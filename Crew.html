@@ -4,6 +4,8 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
 <title>FiberLog Field</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="fiberlog-db.js"></script>
 <style>
 :root {
   --teal:#1D9E75;--teal-dk:#0F6E56;--teal-lt:#E1F5EE;--teal-mid:#5DCAA5;
@@ -409,57 +411,7 @@ input:focus,select:focus{border-color:var(--teal);background:var(--surface)}
 
 <script>
 // ─── CATALOG ───────────────────────────────────────────────────────────────
-const CATALOG=[
-  {id:"STRAND_EHS_1_4",name:"Strand EHS 1/4\" 5000' Reel",unit:"ft",cat:"Strand/Lashing"},
-  {id:"CLAMP_B_SUS_5_8",name:"Clamp B Suspension 5/8\"",unit:"ea",cat:"Strand/Lashing"},
-  {id:"LASH_WIRE_045T430",name:"Lashing Wire .045T430 1200' Coil",unit:"ea",cat:"Strand/Lashing"},
-  {id:"CLAMP_D_LASH",name:"Clamp D Cable Lashing Bug Nut",unit:"ea",cat:"Strand/Lashing"},
-  {id:"STRAP_LASH_16",name:"Strap Cable Lashing 16\" Stainless",unit:"ea",cat:"Strand/Lashing"},
-  {id:"SPACER_LASH_1_2",name:"Spacer 1/2\" Lashing Strap",unit:"ea",cat:"Strand/Lashing"},
-  {id:"STRAP_LASH_10",name:"Strap Cable Lashing 10\" Stainless",unit:"ea",cat:"Strand/Lashing"},
-  {id:"STRAND_SPLICE_1_4",name:"Strand Splice 1/4\" Preformed",unit:"ea",cat:"Strand/Lashing"},
-  {id:"SNOWSHOE_16",name:"Fiber Storage 16\" Snowshoe",unit:"ea",cat:"Strand/Lashing"},
-  {id:"BOLT_5_8x12",name:"Bolt Machine 5/8\" x 12\"",unit:"ea",cat:"Bolts/Nuts"},
-  {id:"BOLT_5_8x14",name:"Bolt Machine 5/8\" x 14\"",unit:"ea",cat:"Bolts/Nuts"},
-  {id:"BOLT_5_8x16",name:"Bolt Machine 5/8\" x 16\"",unit:"ea",cat:"Bolts/Nuts"},
-  {id:"BOLT_TE_5_8x14",name:"Bolt Thimble Eye 5/8\" x 14\"",unit:"ea",cat:"Bolts/Nuts"},
-  {id:"BOLT_TE_5_8x16",name:"Bolt Thimble Eye 5/8\" x 16\"",unit:"ea",cat:"Bolts/Nuts"},
-  {id:"NUT_SQUARE_5_8",name:"Nut Square 5/8\"",unit:"ea",cat:"Bolts/Nuts"},
-  {id:"WASHER_SQUARE_2x2",name:"Washer Square 2\" x 2\"",unit:"ea",cat:"Bolts/Nuts"},
-  {id:"HOOK_B_GUY_5_8",name:"Hook B Guy 5/8\" Rams Head",unit:"ea",cat:"Guy Hardware"},
-  {id:"ANCHOR_ROD_3_4x66",name:"Anchor Rod 3/4\" x 66\"",unit:"ea",cat:"Guy Hardware"},
-  {id:"GUY_INSULATOR",name:"Guy Insulator 3.5\" x 2.5\"",unit:"ea",cat:"Guy Hardware"},
-  {id:"GUY_GUARD_96",name:"Guy Guard 96\" Yellow",unit:"ea",cat:"Guy Hardware"},
-  {id:"GRIP_DEADEND_1_4",name:"Grip Deadend Guy 1/4\" Strand",unit:"ea",cat:"Guy Hardware"},
-  {id:"RIGID_COND_2x10",name:"Rigid Metal Conduit 2\" x 10'",unit:"ea",cat:"Riser/Conduit"},
-  {id:"PVC_COND_2x10",name:"PVC Conduit 2\" x 10'",unit:"ea",cat:"Riser/Conduit"},
-  {id:"STRUT_CLAMP_2IN",name:"Strut Pipe Clamp 2\"",unit:"ea",cat:"Riser/Conduit"},
-  {id:"STANDOFF_V_6",name:"6\" V-Style Standoff",unit:"ea",cat:"Riser/Conduit"},
-  {id:"FIBER_SM_288",name:"Fiber Singlemode 288ct",unit:"ft",cat:"Fiber"},
-  {id:"FIBER_SM_144",name:"Fiber Singlemode 144ct",unit:"ft",cat:"Fiber"},
-  {id:"FIBER_SM_72",name:"Fiber Singlemode 72ct",unit:"ft",cat:"Fiber"},
-  {id:"FIBER_SM_12",name:"Fiber Singlemode 12ct",unit:"ft",cat:"Fiber"},
-  {id:"C6_CASE",name:"C6 Case FOSC450",unit:"ea",cat:"Splice"},
-  {id:"C_TRAY",name:"C Tray CC-C-TRAY-FOSC-A24",unit:"ea",cat:"Splice"},
-  {id:"D6_CASE",name:"D6 Case FOSC450-D6",unit:"ea",cat:"Splice"},
-  {id:"D_TRAY",name:"D Tray FOSC-ACC-D-TRAY-72",unit:"ea",cat:"Splice"},
-  {id:"A4_CASE",name:"A4 Case FOSC450-A4",unit:"ea",cat:"Splice"},
-  {id:"A_TRAY",name:"A Tray FOSC-ACC-A-TRAY-24",unit:"ea",cat:"Splice"},
-  {id:"DROP_GEL_SEAL",name:"Drop Gel Seal Kit",unit:"ea",cat:"Splice"},
-  {id:"PLC_1x8",name:"1x8 Bare PLC Splitter",unit:"ea",cat:"Splice"},
-  {id:"VAULT_LARGE",name:"Vault Large 17x30x18",unit:"ea",cat:"Underground"},
-  {id:"HANDHOLE_POLY",name:"Handhole Polymer 13x24x12",unit:"ea",cat:"Underground"},
-  {id:"CONDUIT_SDR11_2",name:"SDR11 2\" HDPE Conduit",unit:"ft",cat:"Underground"},
-  {id:"CONDUIT_SDR11_1_1_4",name:"SDR11 1-1/4\" HDPE Conduit",unit:"ft",cat:"Underground"},
-  {id:"TRACER_WIRE",name:"Tracer Wire",unit:"ft",cat:"Underground"},
-  {id:"MULE_TAPE",name:"Mule Tape",unit:"ft",cat:"Underground"},
-  {id:"COND_COUPLER_2",name:"Conduit Coupler 2\"",unit:"ea",cat:"Underground"},
-  {id:"MST_6P_100",name:"MST 6P 100ft",unit:"ea",cat:"MST/HST"},
-  {id:"MST_6P_300",name:"MST 6P 300ft",unit:"ea",cat:"MST/HST"},
-  {id:"MST_6P_500",name:"MST 6P 500ft",unit:"ea",cat:"MST/HST"},
-  {id:"HST_6P_100",name:"HST 6P 100ft",unit:"ea",cat:"MST/HST"},
-  {id:"HST_2P_100",name:"HST 2P 100ft",unit:"ea",cat:"MST/HST"},
-];
+let CATALOG=[]; // loaded from Supabase
 
 // ─── TASK TEMPLATES ────────────────────────────────────────────────────────
 // Each checklist item: id, label, icon, type (assembly|footage|counter|material), parts[], defaultQty
@@ -544,57 +496,19 @@ const TEMPLATES={
 };
 
 // ─── PROJECT DATA ──────────────────────────────────────────────────────────
-const PROJECTS=[
-  {id:"wm",name:"West Mountain",icon:"🏔️",iconCls:"pi-teal",region:"West Mountain",
-   fiber:45000,conduit:8200,pctDone:34,
-   phases:[
-    {id:"wm-1",name:"Phase 1 — Main Trunk",fiber:18000,conduit:3200,pctDone:58,tasks:[
-      {id:"wm-1-a",name:"Elm St — Intermediate Poles 1–45",type:"intermediatePole",status:"active",notes:"650ft span, 45 poles total",pctDone:60},
-      {id:"wm-1-b",name:"Elm St — Terminal Poles",type:"terminalPole",status:"open",notes:"Both ends of Elm St segment",pctDone:0},
-      {id:"wm-1-c",name:"Elm St — Down Guys Poles 8,17,31,40",type:"downGuy",status:"done",notes:"All 4 anchor locations",pctDone:100},
-      {id:"wm-1-d",name:"Elm St — Intermediate Lashing",type:"lashingIntermediate",status:"open",notes:"Follow strand after poles complete",pctDone:0},
-    ]},
-    {id:"wm-2",name:"Phase 2 — Oak Ave Branch",fiber:14000,conduit:2800,pctDone:12,tasks:[
-      {id:"wm-2-a",name:"Oak Ave — Intermediate Poles 1–30",type:"intermediatePole",status:"open",notes:"",pctDone:0},
-      {id:"wm-2-b",name:"Oak Ave — Terminal Poles",type:"terminalPole",status:"open",notes:"",pctDone:0},
-      {id:"wm-2-c",name:"Oak Ave — UG Crossing MH1–MH3",type:"underground",status:"open",notes:"180ft bore under Maple Ave",pctDone:0},
-    ]},
-    {id:"wm-3",name:"Phase 3 — Distribution",fiber:13000,conduit:2200,pctDone:5,tasks:[
-      {id:"wm-3-a",name:"Block A — Terminal Lashing",type:"lashingTerminal",status:"open",notes:"",pctDone:0},
-      {id:"wm-3-b",name:"Block B — Splicing",type:"caseSplice",status:"open",notes:"6 splice points planned",pctDone:0},
-    ]},
-  ]},
-  {id:"ov",name:"Ogden Valley",icon:"🌄",iconCls:"pi-blue",region:"Ogden Valley",
-   fiber:32000,conduit:5400,pctDone:18,
-   phases:[
-    {id:"ov-1",name:"Phase 1 — Valley Road",fiber:20000,conduit:3000,pctDone:22,tasks:[
-      {id:"ov-1-a",name:"Valley Rd — Strand Poles 1–60",type:"intermediatePole",status:"open",notes:"",pctDone:0},
-      {id:"ov-1-b",name:"Valley Rd — Lashing",type:"lashingIntermediate",status:"open",notes:"",pctDone:0},
-      {id:"ov-1-c",name:"Valley Rd — UG Segment A",type:"underground",status:"open",notes:"320ft SDR11 conduit",pctDone:0},
-    ]},
-    {id:"ov-2",name:"Phase 2 — Side Roads",fiber:12000,conduit:2400,pctDone:0,tasks:[
-      {id:"ov-2-a",name:"Canyon Rd — Poles & Strand",type:"intermediatePole",status:"open",notes:"",pctDone:0},
-    ]},
-  ]},
-  {id:"hb",name:"Heber",icon:"🏕️",iconCls:"pi-amber",region:"Heber",
-   fiber:28000,conduit:4100,pctDone:8,
-   phases:[
-    {id:"hb-1",name:"Phase 1 — Main St",fiber:15000,conduit:2200,pctDone:10,tasks:[
-      {id:"hb-1-a",name:"Main St — Intermediate Poles",type:"intermediatePole",status:"open",notes:"",pctDone:0},
-      {id:"hb-1-b",name:"Main St — Terminal Lashing",type:"lashingTerminal",status:"open",notes:"",pctDone:0},
-    ]},
-  ]},
-];
+let PROJECTS=[]; // loaded from Supabase
 
 // ─── STATE ─────────────────────────────────────────────────────────────────
 let currentUser="Marcus W.";
 let currentUserInitials="MW";
+let currentUserId=null;
+let currentSessionId=null;
 let selProject=null,selPhase=null,selTask=null;
 let hoursWorked=8.0;
-// Task log: taskId -> {checklistCounts:{itemId:count}, footage:{itemId:ft}, extraParts:[{id,qty,name,unit}], notes}
 const taskLogs={};
 let ppTarget=null;
 let ppSelectedPart=null;
+let USERS_LIST=[];
 
 // ─── SMART REMINDERS (scaffold — active in future version) ────────────────
 // When a crew member logs certain items, the app will nudge them about
@@ -632,11 +546,114 @@ function adjustHours(delta){
 }
 
 // ─── INIT ──────────────────────────────────────────────────────────────────
-document.addEventListener("DOMContentLoaded",()=>{
+document.addEventListener("DOMContentLoaded", async ()=>{
   const now=new Date();
   document.getElementById("s1-date").textContent=now.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
-  renderProjects();
+
+  // Show loading state
+  document.getElementById("projectList").innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted)">Loading projects...</div>`;
+
+  try {
+    // Load all data from Supabase in parallel
+    const [projectTree, assemblies, catalog, users] = await Promise.all([
+      FiberLog.Projects.getFullTree(),
+      FiberLog.Assemblies.getAll(),
+      FiberLog.Parts.getAll(),
+      FiberLog.Auth.getCrewList()
+    ]);
+
+    // Map Supabase data to the shape the UI expects
+    PROJECTS = projectTree.map(p => ({
+      ...p,
+      icon: projectIcon(p.name),
+      iconCls: projectIconCls(p.name),
+      pctDone: 0, // will come from completion view later
+      phases: (p.phases||[]).map(ph => ({
+        ...ph,
+        pctDone: 0,
+        tasks: (ph.tasks||[]).map(t => ({
+          ...t,
+          type: t.task_type,
+          notes: t.scope_notes||"",
+          pctDone: 0
+        }))
+      }))
+    }));
+
+    // Map assemblies from Supabase to TEMPLATES shape
+    Object.entries(assemblies).forEach(([key, val]) => {
+      if(TEMPLATES[key]) {
+        // Update parts in existing templates with live BoxHero SKUs
+        TEMPLATES[key].parts = val.parts.map(p => ({
+          id: p.id, qty: p.qty
+        }));
+        // Also update checklist parts
+        TEMPLATES[key].checklist.forEach(ci => {
+          if(ci.parts) {
+            ci.parts = ci.parts.map(cp => {
+              const live = val.parts.find(p => {
+                // match by name similarity since IDs changed to BoxHero SKUs
+                return p.id === cp.id || p.name.toLowerCase().includes(cp.id.toLowerCase().replace(/_/g,' ').substring(0,8));
+              });
+              return live ? {...cp, id: live.id} : cp;
+            });
+          }
+        });
+      }
+    });
+
+    // Load catalog for part search
+    CATALOG = catalog.map(p => ({
+      id: p.id,
+      name: p.name,
+      unit: p.unit,
+      cat: p.category || p.department || 'General'
+    }));
+
+    // Load users for picker
+    USERS_LIST = users;
+    renderUserSelect();
+
+    // Try to restore saved user from sessionStorage
+    const savedUser = FiberLog.Auth.getCurrentUser();
+    if(savedUser) {
+      currentUser = savedUser.name;
+      currentUserId = savedUser.id;
+      currentUserInitials = savedUser.initials;
+      document.getElementById("userBtn").textContent = currentUserInitials;
+    }
+
+    renderProjects();
+  } catch(err) {
+    console.error("FiberLog init error:", err);
+    document.getElementById("projectList").innerHTML=`
+      <div style="text-align:center;padding:40px;color:var(--red)">
+        <div style="font-size:24px;margin-bottom:8px">⚠️</div>
+        <div style="font-weight:600;margin-bottom:4px">Could not load data</div>
+        <div style="font-size:13px;color:var(--muted)">${err.message}</div>
+        <button onclick="location.reload()" style="margin-top:16px;padding:10px 20px;background:var(--teal);color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px">Retry</button>
+      </div>`;
+  }
 });
+
+function projectIcon(name){
+  if(name.toLowerCase().includes("mountain")) return "🏔️";
+  if(name.toLowerCase().includes("valley")) return "🌄";
+  if(name.toLowerCase().includes("heber")) return "🏕️";
+  if(name.toLowerCase().includes("park")) return "🌲";
+  return "📡";
+}
+function projectIconCls(name){
+  const icons=["pi-teal","pi-blue","pi-amber","pi-purple"];
+  let hash=0; for(let c of name) hash+=c.charCodeAt(0);
+  return icons[hash%icons.length];
+}
+
+function renderUserSelect(){
+  const sel=document.getElementById("userSelect");
+  if(!sel||!USERS_LIST.length) return;
+  sel.innerHTML=USERS_LIST.map(u=>`<option value="${u.id}">${u.name}${u.is_contractor?" (sub)":""}</option>`).join("");
+}
 
 // ─── NAVIGATION ────────────────────────────────────────────────────────────
 function goTo(toId,fromId){
@@ -733,13 +750,21 @@ function taskCard(t){
   </div>`;
 }
 
-function selectTask(tid){
+async function selectTask(tid){
   selTask=selPhase.tasks.find(t=>t.id===tid);
   if(!taskLogs[tid]) taskLogs[tid]={checklistCounts:{},footage:{},extraParts:[]};
   document.getElementById("s4-title").textContent=selTask.name;
   document.getElementById("s4-sub").textContent=`${selProject.name} › ${selPhase.name}`;
   renderWorkspace();
   pushTo("s4","s3");
+
+  // Create or update session in Supabase (drives in-progress on manager dashboard)
+  if(currentUserId){
+    try {
+      const session = await FiberLog.Sessions.startSession(currentUserId, selTask.id);
+      currentSessionId = session.id;
+    } catch(e){ console.warn("Session start failed:", e); }
+  }
 }
 
 // ─── SCREEN 4 — TASK WORKSPACE ────────────────────────────────────────────
@@ -851,12 +876,34 @@ function renderWorkspace(){
   document.getElementById("s4-body").innerHTML=html;
 }
 
-function tally(itemId,delta){
+async function tally(itemId,delta){
   const log=taskLogs[selTask.id];
   if(!log.checklistCounts[itemId]) log.checklistCounts[itemId]=0;
+  const prev = log.checklistCounts[itemId];
   log.checklistCounts[itemId]=Math.max(0,log.checklistCounts[itemId]+delta);
   if(selTask.status==="open"&&log.checklistCounts[itemId]>0) selTask.status="active";
   renderWorkspace();
+
+  // Save to Supabase if tapped up (not down)
+  if(delta > 0 && currentSessionId && currentUserId){
+    const tmpl=TEMPLATES[selTask.type]||TEMPLATES.freeform;
+    const checkItem=tmpl.checklist.find(c=>c.id===itemId);
+    if(checkItem && checkItem.parts){
+      try {
+        const entryData = {
+          type: "assembly",
+          assemblyKey: selTask.type,
+          qty: 1,
+          location: "",
+          parts: checkItem.parts.map(p=>{
+            const part=CATALOG.find(x=>x.id===p.id)||{name:p.id,unit:"ea"};
+            return{id:p.id,name:part.name,unit:part.unit,qty:p.qty,isExtra:false};
+          })
+        };
+        await FiberLog.Entries.saveEntry(currentSessionId, currentUserId, selTask.id, entryData);
+      } catch(e){ console.warn("Entry save failed:", e); }
+    }
+  }
 }
 
 function logFootage(itemId,val){
@@ -926,21 +973,32 @@ function openPartPicker(){
   document.getElementById("partPickerOverlay").classList.add("open");
 }
 
-function ppSearch(q){
+async function ppSearch(q){
   const el=document.getElementById("ppResults");
   if(!q.trim()){el.innerHTML=`<div class="empty-hint">Start typing to find a part</div>`;return;}
-  const hits=CATALOG.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.id.toLowerCase().includes(q.toLowerCase())).slice(0,12);
+
+  let hits=[];
+  try {
+    // Search live catalog from Supabase
+    hits = await FiberLog.Parts.search(q);
+    hits = hits.map(p=>({id:p.id,name:p.name,unit:p.unit,cat:p.category||p.department||"General"}));
+  } catch(e){
+    // Fallback to local CATALOG if offline
+    hits=CATALOG.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.id.toLowerCase().includes(q.toLowerCase())).slice(0,12);
+  }
+
   if(!hits.length){el.innerHTML=`<div class="empty-hint">No parts found — try a different term</div>`;return;}
-  el.innerHTML=hits.map(p=>`<div class="pp-result" onclick="ppSelect('${p.id}')">
+  el.innerHTML=hits.map(p=>`<div class="pp-result" onclick="ppSelect('${p.id}','${p.name.replace(/'/g,"\'")}','${p.unit}')">
     <div><div class="pp-result-name">${p.name}</div><div class="pp-result-id">${p.id}</div></div>
     <span class="pp-result-cat">${p.cat}</span>
   </div>`).join("");
 }
 
-function ppSelect(id){
+function ppSelect(id,name,unit){
   ppSelectedPart=id;
-  const part=CATALOG.find(p=>p.id===id);
-  document.getElementById("ppSelectedLabel").textContent=part?part.name:id;
+  // Store name/unit so we dont need to re-fetch
+  ppSelectedPart={id,name:name||id,unit:unit||"ea"};
+  document.getElementById("ppSelectedLabel").textContent=name||id;
   document.getElementById("ppQtyInput").value=1;
   document.getElementById("ppQtyRow").style.display="flex";
 }
@@ -948,11 +1006,11 @@ function ppSelect(id){
 function confirmAddExtra(){
   if(!ppSelectedPart) return;
   const qty=parseInt(document.getElementById("ppQtyInput").value)||1;
-  const part=CATALOG.find(p=>p.id===ppSelectedPart)||{name:ppSelectedPart,unit:"ea"};
+  const partObj = typeof ppSelectedPart==="object" ? ppSelectedPart : {id:ppSelectedPart,name:ppSelectedPart,unit:"ea"};
   const log=taskLogs[selTask.id];
-  const existing=log.extraParts.find(p=>p.id===ppSelectedPart);
+  const existing=log.extraParts.find(p=>p.id===partObj.id);
   if(existing) existing.qty+=qty;
-  else log.extraParts.push({id:ppSelectedPart,name:part.name,unit:part.unit,qty});
+  else log.extraParts.push({id:partObj.id,name:partObj.name,unit:partObj.unit,qty});
   closeOverlay("partPickerOverlay");
   renderWorkspace();
 }
@@ -964,19 +1022,25 @@ function openNewTask(){
   document.getElementById("newTaskOverlay").classList.add("open");
 }
 
-function confirmNewTask(){
+async function confirmNewTask(){
   const name=document.getElementById("newTaskName").value.trim();
   if(!name){alert("Enter a task name.");return;}
   const type=document.getElementById("newTaskType").value;
   const notes=document.getElementById("newTaskNotes").value.trim();
-  const newTask={
-    id:"custom-"+Date.now(),
-    name,type,status:"open",notes,pctDone:0
-  };
+
+  let newTask={id:"custom-"+Date.now(),name,type:type,task_type:type,status:"open",notes,scope_notes:notes,pctDone:0};
+
+  // Save to Supabase if we have a phase ID
+  if(selPhase.id && currentUserId){
+    try {
+      const saved = await FiberLog.Projects.addTask(selPhase.id, name, type, notes, currentUserId);
+      newTask.id = saved.id;
+    } catch(e){ console.warn("Task save failed:", e); }
+  }
+
   selPhase.tasks.push(newTask);
   closeOverlay("newTaskOverlay");
   renderTasks();
-  // immediately open the new task
   selectTask(newTask.id);
 }
 
@@ -1069,7 +1133,40 @@ function openSummary(){
   document.getElementById("summaryOverlay").classList.add("open");
 }
 
-function submitDay(){
+async function submitDay(){
+  const submitBtn = document.querySelector(".sheet-footer .btn-primary");
+  if(submitBtn){ submitBtn.textContent="Submitting..."; submitBtn.disabled=true; }
+
+  // Build totals for Supabase submission record
+  let totalFt=0, totalAssemblies=0;
+  const allPartIds = new Set();
+  PROJECTS.forEach(proj=>{
+    proj.phases.forEach(ph=>{
+      ph.tasks.forEach(task=>{
+        const log=taskLogs[task.id];
+        if(!log) return;
+        const tmpl=TEMPLATES[task.type||task.task_type]||TEMPLATES.freeform;
+        tmpl.checklist.forEach(item=>{
+          totalFt += log.footage[item.id]||0;
+          const cnt = log.checklistCounts[item.id]||0;
+          if(cnt>0){ totalAssemblies+=cnt; (item.parts||[]).forEach(p=>allPartIds.add(p.id)); }
+        });
+        (log.extraParts||[]).forEach(p=>allPartIds.add(p.id));
+      });
+    });
+  });
+
+  try {
+    if(currentSessionId && currentUserId){
+      await FiberLog.Submissions.submitDay(currentSessionId, currentUserId, hoursWorked, {
+        footage: totalFt,
+        assemblies: totalAssemblies,
+        partTypes: allPartIds.size
+      });
+    }
+  } catch(e){ console.warn("Supabase submit failed:", e); }
+
+  // Also keep the Google Sheets submit as backup
   const now=new Date();
   const entries=[];
   PROJECTS.forEach(proj=>{
@@ -1077,7 +1174,7 @@ function submitDay(){
       ph.tasks.forEach(task=>{
         const log=taskLogs[task.id];
         if(!log) return;
-        const tmpl=TEMPLATES[task.type]||TEMPLATES.freeform;
+        const tmpl=TEMPLATES[task.type||task.task_type]||TEMPLATES.freeform;
         const parts=[];
         tmpl.checklist.forEach(item=>{
           const cnt=log.checklistCounts[item.id]||0;
@@ -1125,10 +1222,1255 @@ function submitDay(){
 
 // ─── USER ─────────────────────────────────────────────────────────────────
 function openUserSheet(){document.getElementById("userOverlay").classList.add("open");}
-function setUser(name){
-  currentUser=name;
-  currentUserInitials=name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+function setUser(val){
+  // val is now a user ID from the select
+  const user = USERS_LIST.find(u=>u.id===val);
+  if(!user) return;
+  currentUser=user.name;
+  currentUserId=user.id;
+  currentUserInitials=user.initials;
   document.getElementById("userBtn").textContent=currentUserInitials;
+  FiberLog.Auth.setCurrentUser(user);
+}
+
+// ─── OVERLAYS ─────────────────────────────────────────────────────────────
+function closeOverlay(id){document.getElementById(id).classList.remove("open");}
+function overlayBg(e,id){if(e.target===document.getElementById(id)) closeOverlay(id);}
+</script>
+</body>
+</html>let ASSEMBLIES={}; // loaded from SupabaseDOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>FiberLog Field</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="fiberlog-db.js"></script>
+<style>
+:root {
+  --teal:#1D9E75;--teal-dk:#0F6E56;--teal-lt:#E1F5EE;--teal-mid:#5DCAA5;
+  --amber:#BA7517;--amber-dk:#854F0B;--amber-lt:#FAEEDA;--amber-mid:#EF9F27;
+  --blue:#185FA5;--blue-lt:#E6F1FB;--blue-mid:#378ADD;
+  --red:#A32D2D;--red-lt:#FCEBEB;--red-mid:#E24B4A;
+  --gray:#5F5E5A;--gray-lt:#F1EFE8;--gray-mid:#888780;
+  --purple:#534AB7;--purple-lt:#EEEDFE;
+  --bg:#f0efeb;--surface:#fff;--border:#e0dfd9;--border2:#cccbc4;
+  --text:#1a1a17;--muted:#6b6a65;--hint:#a8a7a1;
+  --r:14px;--r-sm:10px;--r-xs:6px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;background:var(--bg);color:var(--text);font-size:15px}
+
+/* ── Screens ── */
+.screen{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg);transition:transform 0.3s cubic-bezier(.4,0,.2,1),opacity 0.3s;overflow:hidden}
+.screen.hidden{transform:translateX(100%);opacity:0;pointer-events:none}
+.screen.slide-left{transform:translateX(-30%);opacity:0;pointer-events:none}
+
+/* ── Top bar ── */
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 16px 11px;flex-shrink:0}
+.topbar-inner{display:flex;align-items:center;gap:10px}
+.back-btn{width:34px;height:34px;border-radius:50%;background:var(--bg);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--muted);flex-shrink:0}
+.topbar-text{flex:1;min-width:0}
+.topbar-title{font-size:17px;font-weight:700;letter-spacing:-0.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar-sub{font-size:12px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.user-btn{width:34px;height:34px;border-radius:50%;background:var(--teal-lt);border:none;cursor:pointer;font-size:12px;font-weight:700;color:var(--teal-dk);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+
+/* ── Scroll body ── */
+.scroll-body{flex:1;overflow-y:auto;padding:14px 14px 90px;-webkit-overflow-scrolling:touch}
+.scroll-body::-webkit-scrollbar{display:none}
+
+/* ── Section label ── */
+.sec-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin:18px 0 8px}
+.sec-label:first-child{margin-top:0}
+
+/* ── Project cards (screen 1) ── */
+.proj-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:10px;cursor:pointer;display:flex;align-items:center;gap:14px;transition:transform .1s,box-shadow .1s}
+.proj-card:active{transform:scale(.98)}
+.proj-icon{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+.pi-teal{background:var(--teal-lt)}
+.pi-blue{background:var(--blue-lt)}
+.pi-amber{background:var(--amber-lt)}
+.pi-purple{background:var(--purple-lt)}
+.proj-info{flex:1;min-width:0}
+.proj-name{font-size:16px;font-weight:700}
+.proj-meta{font-size:12px;color:var(--muted);margin-top:2px}
+.proj-progress{margin-top:8px}
+.proj-prog-bar{height:5px;border-radius:3px;background:var(--border);overflow:hidden;margin-top:4px}
+.proj-prog-fill{height:100%;border-radius:3px;background:var(--teal)}
+.proj-prog-label{font-size:11px;color:var(--muted);display:flex;justify-content:space-between}
+.arrow{font-size:18px;color:var(--border2);flex-shrink:0}
+
+/* ── Phase cards (screen 2) ── */
+.phase-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;margin-bottom:8px;cursor:pointer;display:flex;align-items:center;gap:12px;transition:transform .1s}
+.phase-card:active{transform:scale(.98)}
+.phase-num{width:36px;height:36px;border-radius:10px;background:var(--teal-lt);color:var(--teal-dk);font-size:14px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.phase-info{flex:1;min-width:0}
+.phase-name{font-size:15px;font-weight:600}
+.phase-meta{font-size:12px;color:var(--muted);margin-top:2px}
+.phase-done-pct{font-size:13px;font-weight:700;color:var(--teal);flex-shrink:0}
+
+/* ── Task cards (screen 3) ── */
+.task-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:8px;cursor:pointer;transition:transform .1s}
+.task-card:active{transform:scale(.98)}
+.task-card.done-card{opacity:.6;border-style:dashed}
+.task-card-top{display:flex;align-items:flex-start;gap:10px}
+.task-status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.dot-open{background:var(--amber-mid)}
+.dot-active{background:var(--teal)}
+.dot-done{background:var(--gray-mid)}
+.task-card-info{flex:1;min-width:0}
+.task-card-name{font-size:15px;font-weight:600;line-height:1.3}
+.task-card-sub{font-size:12px;color:var(--muted);margin-top:3px}
+.task-card-checklist{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap}
+.task-chip{font-size:11px;padding:3px 9px;border-radius:20px;background:var(--bg);border:1px solid var(--border);color:var(--muted)}
+.task-chip.logged{background:var(--teal-lt);border-color:var(--teal-mid);color:var(--teal-dk)}
+.new-task-card{background:var(--surface);border:1.5px dashed var(--border2);border-radius:var(--r);padding:14px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;color:var(--muted);transition:border-color .15s}
+.new-task-card:active{border-color:var(--teal)}
+
+/* ── Task workspace (screen 4) ── */
+.task-header-card{background:var(--teal-dk);border-radius:var(--r);padding:16px;margin-bottom:14px;color:white}
+.thc-project{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;opacity:.7;margin-bottom:4px}
+.thc-task{font-size:17px;font-weight:700;line-height:1.3}
+.thc-meta{font-size:12px;opacity:.7;margin-top:4px}
+.thc-progress{margin-top:12px}
+.thc-prog-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.2);overflow:hidden}
+.thc-prog-fill{height:100%;border-radius:3px;background:rgba(255,255,255,.85);transition:width .4s}
+.thc-prog-label{font-size:11px;opacity:.8;margin-top:4px;display:flex;justify-content:space-between}
+
+/* ── Checklist items ── */
+.checklist-item{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px}
+.checklist-item.completed{background:var(--teal-lt);border-color:var(--teal-mid)}
+.ci-icon{font-size:20px;flex-shrink:0;width:32px;text-align:center}
+.ci-info{flex:1;min-width:0}
+.ci-label{font-size:14px;font-weight:600;line-height:1.3}
+.ci-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.checklist-item.completed .ci-label{color:var(--teal-dk)}
+.checklist-item.completed .ci-sub{color:var(--teal)}
+.ci-action{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.tally-btn{width:38px;height:38px;border-radius:10px;border:none;cursor:pointer;font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center;transition:transform .1s,background .1s}
+.tally-btn:active{transform:scale(.9)}
+.tally-plus{background:var(--teal);color:white}
+.tally-plus.big{width:48px;height:48px;border-radius:12px;font-size:24px}
+.tally-minus{background:var(--bg);color:var(--muted);border:1px solid var(--border)}
+.tally-count{font-size:20px;font-weight:800;min-width:28px;text-align:center;color:var(--text)}
+.footage-input-row{display:flex;gap:8px;align-items:center;margin-top:8px}
+.footage-input{width:100%;padding:10px 12px;border:1.5px solid var(--border2);border-radius:var(--r-sm);font-size:18px;font-weight:700;text-align:center;background:var(--bg);color:var(--text);outline:none}
+.footage-input:focus{border-color:var(--teal);background:var(--surface)}
+.footage-unit{font-size:13px;color:var(--muted);font-weight:500;white-space:nowrap}
+.log-btn{padding:9px 16px;border-radius:var(--r-sm);background:var(--teal);color:white;border:none;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
+.log-btn:active{background:var(--teal-dk)}
+
+/* ── Running tally card ── */
+.tally-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;margin-bottom:8px}
+.tally-card-header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg)}
+.tally-card-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.tally-card-toggle{font-size:12px;color:var(--teal);font-weight:600;background:none;border:none;cursor:pointer}
+.tally-row{display:flex;justify-content:space-between;align-items:center;padding:9px 14px;border-bottom:1px solid var(--border)}
+.tally-row:last-child{border-bottom:none}
+.tally-part-name{font-size:13px;font-weight:500;flex:1}
+.tally-part-id{font-size:10px;font-family:monospace;color:var(--hint);margin-top:1px}
+.tally-part-qty{font-size:15px;font-weight:800;color:var(--teal-dk)}
+.tally-part-unit{font-size:11px;color:var(--muted);margin-left:3px}
+
+/* ── Add extra item ── */
+.add-extra-btn{display:flex;align-items:center;gap:10px;padding:13px 14px;background:var(--surface);border:1.5px dashed var(--border2);border-radius:var(--r-sm);cursor:pointer;color:var(--muted);font-size:14px;font-weight:500;width:100%;text-align:left;transition:border-color .15s}
+.add-extra-btn:active{border-color:var(--teal);color:var(--teal)}
+
+/* ── Bottom bar ── */
+.bottom-bar{position:absolute;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);padding:10px 14px 24px;display:flex;gap:8px;flex-shrink:0}
+.btn{padding:13px 16px;border-radius:var(--r-sm);font-size:15px;font-weight:700;cursor:pointer;border:none;flex:1}
+.btn-primary{background:var(--teal);color:white}
+.btn-primary:active{background:var(--teal-dk)}
+.btn-ghost{background:var(--bg);color:var(--text);border:1px solid var(--border2)}
+.btn-wrap-day{background:var(--teal-dk);color:white;padding:14px;border-radius:var(--r-sm);font-size:15px;font-weight:700;cursor:pointer;border:none;width:100%}
+
+/* ── Summary sheet ── */
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;align-items:flex-end;justify-content:center}
+.overlay.open{display:flex}
+.sheet{background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-height:90vh;display:flex;flex-direction:column}
+.sheet-handle{width:36px;height:4px;background:var(--border2);border-radius:2px;margin:10px auto 0}
+.sheet-header{padding:14px 16px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+.sheet-title{font-size:18px;font-weight:800}
+.sheet-sub{font-size:13px;color:var(--muted);margin-top:2px}
+.sheet-body{padding:14px 16px;overflow-y:auto;flex:1}
+.sheet-footer{padding:10px 16px 28px;border-top:1px solid var(--border);flex-shrink:0;display:flex;gap:8px}
+.summary-stat{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+.summary-stat:last-child{border-bottom:none}
+.summary-stat-label{font-size:14px;color:var(--muted)}
+.summary-stat-val{font-size:16px;font-weight:800;color:var(--text)}
+.summary-section{margin-bottom:16px}
+.summary-section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);margin-bottom:8px}
+.summary-part-row{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg);border-radius:var(--r-xs);margin-bottom:4px}
+.summary-part-name{font-size:13px;font-weight:500}
+.summary-part-id{font-size:10px;font-family:monospace;color:var(--hint)}
+.summary-part-qty{font-size:14px;font-weight:800;color:var(--teal-dk)}
+
+/* ── Part picker overlay ── */
+.part-picker-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:110;align-items:flex-end;justify-content:center}
+.part-picker-overlay.open{display:flex}
+.part-picker-sheet{background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-height:80vh;display:flex;flex-direction:column}
+.pp-search-wrap{padding:12px 14px;border-bottom:1px solid var(--border)}
+.pp-search{position:relative}
+.pp-search input{width:100%;padding:10px 12px 10px 36px;border:1.5px solid var(--border2);border-radius:var(--r-sm);font-size:15px;font-family:inherit;background:var(--bg);color:var(--text);outline:none}
+.pp-search input:focus{border-color:var(--teal);background:var(--surface)}
+.pp-search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:15px;color:var(--hint);pointer-events:none}
+.pp-results{flex:1;overflow-y:auto}
+.pp-result{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer}
+.pp-result:active{background:var(--bg)}
+.pp-result-name{font-size:14px;font-weight:500}
+.pp-result-id{font-size:11px;font-family:monospace;color:var(--hint);margin-top:1px}
+.pp-result-cat{font-size:11px;padding:2px 8px;border-radius:20px;background:var(--gray-lt);color:var(--gray)}
+.pp-qty-row{padding:12px 14px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center}
+.pp-qty-label{font-size:13px;color:var(--muted);flex:1}
+.pp-qty-input{width:72px;padding:8px;border:1.5px solid var(--border2);border-radius:var(--r-xs);font-size:16px;font-weight:700;text-align:center;background:var(--bg);color:var(--text);outline:none}
+.pp-add-btn{padding:10px 20px;background:var(--teal);color:white;border:none;border-radius:var(--r-sm);font-size:14px;font-weight:700;cursor:pointer}
+
+/* ── New task input ── */
+.new-task-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:110;align-items:flex-end;justify-content:center}
+.new-task-overlay.open{display:flex}
+.new-task-sheet{background:var(--surface);border-radius:20px 20px 0 0;width:100%;padding:12px 16px 32px}
+.new-task-handle{width:36px;height:4px;background:var(--border2);border-radius:2px;margin:0 auto 14px}
+.field{margin-bottom:14px}
+.field label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);display:block;margin-bottom:5px}
+input,select,textarea{width:100%;padding:11px 12px;border:1.5px solid var(--border2);border-radius:var(--r-sm);font-size:15px;font-family:inherit;background:var(--bg);color:var(--text);outline:none;appearance:none;-webkit-appearance:none}
+input:focus,select:focus{border-color:var(--teal);background:var(--surface)}
+
+/* ── User overlay ── */
+.user-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:120;align-items:flex-end;justify-content:center}
+.user-overlay.open{display:flex}
+.user-sheet{background:var(--surface);border-radius:20px 20px 0 0;width:100%;padding:12px 16px 32px}
+
+/* ── Misc ── */
+.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700}
+.badge-open{background:var(--amber-lt);color:var(--amber-dk)}
+.badge-active{background:var(--teal-lt);color:var(--teal-dk)}
+.badge-done{background:var(--gray-lt);color:var(--gray)}
+.divider{height:1px;background:var(--border);margin:14px 0}
+.empty-hint{text-align:center;padding:32px 20px;color:var(--hint);font-size:14px;line-height:1.7}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     SCREEN 1 — PROJECTS
+══════════════════════════════════════════ -->
+<div class="screen" id="s1">
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="topbar-text">
+        <div class="topbar-title">FiberLog</div>
+        <div class="topbar-sub" id="s1-date"></div>
+      </div>
+      <button class="user-btn" id="userBtn" onclick="openUserSheet()">MW</button>
+    </div>
+  </div>
+  <div class="scroll-body">
+    <div class="sec-label">Your projects</div>
+    <div id="projectList"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     SCREEN 2 — PHASES
+══════════════════════════════════════════ -->
+<div class="screen hidden" id="s2">
+  <div class="topbar">
+    <div class="topbar-inner">
+      <button class="back-btn" onclick="goTo('s1','s2')">←</button>
+      <div class="topbar-text">
+        <div class="topbar-title" id="s2-title"></div>
+        <div class="topbar-sub" id="s2-sub"></div>
+      </div>
+    </div>
+  </div>
+  <div class="scroll-body">
+    <div class="sec-label">Select a phase</div>
+    <div id="phaseList"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     SCREEN 3 — TASKS
+══════════════════════════════════════════ -->
+<div class="screen hidden" id="s3">
+  <div class="topbar">
+    <div class="topbar-inner">
+      <button class="back-btn" onclick="goTo('s2','s3')">←</button>
+      <div class="topbar-text">
+        <div class="topbar-title" id="s3-title"></div>
+        <div class="topbar-sub" id="s3-sub"></div>
+      </div>
+    </div>
+  </div>
+  <div class="scroll-body">
+    <div class="sec-label">Open tasks</div>
+    <div id="taskList"></div>
+    <div class="sec-label" id="doneTasksLabel" style="display:none">Completed</div>
+    <div id="doneTaskList"></div>
+    <div class="new-task-card" onclick="openNewTask()">
+      <span style="font-size:20px">＋</span>
+      <span style="font-size:14px;font-weight:500">Log a task not listed here</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     SCREEN 4 — TASK WORKSPACE
+══════════════════════════════════════════ -->
+<div class="screen hidden" id="s4">
+  <div class="topbar">
+    <div class="topbar-inner">
+      <button class="back-btn" onclick="goTo('s3','s4')">←</button>
+      <div class="topbar-text">
+        <div class="topbar-title" id="s4-title">Task</div>
+        <div class="topbar-sub" id="s4-sub"></div>
+      </div>
+    </div>
+  </div>
+  <div class="scroll-body" id="s4-body">
+    <!-- Rendered dynamically -->
+  </div>
+  <div class="bottom-bar">
+    <button class="btn btn-ghost" style="flex:0 0 auto;padding:13px 14px" onclick="goTo('s3','s4')">← Tasks</button>
+    <button class="btn-wrap-day" onclick="openSummary()">Wrap up &amp; submit day</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     END OF DAY SUMMARY SHEET
+══════════════════════════════════════════ -->
+<div class="overlay" id="summaryOverlay" onclick="overlayBg(event,'summaryOverlay')">
+<div class="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <div class="sheet-title">End of day summary</div>
+    <div class="sheet-sub" id="summary-date-user"></div>
+    <!-- Hours adjustment — right here before submit -->
+    <div style="display:flex;align-items:center;gap:12px;margin-top:12px;padding:12px 14px;background:var(--amber-lt);border-radius:var(--r-sm);border:1px solid rgba(186,117,23,0.25)">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:700;color:var(--amber-dk)">Hours worked today</div>
+        <div style="font-size:11px;color:var(--amber);margin-top:1px">Adjust before submitting</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button onclick="adjustHours(-0.5)" style="width:34px;height:34px;border-radius:50%;background:var(--surface);border:1px solid var(--border2);font-size:18px;font-weight:700;cursor:pointer;color:var(--text);display:flex;align-items:center;justify-content:center">−</button>
+        <div style="text-align:center;min-width:48px">
+          <div style="font-size:24px;font-weight:800;color:var(--text)" id="hoursDisplay">8.0</div>
+          <div style="font-size:10px;color:var(--muted)">hrs</div>
+        </div>
+        <button onclick="adjustHours(0.5)" style="width:34px;height:34px;border-radius:50%;background:var(--teal);border:none;font-size:18px;font-weight:700;cursor:pointer;color:white;display:flex;align-items:center;justify-content:center">+</button>
+      </div>
+    </div>
+  </div>
+  <div class="sheet-body" id="summaryBody"></div>
+  <div class="sheet-footer">
+    <button class="btn btn-ghost" style="flex:1" onclick="closeOverlay('summaryOverlay')">Keep logging</button>
+    <button class="btn btn-primary" style="flex:2" onclick="submitDay()">Submit to sheet ✓</button>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     PART PICKER
+══════════════════════════════════════════ -->
+<div class="part-picker-overlay" id="partPickerOverlay" onclick="overlayBg(event,'partPickerOverlay')">
+<div class="part-picker-sheet">
+  <div class="sheet-handle" style="margin-bottom:10px"></div>
+  <div class="pp-search-wrap">
+    <div class="pp-search">
+      <span class="pp-search-icon">🔍</span>
+      <input type="text" id="ppSearchInput" placeholder="Search part name or ID…" oninput="ppSearch(this.value)" autocomplete="off"/>
+    </div>
+  </div>
+  <div class="pp-results" id="ppResults">
+    <div class="empty-hint">Start typing to find a part</div>
+  </div>
+  <div class="pp-qty-row" id="ppQtyRow" style="display:none">
+    <div class="pp-qty-label" id="ppSelectedLabel">Selected part</div>
+    <input type="number" class="pp-qty-input" id="ppQtyInput" value="1" min="1"/>
+    <button class="pp-add-btn" onclick="confirmAddExtra()">Add</button>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     NEW TASK SHEET
+══════════════════════════════════════════ -->
+<div class="new-task-overlay" id="newTaskOverlay" onclick="overlayBg(event,'newTaskOverlay')">
+<div class="new-task-sheet">
+  <div class="new-task-handle"></div>
+  <div style="font-size:17px;font-weight:800;margin-bottom:14px">Add task to this phase</div>
+  <div class="field">
+    <label>Task / job name</label>
+    <input type="text" id="newTaskName" placeholder="e.g. Down guys — Poles 18, 22, 31"/>
+  </div>
+  <div class="field">
+    <label>Task type (sets checklist)</label>
+    <select id="newTaskType">
+      <option value="lashingIntermediate">Intermediate Lashing — fiber &amp; hardware</option>
+      <option value="lashingTerminal">Terminal Pole Lashing — fiber &amp; hardware</option>
+      <option value="intermediatePole">Intermediate Pole — strand &amp; hardware</option>
+      <option value="terminalPole">Terminal Pole — strand &amp; hardware</option>
+      <option value="downGuy">Down Guy Installation</option>
+      <option value="caseSplice">Case Splice</option>
+      <option value="poleRiser">Pole Riser</option>
+      <option value="snowshoe">Snowshoe</option>
+      <option value="underground">Underground — conduit &amp; vaults</option>
+      <option value="freeform">Freeform (no checklist)</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>Notes / scope</label>
+    <textarea id="newTaskNotes" placeholder="e.g. 650 ft span, 7 poles, flagged for re-tension on pole 17" style="min-height:60px"></textarea>
+  </div>
+  <div style="display:flex;gap:8px">
+    <button class="btn btn-ghost" style="flex:1;padding:12px" onclick="closeOverlay('newTaskOverlay')">Cancel</button>
+    <button class="btn btn-primary" style="flex:2;padding:12px" onclick="confirmNewTask()">Start this task</button>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     USER SHEET
+══════════════════════════════════════════ -->
+<div class="user-overlay" id="userOverlay" onclick="overlayBg(event,'userOverlay')">
+<div class="user-sheet">
+  <div class="new-task-handle"></div>
+  <div style="font-size:17px;font-weight:800;margin-bottom:14px">Who are you?</div>
+  <div class="field">
+    <label>Your name</label>
+    <select id="userSelect" onchange="setUser(this.value)">
+      <option>Marcus W.</option><option>Tony G.</option><option>Rico B.</option>
+      <option>J. Salazar</option><option>D. Park</option><option>L. Chen</option>
+    </select>
+  </div>
+  <div style="font-size:13px;color:var(--muted);padding:8px 0">Hours worked can be adjusted when you submit at end of day.</div>
+  <button class="btn btn-primary" style="padding:13px" onclick="closeOverlay('userOverlay')">Done</button>
+</div>
+</div>
+
+<script>
+// ─── CATALOG ───────────────────────────────────────────────────────────────
+let CATALOG=[]; // loaded from Supabase
+
+// ─── TASK TEMPLATES ────────────────────────────────────────────────────────
+// Each checklist item: id, label, icon, type (assembly|footage|counter|material), parts[], defaultQty
+const TEMPLATES={
+  intermediatePole:{
+    label:"Intermediate Pole — strand & hardware",
+    checklist:[
+      {id:"footage",label:"Strand footage",icon:"📏",type:"footage",unit:"ft",hint:"Total feet of strand hung"},
+      {id:"poles",label:"Intermediate poles completed",icon:"🔩",type:"counter",unit:"poles",
+        parts:[{id:"NUT_SQUARE_5_8",qty:2},{id:"WASHER_SQUARE_2x2",qty:2},{id:"BOLT_5_8x14",qty:1},{id:"CLAMP_B_SUS_5_8",qty:1}]},
+    ]
+  },
+  terminalPole:{
+    label:"Terminal Pole — strand & hardware",
+    checklist:[
+      {id:"footage",label:"Strand footage",icon:"📏",type:"footage",unit:"ft",hint:"Total feet of strand hung"},
+      {id:"terminals",label:"Terminal poles completed",icon:"🔩",type:"counter",unit:"poles",
+        parts:[{id:"BOLT_TE_5_8x14",qty:1},{id:"NUT_SQUARE_5_8",qty:1},{id:"WASHER_SQUARE_2x2",qty:1},{id:"GRIP_DEADEND_1_4",qty:1}]},
+    ]
+  },
+  lashingIntermediate:{
+    label:"Intermediate Lashing — fiber & hardware",
+    checklist:[
+      {id:"footage",label:"Lashing footage",icon:"📏",type:"footage",unit:"ft",hint:"Total feet of fiber lashed"},
+      {id:"assemblies",label:"Intermediate lashing assemblies",icon:"🔧",type:"counter",unit:"assemblies",
+        parts:[{id:"CLAMP_D_LASH",qty:2},{id:"SPACER_LASH_1_2",qty:2},{id:"STRAP_LASH_16",qty:2}]},
+      {id:"wire",label:"Lashing wire coils used",icon:"🌀",type:"counter",unit:"coils",
+        parts:[{id:"LASH_WIRE_045T430",qty:1}]},
+    ]
+  },
+  lashingTerminal:{
+    label:"Terminal Pole Lashing — fiber & hardware",
+    checklist:[
+      {id:"footage",label:"Lashing footage",icon:"📏",type:"footage",unit:"ft",hint:"Total feet of fiber lashed"},
+      {id:"assemblies",label:"Terminal lashing assemblies",icon:"🔧",type:"counter",unit:"assemblies",
+        parts:[{id:"CLAMP_D_LASH",qty:2},{id:"SPACER_LASH_1_2",qty:2},{id:"STRAP_LASH_16",qty:3},{id:"GRIP_DEADEND_1_4",qty:1}]},
+    ]
+  },
+  downGuy:{
+    label:"Down Guy Installation",
+    checklist:[
+      {id:"guys",label:"Down guys installed",icon:"⚓",type:"counter",unit:"guys",
+        parts:[{id:"STRAND_EHS_1_4",qty:20},{id:"GRIP_DEADEND_1_4",qty:4},{id:"ANCHOR_ROD_3_4x66",qty:1},{id:"GUY_INSULATOR",qty:1},{id:"GUY_GUARD_96",qty:1},{id:"HOOK_B_GUY_5_8",qty:1}]},
+    ]
+  },
+  caseSplice:{
+    label:"Case Splice",
+    checklist:[
+      {id:"splices",label:"Splice cases completed",icon:"💡",type:"counter",unit:"cases",
+        parts:[{id:"C6_CASE",qty:1},{id:"C_TRAY",qty:4}]},
+    ]
+  },
+  poleRiser:{
+    label:"Pole Riser",
+    checklist:[
+      {id:"risers",label:"Risers installed",icon:"🏗️",type:"counter",unit:"risers",
+        parts:[{id:"RIGID_COND_2x10",qty:2},{id:"STRUT_CLAMP_2IN",qty:2},{id:"STANDOFF_V_6",qty:2}]},
+    ]
+  },
+  snowshoe:{
+    label:"Snowshoe",
+    checklist:[
+      {id:"snowshoes",label:"Snowshoes installed",icon:"❄️",type:"counter",unit:"units",
+        parts:[{id:"STRAP_LASH_16",qty:5},{id:"SNOWSHOE_16",qty:1}]},
+    ]
+  },
+  underground:{
+    label:"Underground — conduit & vaults",
+    checklist:[
+      {id:"bore",label:"Bore / trench footage",icon:"📏",type:"footage",unit:"ft",hint:"Total feet bored or trenched"},
+      {id:"conduit",label:"Conduit footage placed",icon:"📏",type:"footage",unit:"ft",hint:"Total feet of conduit placed"},
+      {id:"vaults",label:"Vaults / handholes set",icon:"🕳️",type:"counter",unit:"units",
+        parts:[{id:"HANDHOLE_POLY",qty:1}]},
+    ]
+  },
+  freeform:{
+    label:"Freeform task",
+    checklist:[
+      {id:"footage",label:"Footage (if applicable)",icon:"📏",type:"footage",unit:"ft",hint:"Enter if relevant"},
+    ]
+  }
+};
+
+// ─── PROJECT DATA ──────────────────────────────────────────────────────────
+let PROJECTS=[]; // loaded from Supabase
+
+// ─── STATE ─────────────────────────────────────────────────────────────────
+let currentUser="Marcus W.";
+let currentUserInitials="MW";
+let currentUserId=null;
+let currentSessionId=null;
+let selProject=null,selPhase=null,selTask=null;
+let hoursWorked=8.0;
+const taskLogs={};
+let ppTarget=null;
+let ppSelectedPart=null;
+let USERS_LIST=[];
+
+// ─── SMART REMINDERS (scaffold — active in future version) ────────────────
+// When a crew member logs certain items, the app will nudge them about
+// commonly-forgotten related materials. Triggered after tally or on submit.
+const SMART_REMINDERS={
+  caseSplice:{
+    trigger:"splices",
+    message:"You logged splice cases — did you use splice sleeves or a splitter?",
+    suggestions:[
+      {id:"PLC_1x8",name:"1x8 Bare PLC Splitter"},
+      {id:"PLC_1x4",name:"1x4 Bare PLC Splitter"},
+      {id:"DROP_GEL_SEAL",name:"Drop Gel Seal Kit"},
+    ]
+  },
+  lashingIntermediate:{
+    trigger:"wire",
+    message:"You lashed fiber — did you log all your lashing wire coils?",
+    suggestions:[{id:"LASH_WIRE_045T430",name:"Lashing Wire .045T430"}]
+  },
+  downGuy:{
+    trigger:"guys",
+    message:"Down guys installed — did you use a guy insulator and guard on each?",
+    suggestions:[
+      {id:"GUY_INSULATOR",name:"Guy Insulator"},
+      {id:"GUY_GUARD_96",name:"Guy Guard 96\""},
+    ]
+  },
+  // Add more as field patterns emerge
+};
+
+function adjustHours(delta){
+  hoursWorked=Math.max(0, Math.round((hoursWorked+delta)*2)/2);
+  const el=document.getElementById("hoursDisplay");
+  if(el) el.textContent=hoursWorked.toFixed(1);
+}
+
+// ─── INIT ──────────────────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", async ()=>{
+  const now=new Date();
+  document.getElementById("s1-date").textContent=now.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
+
+  // Show loading state
+  document.getElementById("projectList").innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted)">Loading projects...</div>`;
+
+  try {
+    // Load all data from Supabase in parallel
+    const [projectTree, assemblies, catalog, users] = await Promise.all([
+      FiberLog.Projects.getFullTree(),
+      FiberLog.Assemblies.getAll(),
+      FiberLog.Parts.getAll(),
+      FiberLog.Auth.getCrewList()
+    ]);
+
+    // Map Supabase data to the shape the UI expects
+    PROJECTS = projectTree.map(p => ({
+      ...p,
+      icon: projectIcon(p.name),
+      iconCls: projectIconCls(p.name),
+      pctDone: 0, // will come from completion view later
+      phases: (p.phases||[]).map(ph => ({
+        ...ph,
+        pctDone: 0,
+        tasks: (ph.tasks||[]).map(t => ({
+          ...t,
+          type: t.task_type,
+          notes: t.scope_notes||"",
+          pctDone: 0
+        }))
+      }))
+    }));
+
+    // Map assemblies from Supabase to TEMPLATES shape
+    Object.entries(assemblies).forEach(([key, val]) => {
+      if(TEMPLATES[key]) {
+        // Update parts in existing templates with live BoxHero SKUs
+        TEMPLATES[key].parts = val.parts.map(p => ({
+          id: p.id, qty: p.qty
+        }));
+        // Also update checklist parts
+        TEMPLATES[key].checklist.forEach(ci => {
+          if(ci.parts) {
+            ci.parts = ci.parts.map(cp => {
+              const live = val.parts.find(p => {
+                // match by name similarity since IDs changed to BoxHero SKUs
+                return p.id === cp.id || p.name.toLowerCase().includes(cp.id.toLowerCase().replace(/_/g,' ').substring(0,8));
+              });
+              return live ? {...cp, id: live.id} : cp;
+            });
+          }
+        });
+      }
+    });
+
+    // Load catalog for part search
+    CATALOG = catalog.map(p => ({
+      id: p.id,
+      name: p.name,
+      unit: p.unit,
+      cat: p.category || p.department || 'General'
+    }));
+
+    // Load users for picker
+    USERS_LIST = users;
+    renderUserSelect();
+
+    // Try to restore saved user from sessionStorage
+    const savedUser = FiberLog.Auth.getCurrentUser();
+    if(savedUser) {
+      currentUser = savedUser.name;
+      currentUserId = savedUser.id;
+      currentUserInitials = savedUser.initials;
+      document.getElementById("userBtn").textContent = currentUserInitials;
+    }
+
+    renderProjects();
+  } catch(err) {
+    console.error("FiberLog init error:", err);
+    document.getElementById("projectList").innerHTML=`
+      <div style="text-align:center;padding:40px;color:var(--red)">
+        <div style="font-size:24px;margin-bottom:8px">⚠️</div>
+        <div style="font-weight:600;margin-bottom:4px">Could not load data</div>
+        <div style="font-size:13px;color:var(--muted)">${err.message}</div>
+        <button onclick="location.reload()" style="margin-top:16px;padding:10px 20px;background:var(--teal);color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px">Retry</button>
+      </div>`;
+  }
+});
+
+function projectIcon(name){
+  if(name.toLowerCase().includes("mountain")) return "🏔️";
+  if(name.toLowerCase().includes("valley")) return "🌄";
+  if(name.toLowerCase().includes("heber")) return "🏕️";
+  if(name.toLowerCase().includes("park")) return "🌲";
+  return "📡";
+}
+function projectIconCls(name){
+  const icons=["pi-teal","pi-blue","pi-amber","pi-purple"];
+  let hash=0; for(let c of name) hash+=c.charCodeAt(0);
+  return icons[hash%icons.length];
+}
+
+function renderUserSelect(){
+  const sel=document.getElementById("userSelect");
+  if(!sel||!USERS_LIST.length) return;
+  sel.innerHTML=USERS_LIST.map(u=>`<option value="${u.id}">${u.name}${u.is_contractor?" (sub)":""}</option>`).join("");
+}
+
+// ─── NAVIGATION ────────────────────────────────────────────────────────────
+function goTo(toId,fromId){
+  const from=document.getElementById(fromId);
+  const to=document.getElementById(toId);
+  // going back: from slides right out, to un-slides-left
+  from.classList.add("hidden");
+  to.classList.remove("hidden","slide-left");
+}
+function pushTo(toId,fromId){
+  const from=document.getElementById(fromId);
+  const to=document.getElementById(toId);
+  from.classList.add("slide-left");
+  to.classList.remove("hidden","slide-left");
+}
+
+// ─── SCREEN 1 — PROJECTS ──────────────────────────────────────────────────
+function renderProjects(){
+  document.getElementById("projectList").innerHTML=PROJECTS.map(p=>`
+    <div class="proj-card" onclick="selectProject('${p.id}')">
+      <div class="proj-icon ${p.iconCls}">${p.icon}</div>
+      <div class="proj-info">
+        <div class="proj-name">${p.name}</div>
+        <div class="proj-meta">${p.phases.length} phases · ${(p.fiber/1000).toFixed(0)}k ft fiber · ${(p.conduit/1000).toFixed(1)}k ft conduit</div>
+        <div class="proj-progress">
+          <div class="proj-prog-label"><span>${p.pctDone}% complete</span><span>${p.phases.reduce((a,ph)=>a+ph.tasks.filter(t=>t.status==="done").length,0)}/${p.phases.reduce((a,ph)=>a+ph.tasks.length,0)} tasks done</span></div>
+          <div class="proj-prog-bar"><div class="proj-prog-fill" style="width:${p.pctDone}%"></div></div>
+        </div>
+      </div>
+      <div class="arrow">›</div>
+    </div>
+  `).join("");
+}
+
+function selectProject(pid){
+  selProject=PROJECTS.find(p=>p.id===pid);
+  document.getElementById("s2-title").textContent=selProject.name;
+  document.getElementById("s2-sub").textContent=`${selProject.region} · ${(selProject.fiber/1000).toFixed(0)}k ft fiber`;
+  renderPhases();
+  pushTo("s2","s1");
+}
+
+// ─── SCREEN 2 — PHASES ────────────────────────────────────────────────────
+function renderPhases(){
+  document.getElementById("phaseList").innerHTML=selProject.phases.map((ph,i)=>{
+    const done=ph.tasks.filter(t=>t.status==="done").length;
+    return`<div class="phase-card" onclick="selectPhase('${ph.id}')">
+      <div class="phase-num">${i+1}</div>
+      <div class="phase-info">
+        <div class="phase-name">${ph.name}</div>
+        <div class="phase-meta">${done}/${ph.tasks.length} tasks · ${(ph.fiber/1000).toFixed(0)}k ft fiber · ${(ph.conduit/1000).toFixed(1)}k ft conduit</div>
+      </div>
+      <div class="phase-done-pct">${ph.pctDone}%</div>
+    </div>`;
+  }).join("");
+}
+
+function selectPhase(phid){
+  selPhase=selProject.phases.find(p=>p.id===phid);
+  document.getElementById("s3-title").textContent=selPhase.name;
+  document.getElementById("s3-sub").textContent=selProject.name;
+  renderTasks();
+  pushTo("s3","s2");
+}
+
+// ─── SCREEN 3 — TASKS ─────────────────────────────────────────────────────
+function renderTasks(){
+  const open=selPhase.tasks.filter(t=>t.status!=="done");
+  const done=selPhase.tasks.filter(t=>t.status==="done");
+  document.getElementById("taskList").innerHTML=open.map(t=>taskCard(t)).join("")||`<div class="empty-hint">No open tasks — add one below or all tasks are complete!</div>`;
+  document.getElementById("doneTasksLabel").style.display=done.length?"block":"none";
+  document.getElementById("doneTaskList").innerHTML=done.map(t=>taskCard(t)).join("");
+}
+
+function taskCard(t){
+  const tmpl=TEMPLATES[t.type]||TEMPLATES.freeform;
+  const log=taskLogs[t.id]||{};
+  const counts=log.checklistCounts||{};
+  const chips=tmpl.checklist.slice(0,3).map(c=>{
+    const logged=counts[c.id]>0||(log.footage&&log.footage[c.id]>0);
+    return`<span class="task-chip${logged?" logged":""}">${c.icon} ${c.label}</span>`;
+  }).join("");
+  const statusBadge=`<span class="badge badge-${t.status}">${t.status==="active"?"In progress":t.status==="done"?"Done":"Open"}</span>`;
+  return`<div class="task-card${t.status==="done"?" done-card":""}" onclick="selectTask('${t.id}')">
+    <div class="task-card-top">
+      <div class="task-status-dot dot-${t.status}"></div>
+      <div class="task-card-info">
+        <div class="task-card-name">${t.name}</div>
+        <div class="task-card-sub">${statusBadge} ${t.notes?`· ${t.notes}`:""}</div>
+      </div>
+      <div class="arrow">›</div>
+    </div>
+    ${chips?`<div class="task-card-checklist">${chips}</div>`:""}
+  </div>`;
+}
+
+async function selectTask(tid){
+  selTask=selPhase.tasks.find(t=>t.id===tid);
+  if(!taskLogs[tid]) taskLogs[tid]={checklistCounts:{},footage:{},extraParts:[]};
+  document.getElementById("s4-title").textContent=selTask.name;
+  document.getElementById("s4-sub").textContent=`${selProject.name} › ${selPhase.name}`;
+  renderWorkspace();
+  pushTo("s4","s3");
+
+  // Create or update session in Supabase (drives in-progress on manager dashboard)
+  if(currentUserId){
+    try {
+      const session = await FiberLog.Sessions.startSession(currentUserId, selTask.id);
+      currentSessionId = session.id;
+    } catch(e){ console.warn("Session start failed:", e); }
+  }
+}
+
+// ─── SCREEN 4 — TASK WORKSPACE ────────────────────────────────────────────
+function renderWorkspace(){
+  const tmpl=TEMPLATES[selTask.type]||TEMPLATES.freeform;
+  const log=taskLogs[selTask.id];
+  const counts=log.checklistCounts;
+  const footage=log.footage;
+
+  // calculate overall checklist completion
+  const total=tmpl.checklist.length;
+  const complete=tmpl.checklist.filter(c=>{
+    if(c.type==="footage") return(footage[c.id]||0)>0;
+    return(counts[c.id]||0)>0;
+  }).length;
+  const pct=total>0?Math.round(complete/total*100):0;
+
+  let html=`
+    <div class="task-header-card">
+      <div class="thc-project">${selProject.name} › ${selPhase.name}</div>
+      <div class="thc-task">${selTask.name}</div>
+      ${selTask.notes?`<div class="thc-meta">${selTask.notes}</div>`:""}
+      <div class="thc-progress">
+        <div class="thc-prog-bar"><div class="thc-prog-fill" id="ws-prog-fill" style="width:${pct}%"></div></div>
+        <div class="thc-prog-label"><span id="ws-prog-label">${complete} of ${total} checklist items logged</span><span id="ws-prog-pct">${pct}%</span></div>
+      </div>
+    </div>
+
+    <div class="sec-label">Log as you work — tap + each time you complete one</div>
+  `;
+
+  // Checklist items
+  tmpl.checklist.forEach(item=>{
+    const isFootage=item.type==="footage";
+    const cnt=isFootage?(footage[item.id]||0):(counts[item.id]||0);
+    const done=cnt>0;
+    const partsForOne=item.parts||[];
+    const partsSub=partsForOne.length?partsForOne.map(p=>{
+      const part=CATALOG.find(x=>x.id===p.id);
+      return`${p.qty} ${part?part.name:p.id}`;
+    }).join(" · "):"";
+
+    if(isFootage){
+      html+=`<div class="checklist-item${done?" completed":""}" id="ci-${item.id}">
+        <div class="ci-icon">${item.icon}</div>
+        <div class="ci-info">
+          <div class="ci-label">${item.label}</div>
+          <div class="ci-sub">${item.hint||""}</div>
+          <div class="footage-input-row" style="margin-top:8px">
+            <input class="footage-input" type="number" placeholder="0" value="${cnt||""}"
+              id="footage-${item.id}"
+              onchange="logFootage('${item.id}',this.value)"
+              style="max-width:140px"/>
+            <span class="footage-unit">${item.unit}</span>
+            ${done?`<span style="font-size:18px">✅</span>`:""}
+          </div>
+        </div>
+      </div>`;
+    } else {
+      html+=`<div class="checklist-item${done?" completed":""}" id="ci-${item.id}">
+        <div class="ci-icon">${item.icon}</div>
+        <div class="ci-info">
+          <div class="ci-label">${item.label}</div>
+          <div class="ci-sub">${done?`${cnt} ${item.unit} logged · `:""}${partsSub}</div>
+        </div>
+        <div class="ci-action">
+          ${cnt>0?`<button class="tally-btn tally-minus" onclick="tally('${item.id}',-1)">−</button>`:""}
+          ${cnt>0?`<div class="tally-count">${cnt}</div>`:""}
+          <button class="tally-btn tally-plus${cnt===0?" big":""}" onclick="tally('${item.id}',1)">+</button>
+        </div>
+      </div>`;
+    }
+  });
+
+  // Running tally of all parts logged
+  const allParts=buildPartsTally();
+  const extraParts=log.extraParts||[];
+
+  html+=`<div class="sec-label" style="margin-top:20px">Running parts tally</div>`;
+
+  if(allParts.length||extraParts.length){
+    html+=`<div class="tally-card">
+      <div class="tally-card-header">
+        <span class="tally-card-title">Parts logged so far today</span>
+      </div>
+      ${allParts.map(p=>`<div class="tally-row">
+        <div><div class="tally-part-name">${p.name}</div><div class="tally-part-id">${p.id}</div></div>
+        <div><span class="tally-part-qty">${p.qty.toLocaleString()}</span><span class="tally-part-unit"> ${p.unit}</span></div>
+      </div>`).join("")}
+      ${extraParts.map((p,i)=>`<div class="tally-row">
+        <div><div class="tally-part-name">${p.name} <span style="font-size:10px;background:var(--amber-lt);color:var(--amber-dk);padding:1px 5px;border-radius:10px">extra</span></div><div class="tally-part-id">${p.id}</div></div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input type="number" value="${p.qty}" min="1" style="width:56px;padding:4px 6px;font-size:13px;font-weight:700;text-align:center;border:1px solid var(--border2);border-radius:6px;background:var(--bg)"
+            onchange="updateExtra(${i},this.value)"/>
+          <span style="font-size:11px;color:var(--muted)">${p.unit}</span>
+          <button onclick="removeExtra(${i})" style="width:22px;height:22px;border-radius:50%;background:var(--red-lt);border:none;color:var(--red);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center">×</button>
+        </div>
+      </div>`).join("")}
+    </div>`;
+  } else {
+    html+=`<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:16px;text-align:center;color:var(--hint);font-size:13px;margin-bottom:8px">Parts will appear here as you log work above</div>`;
+  }
+
+  html+=`<button class="add-extra-btn" onclick="openPartPicker()">
+    <span style="font-size:20px">＋</span>
+    <span>Add something not in the checklist</span>
+  </button>`;
+
+  document.getElementById("s4-body").innerHTML=html;
+}
+
+async function tally(itemId,delta){
+  const log=taskLogs[selTask.id];
+  if(!log.checklistCounts[itemId]) log.checklistCounts[itemId]=0;
+  const prev = log.checklistCounts[itemId];
+  log.checklistCounts[itemId]=Math.max(0,log.checklistCounts[itemId]+delta);
+  if(selTask.status==="open"&&log.checklistCounts[itemId]>0) selTask.status="active";
+  renderWorkspace();
+
+  // Save to Supabase if tapped up (not down)
+  if(delta > 0 && currentSessionId && currentUserId){
+    const tmpl=TEMPLATES[selTask.type]||TEMPLATES.freeform;
+    const checkItem=tmpl.checklist.find(c=>c.id===itemId);
+    if(checkItem && checkItem.parts){
+      try {
+        const entryData = {
+          type: "assembly",
+          assemblyKey: selTask.type,
+          qty: 1,
+          location: "",
+          parts: checkItem.parts.map(p=>{
+            const part=CATALOG.find(x=>x.id===p.id)||{name:p.id,unit:"ea"};
+            return{id:p.id,name:part.name,unit:part.unit,qty:p.qty,isExtra:false};
+          })
+        };
+        await FiberLog.Entries.saveEntry(currentSessionId, currentUserId, selTask.id, entryData);
+      } catch(e){ console.warn("Entry save failed:", e); }
+    }
+  }
+}
+
+function logFootage(itemId,val){
+  const log=taskLogs[selTask.id];
+  if(!log.footage) log.footage={};
+  log.footage[itemId]=parseFloat(val)||0;
+  if(selTask.status==="open"&&log.footage[itemId]>0) selTask.status="active";
+  // update checklist style without full re-render
+  const ci=document.getElementById("ci-"+itemId);
+  if(ci){
+    if(log.footage[itemId]>0) ci.classList.add("completed");
+    else ci.classList.remove("completed");
+  }
+  // update tally section
+  const allParts=buildPartsTally();
+  updateProgressBar();
+}
+
+function updateProgressBar(){
+  const tmpl=TEMPLATES[selTask.type]||TEMPLATES.freeform;
+  const log=taskLogs[selTask.id];
+  const total=tmpl.checklist.length;
+  const complete=tmpl.checklist.filter(c=>{
+    if(c.type==="footage") return(log.footage[c.id]||0)>0;
+    return(log.checklistCounts[c.id]||0)>0;
+  }).length;
+  const pct=total>0?Math.round(complete/total*100):0;
+  const fill=document.getElementById("ws-prog-fill");
+  const label=document.getElementById("ws-prog-label");
+  const pctEl=document.getElementById("ws-prog-pct");
+  if(fill) fill.style.width=pct+"%";
+  if(label) label.textContent=`${complete} of ${total} checklist items logged`;
+  if(pctEl) pctEl.textContent=pct+"%";
+}
+
+function buildPartsTally(){
+  const tmpl=TEMPLATES[selTask.type]||TEMPLATES.freeform;
+  const log=taskLogs[selTask.id];
+  const totals={};
+  tmpl.checklist.forEach(item=>{
+    const cnt=log.checklistCounts[item.id]||0;
+    if(cnt>0&&item.parts){
+      item.parts.forEach(p=>{
+        const part=CATALOG.find(x=>x.id===p.id)||{name:p.id,unit:"ea"};
+        if(!totals[p.id]) totals[p.id]={id:p.id,name:part.name,unit:part.unit,qty:0};
+        totals[p.id].qty+=p.qty*cnt;
+      });
+    }
+  });
+  return Object.values(totals);
+}
+
+function updateExtra(i,val){
+  taskLogs[selTask.id].extraParts[i].qty=parseInt(val)||1;
+}
+function removeExtra(i){
+  taskLogs[selTask.id].extraParts.splice(i,1);
+  renderWorkspace();
+}
+
+// ─── PART PICKER ──────────────────────────────────────────────────────────
+function openPartPicker(){
+  ppSelectedPart=null;
+  document.getElementById("ppSearchInput").value="";
+  document.getElementById("ppResults").innerHTML=`<div class="empty-hint">Start typing to find a part</div>`;
+  document.getElementById("ppQtyRow").style.display="none";
+  document.getElementById("partPickerOverlay").classList.add("open");
+}
+
+async function ppSearch(q){
+  const el=document.getElementById("ppResults");
+  if(!q.trim()){el.innerHTML=`<div class="empty-hint">Start typing to find a part</div>`;return;}
+
+  let hits=[];
+  try {
+    // Search live catalog from Supabase
+    hits = await FiberLog.Parts.search(q);
+    hits = hits.map(p=>({id:p.id,name:p.name,unit:p.unit,cat:p.category||p.department||"General"}));
+  } catch(e){
+    // Fallback to local CATALOG if offline
+    hits=CATALOG.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.id.toLowerCase().includes(q.toLowerCase())).slice(0,12);
+  }
+
+  if(!hits.length){el.innerHTML=`<div class="empty-hint">No parts found — try a different term</div>`;return;}
+  el.innerHTML=hits.map(p=>`<div class="pp-result" onclick="ppSelect('${p.id}','${p.name.replace(/'/g,"\'")}','${p.unit}')">
+    <div><div class="pp-result-name">${p.name}</div><div class="pp-result-id">${p.id}</div></div>
+    <span class="pp-result-cat">${p.cat}</span>
+  </div>`).join("");
+}
+
+function ppSelect(id,name,unit){
+  ppSelectedPart=id;
+  // Store name/unit so we dont need to re-fetch
+  ppSelectedPart={id,name:name||id,unit:unit||"ea"};
+  document.getElementById("ppSelectedLabel").textContent=name||id;
+  document.getElementById("ppQtyInput").value=1;
+  document.getElementById("ppQtyRow").style.display="flex";
+}
+
+function confirmAddExtra(){
+  if(!ppSelectedPart) return;
+  const qty=parseInt(document.getElementById("ppQtyInput").value)||1;
+  const partObj = typeof ppSelectedPart==="object" ? ppSelectedPart : {id:ppSelectedPart,name:ppSelectedPart,unit:"ea"};
+  const log=taskLogs[selTask.id];
+  const existing=log.extraParts.find(p=>p.id===partObj.id);
+  if(existing) existing.qty+=qty;
+  else log.extraParts.push({id:partObj.id,name:partObj.name,unit:partObj.unit,qty});
+  closeOverlay("partPickerOverlay");
+  renderWorkspace();
+}
+
+// ─── NEW TASK ──────────────────────────────────────────────────────────────
+function openNewTask(){
+  document.getElementById("newTaskName").value="";
+  document.getElementById("newTaskNotes").value="";
+  document.getElementById("newTaskOverlay").classList.add("open");
+}
+
+async function confirmNewTask(){
+  const name=document.getElementById("newTaskName").value.trim();
+  if(!name){alert("Enter a task name.");return;}
+  const type=document.getElementById("newTaskType").value;
+  const notes=document.getElementById("newTaskNotes").value.trim();
+
+  let newTask={id:"custom-"+Date.now(),name,type:type,task_type:type,status:"open",notes,scope_notes:notes,pctDone:0};
+
+  // Save to Supabase if we have a phase ID
+  if(selPhase.id && currentUserId){
+    try {
+      const saved = await FiberLog.Projects.addTask(selPhase.id, name, type, notes, currentUserId);
+      newTask.id = saved.id;
+    } catch(e){ console.warn("Task save failed:", e); }
+  }
+
+  selPhase.tasks.push(newTask);
+  closeOverlay("newTaskOverlay");
+  renderTasks();
+  selectTask(newTask.id);
+}
+
+// ─── SUMMARY & SUBMIT ─────────────────────────────────────────────────────
+function openSummary(){
+  const now=new Date();
+  // Reset hours display to current value
+  const hoursEl=document.getElementById("hoursDisplay");
+  if(hoursEl) hoursEl.textContent=hoursWorked.toFixed(1);
+
+  document.getElementById("summary-date-user").textContent=
+    `${currentUser} · ${now.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}`;
+
+  // build summary across all logged tasks
+  let totalFt=0,totalAssemblies=0;
+  const allParts={};
+  const taskSummaries=[];
+
+  PROJECTS.forEach(proj=>{
+    proj.phases.forEach(ph=>{
+      ph.tasks.forEach(task=>{
+        const log=taskLogs[task.id];
+        if(!log) return;
+        const tmpl=TEMPLATES[task.type]||TEMPLATES.freeform;
+        let taskFt=0,taskAss=0;
+        const taskParts={};
+
+        tmpl.checklist.forEach(item=>{
+          const cnt=log.checklistCounts[item.id]||0;
+          const ft=log.footage[item.id]||0;
+          if(ft>0){taskFt+=ft;totalFt+=ft;}
+          if(cnt>0){
+            taskAss+=cnt;totalAssemblies+=cnt;
+            (item.parts||[]).forEach(p=>{
+              const part=CATALOG.find(x=>x.id===p.id)||{name:p.id,unit:"ea"};
+              if(!taskParts[p.id]) taskParts[p.id]={id:p.id,name:part.name,unit:part.unit,qty:0};
+              taskParts[p.id].qty+=p.qty*cnt;
+              if(!allParts[p.id]) allParts[p.id]={id:p.id,name:part.name,unit:part.unit,qty:0};
+              allParts[p.id].qty+=p.qty*cnt;
+            });
+          }
+        });
+        (log.extraParts||[]).forEach(p=>{
+          if(!taskParts[p.id]) taskParts[p.id]={...p,qty:0};
+          taskParts[p.id].qty+=p.qty;
+          if(!allParts[p.id]) allParts[p.id]={...p,qty:0};
+          allParts[p.id].qty+=p.qty;
+        });
+
+        const hasData=taskFt>0||taskAss>0||Object.keys(taskParts).length>0;
+        if(hasData) taskSummaries.push({task,proj,ph,taskFt,taskAss,parts:Object.values(taskParts)});
+      });
+    });
+  });
+
+  const hours=parseFloat(document.getElementById("hoursInput")?.value)||hoursWorked;
+  const partsList=Object.values(allParts);
+
+  let html=`
+    <div class="summary-section">
+      <div class="summary-stat"><span class="summary-stat-label">Total footage logged</span><span class="summary-stat-val">${totalFt.toLocaleString()} ft</span></div>
+      <div class="summary-stat"><span class="summary-stat-label">Assemblies / units logged</span><span class="summary-stat-val">${totalAssemblies}</span></div>
+      <div class="summary-stat"><span class="summary-stat-label">Unique parts used</span><span class="summary-stat-val">${partsList.length}</span></div>
+      <div class="summary-stat"><span class="summary-stat-label">Hours worked</span><span class="summary-stat-val">${hoursWorked.toFixed(1)} hrs</span></div>
+      <div class="summary-stat"><span class="summary-stat-label">Tasks logged on</span><span class="summary-stat-val">${taskSummaries.length}</span></div>
+    </div>
+  `;
+
+  if(taskSummaries.length){
+    html+=`<div class="summary-section-title" style="margin-top:4px">By task</div>`;
+    taskSummaries.forEach(({task,proj,ph,taskFt,taskAss,parts})=>{
+      html+=`<div style="background:var(--teal-lt);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:700;color:var(--teal-dk)">${task.name}</div>
+        <div style="font-size:11px;color:var(--teal);margin-bottom:6px">${proj.name} › ${ph.name}</div>
+        ${taskFt>0?`<div style="font-size:12px;color:var(--text)">📏 ${taskFt.toLocaleString()} ft footage</div>`:""}
+        ${taskAss>0?`<div style="font-size:12px;color:var(--text)">🔧 ${taskAss} assemblies</div>`:""}
+      </div>`;
+    });
+  }
+
+  if(partsList.length){
+    html+=`<div class="summary-section-title" style="margin-top:8px">All parts consumed today</div>`;
+    html+=partsList.map(p=>`<div class="summary-part-row">
+      <div><div class="summary-part-name">${p.name}</div><div class="summary-part-id">${p.id}</div></div>
+      <div style="text-align:right"><span class="summary-part-qty">${p.qty.toLocaleString()}</span> <span style="font-size:11px;color:var(--muted)">${p.unit}</span></div>
+    </div>`).join("");
+  }
+
+  document.getElementById("summaryBody").innerHTML=html;
+  document.getElementById("summaryOverlay").classList.add("open");
+}
+
+async function submitDay(){
+  const submitBtn = document.querySelector(".sheet-footer .btn-primary");
+  if(submitBtn){ submitBtn.textContent="Submitting..."; submitBtn.disabled=true; }
+
+  // Build totals for Supabase submission record
+  let totalFt=0, totalAssemblies=0;
+  const allPartIds = new Set();
+  PROJECTS.forEach(proj=>{
+    proj.phases.forEach(ph=>{
+      ph.tasks.forEach(task=>{
+        const log=taskLogs[task.id];
+        if(!log) return;
+        const tmpl=TEMPLATES[task.type||task.task_type]||TEMPLATES.freeform;
+        tmpl.checklist.forEach(item=>{
+          totalFt += log.footage[item.id]||0;
+          const cnt = log.checklistCounts[item.id]||0;
+          if(cnt>0){ totalAssemblies+=cnt; (item.parts||[]).forEach(p=>allPartIds.add(p.id)); }
+        });
+        (log.extraParts||[]).forEach(p=>allPartIds.add(p.id));
+      });
+    });
+  });
+
+  try {
+    if(currentSessionId && currentUserId){
+      await FiberLog.Submissions.submitDay(currentSessionId, currentUserId, hoursWorked, {
+        footage: totalFt,
+        assemblies: totalAssemblies,
+        partTypes: allPartIds.size
+      });
+    }
+  } catch(e){ console.warn("Supabase submit failed:", e); }
+
+  // Also keep the Google Sheets submit as backup
+  const now=new Date();
+  const entries=[];
+  PROJECTS.forEach(proj=>{
+    proj.phases.forEach(ph=>{
+      ph.tasks.forEach(task=>{
+        const log=taskLogs[task.id];
+        if(!log) return;
+        const tmpl=TEMPLATES[task.type||task.task_type]||TEMPLATES.freeform;
+        const parts=[];
+        tmpl.checklist.forEach(item=>{
+          const cnt=log.checklistCounts[item.id]||0;
+          const ft=log.footage[item.id]||0;
+          if(ft>0) parts.push({id:"FOOTAGE_"+item.id,name:item.label+" (footage)",unit:"ft",qty:ft});
+          if(cnt>0)(item.parts||[]).forEach(p=>{
+            const existing=parts.find(x=>x.id===p.id);
+            const part=CATALOG.find(x=>x.id===p.id)||{name:p.id,unit:"ea"};
+            if(existing) existing.qty+=p.qty*cnt;
+            else parts.push({id:p.id,name:part.name,unit:part.unit,qty:p.qty*cnt});
+          });
+        });
+        (log.extraParts||[]).forEach(p=>{
+          const existing=parts.find(x=>x.id===p.id);
+          if(existing) existing.qty+=p.qty;
+          else parts.push({...p});
+        });
+        if(parts.length) entries.push({project:proj.name,phase:ph.name,task:task.name,taskType:task.type,parts});
+      });
+    });
+  });
+
+  const payload={
+    date:now.toISOString().split("T")[0],
+    techName:currentUser,
+    hoursWorked:hoursWorked,
+    timestamp:now.toISOString(),
+    entries
+  };
+
+  fetch("https://script.google.com/macros/s/AKfycbyEt9UFLn5TC4cDyECGdcgaYlloD0qAD3cnVcKabnyv0tbNVlCh1pEsi_80QLePCm9g/exec",
+    {method:"POST",mode:"no-cors",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+    .then(()=>{
+      closeOverlay("summaryOverlay");
+      // reset logs
+      Object.keys(taskLogs).forEach(k=>delete taskLogs[k]);
+      selTask=null; selPhase=null; selProject=null;
+      alert(`✓ Day submitted for ${currentUser}! Check your Google Sheet.`);
+      goTo("s1","s4");
+      goTo("s1","s3");
+      goTo("s1","s2");
+    })
+    .catch(err=>{console.error(err);alert("Error submitting — try again.");});
+}
+
+// ─── USER ─────────────────────────────────────────────────────────────────
+function openUserSheet(){document.getElementById("userOverlay").classList.add("open");}
+function setUser(val){
+  // val is now a user ID from the select
+  const user = USERS_LIST.find(u=>u.id===val);
+  if(!user) return;
+  currentUser=user.name;
+  currentUserId=user.id;
+  currentUserInitials=user.initials;
+  document.getElementById("userBtn").textContent=currentUserInitials;
+  FiberLog.Auth.setCurrentUser(user);
 }
 
 // ─── OVERLAYS ─────────────────────────────────────────────────────────────
