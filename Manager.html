@@ -4,6 +4,8 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>FiberLog — Manager</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="fiberlog-db.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 
@@ -548,95 +550,11 @@ const CATALOG_MINI=[
   {id:"GUY_GUARD_96",name:"Guy Guard 96\"",unit:"ea"},
 ];
 
-// status values: "submitted" | "in-progress" | "started" | "none"
-// in-progress = actively logging entries, not yet submitted
-// started = opened app, selected task, zero entries logged yet
-// none = no activity at all today
-const CREW=[
-  {id:1, name:"Marcus W.",   initials:"MW", type:"aerial",      project:"West Mountain", status:"submitted",   hrs:8.5, lastLog:"2:14 PM", entries:6,  footage:840,  currentTask:"Elm St — Intermediate Lashing",          currentPhase:"Phase 1 — Main Trunk"},
-  {id:2, name:"Tony G.",     initials:"TG", type:"aerial",      project:"West Mountain", status:"in-progress", hrs:0,   lastLog:"3:22 PM", entries:4,  footage:560,  currentTask:"Elm St — Terminal Poles",                currentPhase:"Phase 1 — Main Trunk"},
-  {id:3, name:"Rico B.",     initials:"RB", type:"aerial",      project:"West Mountain", status:"flagged",     hrs:4,   lastLog:"10:30 AM",entries:2,  footage:280,  currentTask:"Emergency repair — fiber cut",            currentPhase:"Unassigned"},
-  {id:4, name:"J. Salazar",  initials:"JS", type:"underground", project:"Ogden Valley",  status:"in-progress", hrs:0,   lastLog:"3:41 PM", entries:7,  footage:320,  currentTask:"Valley Rd — UG Segment A",               currentPhase:"Phase 1 — Valley Road"},
-  {id:5, name:"D. Park",     initials:"DP", type:"splice",      project:"West Mountain", status:"submitted",   hrs:7.5, lastLog:"12:30 PM",entries:3,  footage:0,    currentTask:"Block B — Splicing",                     currentPhase:"Phase 3 — Distribution"},
-  {id:6, name:"L. Chen",     initials:"LC", type:"splice",      project:"Heber",         status:"in-progress", hrs:0,   lastLog:"3:55 PM", entries:2,  footage:0,    currentTask:"Main St — Splice Point 3",               currentPhase:"Phase 1 — Main St"},
-  {id:7, name:"T. Vasquez",  initials:"TV", type:"drop",        project:"West Mountain", status:"started",     hrs:0,   lastLog:"8:02 AM", entries:0,  footage:0,    currentTask:"Block A — Service connections",          currentPhase:"Phase 3 — Distribution"},
-  {id:8, name:"J. Morales",  initials:"JM", type:"drop",        project:"Ogden Valley",  status:"none",        hrs:0,   lastLog:"—",       entries:0,  footage:0,    currentTask:null,                                     currentPhase:null},
-  {id:9, name:"K. Williams", initials:"KW", type:"locator",     project:"All",           status:"submitted",   hrs:8,   lastLog:"11:00 AM",entries:3,  footage:0,    currentTask:"Utility locates — Oak Ave segment",      currentPhase:"Pre-construction"},
-  {id:10,name:"A. Reyes",    initials:"AR", type:"contractor",  project:"West Mountain", status:"in-progress", hrs:0,   lastLog:"4:05 PM", entries:9,  footage:1200, currentTask:"Oak Ave — Intermediate Poles 1–30",      currentPhase:"Phase 2 — Oak Ave Branch"},
-  {id:11,name:"B. Torres",   initials:"BT", type:"contractor",  project:"Ogden Valley",  status:"submitted",   hrs:9,   lastLog:"2:45 PM", entries:5,  footage:640,  currentTask:"Valley Rd — Strand Poles 1–60",          currentPhase:"Phase 1 — Valley Road"},
-  {id:12,name:"C. Nguyen",   initials:"CN", type:"contractor",  project:"Heber",         status:"submitted",   hrs:8,   lastLog:"1:15 PM", entries:4,  footage:480,  currentTask:"Main St — Intermediate Poles",           currentPhase:"Phase 1 — Main St"},
-  {id:13,name:"M. Johnson",  initials:"MJ", type:"aerial",      project:"Ogden Valley",  status:"in-progress", hrs:0,   lastLog:"3:48 PM", entries:6,  footage:820,  currentTask:"Valley Rd — Strand Poles 1–60",          currentPhase:"Phase 1 — Valley Road"},
-  {id:14,name:"S. Kim",      initials:"SK", type:"underground", project:"West Mountain", status:"submitted",   hrs:9,   lastLog:"3:15 PM", entries:6,  footage:410,  currentTask:"Oak Ave — UG Crossing MH1–MH3",          currentPhase:"Phase 2 — Oak Ave Branch"},
-  {id:15,name:"R. Davis",    initials:"RD", type:"aerial",      project:"Heber",         status:"started",     hrs:0,   lastLog:"8:15 AM", entries:0,  footage:0,    currentTask:"Main St — Intermediate Poles",           currentPhase:"Phase 1 — Main St"},
-  {id:16,name:"P. Martinez", initials:"PM", type:"contractor",  project:"West Mountain", status:"submitted",   hrs:10,  lastLog:"4:00 PM", entries:8,  footage:1100, currentTask:"Oak Ave — Intermediate Poles 1–30",      currentPhase:"Phase 2 — Oak Ave Branch"},
-];
+let CREW=[]; // loaded from Supabase
 
-const SUBMISSIONS=[
-  {id:1,crew:"Marcus W.",crewType:"aerial",project:"West Mountain",phase:"Phase 1 — Main Trunk",task:"Elm St — Intermediate Lashing",time:"2:14 PM",hrs:8.5,status:"pending",footage:840,assemblies:12,parts:[
-    {id:"CLAMP_D_LASH",name:"Clamp D Cable Lashing Bug Nut",qty:24,unit:"ea"},
-    {id:"STRAP_LASH_16",name:"Strap Cable Lashing 16\" SS",qty:24,unit:"ea"},
-    {id:"SPACER_LASH_1_2",name:"Spacer 1/2\" Lashing Strap",qty:24,unit:"ea"},
-    {id:"LASH_WIRE_045T430",name:"Lashing Wire .045T430 1200' Coil",qty:3,unit:"ea"},
-  ]},
-  {id:2,crew:"Tony G.",crewType:"aerial",project:"West Mountain",phase:"Phase 1 — Main Trunk",task:"Elm St — Terminal Poles",time:"1:45 PM",hrs:8,status:"pending",footage:0,assemblies:4,parts:[
-    {id:"BOLT_TE_5_8x14",name:"Bolt Thimble Eye 5/8\" x 14\"",qty:4,unit:"ea"},
-    {id:"NUT_SQUARE_5_8",name:"Nut Square 5/8\"",qty:4,unit:"ea"},
-    {id:"WASHER_SQUARE_2x2",name:"Washer Square 2\" x 2\"",qty:4,unit:"ea"},
-    {id:"GRIP_DEADEND_1_4",name:"Grip Deadend Guy 1/4\" Strand",qty:4,unit:"ea"},
-  ]},
-  {id:3,crew:"D. Park",crewType:"splice",project:"West Mountain",phase:"Phase 3 — Distribution",task:"Block B — Splicing",time:"12:30 PM",hrs:7.5,status:"pending",footage:0,assemblies:3,parts:[
-    {id:"C6_CASE",name:"C6 Case FOSC450",qty:3,unit:"ea"},
-    {id:"C_TRAY",name:"C Tray",qty:12,unit:"ea"},
-    {id:"PLC_1x8",name:"1x8 Bare PLC Splitter",qty:3,unit:"ea"},
-  ]},
-  {id:4,crew:"J. Salazar",crewType:"underground",project:"Ogden Valley",phase:"Phase 1 — Valley Road",task:"Valley Rd — UG Segment A",time:"3:00 PM",hrs:9,status:"pending",footage:320,assemblies:0,parts:[
-    {id:"CONDUIT_SDR11_2",name:"SDR11 2\" HDPE Conduit",qty:320,unit:"ft"},
-    {id:"TRACER_WIRE",name:"Tracer Wire",qty:320,unit:"ft"},
-    {id:"MULE_TAPE",name:"Mule Tape",qty:320,unit:"ft"},
-    {id:"HANDHOLE_POLY",name:"Handhole Polymer",qty:2,unit:"ea"},
-    {id:"COND_COUPLER_2",name:"Conduit Coupler 2\"",qty:6,unit:"ea"},
-  ]},
-  {id:5,crew:"A. Reyes",crewType:"contractor",project:"West Mountain",phase:"Phase 2 — Oak Ave Branch",task:"Oak Ave — Intermediate Poles 1–30",time:"3:30 PM",hrs:10,status:"pending",footage:960,assemblies:16,parts:[
-    {id:"NUT_SQUARE_5_8",name:"Nut Square 5/8\"",qty:32,unit:"ea"},
-    {id:"WASHER_SQUARE_2x2",name:"Washer Square 2\" x 2\"",qty:32,unit:"ea"},
-    {id:"BOLT_5_8x14",name:"Bolt Machine 5/8\" x 14\"",qty:16,unit:"ea"},
-    {id:"CLAMP_B_SUS_5_8",name:"Clamp B Suspension 5/8\"",qty:16,unit:"ea"},
-  ]},
-  {id:6,crew:"Rico B.",crewType:"aerial",project:"—",phase:"—",task:"UNASSIGNED — Fiber cut emergency",time:"10:30 AM",hrs:4,status:"flagged",footage:0,assemblies:1,parts:[
-    {id:"C6_CASE",name:"C6 Case FOSC450",qty:1,unit:"ea"},
-    {id:"C_TRAY",name:"C Tray",qty:4,unit:"ea"},
-    {id:"STRAND_EHS_1_4",name:"Strand EHS 1/4\"",qty:50,unit:"ft"},
-  ],notes:"Vehicle struck aerial strand near Elm St & Oak Ave. Emergency splice completed. Strand re-tensioned. Back in service 2:15 PM."},
-];
+let SUBMISSIONS=[]; // loaded from Supabase
 
-const PROJECTS=[
-  {id:"wm",name:"West Mountain",region:"West Mountain",fiber:45000,conduit:8200,pctDone:34,
-   phases:[
-    {name:"Phase 1 — Main Trunk",pct:58,color:"fill-teal",crews:["aerial","splice"]},
-    {name:"Phase 2 — Oak Ave Branch",pct:12,color:"fill-blue",crews:["aerial","contractor"]},
-    {name:"Phase 3 — Distribution",pct:5,color:"fill-amber",crews:["drop","splice"]},
-   ],
-   alerts:[
-    {type:"warn",text:"Phase 2 behind pace — contractor crew accelerating but ETA pushed to May 15"},
-    {type:"danger",text:"Unassigned emergency log needs categorization"},
-   ]
-  },
-  {id:"ov",name:"Ogden Valley",region:"Ogden Valley",fiber:32000,conduit:5400,pctDone:18,
-   phases:[
-    {name:"Phase 1 — Valley Road",pct:22,color:"fill-teal",crews:["aerial","underground"]},
-    {name:"Phase 2 — Side Roads",pct:0,color:"fill-blue",crews:["aerial"]},
-   ],
-   alerts:[
-    {type:"warn",text:"2 crew members not logged today on Valley Road segment"},
-   ]
-  },
-  {id:"hb",name:"Heber",region:"Heber",fiber:28000,conduit:4100,pctDone:8,
-   phases:[
-    {name:"Phase 1 — Main St",pct:10,color:"fill-teal",crews:["aerial","splice"]},
-   ],
-   alerts:[]
-  },
-];
+let PROJECTS=[]; // loaded from Supabase
 
 // ─── FUTURE INTEGRATIONS (roadmap) ────────────────────────────────────────
 //
@@ -679,10 +597,109 @@ let currentApprovalId=null;
 let elSelectedParts=[];
 
 // ─── INIT ──────────────────────────────────────────────────────────────────
-document.addEventListener("DOMContentLoaded",()=>{
+document.addEventListener("DOMContentLoaded", async ()=>{
   const now=new Date();
   document.getElementById("pageDate").textContent=
     now.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})+" · All projects";
+
+  // Set time inputs
+  const t=new Date();
+  document.getElementById("el-start").value=`${String(t.getHours()).padStart(2,"0")}:00`;
+  document.getElementById("el-end").value=`${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
+
+  // Show loading state
+  document.getElementById("feedList").innerHTML=`<div style="padding:20px;text-align:center;color:var(--muted)">Loading...</div>`;
+
+  try {
+    await loadAllData();
+  } catch(err){
+    console.error("Manager init error:", err);
+    document.getElementById("feedList").innerHTML=`<div style="padding:20px;text-align:center;color:var(--red)">Failed to load: ${err.message}<br><button onclick="loadAllData()" style="margin-top:12px;padding:8px 16px;background:var(--teal);color:white;border:none;border-radius:8px;cursor:pointer">Retry</button></div>`;
+  }
+
+  // Subscribe to real-time updates
+  FiberLog.Realtime.subscribeAll({
+    onSessionUpdate: (payload) => {
+      console.log("Session update:", payload);
+      loadCrewActivity();
+    },
+    onNewSubmission: (payload) => {
+      console.log("New submission:", payload);
+      loadSubmissions();
+      // Flash the approvals badge
+      document.getElementById("badge-approvals").style.background="#ef4444";
+      setTimeout(()=>document.getElementById("badge-approvals").style.background="",2000);
+    },
+    onEmergency: (payload) => {
+      console.log("Emergency log:", payload);
+      loadEmergency();
+    }
+  });
+});
+
+async function loadAllData(){
+  const [sessions, submissions, projects, emergency] = await Promise.all([
+    FiberLog.Sessions.getTodaySessions(),
+    FiberLog.Submissions.getPending(),
+    FiberLog.Projects.getFullTree(),
+    FiberLog.Emergency.getUnassigned()
+  ]);
+
+  // Map crew activity from Supabase view
+  CREW = sessions.map(s => ({
+    id: s.user_id,
+    name: s.name,
+    initials: s.initials,
+    type: s.crew_type || "aerial",
+    is_contractor: s.is_contractor,
+    project: s.current_project || "Unassigned",
+    status: mapSessionStatus(s.session_status),
+    hrs: s.hours_worked || 0,
+    lastLog: s.last_activity ? FiberLog.Utils.formatTime(s.last_activity) : "—",
+    entries: s.entry_count || 0,
+    footage: s.footage_total || 0,
+    currentTask: s.current_task || null,
+    currentPhase: s.current_phase || null,
+  }));
+
+  // Map submissions
+  SUBMISSIONS = submissions.map(s => ({
+    id: s.id,
+    crew: s.users?.name || "Unknown",
+    crewType: s.users?.crew_type || "aerial",
+    project: s.work_sessions?.tasks?.phases?.projects?.name || "—",
+    phase: s.work_sessions?.tasks?.phases?.name || "—",
+    task: s.work_sessions?.tasks?.name || "—",
+    time: FiberLog.Utils.formatTime(s.created_at),
+    hrs: s.hours_worked,
+    status: s.status,
+    footage: s.total_footage || 0,
+    assemblies: s.total_assemblies || 0,
+    parts: [], // loaded on demand in detail view
+    notes: s.flag_reason || null
+  }));
+
+  // Map projects
+  PROJECTS = projects.map(p => ({
+    id: p.id,
+    name: p.name,
+    region: p.region,
+    fiber: p.total_fiber_ft,
+    conduit: p.total_conduit_ft,
+    pctDone: 0,
+    phases: (p.phases||[]).map(ph => ({
+      ...ph,
+      pct: 0,
+      color: "fill-teal",
+      crews: ["aerial"]
+    })),
+    alerts: []
+  }));
+
+  // Emergency logs
+  window._emergencyLogs = emergency;
+
+  updateBadges();
   renderFeed();
   renderInProgress();
   renderCrewStatus();
@@ -691,11 +708,63 @@ document.addEventListener("DOMContentLoaded",()=>{
   renderFullCrew();
   renderProjects();
   renderEmergency();
-  // set default time inputs
-  const t=new Date();
-  document.getElementById("el-start").value=`${String(t.getHours()).padStart(2,"0")}:00`;
-  document.getElementById("el-end").value=`${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
-});
+}
+
+async function loadCrewActivity(){
+  try {
+    const sessions = await FiberLog.Sessions.getTodaySessions();
+    CREW = sessions.map(s => ({
+      id: s.user_id, name: s.name, initials: s.initials,
+      type: s.crew_type||"aerial", is_contractor: s.is_contractor,
+      project: s.current_project||"Unassigned",
+      status: mapSessionStatus(s.session_status),
+      hrs: s.hours_worked||0,
+      lastLog: s.last_activity ? FiberLog.Utils.formatTime(s.last_activity) : "—",
+      entries: s.entry_count||0, footage: s.footage_total||0,
+      currentTask: s.current_task||null, currentPhase: s.current_phase||null,
+    }));
+    renderInProgress();
+    renderCrewStatus();
+    renderFullCrew();
+    updateBadges();
+  } catch(e){ console.warn("Crew reload failed:", e); }
+}
+
+async function loadSubmissions(){
+  try {
+    const submissions = await FiberLog.Submissions.getPending();
+    SUBMISSIONS = submissions.map(s => ({
+      id: s.id, crew: s.users?.name||"Unknown",
+      crewType: s.users?.crew_type||"aerial",
+      project: s.work_sessions?.tasks?.phases?.projects?.name||"—",
+      phase: s.work_sessions?.tasks?.phases?.name||"—",
+      task: s.work_sessions?.tasks?.name||"—",
+      time: FiberLog.Utils.formatTime(s.created_at),
+      hrs: s.hours_worked, status: s.status,
+      footage: s.total_footage||0, assemblies: s.total_assemblies||0,
+      parts: [], notes: s.flag_reason||null
+    }));
+    renderFeed();
+    renderApprovals();
+    updateBadges();
+  } catch(e){ console.warn("Submissions reload failed:", e); }
+}
+
+async function loadEmergency(){
+  try {
+    window._emergencyLogs = await FiberLog.Emergency.getUnassigned();
+    renderEmergency();
+    updateBadges();
+  } catch(e){ console.warn("Emergency reload failed:", e); }
+}
+
+function mapSessionStatus(s){
+  if(!s) return "none";
+  if(s==="submitted") return "submitted";
+  if(s==="in-progress") return "in-progress";
+  if(s==="started") return "started";
+  return "none";
+}
 
 // ─── NAV ──────────────────────────────────────────────────────────────────
 function showPage(name,el){
@@ -929,23 +998,34 @@ function approvalCard(s){
   </div>`;
 }
 
-function quickApprove(id){
+async function quickApprove(id){
   const s=SUBMISSIONS.find(x=>x.id===id);
-  if(s){
-    s.status="approved";
-    renderApprovals();
-    renderFeed();
-    updateBadges();
-  }
+  if(!s) return;
+  s.status="approved";
+  renderApprovals();
+  renderFeed();
+  updateBadges();
+
+  // Save to Supabase
+  try {
+    const mgr = FiberLog.Auth.getCurrentUser();
+    await FiberLog.Submissions.approve(id, mgr?.id||null, null);
+  } catch(e){ console.warn("Approve failed:", e); }
 }
-function quickFlag(id){
+
+async function quickFlag(id){
   const s=SUBMISSIONS.find(x=>x.id===id);
-  if(s){
-    s.status="flagged";
-    renderApprovals();
-    renderFeed();
-    updateBadges();
-  }
+  if(!s) return;
+  s.status="flagged";
+  renderApprovals();
+  renderFeed();
+  updateBadges();
+
+  // Save to Supabase
+  try {
+    const mgr = FiberLog.Auth.getCurrentUser();
+    await FiberLog.Submissions.flag(id, mgr?.id||null, "Flagged by manager");
+  } catch(e){ console.warn("Flag failed:", e); }
 }
 
 function openApprovalDetail(id){
@@ -978,13 +1058,28 @@ function openApprovalDetail(id){
   document.getElementById("approvalDetailOverlay").classList.add("open");
 }
 
-function approveSubmission(){
-  quickApprove(currentApprovalId);
+async function approveSubmission(){
+  const note = document.getElementById("detailNote")?.value?.trim()||null;
+  const mgr = FiberLog.Auth.getCurrentUser();
+  const s=SUBMISSIONS.find(x=>x.id===currentApprovalId);
+  if(s){ s.status="approved"; }
   closeOverlay("approvalDetailOverlay");
+  renderApprovals(); renderFeed(); updateBadges();
+  try {
+    await FiberLog.Submissions.approve(currentApprovalId, mgr?.id||null, note);
+  } catch(e){ console.warn("Approve failed:", e); }
 }
-function flagSubmission(){
-  quickFlag(currentApprovalId);
+
+async function flagSubmission(){
+  const reason = prompt("Reason for flagging (optional):") || "Flagged by manager";
+  const mgr = FiberLog.Auth.getCurrentUser();
+  const s=SUBMISSIONS.find(x=>x.id===currentApprovalId);
+  if(s){ s.status="flagged"; s.notes=reason; }
   closeOverlay("approvalDetailOverlay");
+  renderApprovals(); renderFeed(); updateBadges();
+  try {
+    await FiberLog.Submissions.flag(currentApprovalId, mgr?.id||null, reason);
+  } catch(e){ console.warn("Flag failed:", e); }
 }
 
 // ─── CREW FULL LIST ────────────────────────────────────────────────────────
@@ -1084,7 +1179,20 @@ function crewColor(type){
 
 // ─── EMERGENCY LIST ────────────────────────────────────────────────────────
 function renderEmergency(){
-  const unassigned=SUBMISSIONS.filter(s=>s.task.includes("UNASSIGNED")||s.project==="—");
+  // Use live emergency logs from Supabase if available, fallback to SUBMISSIONS filter
+  const liveEm = window._emergencyLogs||[];
+  const unassigned = liveEm.length > 0
+    ? liveEm.map(e=>({
+        id:e.id,
+        crew: e.users?.name||"Unknown",
+        task: e.work_type,
+        notes: e.description,
+        time: FiberLog.Utils.formatTime(e.created_at),
+        parts: (e.emergency_log_parts||[]).map(p=>({
+          id:p.part_id, name:p.parts_catalog?.name||p.part_id, unit:p.parts_catalog?.unit||"ea", qty:p.quantity
+        }))
+      }))
+    : SUBMISSIONS.filter(s=>s.task&&(s.task.includes("UNASSIGNED")||s.project==="—"));
   document.getElementById("badge-emergency").textContent=unassigned.length;
   if(!unassigned.length){
     document.getElementById("emergencyList").innerHTML=`<div style="text-align:center;padding:48px;color:var(--hint)">No unassigned logs — all submissions categorized ✓</div>`;
@@ -1117,16 +1225,24 @@ function renderEmergency(){
   `).join("");
 }
 
-function assignEmergency(id,project){
+async function assignEmergency(id,project){
   const s=SUBMISSIONS.find(x=>x.id===id);
-  if(!s) return;
-  s.project=project;
-  s.task=project==="standalone"?"Standalone emergency log":`Emergency repair — ${project}`;
-  s.status="pending";
-  renderEmergency();
-  renderFeed();
-  updateBadges();
-  alert(`Assigned to ${project}. Now appears in approvals queue.`);
+  if(s){
+    s.project=project;
+    s.task=project==="standalone"?"Standalone emergency log":`Emergency repair — ${project}`;
+    s.status="pending";
+  }
+  renderEmergency(); renderFeed(); updateBadges();
+
+  // Find project ID from PROJECTS
+  const proj = PROJECTS.find(p=>p.name===project);
+  try {
+    await FiberLog.Emergency.assign(id, proj?.id||null);
+    alert(`Assigned to ${project}. Now appears in approvals queue.`);
+  } catch(e){
+    console.warn("Emergency assign failed:", e);
+    alert(`Assigned locally. Sync to database failed — retry later.`);
+  }
 }
 
 // ─── EMERGENCY LOG SHEET ──────────────────────────────────────────────────
@@ -1173,26 +1289,48 @@ function renderElParts(){
   `).join("")||`<div style="font-size:12px;color:var(--hint);padding:6px 0">No parts added yet</div>`;
 }
 
-function submitEmergency(){
-  const crew=document.getElementById("el-crew").value;
+async function submitEmergency(){
+  const crewEl=document.getElementById("el-crew");
+  const crewVal=crewEl.value;
   const type=document.getElementById("el-type").value;
   const desc=document.getElementById("el-desc").value.trim();
-  if(!crew||crew.includes("Select")){alert("Select a crew member.");return;}
+  if(!crewVal||crewVal.includes("Select")){alert("Select a crew member.");return;}
   if(!desc){alert("Add a description.");return;}
+
+  const startVal=document.getElementById("el-start").value;
+  const endVal=document.getElementById("el-end").value;
+  const now=new Date();
+  const dateStr=now.toISOString().split("T")[0];
+  const startISO=startVal?`${dateStr}T${startVal}:00`:null;
+  const endISO=endVal?`${dateStr}T${endVal}:00`:null;
+
+  // Add to local UI immediately
   const newSub={
-    id:Date.now(),crew:crew.split(" (")[0],crewType:"aerial",
+    id:Date.now(),crew:crewVal.split(" (")[0],crewType:"aerial",
     project:"—",phase:"—",
     task:`UNASSIGNED — ${type}`,
-    time:new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
+    time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
     hrs:0,status:"flagged",footage:0,assemblies:0,
-    parts:elParts,notes:desc
+    parts:elParts.map(p=>({...p,name:p.name||p.id,unit:p.unit||"ea"})),notes:desc
   };
   SUBMISSIONS.push(newSub);
   closeOverlay("emergencyOverlay");
-  renderEmergency();
-  renderFeed();
-  updateBadges();
-  alert("Emergency log submitted. Appears in Unassigned queue.");
+  renderEmergency(); renderFeed(); updateBadges();
+
+  // Save to Supabase
+  const mgr=FiberLog.Auth.getCurrentUser();
+  try {
+    await FiberLog.Emergency.submit(
+      null, // crew user_id — could be looked up
+      mgr?.id||null,
+      type, desc, startISO, endISO,
+      elParts.map(p=>({id:p.id,qty:p.qty}))
+    );
+    alert("Emergency log saved to database.");
+  } catch(e){
+    console.warn("Emergency submit failed:", e);
+    alert("Emergency logged locally. Database sync failed — retry later.");
+  }
 }
 
 // ─── BADGES ────────────────────────────────────────────────────────────────
