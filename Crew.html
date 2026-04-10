@@ -490,24 +490,29 @@ const Projects = {
 
   // Load all active projects with phases and tasks
   async getFullTree() {
+    console.log("FiberLog: Loading projects...");
+    
     const { data: projects, error: pErr } = await db
       .from('projects')
       .select('*')
       .eq('status', 'active')
       .order('name');
-    if (pErr) throw pErr;
+    if (pErr) { console.error("Projects error:", pErr); throw pErr; }
+    console.log("FiberLog: Projects loaded:", projects?.length);
 
     const { data: phases, error: phErr } = await db
       .from('phases')
       .select('*')
       .order('sequence_order');
-    if (phErr) throw phErr;
+    if (phErr) { console.error("Phases error:", phErr); throw phErr; }
+    console.log("FiberLog: Phases loaded:", phases?.length);
 
     const { data: tasks, error: tErr } = await db
       .from('tasks')
       .select('*')
       .order('name');
-    if (tErr) throw tErr;
+    if (tErr) { console.error("Tasks error:", tErr); throw tErr; }
+    console.log("FiberLog: Tasks loaded:", tasks?.length);
 
     // Build tree
     return projects.map(proj => ({
@@ -683,12 +688,50 @@ const Sessions = {
 
   // Get all sessions for today (manager view)
   async getTodaySessions() {
-    const today = new Date().toISOString().split('T')[0];
-    const { data, error } = await db
-      .from('crew_activity_today')
-      .select('*');
-    if (error) throw error;
-    return data;
+    // Try the view first, fall back to direct query if view doesnt exist
+    try {
+      const { data, error } = await db
+        .from('crew_activity_today')
+        .select('*');
+      if (error) throw error;
+      console.log("FiberLog: Sessions from view:", data?.length);
+      return data || [];
+    } catch(e) {
+      console.warn("FiberLog: crew_activity_today view failed, using direct query:", e.message);
+      // Fallback: join users with work_sessions directly
+      const today = new Date().toISOString().split('T')[0];
+      const { data, error } = await db
+        .from('users')
+        .select(`
+          id, name, initials, crew_type, is_contractor,
+          work_sessions!left (
+            id, status, entry_count, footage_total, 
+            updated_at, task_id, hours_worked, session_date,
+            tasks!left ( name, phases!left ( name, projects!left ( name ) ) )
+          )
+        `)
+        .eq('role', 'crew')
+        .eq('is_active', true);
+      if (error) { console.error("Sessions fallback error:", error); return []; }
+      // Flatten the result
+      return (data||[]).map(u => {
+        const session = u.work_sessions?.find(s => s.session_date === today) || null;
+        return {
+          user_id: u.id, name: u.name, initials: u.initials,
+          crew_type: u.crew_type, is_contractor: u.is_contractor,
+          session_status: session?.status || null,
+          entry_count: session?.entry_count || 0,
+          footage_total: session?.footage_total || 0,
+          last_activity: session?.updated_at || null,
+          task_id: session?.task_id || null,
+          current_task: session?.tasks?.name || null,
+          current_phase: session?.tasks?.phases?.name || null,
+          current_project: session?.tasks?.phases?.projects?.name || null,
+          hours_worked: session?.hours_worked || null,
+          session_date: today
+        };
+      });
+    }
   },
 
   // Real-time subscription for manager — fires on any session update
