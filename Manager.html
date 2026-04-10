@@ -544,13 +544,13 @@ textarea{min-height:72px;resize:vertical}
 // ============================================================
 
 var SUPABASE_URL = 'https://attduslwidxecmjifsnl.supabase.co';
-var SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_RkQElhXYGUEw6iUtXmcn5w_URF87Qp0';
+var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0dGR1c2x3aWR4ZWNtamlmc25sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4MzkxMzcsImV4cCI6MjA5MTQxNTEzN30.Gg-W0XR2neAT9nVtPxnUiwk1HpHqsOi_PJjYVucdXkc';
 
 // ─── CLIENT INIT ─────────────────────────────────────────────
 // Supabase new publishable key format (2025+)
 // Uses the CDN build — no build step needed
 var _supabaseCreateClient = supabase.createClient;
-var db = _supabaseCreateClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+var db = _supabaseCreateClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
