@@ -944,7 +944,7 @@ const Submissions = {
       .from('submissions')
       .select(`
         *,
-        users ( name, initials, crew_type, is_contractor ),
+        users!submissions_user_id_fkey ( name, initials, crew_type, is_contractor ),
         work_sessions (
           task_id,
           tasks ( name, task_type,
@@ -966,7 +966,7 @@ const Submissions = {
       .from('submissions')
       .select(`
         *,
-        users ( name, initials, crew_type ),
+        users!submissions_user_id_fkey ( name, initials, crew_type ),
         work_sessions (
           task_id,
           entry_count,
