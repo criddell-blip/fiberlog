@@ -1,1351 +1,776 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>FiberLog — Manager</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
-
-:root {
-  --teal:#1D9E75;--teal-dk:#0F6E56;--teal-lt:#E1F5EE;--teal-mid:#5DCAA5;
-  --amber:#BA7517;--amber-dk:#854F0B;--amber-lt:#FAEEDA;--amber-mid:#EF9F27;
-  --blue:#185FA5;--blue-lt:#E6F1FB;--blue-mid:#378ADD;
-  --red:#A32D2D;--red-lt:#FCEBEB;--red-mid:#E24B4A;
-  --gray:#5F5E5A;--gray-lt:#F1EFE8;--gray-mid:#888780;
-  --purple:#534AB7;--purple-lt:#EEEDFE;--purple-mid:#7F77DD;
-  --coral:#993C1D;--coral-lt:#FAECE7;--coral-mid:#D85A30;
-  --bg:#EEECEA;--surface:#fff;--border:#E0DED8;--border2:#CCCBC4;
-  --text:#1A1917;--muted:#6B6A65;--hint:#AEADA7;
-  --sidebar-w:240px;
-  --r:12px;--r-sm:8px;
-}
-
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;min-height:100vh}
-
-/* ── Layout ── */
-.layout{display:flex;min-height:100vh}
-
-/* ── Sidebar ── */
-.sidebar{width:var(--sidebar-w);background:var(--text);flex-shrink:0;display:flex;flex-direction:column;position:fixed;top:0;left:0;height:100vh;z-index:50;transition:transform .25s}
-.sidebar-logo{padding:20px 18px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
-.logo-mark{font-size:18px;font-weight:700;color:#fff;letter-spacing:-.4px}
-.logo-mark span{color:var(--teal-mid)}
-.logo-role{font-size:11px;color:rgba(255,255,255,.4);margin-top:2px;font-weight:500;text-transform:uppercase;letter-spacing:.06em}
-.sidebar-manager{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.08)}
-.mgr-avatar{width:32px;height:32px;border-radius:50%;background:var(--teal);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;flex-shrink:0}
-.mgr-name{font-size:13px;font-weight:600;color:white}
-.mgr-title{font-size:11px;color:rgba(255,255,255,.4)}
-.nav{padding:10px 0;flex:1}
-.nav-item{display:flex;align-items:center;gap:10px;padding:10px 18px;cursor:pointer;color:rgba(255,255,255,.5);font-size:13px;font-weight:500;transition:all .15s;border-left:2px solid transparent;position:relative}
-.nav-item:hover{color:rgba(255,255,255,.85);background:rgba(255,255,255,.04)}
-.nav-item.active{color:white;border-left-color:var(--teal);background:rgba(29,158,117,.12)}
-.nav-icon{font-size:16px;width:20px;text-align:center;flex-shrink:0}
-.nav-badge{margin-left:auto;background:var(--red-mid);color:white;font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px}
-.nav-badge.amber{background:var(--amber-mid)}
-.sidebar-footer{padding:14px 18px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:rgba(255,255,255,.25)}
-
-/* ── Main ── */
-.main{flex:1;margin-left:var(--sidebar-w);display:flex;flex-direction:column;min-height:100vh}
-.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:0;z-index:40}
-.topbar-title{font-size:18px;font-weight:700;letter-spacing:-.3px}
-.topbar-sub{font-size:12px;color:var(--muted);margin-top:1px}
-.topbar-right{display:flex;align-items:center;gap:10px}
-.emergency-btn{display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--red-lt);border:1px solid rgba(162,45,45,.2);border-radius:var(--r-sm);font-size:13px;font-weight:700;color:var(--red);cursor:pointer;transition:all .15s}
-.emergency-btn:hover{background:#f7c1c1}
-.mobile-menu-btn{display:none;width:36px;height:36px;border-radius:var(--r-sm);background:var(--bg);border:none;cursor:pointer;font-size:18px;align-items:center;justify-content:center}
-
-/* ── Content ── */
-.content{padding:24px;flex:1}
-.page{display:none}
-.page.active{display:block}
-
-/* ── Section heading ── */
-.sec-heading{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin:20px 0 10px}
-.sec-heading:first-child{margin-top:0}
-
-/* ── Stat row ── */
-.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
-.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px}
-.stat-val{font-size:28px;font-weight:700;letter-spacing:-.5px;color:var(--text)}
-.stat-lbl{font-size:12px;color:var(--muted);margin-top:2px;font-weight:500}
-.stat-delta{font-size:11px;margin-top:6px;font-weight:600}
-.delta-up{color:var(--teal)}
-.delta-warn{color:var(--amber)}
-.delta-down{color:var(--red)}
-
-/* ── Cards ── */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:12px}
-.card-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border)}
-.card-title{font-size:14px;font-weight:700}
-.card-action{font-size:12px;color:var(--teal);font-weight:600;cursor:pointer;background:none;border:none}
-.card-body{padding:0}
-
-/* ── Two col layout ── */
-.two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
-
-/* ── Feed items (Today) ── */
-.feed-item{display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);transition:background .1s;cursor:pointer}
-.feed-item:last-child{border-bottom:none}
-.feed-item:hover{background:var(--bg)}
-.feed-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:4px}
-.fd-aerial{background:var(--teal)}
-.fd-underground{background:var(--blue-mid)}
-.fd-splice{background:var(--purple-mid)}
-.fd-drop{background:var(--amber-mid)}
-.fd-locator{background:var(--coral-mid)}
-.fd-contractor{background:var(--gray-mid)}
-.fd-emergency{background:var(--red-mid)}
-.feed-body{flex:1;min-width:0}
-.feed-who{font-size:13px;font-weight:600}
-.feed-what{font-size:12px;color:var(--muted);margin-top:2px;line-height:1.5}
-.feed-meta{display:flex;gap:8px;margin-top:5px;flex-wrap:wrap}
-.feed-tag{font-size:11px;padding:2px 7px;border-radius:20px;font-weight:600}
-.tag-teal{background:var(--teal-lt);color:var(--teal-dk)}
-.tag-blue{background:var(--blue-lt);color:var(--blue)}
-.tag-amber{background:var(--amber-lt);color:var(--amber-dk)}
-.tag-red{background:var(--red-lt);color:var(--red)}
-.tag-purple{background:var(--purple-lt);color:var(--purple)}
-.tag-gray{background:var(--gray-lt);color:var(--gray)}
-.tag-coral{background:var(--coral-lt);color:var(--coral)}
-.feed-time{font-size:11px;color:var(--hint);flex-shrink:0;margin-top:2px}
-.feed-status{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:700;flex-shrink:0;align-self:flex-start}
-.status-pending{background:var(--amber-lt);color:var(--amber-dk)}
-.status-approved{background:var(--teal-lt);color:var(--teal-dk)}
-.status-flagged{background:var(--red-lt);color:var(--red)}
-
-/* ── Crew status rows ── */
-.crew-row{display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid var(--border)}
-.crew-row:last-child{border-bottom:none}
-.crew-avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
-.av-aerial{background:var(--teal-lt);color:var(--teal-dk)}
-.av-underground{background:var(--blue-lt);color:var(--blue)}
-.av-splice{background:var(--purple-lt);color:var(--purple)}
-.av-drop{background:var(--amber-lt);color:var(--amber-dk)}
-.av-locator{background:var(--coral-lt);color:var(--coral)}
-.av-contractor{background:var(--gray-lt);color:var(--gray)}
-.crew-info{flex:1;min-width:0}
-.crew-name{font-size:13px;font-weight:600}
-.crew-type{font-size:11px;color:var(--muted);margin-top:1px}
-.crew-activity{font-size:12px;color:var(--muted);flex:1;text-align:right;min-width:0}
-.crew-pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;flex-shrink:0}
-.pill-active{background:var(--teal-lt);color:var(--teal-dk)}
-.pill-inprogress{background:var(--blue-lt);color:var(--blue);border:1px solid rgba(24,95,165,.2)}
-.pill-started{background:var(--purple-lt);color:var(--purple)}
-.pill-pending{background:var(--amber-lt);color:var(--amber-dk)}
-.pill-none{background:var(--gray-lt);color:var(--gray-mid)}
-
-/* ── Live pulse dot for in-progress ── */
-@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.85)}}
-.live-dot{width:8px;height:8px;border-radius:50%;background:var(--blue-mid);display:inline-block;animation:pulse 1.8s ease-in-out infinite;flex-shrink:0}
-.live-dot.green{background:var(--teal)}
-
-/* ── In-progress feed card ── */
-.feed-inprogress{background:var(--blue-lt);border:1px solid rgba(24,95,165,.15);border-radius:var(--r);padding:12px 14px;margin-bottom:6px;cursor:pointer;transition:background .12s}
-.feed-inprogress:hover{background:#c8dff5}
-.feed-started{background:var(--purple-lt);border:1px solid rgba(83,74,183,.15);border-radius:var(--r);padding:12px 14px;margin-bottom:6px}
-.fip-header{display:flex;align-items:center;gap:8px;margin-bottom:5px}
-.fip-name{font-size:13px;font-weight:700}
-.fip-task{font-size:12px;color:var(--muted);margin-bottom:5px;line-height:1.4}
-.fip-stats{display:flex;gap:12px}
-.fip-stat{font-size:12px;color:var(--text)}
-.fip-stat strong{font-weight:700}
-.crew-hrs{font-size:12px;font-weight:700;color:var(--text);flex-shrink:0;min-width:36px;text-align:right}
-
-/* ── Approval cards ── */
-.approval-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);margin-bottom:10px;overflow:hidden}
-.approval-header{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}
-.approval-who{flex:1}
-.approval-name{font-size:14px;font-weight:700}
-.approval-sub{font-size:12px;color:var(--muted);margin-top:2px}
-.approval-time{font-size:11px;color:var(--hint)}
-.approval-body{padding:12px 16px}
-.approval-stat-row{display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap}
-.approval-stat{text-align:center}
-.approval-stat-val{font-size:20px;font-weight:700;color:var(--text)}
-.approval-stat-lbl{font-size:11px;color:var(--muted);margin-top:1px}
-.parts-table{width:100%;border-collapse:collapse;font-size:12px}
-.parts-table th{text-align:left;padding:5px 8px;background:var(--bg);color:var(--muted);font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:.05em}
-.parts-table td{padding:7px 8px;border-bottom:1px solid var(--border)}
-.parts-table tr:last-child td{border-bottom:none}
-.parts-table .part-id{font-family:'DM Mono',monospace;font-size:11px;color:var(--hint)}
-.approval-actions{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border);background:var(--bg)}
-.btn{padding:9px 16px;border-radius:var(--r-sm);font-size:13px;font-weight:700;cursor:pointer;border:none;font-family:inherit;transition:all .15s}
-.btn:active{transform:scale(.97)}
-.btn-approve{background:var(--teal);color:white;flex:2}
-.btn-approve:hover{background:var(--teal-dk)}
-.btn-flag{background:var(--red-lt);color:var(--red);border:1px solid rgba(162,45,45,.2);flex:1}
-.btn-flag:hover{background:#f7c1c1}
-.btn-edit{background:var(--bg);color:var(--text);border:1px solid var(--border2);flex:1}
-.btn-ghost{background:var(--bg);color:var(--text);border:1px solid var(--border2)}
-.btn-primary{background:var(--teal);color:white}
-.btn-danger{background:var(--red-lt);color:var(--red);border:1px solid rgba(162,45,45,.2)}
-
-/* ── Progress bars ── */
-.prog-block{margin-bottom:14px}
-.prog-meta{display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px}
-.prog-name{font-weight:600}
-.prog-val{color:var(--muted)}
-.prog-bg{height:6px;border-radius:3px;background:var(--bg);border:1px solid var(--border)}
-.prog-fill{height:100%;border-radius:3px;transition:width .5s}
-.fill-teal{background:var(--teal)}
-.fill-blue{background:var(--blue-mid)}
-.fill-amber{background:var(--amber-mid)}
-.fill-purple{background:var(--purple-mid)}
-.prog-eta{font-size:11px;margin-top:3px;font-weight:600}
-.eta-ok{color:var(--teal)}
-.eta-warn{color:var(--amber)}
-.eta-late{color:var(--red)}
-
-/* ── Project cards ── */
-.project-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:10px;cursor:pointer;transition:box-shadow .15s}
-.project-card:hover{box-shadow:0 2px 12px rgba(0,0,0,.08)}
-.project-card-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px}
-.project-name{font-size:16px;font-weight:700}
-.project-meta{font-size:12px;color:var(--muted);margin-top:2px}
-.project-pct{font-size:24px;font-weight:700;color:var(--teal)}
-.crew-type-dots{display:flex;gap:5px;margin-top:8px;flex-wrap:wrap}
-.crew-type-dot{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)}
-.ctd{width:8px;height:8px;border-radius:50%}
-
-/* ── Alert strip ── */
-.alert-strip{display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-radius:var(--r-sm);margin-bottom:8px}
-.alert-warn{background:var(--amber-lt);border:1px solid rgba(186,117,23,.25)}
-.alert-danger{background:var(--red-lt);border:1px solid rgba(162,45,45,.2)}
-.alert-info{background:var(--blue-lt);border:1px solid rgba(24,95,165,.2)}
-.alert-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:4px}
-.adot-warn{background:var(--amber)}
-.adot-danger{background:var(--red)}
-.adot-info{background:var(--blue-mid)}
-.alert-text{font-size:13px;line-height:1.5;color:var(--text)}
-
-/* ── Emergency overlay ── */
-.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;align-items:flex-end;justify-content:center}
-.overlay.open{display:flex}
-.sheet{background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:600px;max-height:90vh;display:flex;flex-direction:column;margin:0 auto}
-.sheet-handle{width:36px;height:4px;background:var(--border2);border-radius:2px;margin:10px auto 0}
-.sheet-header{padding:14px 20px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
-.sheet-title{font-size:18px;font-weight:700}
-.sheet-sub{font-size:13px;color:var(--muted);margin-top:2px}
-.sheet-body{padding:16px 20px;overflow-y:auto;flex:1}
-.sheet-footer{padding:12px 20px 24px;border-top:1px solid var(--border);flex-shrink:0;display:flex;gap:8px}
-.field{margin-bottom:14px}
-.field label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);display:block;margin-bottom:5px}
-input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border2);border-radius:var(--r-sm);font-size:14px;font-family:inherit;background:var(--bg);color:var(--text);outline:none;appearance:none;-webkit-appearance:none}
-input:focus,select:focus,textarea:focus{border-color:var(--teal);background:var(--surface)}
-textarea{min-height:72px;resize:vertical}
-
-/* ── Tabs ── */
-.tab-bar{display:flex;border-bottom:1px solid var(--border);margin-bottom:16px;overflow-x:auto}
-.tab-bar::-webkit-scrollbar{display:none}
-.tab{padding:10px 16px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:all .15s}
-.tab.active{color:var(--teal);border-bottom-color:var(--teal)}
-.tab-badge{display:inline-flex;margin-left:5px;background:var(--red-mid);color:white;font-size:10px;font-weight:700;padding:1px 5px;border-radius:20px}
-.tab-badge.amber{background:var(--amber-mid)}
-
-/* ── Mobile sidebar overlay ── */
-.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:49}
-
-/* ── Responsive ── */
-@media(max-width:900px){
-  .stat-row{grid-template-columns:1fr 1fr}
-  .two-col{grid-template-columns:1fr}
-  .three-col{grid-template-columns:1fr}
-}
-@media(max-width:640px){
-  .sidebar{transform:translateX(-100%)}
-  .sidebar.open{transform:translateX(0)}
-  .sidebar-overlay{display:block;display:none}
-  .sidebar-overlay.open{display:block}
-  .main{margin-left:0}
-  .mobile-menu-btn{display:flex}
-  .topbar{padding:12px 16px}
-  .content{padding:14px}
-  .stat-row{grid-template-columns:1fr 1fr;gap:8px}
-  .stat-val{font-size:22px}
-  .emergency-btn span:last-child{display:none}
-}
-</style>
-</head>
-<body>
-
-<div class="layout">
-
-<!-- ── SIDEBAR ── -->
-<div class="sidebar" id="sidebar">
-  <div class="sidebar-logo">
-    <div class="logo-mark">Fiber<span>Log</span></div>
-    <div class="logo-role">Manager portal</div>
-  </div>
-  <div class="sidebar-manager">
-    <div class="mgr-avatar" id="mgrAvatar">JR</div>
-    <div>
-      <div class="mgr-name" id="mgrName">J. Rodriguez</div>
-      <div class="mgr-title">Operations Manager</div>
-    </div>
-  </div>
-  <div class="nav">
-    <div class="nav-item active" onclick="showPage('today',this)"><span class="nav-icon">📋</span>Today<span class="nav-badge amber" id="badge-today">3</span></div>
-    <div class="nav-item" onclick="showPage('approvals',this)"><span class="nav-icon">✅</span>Approvals<span class="nav-badge" id="badge-approvals">5</span></div>
-    <div class="nav-item" onclick="showPage('crew',this)"><span class="nav-icon">👷</span>Crew</div>
-    <div class="nav-item" onclick="showPage('projects',this)"><span class="nav-icon">📈</span>Projects</div>
-    <div class="nav-item" onclick="showPage('emergency',this)"><span class="nav-icon">⚡</span>Unassigned<span class="nav-badge" id="badge-emergency">2</span></div>
-  </div>
-  <div class="sidebar-footer">FiberLog v1.0 · Manager build</div>
-</div>
-<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
-
-<!-- ── MAIN ── -->
-<div class="main">
-
-  <!-- Top bar -->
-  <div class="topbar">
-    <button class="mobile-menu-btn" onclick="openSidebar()">☰</button>
-    <div>
-      <div class="topbar-title" id="pageTitle">Today's overview</div>
-      <div class="topbar-sub" id="pageDate"></div>
-    </div>
-    <div class="topbar-right">
-      <button class="emergency-btn" onclick="openEmergencyLog()">
-        <span>⚡</span><span>Emergency log</span>
-      </button>
-    </div>
-  </div>
-
-  <!-- Content -->
-  <div class="content">
-
-    <!-- ══ TODAY PAGE ══ -->
-    <div class="page active" id="page-today">
-
-      <!-- Stat row -->
-      <div class="stat-row">
-        <div class="stat-card">
-          <div class="stat-val" id="stat-logged">18</div>
-          <div class="stat-lbl">Crew active today</div>
-          <div class="stat-delta delta-warn" id="stat-logged-sub">4 not started</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-val">5</div>
-          <div class="stat-lbl">In progress now</div>
-          <div class="stat-delta" style="color:var(--blue);display:flex;align-items:center;gap:5px"><div class="live-dot"></div> Actively logging</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-val">5</div>
-          <div class="stat-lbl">Pending approvals</div>
-          <div class="stat-delta delta-warn">Review needed</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-val">2</div>
-          <div class="stat-lbl">Issues flagged</div>
-          <div class="stat-delta delta-down">Action required</div>
-        </div>
-      </div>
-
-      <!-- Alerts -->
-      <div class="alert-strip alert-danger">
-        <div class="alert-dot adot-danger"></div>
-        <div class="alert-text"><strong>Fiber cut reported</strong> — Rico B. logged an unassigned emergency on West Mountain near Elm St. Needs categorization and crew dispatch.</div>
-      </div>
-      <div class="alert-strip alert-warn">
-        <div class="alert-dot adot-warn"></div>
-        <div class="alert-text"><strong>4 crew members</strong> have not logged anything today — D. Park, L. Chen, T. Vasquez, J. Morales. Follow up if they're active.</div>
-      </div>
-
-      <!-- In progress now -->
-      <div class="sec-heading" style="display:flex;align-items:center;gap:8px"><div class="live-dot"></div> In progress right now</div>
-      <div id="inProgressSection" style="margin-bottom:16px"></div>
-
-      <div class="two-col">
-        <!-- Live feed -->
-        <div>
-          <div class="sec-heading">Submission feed</div>
-          <div class="card">
-            <div class="card-header">
-              <div class="card-title">Today's logs</div>
-              <button class="card-action" onclick="showPage('approvals',document.querySelector('.nav-item:nth-child(2)'))">Review all →</button>
-            </div>
-            <div class="card-body" id="feedList"></div>
-          </div>
-        </div>
-
-        <!-- Right column -->
-        <div>
-          <div class="sec-heading">Crew status</div>
-          <div class="card">
-            <div class="card-header">
-              <div class="card-title">All crews</div>
-              <button class="card-action" onclick="showPage('crew',document.querySelector('.nav-item:nth-child(3)'))">Full view →</button>
-            </div>
-            <div class="card-body" id="crewStatusList"></div>
-          </div>
-
-          <div class="sec-heading" style="margin-top:16px">Project pulse</div>
-          <div class="card">
-            <div class="card-body" style="padding:14px 16px" id="projectPulse"></div>
-          </div>
-        </div>
-      </div>
-    </div><!-- end today -->
-
-    <!-- ══ APPROVALS PAGE ══ -->
-    <div class="page" id="page-approvals">
-      <div class="tab-bar">
-        <div class="tab active" onclick="filterApprovals('pending',this)">Pending <span class="tab-badge amber">5</span></div>
-        <div class="tab" onclick="filterApprovals('flagged',this)">Flagged <span class="tab-badge">2</span></div>
-        <div class="tab" onclick="filterApprovals('approved',this)">Approved today</div>
-      </div>
-      <div id="approvalsList"></div>
-    </div>
-
-    <!-- ══ CREW PAGE ══ -->
-    <div class="page" id="page-crew">
-      <div class="tab-bar">
-        <div class="tab active" onclick="filterCrew('all',this)">All crews</div>
-        <div class="tab" onclick="filterCrew('aerial',this)">Aerial</div>
-        <div class="tab" onclick="filterCrew('underground',this)">Underground</div>
-        <div class="tab" onclick="filterCrew('splice',this)">Splicers</div>
-        <div class="tab" onclick="filterCrew('drop',this)">Drop crew</div>
-        <div class="tab" onclick="filterCrew('locator',this)">Locator</div>
-        <div class="tab" onclick="filterCrew('contractor',this)">Contractors</div>
-      </div>
-      <div class="stat-row">
-        <div class="stat-card"><div class="stat-val" id="crewStatTotal">22</div><div class="stat-lbl">Total crew</div></div>
-        <div class="stat-card"><div class="stat-val" id="crewStatActive">18</div><div class="stat-lbl">Active today</div><div class="stat-delta delta-up">Logged work</div></div>
-        <div class="stat-card"><div class="stat-val" id="crewStatPending">4</div><div class="stat-lbl">Not logged</div><div class="stat-delta delta-warn">Follow up</div></div>
-        <div class="stat-card"><div class="stat-val" id="crewStatHours">144</div><div class="stat-lbl">Crew-hours today</div></div>
-      </div>
-      <div class="card">
-        <div class="card-body" id="fullCrewList"></div>
-      </div>
-    </div>
-
-    <!-- ══ PROJECTS PAGE ══ -->
-    <div class="page" id="page-projects">
-      <div id="projectsList"></div>
-    </div>
-
-    <!-- ══ EMERGENCY / UNASSIGNED PAGE ══ -->
-    <div class="page" id="page-emergency">
-      <div class="alert-strip alert-info">
-        <div class="alert-dot adot-info"></div>
-        <div class="alert-text">These are logs submitted without a project/task assignment — fiber cuts, emergency repairs, or crew who couldn't find their task. Assign them to a project or mark as standalone.</div>
-      </div>
-      <div id="emergencyList"></div>
-    </div>
-
-  </div><!-- end content -->
-</div><!-- end main -->
-</div><!-- end layout -->
-
-<!-- ══ EMERGENCY LOG SHEET ══ -->
-<div class="overlay" id="emergencyOverlay" onclick="overlayBg(event,'emergencyOverlay')">
-<div class="sheet">
-  <div class="sheet-handle"></div>
-  <div class="sheet-header">
-    <div class="sheet-title">⚡ Emergency / freeform log</div>
-    <div class="sheet-sub">For fiber cuts, unexpected work, or anything not in the project tree</div>
-  </div>
-  <div class="sheet-body">
-    <div class="field">
-      <label>Your name</label>
-      <select id="el-crew">
-        <option>Select crew member…</option>
-        <option>Marcus W. (Aerial)</option>
-        <option>Tony G. (Aerial)</option>
-        <option>Rico B. (Aerial)</option>
-        <option>J. Salazar (Underground)</option>
-        <option>D. Park (Splicer)</option>
-        <option>L. Chen (Splicer)</option>
-        <option>T. Vasquez (Drop)</option>
-        <option>Manager — self log</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>Type of work</label>
-      <select id="el-type">
-        <option>Fiber cut / emergency repair</option>
-        <option>Unplanned splice</option>
-        <option>Emergency down guy</option>
-        <option>Service restoration</option>
-        <option>Damage assessment</option>
-        <option>Other — describe below</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>Location / description</label>
-      <textarea id="el-desc" placeholder="e.g. Fiber cut on West Mountain near Elm St & Oak Ave intersection. Aerial strand severed by vehicle. Repaired with case splice."></textarea>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div class="field">
-        <label>Time started</label>
-        <input type="time" id="el-start"/>
-      </div>
-      <div class="field">
-        <label>Time completed</label>
-        <input type="time" id="el-end"/>
-      </div>
-    </div>
-    <div class="field">
-      <label>Assign to project (optional)</label>
-      <select id="el-project">
-        <option value="">Leave unassigned — categorize later</option>
-        <option>West Mountain</option>
-        <option>Ogden Valley</option>
-        <option>Heber</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>Materials used (add from catalog)</label>
-      <input type="text" id="el-parts-search" placeholder="Search parts…" oninput="elSearch(this.value)"/>
-      <div id="el-results" style="border:1px solid var(--border);border-radius:var(--r-sm);max-height:160px;overflow-y:auto;margin-top:6px;display:none"></div>
-      <div id="el-selected" style="margin-top:8px"></div>
-    </div>
-  </div>
-  <div class="sheet-footer">
-    <button class="btn btn-ghost" style="flex:1" onclick="closeOverlay('emergencyOverlay')">Cancel</button>
-    <button class="btn btn-primary" style="flex:2" onclick="submitEmergency()">Submit emergency log</button>
-  </div>
-</div>
-</div>
-
-<!-- ══ APPROVAL DETAIL SHEET ══ -->
-<div class="overlay" id="approvalDetailOverlay" onclick="overlayBg(event,'approvalDetailOverlay')">
-<div class="sheet">
-  <div class="sheet-handle"></div>
-  <div class="sheet-header">
-    <div class="sheet-title">Review submission</div>
-    <div class="sheet-sub" id="detailSub"></div>
-  </div>
-  <div class="sheet-body" id="detailBody"></div>
-  <div class="sheet-footer">
-    <button class="btn btn-flag" style="flex:1" onclick="flagSubmission()">Flag issue</button>
-    <button class="btn btn-ghost" style="flex:1" onclick="closeOverlay('approvalDetailOverlay')">Close</button>
-    <button class="btn btn-approve" style="flex:2" onclick="approveSubmission()">Approve ✓</button>
-  </div>
-</div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="fiberlog-db.js"></script>
-<script>
-// ─── DATA ──────────────────────────────────────────────────────────────────
-
-const CATALOG_MINI=[
-  {id:"STRAND_EHS_1_4",name:"Strand EHS 1/4\"",unit:"ft"},
-  {id:"CLAMP_D_LASH",name:"Clamp D Cable Lashing",unit:"ea"},
-  {id:"STRAP_LASH_16",name:"Strap Lashing 16\" SS",unit:"ea"},
-  {id:"GRIP_DEADEND_1_4",name:"Grip Deadend 1/4\"",unit:"ea"},
-  {id:"C6_CASE",name:"C6 Case Splice",unit:"ea"},
-  {id:"C_TRAY",name:"C Tray",unit:"ea"},
-  {id:"PLC_1x8",name:"1x8 PLC Splitter",unit:"ea"},
-  {id:"DROP_GEL_SEAL",name:"Drop Gel Seal Kit",unit:"ea"},
-  {id:"CONDUIT_SDR11_2",name:"SDR11 2\" HDPE Conduit",unit:"ft"},
-  {id:"HANDHOLE_POLY",name:"Handhole Polymer",unit:"ea"},
-  {id:"TRACER_WIRE",name:"Tracer Wire",unit:"ft"},
-  {id:"MST_6P_100",name:"MST 6P 100ft",unit:"ea"},
-  {id:"ANCHOR_ROD_3_4x66",name:"Anchor Rod 3/4\" x 66\"",unit:"ea"},
-  {id:"GUY_GUARD_96",name:"Guy Guard 96\"",unit:"ea"},
-];
-
-let CREW=[]; // loaded from Supabase
-
-let SUBMISSIONS=[]; // loaded from Supabase
-
-let PROJECTS=[]; // loaded from Supabase
-
-// ─── FUTURE INTEGRATIONS (roadmap) ────────────────────────────────────────
+// ============================================================
+// FIBERLOG — SUPABASE CONNECTION LAYER
+// fiberlog-db.js
 //
-// VETRO INTEGRATION:
-//   Vetro FiberMap stores network design — routes, poles, conduit paths,
-//   splice points, equipment locations. FiberLog captures what was actually built.
-//   Integration plan:
-//   1. Pull Vetro project/segment IDs into FiberLog project tree
-//   2. As tasks are marked complete, push as-built data back to Vetro
-//   3. Splice closures logged in FiberLog update Vetro splice records
-//   Vetro has a REST API — connection point is the Supabase backend layer.
-//   API docs: https://vetro.io/docs
+// Import this file in all three apps:
 //
-// SPLICER CASE TRACKING:
-//   When a splicer logs a case splice, they will capture:
-//   - Closure ID (e.g. "A-14") tied to Vetro splice point ID
-//   - Physical location (pole #, GPS, or Vetro node reference)
-//   - Case type (A4, C6, D6, etc.) and tray count
-//   - Fiber count spliced and fiber assignments per tray
-//   - Splitters installed (PLC type, ratio)
-//   - Before/after photos (future — requires storage backend)
-//   This makes the closure a living record: open FiberLog, search "Closure A-14",
-//   see everything that went into it, who did it, when, what parts.
-//   Smart reminder: logging a case → prompt for splice sleeves and splitter.
+//   <!-- Add both of these to <head> of each HTML file -->
+//   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+//   <script src="fiberlog-db.js"></script>
 //
-// BOXHERO SYNC:
-//   POST consumption data to BoxHero API on submission approval
-//   Reduces inventory automatically. Requires BoxHero paid tier for API access.
-//
-// CLICKUP SYNC:
-//   Pull task names and assignments from ClickUp workspace into project tree.
-//   Mark ClickUp tasks complete when FiberLog tasks are approved.
-//   ClickUp API: https://clickup.com/api
+// Project: fiberlog
+// Supabase URL: https://attduslwidxecmjifsnl.supabase.co
+// Key type: Publishable (safe for browser use)
+// ============================================================
 
+var SUPABASE_URL = 'https://attduslwidxecmjifsnl.supabase.co';
+var SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_RkQElhXYGUEw6iUtXmcn5w_URF87Qp0';
 
-let currentManager="J. Rodriguez";
-let activeApprovalFilter="pending";
-let activeCrewFilter="all";
-let currentApprovalId=null;
-let elSelectedParts=[];
-
-// ─── INIT ──────────────────────────────────────────────────────────────────
-document.addEventListener("DOMContentLoaded", async ()=>{
-  const now=new Date();
-  document.getElementById("pageDate").textContent=
-    now.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})+" · All projects";
-
-  // Set time inputs
-  const t=new Date();
-  document.getElementById("el-start").value=`${String(t.getHours()).padStart(2,"0")}:00`;
-  document.getElementById("el-end").value=`${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
-
-  // Show loading state
-  document.getElementById("feedList").innerHTML=`<div style="padding:20px;text-align:center;color:var(--muted)">Loading...</div>`;
-
-  try {
-    await loadAllData();
-  } catch(err){
-    console.error("Manager init error:", err);
-    document.getElementById("feedList").innerHTML=`<div style="padding:20px;text-align:center;color:var(--red)">Failed to load: ${err.message}<br><button onclick="loadAllData()" style="margin-top:12px;padding:8px 16px;background:var(--teal);color:white;border:none;border-radius:8px;cursor:pointer">Retry</button></div>`;
+// ─── CLIENT INIT ─────────────────────────────────────────────
+// Supabase new publishable key format (2025+)
+// Uses the CDN build — no build step needed
+var _supabaseCreateClient = supabase.createClient;
+var db = _supabaseCreateClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
   }
-
-  // Subscribe to real-time updates
-  FiberLog.Realtime.subscribeAll({
-    onSessionUpdate: (payload) => {
-      console.log("Session update:", payload);
-      loadCrewActivity();
-    },
-    onNewSubmission: (payload) => {
-      console.log("New submission:", payload);
-      loadSubmissions();
-      // Flash the approvals badge
-      document.getElementById("badge-approvals").style.background="#ef4444";
-      setTimeout(()=>document.getElementById("badge-approvals").style.background="",2000);
-    },
-    onEmergency: (payload) => {
-      console.log("Emergency log:", payload);
-      loadEmergency();
-    }
-  });
 });
 
-async function loadAllData(){
-  const [sessions, submissions, projects, emergency] = await Promise.all([
-    FiberLog.Sessions.getTodaySessions(),
-    FiberLog.Submissions.getPending(),
-    FiberLog.Projects.getFullTree(),
-    FiberLog.Emergency.getUnassigned()
-  ]);
+// ============================================================
+// AUTH — PIN-BASED LOGIN
+// Crew members log in with their name + 4-digit PIN
+// ============================================================
+const Auth = {
 
-  // Map crew activity from Supabase view
-  CREW = sessions.map(s => ({
-    id: s.user_id,
-    name: s.name,
-    initials: s.initials,
-    type: s.crew_type || "aerial",
-    is_contractor: s.is_contractor,
-    project: s.current_project || "Unassigned",
-    status: mapSessionStatus(s.session_status),
-    hrs: s.hours_worked || 0,
-    lastLog: s.last_activity ? FiberLog.Utils.formatTime(s.last_activity) : "—",
-    entries: s.entry_count || 0,
-    footage: s.footage_total || 0,
-    currentTask: s.current_task || null,
-    currentPhase: s.current_phase || null,
-  }));
+  // Get all active crew (for the user picker dropdown)
+  async getCrewList() {
+    const { data, error } = await db
+      .from('users')
+      .select('id, name, initials, role, crew_type, is_contractor')
+      .eq('is_active', true)
+      .order('name');
+    if (error) throw error;
+    return data;
+  },
 
-  // Map submissions
-  SUBMISSIONS = submissions.map(s => ({
-    id: s.id,
-    crew: s.users?.name || "Unknown",
-    crewType: s.users?.crew_type || "aerial",
-    project: s.work_sessions?.tasks?.phases?.projects?.name || "—",
-    phase: s.work_sessions?.tasks?.phases?.name || "—",
-    task: s.work_sessions?.tasks?.name || "—",
-    time: FiberLog.Utils.formatTime(s.created_at),
-    hrs: s.hours_worked,
-    status: s.status,
-    footage: s.total_footage || 0,
-    assemblies: s.total_assemblies || 0,
-    parts: [], // loaded on demand in detail view
-    notes: s.flag_reason || null
-  }));
+  // Simple PIN login — returns user or null
+  async loginWithPin(userId, pin) {
+    const { data, error } = await db
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .eq('pin', pin)
+      .single();
+    if (error) return null;
+    // Store in session
+    sessionStorage.setItem('fiberlog_user', JSON.stringify(data));
+    return data;
+  },
 
-  // Map projects
-  PROJECTS = projects.map(p => ({
-    id: p.id,
-    name: p.name,
-    region: p.region,
-    fiber: p.total_fiber_ft,
-    conduit: p.total_conduit_ft,
-    pctDone: 0,
-    phases: (p.phases||[]).map(ph => ({
-      ...ph,
-      pct: 0,
-      color: "fill-teal",
-      crews: ["aerial"]
-    })),
-    alerts: []
-  }));
+  // Get current user from session
+  getCurrentUser() {
+    const stored = sessionStorage.getItem('fiberlog_user');
+    return stored ? JSON.parse(stored) : null;
+  },
 
-  // Emergency logs
-  window._emergencyLogs = emergency;
+  // Set current user (for PIN-less dev mode)
+  setCurrentUser(user) {
+    sessionStorage.setItem('fiberlog_user', JSON.stringify(user));
+  },
 
-  updateBadges();
-  renderFeed();
-  renderInProgress();
-  renderCrewStatus();
-  renderProjectPulse();
-  renderApprovals();
-  renderFullCrew();
-  renderProjects();
-  renderEmergency();
-}
-
-async function loadCrewActivity(){
-  try {
-    const sessions = await FiberLog.Sessions.getTodaySessions();
-    CREW = sessions.map(s => ({
-      id: s.user_id, name: s.name, initials: s.initials,
-      type: s.crew_type||"aerial", is_contractor: s.is_contractor,
-      project: s.current_project||"Unassigned",
-      status: mapSessionStatus(s.session_status),
-      hrs: s.hours_worked||0,
-      lastLog: s.last_activity ? FiberLog.Utils.formatTime(s.last_activity) : "—",
-      entries: s.entry_count||0, footage: s.footage_total||0,
-      currentTask: s.current_task||null, currentPhase: s.current_phase||null,
-    }));
-    renderInProgress();
-    renderCrewStatus();
-    renderFullCrew();
-    updateBadges();
-  } catch(e){ console.warn("Crew reload failed:", e); }
-}
-
-async function loadSubmissions(){
-  try {
-    const submissions = await FiberLog.Submissions.getPending();
-    SUBMISSIONS = submissions.map(s => ({
-      id: s.id, crew: s.users?.name||"Unknown",
-      crewType: s.users?.crew_type||"aerial",
-      project: s.work_sessions?.tasks?.phases?.projects?.name||"—",
-      phase: s.work_sessions?.tasks?.phases?.name||"—",
-      task: s.work_sessions?.tasks?.name||"—",
-      time: FiberLog.Utils.formatTime(s.created_at),
-      hrs: s.hours_worked, status: s.status,
-      footage: s.total_footage||0, assemblies: s.total_assemblies||0,
-      parts: [], notes: s.flag_reason||null
-    }));
-    renderFeed();
-    renderApprovals();
-    updateBadges();
-  } catch(e){ console.warn("Submissions reload failed:", e); }
-}
-
-async function loadEmergency(){
-  try {
-    window._emergencyLogs = await FiberLog.Emergency.getUnassigned();
-    renderEmergency();
-    updateBadges();
-  } catch(e){ console.warn("Emergency reload failed:", e); }
-}
-
-function mapSessionStatus(s){
-  if(!s) return "none";
-  if(s==="submitted") return "submitted";
-  if(s==="in-progress") return "in-progress";
-  if(s==="started") return "started";
-  return "none";
-}
-
-// ─── NAV ──────────────────────────────────────────────────────────────────
-function showPage(name,el){
-  document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
-  document.querySelectorAll(".nav-item").forEach(n=>n.classList.remove("active"));
-  document.getElementById("page-"+name).classList.add("active");
-  if(el) el.classList.add("active");
-  const titles={today:"Today's overview",approvals:"Approvals queue",crew:"Crew management",projects:"Project health",emergency:"Unassigned logs"};
-  document.getElementById("pageTitle").textContent=titles[name]||name;
-  closeSidebar();
-}
-
-function openSidebar(){
-  document.getElementById("sidebar").classList.add("open");
-  document.getElementById("sidebarOverlay").classList.add("open");
-}
-function closeSidebar(){
-  document.getElementById("sidebar").classList.remove("open");
-  document.getElementById("sidebarOverlay").classList.remove("open");
-}
-
-// ─── CREW TYPE HELPERS ────────────────────────────────────────────────────
-const TYPE_META={
-  aerial:{label:"Aerial",dot:"fd-aerial",av:"av-aerial"},
-  underground:{label:"Underground",dot:"fd-underground",av:"av-underground"},
-  splice:{label:"Splicer",dot:"fd-splice",av:"av-splice"},
-  drop:{label:"Drop crew",dot:"fd-drop",av:"av-drop"},
-  locator:{label:"Locator",dot:"fd-locator",av:"av-locator"},
-  contractor:{label:"Contractor",dot:"fd-contractor",av:"av-contractor"},
-};
-const CREW_TAGS={
-  aerial:"tag-teal",underground:"tag-blue",splice:"tag-purple",
-  drop:"tag-amber",locator:"tag-coral",contractor:"tag-gray"
+  logout() {
+    sessionStorage.removeItem('fiberlog_user');
+  }
 };
 
-// ─── IN PROGRESS ──────────────────────────────────────────────────────────
-function renderInProgress(){
-  const active=CREW.filter(c=>c.status==="in-progress");
-  const started=CREW.filter(c=>c.status==="started");
-  const el=document.getElementById("inProgressSection");
-  if(!el) return;
+// ============================================================
+// PROJECTS — load hierarchy for crew navigation
+// ============================================================
+const Projects = {
 
-  if(!active.length&&!started.length){
-    el.innerHTML=`<div style="font-size:13px;color:var(--hint);padding:8px 0">No crew currently logging — check back during work hours.</div>`;
-    return;
-  }
+  // Load all active projects with phases and tasks
+  async getFullTree() {
+    const { data: projects, error: pErr } = await db
+      .from('projects')
+      .select('*')
+      .eq('status', 'active')
+      .order('name');
+    if (pErr) throw pErr;
 
-  const grid=document.createElement("div");
-  grid.style.cssText="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px";
+    const { data: phases, error: phErr } = await db
+      .from('phases')
+      .select('*')
+      .order('sequence_order');
+    if (phErr) throw phErr;
 
-  active.forEach(c=>{
-    const tm=TYPE_META[c.type]||TYPE_META.contractor;
-    const tagCls=CREW_TAGS[c.type]||"tag-gray";
-    const div=document.createElement("div");
-    div.className="feed-inprogress";
-    div.onclick=()=>showCrewDetail(c);
-    div.innerHTML=`
-      <div class="fip-header">
-        <div class="live-dot"></div>
-        <div class="crew-avatar ${tm.av}" style="width:26px;height:26px;font-size:10px">${c.initials}</div>
-        <div class="fip-name">${c.name}</div>
-        <span class="feed-tag ${tagCls}" style="margin-left:auto">${tm.label}</span>
-      </div>
-      <div class="fip-task">📍 ${c.project} › ${c.currentPhase}<br><strong>${c.currentTask}</strong></div>
-      <div class="fip-stats">
-        <div class="fip-stat"><strong>${c.entries}</strong> entries</div>
-        ${c.footage?`<div class="fip-stat"><strong>${c.footage.toLocaleString()}</strong> ft logged</div>`:""}
-        <div class="fip-stat" style="margin-left:auto;color:var(--hint)">Last: ${c.lastLog}</div>
-      </div>`;
-    grid.appendChild(div);
-  });
+    const { data: tasks, error: tErr } = await db
+      .from('tasks')
+      .select('*')
+      .order('name');
+    if (tErr) throw tErr;
 
-  started.forEach(c=>{
-    const tm=TYPE_META[c.type]||TYPE_META.contractor;
-    const div=document.createElement("div");
-    div.className="feed-started";
-    div.innerHTML=`
-      <div class="fip-header">
-        <div style="width:8px;height:8px;border-radius:50%;background:var(--purple-mid);flex-shrink:0"></div>
-        <div class="crew-avatar ${tm.av}" style="width:26px;height:26px;font-size:10px">${c.initials}</div>
-        <div class="fip-name">${c.name}</div>
-        <span style="font-size:11px;font-weight:700;color:var(--purple);margin-left:auto">App open</span>
-      </div>
-      <div class="fip-task">📍 ${c.project} › ${c.currentTask||"selecting task…"}</div>
-      <div style="font-size:11px;color:var(--hint)">Started ${c.lastLog} · No entries yet</div>`;
-    grid.appendChild(div);
-  });
-
-  el.innerHTML="";
-  el.appendChild(grid);
-}
-
-// ─── FEED ──────────────────────────────────────────────────────────────────
-function renderFeed(){
-  // Only show submitted and flagged in the feed — in-progress shown above
-  const items=SUBMISSIONS.slice().reverse();
-  document.getElementById("feedList").innerHTML=items.map(s=>{
-    const tm=TYPE_META[s.crewType]||TYPE_META.contractor;
-    const isEmergency=s.status==="flagged";
-    const dotCls=isEmergency?"fd-emergency":tm.dot;
-    const tagCls=CREW_TAGS[s.crewType]||"tag-gray";
-    const statusHtml=`<span class="feed-status status-${s.status}">${s.status==="pending"?"Pending":s.status==="approved"?"Approved":"Flagged"}</span>`;
-    return`<div class="feed-item" onclick="openApprovalDetail(${s.id})">
-      <div class="feed-dot ${dotCls}"></div>
-      <div class="feed-body">
-        <div class="feed-who">${s.crew}</div>
-        <div class="feed-what">${s.task}${s.footage?" · "+s.footage.toLocaleString()+"ft":""}${s.assemblies?" · "+s.assemblies+" assemblies":""}</div>
-        <div class="feed-meta">
-          <span class="feed-tag ${tagCls}">${tm.label}</span>
-          <span class="feed-tag tag-gray">${s.project}</span>
-          ${s.parts.length?`<span class="feed-tag tag-gray">${s.parts.length} part types</span>`:""}
-        </div>
-      </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
-        <div class="feed-time">${s.time}</div>
-        ${statusHtml}
-      </div>
-    </div>`;
-  }).join("");
-}
-
-// ─── CREW STATUS (today sidebar) ──────────────────────────────────────────
-function renderCrewStatus(){
-  const top=CREW.slice(0,8);
-  document.getElementById("crewStatusList").innerHTML=top.map(c=>{
-    const tm=TYPE_META[c.type]||TYPE_META.contractor;
-    let pillCls,pillTxt;
-    switch(c.status){
-      case"submitted": pillCls="pill-active";    pillTxt="Submitted"; break;
-      case"in-progress":pillCls="pill-inprogress";pillTxt="▶ Live";   break;
-      case"started":   pillCls="pill-started";   pillTxt="App open";  break;
-      case"flagged":   pillCls="pill-pending";   pillTxt="Flagged";   break;
-      default:         pillCls="pill-none";       pillTxt="No log";
-    }
-    return`<div class="crew-row">
-      <div class="crew-avatar ${tm.av}">${c.initials}</div>
-      <div class="crew-info">
-        <div class="crew-name">${c.name}</div>
-        <div class="crew-type">${tm.label} · ${c.project}</div>
-      </div>
-      <div class="crew-pill ${pillCls}" style="display:flex;align-items:center;gap:4px">
-        ${c.status==="in-progress"?`<div class="live-dot" style="width:6px;height:6px"></div>`:""}
-        ${pillTxt}
-      </div>
-      ${c.hrs>0?`<div class="crew-hrs">${c.hrs}h</div>`:c.status==="in-progress"?`<div class="crew-hrs" style="color:var(--blue);font-size:11px">${c.entries}ent</div>`:`<div class="crew-hrs" style="color:var(--hint)">—</div>`}
-    </div>`;
-  }).join("")+`<div style="text-align:center;padding:10px;font-size:12px;color:var(--teal);cursor:pointer;font-weight:600" onclick="showPage('crew',document.querySelector('.nav-item:nth-child(3)'))">View all ${CREW.length} crew members →</div>`;
-}
-
-function showCrewDetail(c){
-  // Future: open a crew member detail sheet
-  showPage('crew',document.querySelector('.nav-item:nth-child(3)'));
-}
-
-// ─── PROJECT PULSE ────────────────────────────────────────────────────────
-function renderProjectPulse(){
-  document.getElementById("projectPulse").innerHTML=PROJECTS.map(p=>`
-    <div class="prog-block" onclick="showPage('projects',document.querySelector('.nav-item:nth-child(4)'))">
-      <div class="prog-meta">
-        <span class="prog-name">${p.name}</span>
-        <span class="prog-val">${p.pctDone}%</span>
-      </div>
-      <div class="prog-bg"><div class="prog-fill fill-teal" style="width:${p.pctDone}%"></div></div>
-    </div>
-  `).join("");
-}
-
-// ─── APPROVALS ────────────────────────────────────────────────────────────
-function filterApprovals(filter,el){
-  activeApprovalFilter=filter;
-  document.querySelectorAll("#page-approvals .tab").forEach(t=>t.classList.remove("active"));
-  el.classList.add("active");
-  renderApprovals();
-}
-
-function renderApprovals(){
-  const filtered=SUBMISSIONS.filter(s=>{
-    if(activeApprovalFilter==="pending") return s.status==="pending";
-    if(activeApprovalFilter==="flagged") return s.status==="flagged";
-    if(activeApprovalFilter==="approved") return s.status==="approved";
-    return true;
-  });
-  if(!filtered.length){
-    document.getElementById("approvalsList").innerHTML=`<div style="text-align:center;padding:48px 20px;color:var(--hint)">No submissions in this category</div>`;
-    return;
-  }
-  document.getElementById("approvalsList").innerHTML=filtered.map(s=>approvalCard(s)).join("");
-}
-
-function approvalCard(s){
-  const tm=TYPE_META[s.crewType]||TYPE_META.contractor;
-  const tagCls=CREW_TAGS[s.crewType]||"tag-gray";
-  const isEmergency=s.task.includes("UNASSIGNED");
-  return`<div class="approval-card">
-    <div class="approval-header">
-      <div class="approval-who">
-        <div class="approval-name">${s.crew} <span class="feed-tag ${tagCls}" style="font-size:11px;padding:2px 7px">${tm.label}</span></div>
-        <div class="approval-sub">${s.project} › ${s.phase}</div>
-        <div class="approval-sub" style="margin-top:2px;font-weight:600;color:${isEmergency?"var(--red)":"var(--text)"}">${isEmergency?"⚡ ":""}${s.task}</div>
-      </div>
-      <div style="text-align:right;flex-shrink:0">
-        <div class="approval-time">${s.time}</div>
-        <div style="font-size:12px;font-weight:700;margin-top:3px">${s.hrs}h worked</div>
-      </div>
-    </div>
-    <div class="approval-body">
-      <div class="approval-stat-row">
-        ${s.footage?`<div class="approval-stat"><div class="approval-stat-val">${s.footage.toLocaleString()}</div><div class="approval-stat-lbl">Footage ft</div></div>`:""}
-        ${s.assemblies?`<div class="approval-stat"><div class="approval-stat-val">${s.assemblies}</div><div class="approval-stat-lbl">Assemblies</div></div>`:""}
-        <div class="approval-stat"><div class="approval-stat-val">${s.parts.length}</div><div class="approval-stat-lbl">Part types</div></div>
-        <div class="approval-stat"><div class="approval-stat-val">${s.parts.reduce((a,p)=>a+(p.unit==="ft"?0:p.qty),0)}</div><div class="approval-stat-lbl">Total units</div></div>
-      </div>
-      ${s.notes?`<div class="alert-strip alert-warn" style="margin-bottom:10px"><div class="alert-dot adot-warn"></div><div class="alert-text">${s.notes}</div></div>`:""}
-      <table class="parts-table">
-        <thead><tr><th>Part</th><th>Part ID</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit</th></tr></thead>
-        <tbody>
-          ${s.parts.map(p=>`<tr>
-            <td>${p.name}</td>
-            <td class="part-id">${p.id}</td>
-            <td style="text-align:right;font-weight:700">${p.qty.toLocaleString()}</td>
-            <td style="text-align:right;color:var(--muted)">${p.unit}</td>
-          </tr>`).join("")}
-        </tbody>
-      </table>
-    </div>
-    <div class="approval-actions">
-      <button class="btn btn-flag" onclick="quickFlag(${s.id})">Flag</button>
-      <button class="btn btn-edit" onclick="openApprovalDetail(${s.id})">Detail</button>
-      <button class="btn btn-approve" onclick="quickApprove(${s.id})">Approve ✓</button>
-    </div>
-  </div>`;
-}
-
-async function quickApprove(id){
-  const s=SUBMISSIONS.find(x=>x.id===id);
-  if(!s) return;
-  s.status="approved";
-  renderApprovals();
-  renderFeed();
-  updateBadges();
-
-  // Save to Supabase
-  try {
-    const mgr = FiberLog.Auth.getCurrentUser();
-    await FiberLog.Submissions.approve(id, mgr?.id||null, null);
-  } catch(e){ console.warn("Approve failed:", e); }
-}
-
-async function quickFlag(id){
-  const s=SUBMISSIONS.find(x=>x.id===id);
-  if(!s) return;
-  s.status="flagged";
-  renderApprovals();
-  renderFeed();
-  updateBadges();
-
-  // Save to Supabase
-  try {
-    const mgr = FiberLog.Auth.getCurrentUser();
-    await FiberLog.Submissions.flag(id, mgr?.id||null, "Flagged by manager");
-  } catch(e){ console.warn("Flag failed:", e); }
-}
-
-function openApprovalDetail(id){
-  currentApprovalId=id;
-  const s=SUBMISSIONS.find(x=>x.id===id);
-  if(!s) return;
-  document.getElementById("detailSub").textContent=`${s.crew} · ${s.time} · ${s.hrs}h`;
-  document.getElementById("detailBody").innerHTML=`
-    <div style="margin-bottom:14px">
-      <div style="font-size:13px;font-weight:700;color:var(--muted);margin-bottom:4px">Project path</div>
-      <div style="font-size:14px">${s.project} › ${s.phase}</div>
-      <div style="font-size:14px;font-weight:700;margin-top:2px">${s.task}</div>
-    </div>
-    ${s.notes?`<div class="alert-strip alert-warn" style="margin-bottom:14px"><div class="alert-dot adot-warn"></div><div class="alert-text">${s.notes}</div></div>`:""}
-    <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
-      ${s.footage?`<div class="approval-stat"><div class="approval-stat-val">${s.footage.toLocaleString()}</div><div class="approval-stat-lbl">Footage ft</div></div>`:""}
-      ${s.assemblies?`<div class="approval-stat"><div class="approval-stat-val">${s.assemblies}</div><div class="approval-stat-lbl">Assemblies</div></div>`:""}
-      <div class="approval-stat"><div class="approval-stat-val">${s.hrs}</div><div class="approval-stat-lbl">Hours</div></div>
-    </div>
-    <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);margin-bottom:8px">Parts breakdown</div>
-    <table class="parts-table">
-      <thead><tr><th>Part</th><th>ID</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit</th></tr></thead>
-      <tbody>${s.parts.map(p=>`<tr><td>${p.name}</td><td class="part-id">${p.id}</td><td style="text-align:right;font-weight:700">${p.qty.toLocaleString()}</td><td style="text-align:right;color:var(--muted)">${p.unit}</td></tr>`).join("")}</tbody>
-    </table>
-    <div style="margin-top:14px">
-      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);margin-bottom:6px">Manager note (optional)</div>
-      <textarea placeholder="Add a note to this submission…" style="min-height:60px" id="detailNote"></textarea>
-    </div>
-  `;
-  document.getElementById("approvalDetailOverlay").classList.add("open");
-}
-
-async function approveSubmission(){
-  const note = document.getElementById("detailNote")?.value?.trim()||null;
-  const mgr = FiberLog.Auth.getCurrentUser();
-  const s=SUBMISSIONS.find(x=>x.id===currentApprovalId);
-  if(s){ s.status="approved"; }
-  closeOverlay("approvalDetailOverlay");
-  renderApprovals(); renderFeed(); updateBadges();
-  try {
-    await FiberLog.Submissions.approve(currentApprovalId, mgr?.id||null, note);
-  } catch(e){ console.warn("Approve failed:", e); }
-}
-
-async function flagSubmission(){
-  const reason = prompt("Reason for flagging (optional):") || "Flagged by manager";
-  const mgr = FiberLog.Auth.getCurrentUser();
-  const s=SUBMISSIONS.find(x=>x.id===currentApprovalId);
-  if(s){ s.status="flagged"; s.notes=reason; }
-  closeOverlay("approvalDetailOverlay");
-  renderApprovals(); renderFeed(); updateBadges();
-  try {
-    await FiberLog.Submissions.flag(currentApprovalId, mgr?.id||null, reason);
-  } catch(e){ console.warn("Flag failed:", e); }
-}
-
-// ─── CREW FULL LIST ────────────────────────────────────────────────────────
-function filterCrew(filter,el){
-  activeCrewFilter=filter;
-  document.querySelectorAll("#page-crew .tab").forEach(t=>t.classList.remove("active"));
-  el.classList.add("active");
-  renderFullCrew();
-}
-
-function renderFullCrew(){
-  const filtered=activeCrewFilter==="all"?CREW:CREW.filter(c=>c.type===activeCrewFilter);
-  const submitted=filtered.filter(c=>c.status==="submitted"||c.status==="flagged").length;
-  const inprog=filtered.filter(c=>c.status==="in-progress").length;
-  const started=filtered.filter(c=>c.status==="started").length;
-  const none=filtered.filter(c=>c.status==="none").length;
-  const hrs=filtered.reduce((a,c)=>a+c.hrs,0);
-  document.getElementById("crewStatTotal").textContent=filtered.length;
-  document.getElementById("crewStatActive").textContent=submitted+inprog+started;
-  document.getElementById("crewStatPending").textContent=none;
-  document.getElementById("crewStatHours").textContent=hrs.toFixed(1);
-
-  document.getElementById("fullCrewList").innerHTML=filtered.map(c=>{
-    const tm=TYPE_META[c.type]||TYPE_META.contractor;
-    let pillCls,pillTxt,pillExtra="";
-    switch(c.status){
-      case"submitted":  pillCls="pill-active";     pillTxt="Submitted"; break;
-      case"in-progress":pillCls="pill-inprogress"; pillTxt="▶ Live";
-        pillExtra=`<div class="live-dot" style="width:6px;height:6px;margin-right:2px"></div>`; break;
-      case"started":    pillCls="pill-started";    pillTxt="App open";  break;
-      case"flagged":    pillCls="pill-pending";    pillTxt="Flagged";   break;
-      default:          pillCls="pill-none";        pillTxt="No log";
-    }
-    const barW=c.hrs>0?Math.round(c.hrs/10*100):c.status==="in-progress"?Math.round(c.entries/10*100):0;
-    const barColor=c.status==="in-progress"?"var(--blue-mid)":c.status==="none"?"var(--border2)":"var(--teal)";
-    const activityText=c.status==="in-progress"
-      ?`${c.entries} entries · ${c.footage?c.footage.toLocaleString()+"ft · ":""}${c.currentTask}`
-      :c.status==="started"
-      ?`App open · ${c.currentTask||"selecting task"}`
-      :c.status==="none"
-      ?"No activity today"
-      :`${c.entries} entries · ${c.footage?c.footage.toLocaleString()+"ft · ":""}Last: ${c.lastLog}`;
-
-    return`<div class="crew-row">
-      <div class="crew-avatar ${tm.av}">${c.initials}</div>
-      <div class="crew-info">
-        <div class="crew-name">${c.name}</div>
-        <div class="crew-type">${tm.label} · ${c.project}</div>
-      </div>
-      <div style="flex:1;padding:0 12px;min-width:0">
-        <div style="font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${activityText}</div>
-        <div style="height:4px;border-radius:2px;background:var(--bg);margin-top:5px;width:120px">
-          <div style="height:100%;border-radius:2px;background:${barColor};width:${barW}%;transition:width .4s"></div>
-        </div>
-      </div>
-      <div class="crew-pill ${pillCls}" style="display:flex;align-items:center;gap:3px">${pillExtra}${pillTxt}</div>
-      <div class="crew-hrs">${c.hrs>0?c.hrs+"h":c.status==="in-progress"?`<span style="color:var(--blue);font-size:11px">${c.entries}ent</span>`:"—"}</div>
-    </div>`;
-  }).join("");
-}
-
-// ─── PROJECTS ─────────────────────────────────────────────────────────────
-function renderProjects(){
-  document.getElementById("projectsList").innerHTML=PROJECTS.map(p=>`
-    <div class="project-card">
-      <div class="project-card-header">
-        <div>
-          <div class="project-name">${p.name}</div>
-          <div class="project-meta">${p.region} · ${(p.fiber/1000).toFixed(0)}k ft fiber · ${(p.conduit/1000).toFixed(1)}k ft conduit</div>
-          <div class="crew-type-dots">
-            ${[...new Set(p.phases.flatMap(ph=>ph.crews))].map(c=>{
-              const tm=TYPE_META[c];
-              return tm?`<div class="crew-type-dot"><div class="ctd" style="background:${crewColor(c)}"></div>${tm.label}</div>`:"";
-            }).join("")}
-          </div>
-        </div>
-        <div class="project-pct">${p.pctDone}%</div>
-      </div>
-      ${p.alerts.map(a=>`<div class="alert-strip alert-${a.type}" style="margin-bottom:8px">
-        <div class="alert-dot adot-${a.type}"></div>
-        <div class="alert-text">${a.text}</div>
-      </div>`).join("")}
-      ${p.phases.map(ph=>`
-        <div class="prog-block">
-          <div class="prog-meta"><span class="prog-name">${ph.name}</span><span class="prog-val">${ph.pct}%</span></div>
-          <div class="prog-bg"><div class="prog-fill ${ph.color}" style="width:${ph.pct}%"></div></div>
-        </div>
-      `).join("")}
-    </div>
-  `).join("");
-}
-
-function crewColor(type){
-  const map={aerial:"#1D9E75",underground:"#378ADD",splice:"#7F77DD",drop:"#EF9F27",locator:"#D85A30",contractor:"#888780"};
-  return map[type]||"#888780";
-}
-
-// ─── EMERGENCY LIST ────────────────────────────────────────────────────────
-function renderEmergency(){
-  // Use live emergency logs from Supabase if available, fallback to SUBMISSIONS filter
-  const liveEm = window._emergencyLogs||[];
-  const unassigned = liveEm.length > 0
-    ? liveEm.map(e=>({
-        id:e.id,
-        crew: e.users?.name||"Unknown",
-        task: e.work_type,
-        notes: e.description,
-        time: FiberLog.Utils.formatTime(e.created_at),
-        parts: (e.emergency_log_parts||[]).map(p=>({
-          id:p.part_id, name:p.parts_catalog?.name||p.part_id, unit:p.parts_catalog?.unit||"ea", qty:p.quantity
+    // Build tree
+    return projects.map(proj => ({
+      ...proj,
+      phases: phases
+        .filter(ph => ph.project_id === proj.id)
+        .map(ph => ({
+          ...ph,
+          tasks: tasks.filter(t => t.phase_id === ph.id)
         }))
-      }))
-    : SUBMISSIONS.filter(s=>s.task&&(s.task.includes("UNASSIGNED")||s.project==="—"));
-  document.getElementById("badge-emergency").textContent=unassigned.length;
-  if(!unassigned.length){
-    document.getElementById("emergencyList").innerHTML=`<div style="text-align:center;padding:48px;color:var(--hint)">No unassigned logs — all submissions categorized ✓</div>`;
-    return;
+    }));
+  },
+
+  // Get project completion stats
+  async getCompletionStats() {
+    const { data, error } = await db
+      .from('project_completion')
+      .select('*');
+    if (error) throw error;
+    return data;
+  },
+
+  // Mark a task done
+  async markTaskDone(taskId, userId) {
+    const { error } = await db
+      .from('tasks')
+      .update({
+        status: 'done',
+        completed_at: new Date().toISOString(),
+        completed_by: userId
+      })
+      .eq('id', taskId);
+    if (error) throw error;
+  },
+
+  // Add a new task (freeform / crew-created)
+  async addTask(phaseId, name, taskType, notes, userId) {
+    const { data, error } = await db
+      .from('tasks')
+      .insert({
+        phase_id: phaseId,
+        name,
+        task_type: taskType,
+        status: 'open',
+        scope_notes: notes,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
   }
-  document.getElementById("emergencyList").innerHTML=unassigned.map(s=>`
-    <div class="approval-card">
-      <div class="approval-header">
-        <div class="approval-who">
-          <div class="approval-name">${s.crew} <span style="background:var(--red-lt);color:var(--red);font-size:11px;padding:2px 7px;border-radius:20px;font-weight:700">Unassigned</span></div>
-          <div class="approval-sub" style="color:var(--red);font-weight:600;margin-top:4px">⚡ ${s.task.replace("UNASSIGNED — ","")}</div>
-          ${s.notes?`<div class="approval-sub" style="margin-top:4px">${s.notes}</div>`:""}
-        </div>
-        <div class="approval-time">${s.time}</div>
-      </div>
-      <div class="approval-body">
-        <div style="margin-bottom:12px">
-          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);margin-bottom:6px">Assign to project</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            ${PROJECTS.map(p=>`<button class="btn btn-ghost" style="flex:0 0 auto;padding:7px 12px;font-size:12px" onclick="assignEmergency(${s.id},'${p.name}')">${p.name}</button>`).join("")}
-            <button class="btn btn-ghost" style="flex:0 0 auto;padding:7px 12px;font-size:12px;color:var(--teal)" onclick="assignEmergency(${s.id},'standalone')">Keep standalone</button>
-          </div>
-        </div>
-        <table class="parts-table">
-          <thead><tr><th>Part</th><th>ID</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit</th></tr></thead>
-          <tbody>${s.parts.map(p=>`<tr><td>${p.name}</td><td class="part-id">${p.id}</td><td style="text-align:right;font-weight:700">${p.qty}</td><td style="text-align:right;color:var(--muted)">${p.unit}</td></tr>`).join("")}</tbody>
-        </table>
-      </div>
-    </div>
-  `).join("");
-}
+};
 
-async function assignEmergency(id,project){
-  const s=SUBMISSIONS.find(x=>x.id===id);
-  if(s){
-    s.project=project;
-    s.task=project==="standalone"?"Standalone emergency log":`Emergency repair — ${project}`;
-    s.status="pending";
+// ============================================================
+// ASSEMBLIES — load templates with parts
+// ============================================================
+const Assemblies = {
+
+  async getAll() {
+    const { data: assemblies, error: aErr } = await db
+      .from('assemblies')
+      .select('*')
+      .eq('is_active', true);
+    if (aErr) throw aErr;
+
+    const { data: parts, error: pErr } = await db
+      .from('assembly_parts')
+      .select(`
+        assembly_id,
+        default_qty,
+        parts_catalog ( id, name, unit, category )
+      `);
+    if (pErr) throw pErr;
+
+    // Build templates object matching front end ASSEMBLIES shape
+    const templates = {};
+    assemblies.forEach(a => {
+      templates[a.id] = {
+        label: a.label,
+        crewType: a.crew_type,
+        parts: parts
+          .filter(p => p.assembly_id === a.id)
+          .map(p => ({
+            id: p.parts_catalog.id,
+            name: p.parts_catalog.name,
+            unit: p.parts_catalog.unit,
+            qty: p.default_qty
+          }))
+      };
+    });
+    return templates;
   }
-  renderEmergency(); renderFeed(); updateBadges();
+};
 
-  // Find project ID from PROJECTS
-  const proj = PROJECTS.find(p=>p.name===project);
-  try {
-    await FiberLog.Emergency.assign(id, proj?.id||null);
-    alert(`Assigned to ${project}. Now appears in approvals queue.`);
-  } catch(e){
-    console.warn("Emergency assign failed:", e);
-    alert(`Assigned locally. Sync to database failed — retry later.`);
+// ============================================================
+// PARTS CATALOG
+// ============================================================
+const Parts = {
+
+  async getAll() {
+    const { data, error } = await db
+      .from('parts_catalog')
+      .select('*')
+      .eq('is_active', true)
+      .order('name');
+    if (error) throw error;
+    return data;
+  },
+
+  async search(query) {
+    const { data, error } = await db
+      .from('parts_catalog')
+      .select('*')
+      .or(`name.ilike.%${query}%,id.ilike.%${query}%`)
+      .eq('is_active', true)
+      .limit(12);
+    if (error) throw error;
+    return data;
   }
-}
+};
 
-// ─── EMERGENCY LOG SHEET ──────────────────────────────────────────────────
-let elParts=[];
-function openEmergencyLog(){
-  elParts=[];
-  document.getElementById("el-parts-search").value="";
-  document.getElementById("el-results").style.display="none";
-  document.getElementById("el-selected").innerHTML="";
-  document.getElementById("emergencyOverlay").classList.add("open");
-}
+// ============================================================
+// WORK SESSIONS — drives in-progress visibility
+// ============================================================
+const Sessions = {
 
-function elSearch(q){
-  const el=document.getElementById("el-results");
-  if(!q){el.style.display="none";return;}
-  const hits=CATALOG_MINI.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.id.toLowerCase().includes(q.toLowerCase())).slice(0,6);
-  if(!hits.length){el.style.display="none";return;}
-  el.style.display="block";
-  el.innerHTML=hits.map(p=>`<div style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;font-size:13px" onclick="elAddPart('${p.id}')">
-    <span>${p.name}</span><span style="color:var(--hint);font-size:11px">${p.unit}</span>
-  </div>`).join("");
-}
+  // Start or resume today's session for a user
+  async startSession(userId, taskId) {
+    const today = new Date().toISOString().split('T')[0];
 
-function elAddPart(id){
-  const part=CATALOG_MINI.find(p=>p.id===id);
-  if(!part) return;
-  const existing=elParts.find(p=>p.id===id);
-  if(existing) existing.qty++;
-  else elParts.push({...part,qty:1});
-  document.getElementById("el-results").style.display="none";
-  document.getElementById("el-parts-search").value="";
-  renderElParts();
-}
+    // Check for existing session today
+    const { data: existing } = await db
+      .from('work_sessions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('session_date', today)
+      .single();
 
-function renderElParts(){
-  document.getElementById("el-selected").innerHTML=elParts.map((p,i)=>`
-    <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
-      <span style="flex:1;font-size:13px">${p.name}</span>
-      <input type="number" value="${p.qty}" min="1" style="width:60px;padding:4px;font-size:13px;font-weight:700;text-align:center;border:1px solid var(--border2);border-radius:6px;background:var(--bg)"
-        onchange="elParts[${i}].qty=parseInt(this.value)||1"/>
-      <span style="font-size:11px;color:var(--muted)">${p.unit}</span>
-      <button onclick="elParts.splice(${i},1);renderElParts()" style="width:22px;height:22px;border-radius:50%;background:var(--red-lt);border:none;color:var(--red);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center">×</button>
-    </div>
-  `).join("")||`<div style="font-size:12px;color:var(--hint);padding:6px 0">No parts added yet</div>`;
-}
+    if (existing) {
+      // Update task if changed
+      if (taskId && existing.task_id !== taskId) {
+        await db
+          .from('work_sessions')
+          .update({ task_id: taskId, status: 'in-progress' })
+          .eq('id', existing.id);
+      }
+      return existing;
+    }
 
-async function submitEmergency(){
-  const crewEl=document.getElementById("el-crew");
-  const crewVal=crewEl.value;
-  const type=document.getElementById("el-type").value;
-  const desc=document.getElementById("el-desc").value.trim();
-  if(!crewVal||crewVal.includes("Select")){alert("Select a crew member.");return;}
-  if(!desc){alert("Add a description.");return;}
+    // Create new session
+    const { data, error } = await db
+      .from('work_sessions')
+      .insert({
+        user_id: userId,
+        task_id: taskId,
+        session_date: today,
+        status: taskId ? 'started' : 'started'
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
 
-  const startVal=document.getElementById("el-start").value;
-  const endVal=document.getElementById("el-end").value;
-  const now=new Date();
-  const dateStr=now.toISOString().split("T")[0];
-  const startISO=startVal?`${dateStr}T${startVal}:00`:null;
-  const endISO=endVal?`${dateStr}T${endVal}:00`:null;
+  // Update session status and counts
+  async updateSession(sessionId, updates) {
+    const { error } = await db
+      .from('work_sessions')
+      .update(updates)
+      .eq('id', sessionId);
+    if (error) throw error;
+  },
 
-  // Add to local UI immediately
-  const newSub={
-    id:Date.now(),crew:crewVal.split(" (")[0],crewType:"aerial",
-    project:"—",phase:"—",
-    task:`UNASSIGNED — ${type}`,
-    time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
-    hrs:0,status:"flagged",footage:0,assemblies:0,
-    parts:elParts.map(p=>({...p,name:p.name||p.id,unit:p.unit||"ea"})),notes:desc
-  };
-  SUBMISSIONS.push(newSub);
-  closeOverlay("emergencyOverlay");
-  renderEmergency(); renderFeed(); updateBadges();
+  // Get all sessions for today (manager view)
+  async getTodaySessions() {
+    const today = new Date().toISOString().split('T')[0];
+    const { data, error } = await db
+      .from('crew_activity_today')
+      .select('*');
+    if (error) throw error;
+    return data;
+  },
 
-  // Save to Supabase
-  const mgr=FiberLog.Auth.getCurrentUser();
-  try {
-    await FiberLog.Emergency.submit(
-      null, // crew user_id — could be looked up
-      mgr?.id||null,
-      type, desc, startISO, endISO,
-      elParts.map(p=>({id:p.id,qty:p.qty}))
-    );
-    alert("Emergency log saved to database.");
-  } catch(e){
-    console.warn("Emergency submit failed:", e);
-    alert("Emergency logged locally. Database sync failed — retry later.");
+  // Real-time subscription for manager — fires on any session update
+  subscribeToSessions(callback) {
+    return db
+      .channel('work_sessions_live')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'work_sessions' },
+        (payload) => callback(payload)
+      )
+      .subscribe();
   }
-}
+};
 
-// ─── BADGES ────────────────────────────────────────────────────────────────
-function updateBadges(){
-  const pending=SUBMISSIONS.filter(s=>s.status==="pending").length;
-  const unassigned=SUBMISSIONS.filter(s=>s.task.includes("UNASSIGNED")||s.project==="—").length;
-  const flagged=SUBMISSIONS.filter(s=>s.status==="flagged").length;
-  document.getElementById("badge-approvals").textContent=pending;
-  document.getElementById("badge-emergency").textContent=unassigned;
-  document.getElementById("badge-today").textContent=flagged;
-}
+// ============================================================
+// LOG ENTRIES — individual taps throughout the day
+// ============================================================
+const Entries = {
 
-// ─── OVERLAYS ─────────────────────────────────────────────────────────────
-function closeOverlay(id){document.getElementById(id).classList.remove("open");}
-function overlayBg(e,id){if(e.target===document.getElementById(id)) closeOverlay(id);}
-</script>
-</body>
-</html>
+  // Save a single log entry and its parts
+  async saveEntry(sessionId, userId, taskId, entryData) {
+    // 1. Insert log entry
+    const { data: entry, error: eErr } = await db
+      .from('log_entries')
+      .insert({
+        session_id: sessionId,
+        user_id: userId,
+        task_id: taskId,
+        entry_type: entryData.type,
+        assembly_id: entryData.assemblyKey || null,
+        assembly_qty: entryData.qty || 1,
+        footage_amt: entryData.footage || null,
+        footage_type: entryData.footageType || null,
+        footage_from: entryData.from || null,
+        footage_to: entryData.to || null,
+        note_type: entryData.noteType || null,
+        note_text: entryData.text || null,
+        location_desc: entryData.location || null,
+        closure_id: entryData.closureId || null,
+      })
+      .select()
+      .single();
+    if (eErr) throw eErr;
+
+    // 2. Insert parts
+    if (entryData.parts && entryData.parts.length > 0) {
+      const partRows = entryData.parts.map(p => ({
+        entry_id: entry.id,
+        part_id: p.id,
+        quantity: p.qty,
+        is_extra: p.isExtra || false
+      }));
+      const { error: pErr } = await db
+        .from('entry_parts')
+        .insert(partRows);
+      if (pErr) throw pErr;
+    }
+
+    // 3. Update session counts
+    const footageAdded = entryData.footage || 0;
+    await db.rpc('increment_session_counts', {
+      p_session_id: sessionId,
+      p_entry_count: 1,
+      p_footage: footageAdded
+    });
+
+    return entry;
+  },
+
+  // Update session counter via RPC
+  // (Create this function in Supabase SQL editor)
+  async loadEntries(sessionId) {
+    const { data, error } = await db
+      .from('log_entries')
+      .select(`
+        *,
+        entry_parts (
+          part_id,
+          quantity,
+          is_extra,
+          parts_catalog ( id, name, unit )
+        )
+      `)
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return data;
+  }
+};
+
+// ============================================================
+// SUBMISSIONS — end-of-day submit and approval flow
+// ============================================================
+const Submissions = {
+
+  // Submit end of day — creates submission record
+  async submitDay(sessionId, userId, hoursWorked, totals) {
+    // 1. Create submission
+    const { data: sub, error: sErr } = await db
+      .from('submissions')
+      .insert({
+        session_id: sessionId,
+        user_id: userId,
+        session_date: new Date().toISOString().split('T')[0],
+        hours_worked: hoursWorked,
+        status: 'pending',
+        total_footage: totals.footage,
+        total_assemblies: totals.assemblies,
+        total_part_types: totals.partTypes
+      })
+      .select()
+      .single();
+    if (sErr) throw sErr;
+
+    // 2. Lock session as submitted
+    await db
+      .from('work_sessions')
+      .update({
+        status: 'submitted',
+        submitted_at: new Date().toISOString(),
+        hours_worked: hoursWorked
+      })
+      .eq('id', sessionId);
+
+    return sub;
+  },
+
+  // Get all pending submissions (manager)
+  async getPending() {
+    const { data, error } = await db
+      .from('submissions')
+      .select(`
+        *,
+        users ( name, initials, crew_type, is_contractor ),
+        work_sessions (
+          task_id,
+          tasks ( name, task_type,
+            phases ( name,
+              projects ( name )
+            )
+          )
+        )
+      `)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data;
+  },
+
+  // Get submission with full parts breakdown
+  async getWithParts(submissionId) {
+    const { data: sub, error } = await db
+      .from('submissions')
+      .select(`
+        *,
+        users ( name, initials, crew_type ),
+        work_sessions (
+          task_id,
+          entry_count,
+          footage_total,
+          log_entries (
+            entry_type, assembly_id, assembly_qty,
+            footage_amt, footage_type, note_text,
+            entry_parts (
+              quantity, is_extra,
+              parts_catalog ( id, name, unit, category )
+            )
+          ),
+          tasks ( name, phases ( name, projects ( name ) ) )
+        )
+      `)
+      .eq('id', submissionId)
+      .single();
+    if (error) throw error;
+    return sub;
+  },
+
+  // Approve a submission
+  async approve(submissionId, managerId, notes) {
+    const { data: sub, error: sErr } = await db
+      .from('submissions')
+      .update({
+        status: 'approved',
+        reviewed_by: managerId,
+        reviewed_at: new Date().toISOString(),
+        manager_notes: notes || null
+      })
+      .eq('id', submissionId)
+      .select()
+      .single();
+    if (sErr) throw sErr;
+
+    // Roll up material consumption
+    await Submissions._rollupConsumption(submissionId);
+    return sub;
+  },
+
+  // Flag a submission
+  async flag(submissionId, managerId, reason) {
+    const { error } = await db
+      .from('submissions')
+      .update({
+        status: 'flagged',
+        reviewed_by: managerId,
+        reviewed_at: new Date().toISOString(),
+        flag_reason: reason
+      })
+      .eq('id', submissionId);
+    if (error) throw error;
+  },
+
+  // Internal — aggregate parts into material_consumption on approval
+  async _rollupConsumption(submissionId) {
+    // Load full submission data
+    const sub = await Submissions.getWithParts(submissionId);
+    const session = sub.work_sessions;
+    const task = session?.tasks;
+    const phase = task?.phases;
+    const project = phase?.projects;
+
+    // Aggregate all parts across entries
+    const partTotals = {};
+    (session?.log_entries || []).forEach(entry => {
+      (entry.entry_parts || []).forEach(ep => {
+        const id = ep.parts_catalog.id;
+        if (!partTotals[id]) partTotals[id] = 0;
+        partTotals[id] += ep.quantity;
+      });
+    });
+
+    // Get IDs for FK references
+    const { data: taskData } = await db
+      .from('tasks')
+      .select('id, phase_id, phases(project_id)')
+      .eq('name', task?.name)
+      .single();
+
+    if (!taskData) return;
+
+    const rows = Object.entries(partTotals).map(([partId, qty]) => ({
+      project_id: taskData.phases.project_id,
+      phase_id: taskData.phase_id,
+      task_id: taskData.id,
+      part_id: partId,
+      quantity: qty,
+      submission_id: submissionId
+    }));
+
+    if (rows.length > 0) {
+      await db.from('material_consumption').insert(rows);
+    }
+  },
+
+  // Real-time subscription for managers
+  subscribeToSubmissions(callback) {
+    return db
+      .channel('submissions_live')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'submissions' },
+        (payload) => callback(payload)
+      )
+      .subscribe();
+  }
+};
+
+// ============================================================
+// EMERGENCY LOGS
+// ============================================================
+const Emergency = {
+
+  async getUnassigned() {
+    const { data, error } = await db
+      .from('emergency_logs')
+      .select(`
+        *,
+        users ( name, crew_type ),
+        emergency_log_parts (
+          quantity,
+          parts_catalog ( id, name, unit )
+        )
+      `)
+      .eq('status', 'unassigned')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data;
+  },
+
+  async submit(userId, loggedBy, workType, description, startedAt, endedAt, parts) {
+    // 1. Create log
+    const { data: log, error: lErr } = await db
+      .from('emergency_logs')
+      .insert({
+        user_id: userId,
+        logged_by: loggedBy,
+        work_type: workType,
+        description,
+        started_at: startedAt,
+        ended_at: endedAt,
+        status: 'unassigned'
+      })
+      .select()
+      .single();
+    if (lErr) throw lErr;
+
+    // 2. Insert parts
+    if (parts && parts.length > 0) {
+      await db.from('emergency_log_parts').insert(
+        parts.map(p => ({
+          emergency_log_id: log.id,
+          part_id: p.id,
+          quantity: p.qty
+        }))
+      );
+    }
+    return log;
+  },
+
+  async assign(logId, projectId) {
+    const { error } = await db
+      .from('emergency_logs')
+      .update({ project_id: projectId, status: 'assigned' })
+      .eq('id', logId);
+    if (error) throw error;
+  }
+};
+
+// ============================================================
+// MATERIAL REPORTS
+// ============================================================
+const Materials = {
+
+  // Get all consumption for a project (approved only)
+  async getByProject(projectId) {
+    const { data, error } = await db
+      .from('material_summary')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('category')
+      .order('part_name');
+    if (error) throw error;
+    return data;
+  },
+
+  // Get consumption by category for a project
+  async getByCategory(projectId, category) {
+    const { data, error } = await db
+      .from('material_summary')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('category', category);
+    if (error) throw error;
+    return data;
+  }
+};
+
+// ============================================================
+// SUPABASE RPC — run this SQL in Supabase SQL Editor too
+// ============================================================
+/*
+
+-- Increment session entry count and footage (called on each entry save)
+CREATE OR REPLACE FUNCTION increment_session_counts(
+  p_session_id UUID,
+  p_entry_count INT DEFAULT 1,
+  p_footage NUMERIC DEFAULT 0
+)
+RETURNS void AS $$
+BEGIN
+  UPDATE work_sessions
+  SET
+    entry_count = entry_count + p_entry_count,
+    footage_total = footage_total + p_footage,
+    status = CASE
+      WHEN status = 'started' THEN 'in-progress'
+      ELSE status
+    END,
+    updated_at = NOW()
+  WHERE id = p_session_id;
+END;
+$$ LANGUAGE plpgsql;
+
+*/
+
+// ============================================================
+// REALTIME MANAGER HELPERS
+// ============================================================
+const Realtime = {
+  channels: [],
+
+  // Subscribe to all live updates manager needs
+  subscribeAll(callbacks) {
+    // Work sessions (in-progress status)
+    const sessionChannel = db
+      .channel('manager_sessions')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'work_sessions' },
+        (payload) => callbacks.onSessionUpdate && callbacks.onSessionUpdate(payload)
+      )
+      .subscribe();
+
+    // New submissions
+    const subChannel = db
+      .channel('manager_submissions')
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'submissions' },
+        (payload) => callbacks.onNewSubmission && callbacks.onNewSubmission(payload)
+      )
+      .subscribe();
+
+    // Emergency logs
+    const emergencyChannel = db
+      .channel('manager_emergency')
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'emergency_logs' },
+        (payload) => callbacks.onEmergency && callbacks.onEmergency(payload)
+      )
+      .subscribe();
+
+    this.channels = [sessionChannel, subChannel, emergencyChannel];
+    return this.channels;
+  },
+
+  unsubscribeAll() {
+    this.channels.forEach(ch => db.removeChannel(ch));
+    this.channels = [];
+  }
+};
+
+// ============================================================
+// UTILITY
+// ============================================================
+const Utils = {
+  // Format timestamp for display
+  formatTime(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleTimeString('en-US', {
+      hour: 'numeric', minute: '2-digit'
+    });
+  },
+
+  formatDate(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleDateString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric'
+    });
+  },
+
+  today() {
+    return new Date().toISOString().split('T')[0];
+  },
+
+  // Build parts summary from log entries
+  buildPartsSummary(entries) {
+    const totals = {};
+    entries.forEach(entry => {
+      (entry.entry_parts || []).forEach(ep => {
+        const part = ep.parts_catalog;
+        if (!totals[part.id]) {
+          totals[part.id] = { id: part.id, name: part.name, unit: part.unit, qty: 0 };
+        }
+        totals[part.id].qty += ep.quantity;
+      });
+    });
+    return Object.values(totals);
+  }
+};
+
+// Export everything
+window.FiberLog = {
+  db,
+  Auth,
+  Projects,
+  Assemblies,
+  Parts,
+  Sessions,
+  Entries,
+  Submissions,
+  Emergency,
+  Materials,
+  Realtime,
+  Utils
+};
+
+console.log('FiberLog DB layer loaded ✓');
+
+// ─── READY CALLBACK ────────────────────────────────────────────────────────
+// Fire any callbacks registered before this script loaded
+if(window._fiberlogReady) {
+  window._fiberlogReady.forEach(fn => fn(window.FiberLog));
+  window._fiberlogReady = [];
+}
+window._fiberlogLoaded = true;
