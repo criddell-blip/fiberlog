@@ -17,11 +17,11 @@
   --r:14px;--r-sm:10px;--r-xs:6px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;overflow:hidden;position:relative}
+html,body{height:100%;overflow:hidden}
 body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;background:var(--bg);color:var(--text);font-size:15px}
 
 /* ── Screens ── */
-.screen{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg);transition:transform 0.3s cubic-bezier(.4,0,.2,1),opacity 0.3s;overflow:hidden;z-index:1}
+.screen{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;background:var(--bg);transition:transform 0.3s cubic-bezier(.4,0,.2,1),opacity 0.3s;z-index:1}
 .screen.hidden{transform:translateX(100%);opacity:0;pointer-events:none}
 .screen.slide-left{transform:translateX(-30%);opacity:0;pointer-events:none}
 
@@ -1510,17 +1510,17 @@ function renderProjects(){
     const fiberK = ((p.fiber||p.total_fiber_ft||0)/1000).toFixed(0);
     const conduitK = ((p.conduit||p.total_conduit_ft||0)/1000).toFixed(1);
     return `
-    <div class="proj-card" onclick="selectProject('${p.id}')">
-      <div class="proj-icon ${p.iconCls||'pi-teal'}">${p.icon||'📡'}</div>
-      <div class="proj-info">
-        <div class="proj-name">${p.name}</div>
-        <div class="proj-meta">${phases.length} phases · ${fiberK}k ft fiber · ${conduitK}k ft conduit</div>
-        <div class="proj-progress">
-          <div class="proj-prog-label"><span>${p.pctDone||0}% complete</span><span>${doneTasks}/${totalTasks} tasks done</span></div>
-          <div class="proj-prog-bar"><div class="proj-prog-fill" style="width:${p.pctDone||0}%"></div></div>
+    <div class="proj-card" onclick="selectProject('${p.id}')" style="background:#fff;border:1px solid #e0dfd9;border-radius:14px;padding:16px;margin-bottom:10px;cursor:pointer;display:flex;align-items:center;gap:14px">
+      <div class="proj-icon ${p.iconCls||'pi-teal'}" style="width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;background:#E1F5EE">${p.icon||'📡'}</div>
+      <div class="proj-info" style="flex:1;min-width:0">
+        <div class="proj-name" style="font-size:16px;font-weight:700">${p.name}</div>
+        <div class="proj-meta" style="font-size:12px;color:#6b6a65;margin-top:2px">${phases.length} phases · ${fiberK}k ft fiber · ${conduitK}k ft conduit</div>
+        <div class="proj-progress" style="margin-top:8px">
+          <div class="proj-prog-label" style="display:flex;justify-content:space-between;font-size:11px;color:#6b6a65"><span>${p.pctDone||0}% complete</span><span>${doneTasks}/${totalTasks} tasks done</span></div>
+          <div class="proj-prog-bar" style="height:5px;border-radius:3px;background:#f0efeb;margin-top:4px"><div class="proj-prog-fill" style="height:100%;border-radius:3px;background:#1D9E75;width:${p.pctDone||0}%"></div></div>
         </div>
       </div>
-      <div class="arrow">›</div>
+      <div class="arrow" style="font-size:18px;color:#cccbc4">›</div>
     </div>`;
   }).join("");
   console.log("FiberLog: HTML generated, length:", html.length, "first 200:", html.substring(0,200));
@@ -2099,11 +2099,11 @@ function overlayBg(e,id){if(e.target===document.getElementById(id)) closeOverlay
   --r:14px;--r-sm:10px;--r-xs:6px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;overflow:hidden;position:relative}
+html,body{height:100%;overflow:hidden}
 body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;background:var(--bg);color:var(--text);font-size:15px}
 
 /* ── Screens ── */
-.screen{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg);transition:transform 0.3s cubic-bezier(.4,0,.2,1),opacity 0.3s;overflow:hidden;z-index:1}
+.screen{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;background:var(--bg);transition:transform 0.3s cubic-bezier(.4,0,.2,1),opacity 0.3s;z-index:1}
 .screen.hidden{transform:translateX(100%);opacity:0;pointer-events:none}
 .screen.slide-left{transform:translateX(-30%);opacity:0;pointer-events:none}
 
