@@ -1386,14 +1386,21 @@ document.addEventListener("DOMContentLoaded", async ()=>{
       ...p,
       icon: projectIcon(p.name),
       iconCls: projectIconCls(p.name),
-      pctDone: 0, // will come from completion view later
+      pctDone: 0,
+      // alias Supabase column names to what the UI expects
+      fiber: p.total_fiber_ft || 0,
+      conduit: p.total_conduit_ft || 0,
+      region: p.region || p.name,
       phases: (p.phases||[]).map(ph => ({
         ...ph,
         pctDone: 0,
+        fiber: ph.fiber_ft || 0,
+        conduit: ph.conduit_ft || 0,
         tasks: (ph.tasks||[]).map(t => ({
           ...t,
-          type: t.task_type,
-          notes: t.scope_notes||"",
+          type: t.task_type || 'freeform',
+          notes: t.scope_notes || "",
+          status: t.status || 'open',
           pctDone: 0
         }))
       }))
@@ -1442,6 +1449,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
       document.getElementById("userBtn").textContent = currentUserInitials;
     }
 
+    console.log("FiberLog: Rendering", PROJECTS.length, "projects:", PROJECTS.map(p=>p.name));
     renderProjects();
   } catch(err) {
     console.error("FiberLog init error:", err);
@@ -1491,20 +1499,30 @@ function pushTo(toId,fromId){
 
 // ─── SCREEN 1 — PROJECTS ──────────────────────────────────────────────────
 function renderProjects(){
-  document.getElementById("projectList").innerHTML=PROJECTS.map(p=>`
+  if(!PROJECTS || !PROJECTS.length){
+    document.getElementById("projectList").innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted)">No projects found</div>`;
+    return;
+  }
+  document.getElementById("projectList").innerHTML=PROJECTS.map(p=>{
+    const phases = p.phases||[];
+    const doneTasks = phases.reduce((a,ph)=>a+(ph.tasks||[]).filter(t=>t.status==="done").length,0);
+    const totalTasks = phases.reduce((a,ph)=>a+(ph.tasks||[]).length,0);
+    const fiberK = ((p.fiber||p.total_fiber_ft||0)/1000).toFixed(0);
+    const conduitK = ((p.conduit||p.total_conduit_ft||0)/1000).toFixed(1);
+    return `
     <div class="proj-card" onclick="selectProject('${p.id}')">
-      <div class="proj-icon ${p.iconCls}">${p.icon}</div>
+      <div class="proj-icon ${p.iconCls||'pi-teal'}">${p.icon||'📡'}</div>
       <div class="proj-info">
         <div class="proj-name">${p.name}</div>
-        <div class="proj-meta">${p.phases.length} phases · ${(p.fiber/1000).toFixed(0)}k ft fiber · ${(p.conduit/1000).toFixed(1)}k ft conduit</div>
+        <div class="proj-meta">${phases.length} phases · ${fiberK}k ft fiber · ${conduitK}k ft conduit</div>
         <div class="proj-progress">
-          <div class="proj-prog-label"><span>${p.pctDone}% complete</span><span>${p.phases.reduce((a,ph)=>a+ph.tasks.filter(t=>t.status==="done").length,0)}/${p.phases.reduce((a,ph)=>a+ph.tasks.length,0)} tasks done</span></div>
-          <div class="proj-prog-bar"><div class="proj-prog-fill" style="width:${p.pctDone}%"></div></div>
+          <div class="proj-prog-label"><span>${p.pctDone||0}% complete</span><span>${doneTasks}/${totalTasks} tasks done</span></div>
+          <div class="proj-prog-bar"><div class="proj-prog-fill" style="width:${p.pctDone||0}%"></div></div>
         </div>
       </div>
       <div class="arrow">›</div>
-    </div>
-  `).join("");
+    </div>`;
+  }).join("");
 }
 
 function selectProject(pid){
