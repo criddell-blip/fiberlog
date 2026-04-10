@@ -17,11 +17,11 @@
   --r:14px;--r-sm:10px;--r-xs:6px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;overflow:hidden}
+html,body{height:100%;overflow:hidden;position:relative}
 body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;background:var(--bg);color:var(--text);font-size:15px}
 
 /* ── Screens ── */
-.screen{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg);transition:transform 0.3s cubic-bezier(.4,0,.2,1),opacity 0.3s;overflow:hidden}
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg);transition:transform 0.3s cubic-bezier(.4,0,.2,1),opacity 0.3s;overflow:hidden;z-index:1}
 .screen.hidden{transform:translateX(100%);opacity:0;pointer-events:none}
 .screen.slide-left{transform:translateX(-30%);opacity:0;pointer-events:none}
 
@@ -35,7 +35,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-
 .user-btn{width:34px;height:34px;border-radius:50%;background:var(--teal-lt);border:none;cursor:pointer;font-size:12px;font-weight:700;color:var(--teal-dk);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 
 /* ── Scroll body ── */
-.scroll-body{flex:1;overflow-y:auto;padding:14px 14px 90px;-webkit-overflow-scrolling:touch}
+.scroll-body{flex:1;overflow-y:auto;padding:14px 14px 90px;-webkit-overflow-scrolling:touch;min-height:0}
 .scroll-body::-webkit-scrollbar{display:none}
 
 /* ── Section label ── */
@@ -1503,7 +1503,7 @@ function renderProjects(){
     document.getElementById("projectList").innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted)">No projects found</div>`;
     return;
   }
-  document.getElementById("projectList").innerHTML=PROJECTS.map(p=>{
+  const html = PROJECTS.map(p=>{
     const phases = p.phases||[];
     const doneTasks = phases.reduce((a,ph)=>a+(ph.tasks||[]).filter(t=>t.status==="done").length,0);
     const totalTasks = phases.reduce((a,ph)=>a+(ph.tasks||[]).length,0);
@@ -1523,6 +1523,11 @@ function renderProjects(){
       <div class="arrow">›</div>
     </div>`;
   }).join("");
+  console.log("FiberLog: HTML generated, length:", html.length, "first 200:", html.substring(0,200));
+  const el = document.getElementById("projectList");
+  console.log("FiberLog: projectList element:", el, "parent visible:", el?.offsetParent);
+  el.innerHTML = html;
+  console.log("FiberLog: After render, children:", el.children.length);
 }
 
 function selectProject(pid){
@@ -2094,11 +2099,11 @@ function overlayBg(e,id){if(e.target===document.getElementById(id)) closeOverlay
   --r:14px;--r-sm:10px;--r-xs:6px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;overflow:hidden}
+html,body{height:100%;overflow:hidden;position:relative}
 body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;background:var(--bg);color:var(--text);font-size:15px}
 
 /* ── Screens ── */
-.screen{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg);transition:transform 0.3s cubic-bezier(.4,0,.2,1),opacity 0.3s;overflow:hidden}
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg);transition:transform 0.3s cubic-bezier(.4,0,.2,1),opacity 0.3s;overflow:hidden;z-index:1}
 .screen.hidden{transform:translateX(100%);opacity:0;pointer-events:none}
 .screen.slide-left{transform:translateX(-30%);opacity:0;pointer-events:none}
 
@@ -2112,7 +2117,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-
 .user-btn{width:34px;height:34px;border-radius:50%;background:var(--teal-lt);border:none;cursor:pointer;font-size:12px;font-weight:700;color:var(--teal-dk);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 
 /* ── Scroll body ── */
-.scroll-body{flex:1;overflow-y:auto;padding:14px 14px 90px;-webkit-overflow-scrolling:touch}
+.scroll-body{flex:1;overflow-y:auto;padding:14px 14px 90px;-webkit-overflow-scrolling:touch;min-height:0}
 .scroll-body::-webkit-scrollbar{display:none}
 
 /* ── Section label ── */
