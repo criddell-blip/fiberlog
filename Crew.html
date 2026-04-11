@@ -357,29 +357,15 @@ input:focus,select:focus{border-color:var(--teal);background:var(--surface)}
 <div class="new-task-overlay" id="newTaskOverlay" onclick="overlayBg(event,'newTaskOverlay')">
 <div class="new-task-sheet">
   <div class="new-task-handle"></div>
-  <div style="font-size:17px;font-weight:800;margin-bottom:14px">Add task to this phase</div>
+  <div style="font-size:17px;font-weight:800;margin-bottom:6px">Add task to this phase</div>
+  <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Name the section or location you are working on</div>
   <div class="field">
-    <label>Task / job name</label>
-    <input type="text" id="newTaskName" placeholder="e.g. Down guys — Poles 18, 22, 31"/>
+    <label>Section / location name</label>
+    <input type="text" id="newTaskName" placeholder="e.g. Elm St Poles 14–21, Oak Ave MH crossing, Pole 31 area"/>
   </div>
   <div class="field">
-    <label>Task type (sets checklist)</label>
-    <select id="newTaskType">
-      <option value="lashingIntermediate">Intermediate Lashing — fiber &amp; hardware</option>
-      <option value="lashingTerminal">Terminal Pole Lashing — fiber &amp; hardware</option>
-      <option value="intermediatePole">Intermediate Pole — strand &amp; hardware</option>
-      <option value="terminalPole">Terminal Pole — strand &amp; hardware</option>
-      <option value="downGuy">Down Guy Installation</option>
-      <option value="caseSplice">Case Splice</option>
-      <option value="poleRiser">Pole Riser</option>
-      <option value="snowshoe">Snowshoe</option>
-      <option value="underground">Underground — conduit &amp; vaults</option>
-      <option value="freeform">Freeform (no checklist)</option>
-    </select>
-  </div>
-  <div class="field">
-    <label>Notes / scope</label>
-    <textarea id="newTaskNotes" placeholder="e.g. 650 ft span, 7 poles, flagged for re-tension on pole 17" style="min-height:60px"></textarea>
+    <label>Notes (optional)</label>
+    <textarea id="newTaskNotes" placeholder="e.g. 650ft span, flagged for re-tension on pole 17, bore under Maple Ave" style="min-height:60px"></textarea>
   </div>
   <div style="display:flex;gap:8px">
     <button class="btn btn-ghost" style="flex:1;padding:12px" onclick="closeOverlay('newTaskOverlay')">Cancel</button>
@@ -1592,7 +1578,7 @@ function taskCard(t){
     const logged=counts[c.id]>0||(log.footage&&log.footage[c.id]>0);
     return`<span class="task-chip${logged?" logged":""}">${c.icon} ${c.label}</span>`;
   }).join("");
-  const statusBadge=`<span class="badge badge-${t.status}">${t.status==="active"?"In progress":t.status==="done"?"Done":"Open"}</span>`;
+  const statusBadge=`<span class="badge badge-${t.status||"open"}">${t.status==="active"?"In progress":t.status==="done"?"Done":"Open"}</span>`;
   return`<div class="task-card${t.status==="done"?" done-card":""}" onclick="selectTask('${t.id}')">
     <div class="task-card-top">
       <div class="task-status-dot dot-${t.status}"></div>
@@ -1625,18 +1611,15 @@ async function selectTask(tid){
 
 // ─── SCREEN 4 — TASK WORKSPACE ────────────────────────────────────────────
 function renderWorkspace(){
-  const tmpl=TEMPLATES[selTask.type]||TEMPLATES.freeform;
+  const tmpl=TEMPLATES[selTask.type||selTask.task_type]||TEMPLATES.freeform;
   const log=taskLogs[selTask.id];
   const counts=log.checklistCounts;
   const footage=log.footage;
 
-  // calculate overall checklist completion
-  const total=tmpl.checklist.length;
-  const complete=tmpl.checklist.filter(c=>{
-    if(c.type==="footage") return(footage[c.id]||0)>0;
-    return(counts[c.id]||0)>0;
-  }).length;
-  const pct=total>0?Math.round(complete/total*100):0;
+  // Calculate progress — count any assembly or footage logged
+  const assemblyCount = Object.values(log.extraAssemblies||{}).reduce((a,b)=>a+b,0);
+  const footageCount = Object.values(footage||{}).reduce((a,b)=>a+(b>0?1:0),0);
+  const totalLogged = assemblyCount + footageCount + (log.extraParts||[]).length;
 
   let html=`
     <div class="task-header-card">
@@ -1644,99 +1627,46 @@ function renderWorkspace(){
       <div class="thc-task">${selTask.name}</div>
       ${selTask.notes?`<div class="thc-meta">${selTask.notes}</div>`:""}
       <div class="thc-progress">
-        <div class="thc-prog-bar"><div class="thc-prog-fill" id="ws-prog-fill" style="width:${pct}%"></div></div>
-        <div class="thc-prog-label"><span id="ws-prog-label">${complete} of ${total} checklist items logged</span><span id="ws-prog-pct">${pct}%</span></div>
+        <div class="thc-prog-bar"><div class="thc-prog-fill" id="ws-prog-fill" style="width:${totalLogged>0?'100':'0'}%"></div></div>
+        <div class="thc-prog-label"><span id="ws-prog-label">${totalLogged} item${totalLogged!==1?'s':''} logged today</span><span id="ws-prog-pct">${assemblyCount} assemblies · ${Object.values(footage||{}).reduce((a,b)=>a+b,0).toLocaleString()} ft</span></div>
       </div>
     </div>
 
-    <div class="sec-label">Log as you work — tap + each time you complete one</div>
-  `;
-
-  // Checklist items
-  tmpl.checklist.forEach(item=>{
-    const isFootage=item.type==="footage";
-    const cnt=isFootage?(footage[item.id]||0):(counts[item.id]||0);
-    const done=cnt>0;
-    const partsForOne=item.parts||[];
-    const partsSub=partsForOne.length?partsForOne.map(p=>{
-      const part=CATALOG.find(x=>x.id===p.id);
-      return`${p.qty} ${part?part.name:p.id}`;
-    }).join(" · "):"";
-
-    if(isFootage){
-      html+=`<div class="checklist-item${done?" completed":""}" id="ci-${item.id}">
-        <div class="ci-icon">${item.icon}</div>
-        <div class="ci-info">
-          <div class="ci-label">${item.label}</div>
-          <div class="ci-sub">${item.hint||""}</div>
-          <div class="footage-input-row" style="margin-top:8px">
-            <input class="footage-input" type="number" placeholder="0" value="${cnt||""}"
-              id="footage-${item.id}"
-              onchange="logFootage('${item.id}',this.value)"
-              style="max-width:140px"/>
-            <span class="footage-unit">${item.unit}</span>
-            ${done?`<span style="font-size:18px">✅</span>`:""}
-          </div>
+    <div class="sec-label">Footage</div>
+    <div class="checklist-item${(footage.aerial||0)>0?" completed":""}">
+      <div class="ci-icon">📏</div>
+      <div class="ci-info">
+        <div class="ci-label">Aerial footage</div>
+        <div class="ci-sub">Strand hung or lashed</div>
+        <div class="footage-input-row" style="margin-top:8px">
+          <input class="footage-input" type="number" placeholder="0" value="${footage.aerial||''}" id="footage-aerial" onchange="logFootage('aerial',this.value)" style="max-width:140px"/>
+          <span class="footage-unit">ft</span>
         </div>
-      </div>`;
-    } else {
-      html+=`<div class="checklist-item${done?" completed":""}" id="ci-${item.id}">
-        <div class="ci-icon">${item.icon}</div>
-        <div class="ci-info">
-          <div class="ci-label">${item.label}</div>
-          <div class="ci-sub">${done?`${cnt} ${item.unit} logged · `:""}${partsSub}</div>
-        </div>
-        <div class="ci-action">
-          ${cnt>0?`<button class="tally-btn tally-minus" onclick="tally('${item.id}',-1)">−</button>`:""}
-          ${cnt>0?`<div class="tally-count">${cnt}</div>`:""}
-          <button class="tally-btn tally-plus${cnt===0?" big":""}" onclick="tally('${item.id}',1)">+</button>
-        </div>
-      </div>`;
-    }
-  });
-
-  // Running tally of all parts logged
-  const allParts=buildPartsTally();
-  const extraParts=log.extraParts||[];
-
-  html+=`<div class="sec-label" style="margin-top:20px">Running parts tally</div>`;
-
-  if(allParts.length||extraParts.length){
-    html+=`<div class="tally-card">
-      <div class="tally-card-header">
-        <span class="tally-card-title">Parts logged so far today</span>
       </div>
-      ${allParts.map(p=>`<div class="tally-row">
-        <div><div class="tally-part-name">${p.name}</div><div class="tally-part-id">${p.id}</div></div>
-        <div><span class="tally-part-qty">${p.qty.toLocaleString()}</span><span class="tally-part-unit"> ${p.unit}</span></div>
-      </div>`).join("")}
-      ${extraParts.map((p,i)=>`<div class="tally-row">
-        <div><div class="tally-part-name">${p.name} <span style="font-size:10px;background:var(--amber-lt);color:var(--amber-dk);padding:1px 5px;border-radius:10px">extra</span></div><div class="tally-part-id">${p.id}</div></div>
-        <div style="display:flex;align-items:center;gap:6px">
-          <input type="number" value="${p.qty}" min="1" style="width:56px;padding:4px 6px;font-size:13px;font-weight:700;text-align:center;border:1px solid var(--border2);border-radius:6px;background:var(--bg)"
-            onchange="updateExtra(${i},this.value)"/>
-          <span style="font-size:11px;color:var(--muted)">${p.unit}</span>
-          <button onclick="removeExtra(${i})" style="width:22px;height:22px;border-radius:50%;background:var(--red-lt);border:none;color:var(--red);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center">×</button>
+    </div>
+    <div class="checklist-item${(footage.underground||0)>0?" completed":""}">
+      <div class="ci-icon">📏</div>
+      <div class="ci-info">
+        <div class="ci-label">Underground footage</div>
+        <div class="ci-sub">Bore, trench, or conduit placed</div>
+        <div class="footage-input-row" style="margin-top:8px">
+          <input class="footage-input" type="number" placeholder="0" value="${footage.underground||''}" id="footage-underground" onchange="logFootage('underground',this.value)" style="max-width:140px"/>
+          <span class="footage-unit">ft</span>
         </div>
-      </div>`).join("")}
-    </div>`;
-  } else {
-    html+=`<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:16px;text-align:center;color:var(--hint);font-size:13px;margin-bottom:8px">Parts will appear here as you log work above</div>`;
-  }
+      </div>
+    </div>
 
-  html+=`<button class="add-extra-btn" onclick="openPartPicker()">
-    <span style="font-size:20px">＋</span>
-    <span>Add individual part not in checklist</span>
-  </button>
-  <div class="sec-label" style="margin-top:20px">All assemblies</div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Tap any assembly — not limited to this task type</div>`;
+    <div class="sec-label" style="margin-top:16px">Assemblies used at this location</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Tap + for each assembly completed</div>`;
+
+  // Full assembly library — all assemblies available for any task
   Object.entries(ASSEMBLIES).forEach(([k,tmpl])=>{
     const used=(log.extraAssemblies&&log.extraAssemblies[k])||0;
     html+=`<div class="checklist-item${used>0?" completed":""}" style="margin-bottom:6px">
       <div class="ci-icon">🔧</div>
       <div class="ci-info">
-        <div class="ci-label" style="font-size:13px">${tmpl.label}</div>
-        <div class="ci-sub">${tmpl.parts?tmpl.parts.length+" parts":""}</div>
+        <div class="ci-label">${tmpl.label}</div>
+        <div class="ci-sub">${used>0?used+' logged · ':''}</div>
       </div>
       <div class="ci-action">
         ${used>0?`<button class="tally-btn tally-minus" onclick="tallyAssembly('${k}',-1)">−</button>`:""}
@@ -1745,6 +1675,36 @@ function renderWorkspace(){
       </div>
     </div>`;
   });
+
+  // Running parts tally
+  const allParts=buildPartsTally();
+  const extraParts=log.extraParts||[];
+  const combinedParts={};
+  [...allParts,...extraParts].forEach(p=>{
+    if(!combinedParts[p.id]) combinedParts[p.id]={...p,qty:0};
+    combinedParts[p.id].qty+=p.qty;
+  });
+  const partsList=Object.values(combinedParts);
+
+  html+=`<div class="sec-label" style="margin-top:20px">Running parts tally</div>`;
+  if(partsList.length){
+    html+=`<div class="tally-card"><div class="tally-card-header"><span class="tally-card-title">Parts logged so far</span></div>`;
+    html+=partsList.map((p,i)=>`<div class="tally-row">
+      <div><div class="tally-part-name">${p.name}</div><div class="tally-part-id">${p.id}</div></div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <input type="number" value="${p.qty}" min="1" style="width:56px;padding:4px 6px;font-size:13px;font-weight:700;text-align:center;border:1px solid var(--border2);border-radius:6px;background:var(--bg)" onchange="updateExtraQty('${p.id}',this.value)"/>
+        <span style="font-size:11px;color:var(--muted)">${p.unit}</span>
+      </div>
+    </div>`).join("");
+    html+=`</div>`;
+  } else {
+    html+=`<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:16px;text-align:center;color:var(--hint);font-size:13px">Parts appear here as you log assemblies above</div>`;
+  }
+
+  html+=`<button class="add-extra-btn" style="margin-top:10px" onclick="openPartPicker()">
+    <span style="font-size:20px">＋</span>
+    <span>Add individual part not in an assembly</span>
+  </button>`;
 
   document.getElementById("s4-body").innerHTML=html;
 }
@@ -1801,6 +1761,7 @@ function logFootage(itemId,val){
   if(!log.footage) log.footage={};
   log.footage[itemId]=parseFloat(val)||0;
   if(selTask.status==="open"&&log.footage[itemId]>0) selTask.status="active";
+  renderWorkspace();
   // update checklist style without full re-render
   const ci=document.getElementById("ci-"+itemId);
   if(ci){
@@ -1846,6 +1807,13 @@ function buildPartsTally(){
   return Object.values(totals);
 }
 
+
+function updateExtraQty(partId, val){
+  const log=taskLogs[selTask.id];
+  const ep=log.extraParts.find(p=>p.id===partId);
+  if(ep) ep.qty=parseInt(val)||1;
+  // Also update checklist counts indirectly through parts
+}
 function updateExtra(i,val){
   taskLogs[selTask.id].extraParts[i].qty=parseInt(val)||1;
 }
@@ -1915,7 +1883,7 @@ function openNewTask(){
 async function confirmNewTask(){
   const name=document.getElementById("newTaskName").value.trim();
   if(!name){alert("Enter a task name.");return;}
-  const type=document.getElementById("newTaskType").value;
+  const type="freeform"; // open — no task type restriction
   const notes=document.getElementById("newTaskNotes").value.trim();
 
   let newTask={id:"custom-"+Date.now(),name,type:type,task_type:type,status:"open",notes,scope_notes:notes,pctDone:0};
@@ -2407,29 +2375,15 @@ input:focus,select:focus{border-color:var(--teal);background:var(--surface)}
 <div class="new-task-overlay" id="newTaskOverlay" onclick="overlayBg(event,'newTaskOverlay')">
 <div class="new-task-sheet">
   <div class="new-task-handle"></div>
-  <div style="font-size:17px;font-weight:800;margin-bottom:14px">Add task to this phase</div>
+  <div style="font-size:17px;font-weight:800;margin-bottom:6px">Add task to this phase</div>
+  <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Name the section or location you are working on</div>
   <div class="field">
-    <label>Task / job name</label>
-    <input type="text" id="newTaskName" placeholder="e.g. Down guys — Poles 18, 22, 31"/>
+    <label>Section / location name</label>
+    <input type="text" id="newTaskName" placeholder="e.g. Elm St Poles 14–21, Oak Ave MH crossing, Pole 31 area"/>
   </div>
   <div class="field">
-    <label>Task type (sets checklist)</label>
-    <select id="newTaskType">
-      <option value="lashingIntermediate">Intermediate Lashing — fiber &amp; hardware</option>
-      <option value="lashingTerminal">Terminal Pole Lashing — fiber &amp; hardware</option>
-      <option value="intermediatePole">Intermediate Pole — strand &amp; hardware</option>
-      <option value="terminalPole">Terminal Pole — strand &amp; hardware</option>
-      <option value="downGuy">Down Guy Installation</option>
-      <option value="caseSplice">Case Splice</option>
-      <option value="poleRiser">Pole Riser</option>
-      <option value="snowshoe">Snowshoe</option>
-      <option value="underground">Underground — conduit &amp; vaults</option>
-      <option value="freeform">Freeform (no checklist)</option>
-    </select>
-  </div>
-  <div class="field">
-    <label>Notes / scope</label>
-    <textarea id="newTaskNotes" placeholder="e.g. 650 ft span, 7 poles, flagged for re-tension on pole 17" style="min-height:60px"></textarea>
+    <label>Notes (optional)</label>
+    <textarea id="newTaskNotes" placeholder="e.g. 650ft span, flagged for re-tension on pole 17, bore under Maple Ave" style="min-height:60px"></textarea>
   </div>
   <div style="display:flex;gap:8px">
     <button class="btn btn-ghost" style="flex:1;padding:12px" onclick="closeOverlay('newTaskOverlay')">Cancel</button>
