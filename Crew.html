@@ -1216,7 +1216,6 @@ window._fiberlogLoaded = true;
 </script>
 <script>
 // ─── CATALOG ───────────────────────────────────────────────────────────────
-var CATALOG=[]; // loaded from Supabase
 
 // ─── TASK TEMPLATES ────────────────────────────────────────────────────────
 // Each checklist item: id, label, icon, type (assembly|footage|counter|material), parts[], defaultQty
@@ -1301,7 +1300,6 @@ const TEMPLATES={
 };
 
 // ─── PROJECT DATA ──────────────────────────────────────────────────────────
-var PROJECTS=[]; // loaded from Supabase
 
 // ─── STATE ─────────────────────────────────────────────────────────────────
 let currentUser="Marcus W.";
@@ -1314,6 +1312,9 @@ const taskLogs={};
 let ppTarget=null;
 let ppSelectedPart=null;
 let USERS_LIST=[];
+var ASSEMBLIES={}; window.ASSEMBLIES=ASSEMBLIES; // global
+var PROJECTS=[]; window.PROJECTS=PROJECTS; // global  
+var CATALOG=[]; window.CATALOG=CATALOG; // global
 
 // ─── SMART REMINDERS (scaffold — active in future version) ────────────────
 // When a crew member logs certain items, the app will nudge them about
@@ -1395,7 +1396,7 @@ document.addEventListener("DOMContentLoaded", async ()=>{
     // Map assemblies from Supabase into both TEMPLATES and ASSEMBLIES
     Object.entries(assemblies).forEach(([key, val]) => {
       // Populate ASSEMBLIES for the workspace full library
-      ASSEMBLIES[key] = {
+      window.ASSEMBLIES[key] = ASSEMBLIES[key] = {
         label: val.label,
         crewType: val.crewType,
         parts: val.parts.map(p => ({id:p.id, qty:p.qty, name:p.name, unit:p.unit}))
@@ -1653,7 +1654,7 @@ function renderWorkspace(){
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Tap + for each assembly completed</div>`;
 
   // Full assembly library — all assemblies available for any task
-  Object.entries(ASSEMBLIES).forEach(([k,tmpl])=>{
+  Object.entries(window.ASSEMBLIES||ASSEMBLIES||{}).forEach(([k,tmpl])=>{
     const used=(log.extraAssemblies&&log.extraAssemblies[k])||0;
     html+=`<div class="checklist-item${used>0?" completed":""}" style="margin-bottom:6px">
       <div class="ci-icon">🔧</div>
@@ -2094,4 +2095,4 @@ function showToast(msg){
 }
 </script>
 </body>
-</html>let ASSEMBLIES={}; // loaded from Supabase
+</html>
