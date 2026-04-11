@@ -1559,6 +1559,20 @@ function selectPhase(phid){
   document.getElementById("s3-sub").textContent=selProject.name;
   renderTasks();
   pushTo("s3","s2");
+  // Real-time: any crew member creating a task in this phase appears instantly
+  if(window._taskChannel) FiberLog.db.removeChannel(window._taskChannel);
+  window._taskChannel = FiberLog.db.channel('tasks_'+phid)
+    .on('postgres_changes',
+      {event:'INSERT',schema:'public',table:'tasks',filter:'phase_id=eq.'+phid},
+      (payload)=>{
+        const t=payload.new;
+        if(!selPhase.tasks.find(x=>x.id===t.id)){
+          selPhase.tasks.push({...t,type:t.task_type,notes:t.scope_notes||'',status:t.status||'open',pctDone:0});
+          renderTasks();
+          showToast('New task: '+t.name);
+        }
+      }
+    ).subscribe();
 }
 
 // ─── SCREEN 3 — TASKS ─────────────────────────────────────────────────────
@@ -1594,7 +1608,7 @@ function taskCard(t){
 
 async function selectTask(tid){
   selTask=selPhase.tasks.find(t=>t.id===tid);
-  if(!taskLogs[tid]) taskLogs[tid]={checklistCounts:{},footage:{},extraParts:[]};
+  if(!taskLogs[tid]) taskLogs[tid]={checklistCounts:{},footage:{},extraParts:[],extraAssemblies:{}};
   document.getElementById("s4-title").textContent=selTask.name;
   document.getElementById("s4-sub").textContent=`${selProject.name} › ${selPhase.name}`;
   renderWorkspace();
@@ -1712,12 +1726,46 @@ function renderWorkspace(){
 
   html+=`<button class="add-extra-btn" onclick="openPartPicker()">
     <span style="font-size:20px">＋</span>
-    <span>Add something not in the checklist</span>
-  </button>`;
+    <span>Add individual part not in checklist</span>
+  </button>
+  <div class="sec-label" style="margin-top:20px">All assemblies</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Tap any assembly — not limited to this task type</div>`;
+  Object.entries(ASSEMBLIES).forEach(([k,tmpl])=>{
+    const used=(log.extraAssemblies&&log.extraAssemblies[k])||0;
+    html+=`<div class="checklist-item${used>0?" completed":""}" style="margin-bottom:6px">
+      <div class="ci-icon">🔧</div>
+      <div class="ci-info">
+        <div class="ci-label" style="font-size:13px">${tmpl.label}</div>
+        <div class="ci-sub">${tmpl.parts?tmpl.parts.length+" parts":""}</div>
+      </div>
+      <div class="ci-action">
+        ${used>0?`<button class="tally-btn tally-minus" onclick="tallyAssembly('${k}',-1)">−</button>`:""}
+        ${used>0?`<div class="tally-count">${used}</div>`:""}
+        <button class="tally-btn tally-plus${used===0?" big":""}" onclick="tallyAssembly('${k}',1)">+</button>
+      </div>
+    </div>`;
+  });
 
   document.getElementById("s4-body").innerHTML=html;
 }
 
+async function tallyAssembly(key,delta){
+  const log=taskLogs[selTask.id];
+  if(!log.extraAssemblies) log.extraAssemblies={};
+  log.extraAssemblies[key]=Math.max(0,(log.extraAssemblies[key]||0)+delta);
+  if(selTask.status==="open"&&delta>0) selTask.status="active";
+  const tmpl=ASSEMBLIES[key];
+  if(tmpl&&tmpl.parts){
+    tmpl.parts.forEach(p=>{
+      const part=CATALOG.find(x=>x.id===p.id)||{name:p.id,unit:"ea"};
+      const ex=log.extraParts.find(x=>x.id===p.id);
+      if(delta>0){ if(ex) ex.qty+=p.qty; else log.extraParts.push({id:p.id,name:part.name,unit:part.unit,qty:p.qty}); }
+      else if(ex){ ex.qty=Math.max(0,ex.qty-p.qty); }
+    });
+    log.extraParts=log.extraParts.filter(x=>x.qty>0);
+  }
+  renderWorkspace();
+}
 async function tally(itemId,delta){
   const log=taskLogs[selTask.id];
   if(!log.checklistCounts[itemId]) log.checklistCounts[itemId]=0;
@@ -2078,6 +2126,11 @@ function setUser(val){
 // ─── OVERLAYS ─────────────────────────────────────────────────────────────
 function closeOverlay(id){document.getElementById(id).classList.remove("open");}
 function overlayBg(e,id){if(e.target===document.getElementById(id)) closeOverlay(id);}
+function showToast(msg){
+  const t=document.createElement("div");
+  t.style.cssText="position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#1a1a17;color:white;padding:10px 18px;border-radius:20px;font-size:13px;font-weight:500;z-index:200;white-space:nowrap";
+  t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),3000);
+}
 </script>
 </body>
 </html>let ASSEMBLIES={}; // loaded from SupabaseDOCTYPE html>
