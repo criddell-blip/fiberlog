@@ -1,0 +1,805 @@
+import { useState } from 'react'
+import { useApp } from '../../AppContext'
+import { db, addTask } from '../../lib/supabase'
+
+const JOB_TYPES = [
+  { id: 'aerial',      label: 'Aerial',      icon: '🏗️' },
+  { id: 'underground', label: 'Underground',  icon: '⛏️' },
+  { id: 'splice',      label: 'Splice',       icon: '🔌' },
+  { id: 'fiber_pull',  label: 'Fiber Pull',   icon: '📦' },
+  { id: 'emergency',   label: 'Emergency',    icon: '⚡' },
+]
+
+const TARGET_FIELDS = [
+  { key: 'fiber_ft',            label: 'Fiber',        unit: 'ft',    col: 'fiber_ft' },
+  { key: 'strand_ft_target',    label: 'Strand',       unit: 'ft',    col: 'strand_ft_target' },
+  { key: 'conduit_ft_target',   label: 'Conduit',      unit: 'ft',    col: 'conduit_ft_target' },
+  { key: 'mst_hst_target',      label: 'MST/HST',      unit: 'units', col: 'mst_hst_target' },
+  { key: 'splice_case_target',  label: 'Splice Cases', unit: 'ea',    col: 'splice_case_target' },
+  { key: 'handhole_target',     label: 'Handholes',    unit: 'ea',    col: 'handhole_target' },
+  { key: 'vault_target',        label: 'Vaults',       unit: 'ea',    col: 'vault_target' },
+]
+
+const PROJECT_TARGET_FIELDS = [
+  { key: 'total_fiber_ft',      label: 'Fiber',        unit: 'ft' },
+  { key: 'total_strand_ft',     label: 'Strand',       unit: 'ft' },
+  { key: 'total_conduit_ft',    label: 'Conduit',      unit: 'ft' },
+  { key: 'total_mst_hst',       label: 'MST/HST',      unit: 'units' },
+  { key: 'total_splice_cases',  label: 'Splice Cases', unit: 'ea' },
+  { key: 'total_handholes',     label: 'Handholes',    unit: 'ea' },
+  { key: 'total_vaults',        label: 'Vaults',       unit: 'ea' },
+]
+
+export default function ProjectManager() {
+  const { projects, setProjects, showToast, reload, currentUser } = useApp()
+  const [selProject, setSelProject] = useState(null)
+  const [selPhase, setSelPhase] = useState(null)
+  const [showAddPhase, setShowAddPhase] = useState(false)
+  const [showAddProject, setShowAddProject] = useState(false)
+
+  // Add phase form state
+  const [phaseName, setPhaseName] = useState('')
+  const [phaseTargets, setPhaseTargets] = useState({})
+  const [phasePermitUrl, setPhasePermitUrl] = useState('')
+  const [phaseSaving, setPhaseSaving] = useState(false)
+
+  // Add project form
+  const [projName, setProjName] = useState('')
+  const [projRegion, setProjRegion] = useState('')
+  const [projFiber, setProjFiber] = useState('')
+  const [projTargets, setProjTargets] = useState({})
+  const [projSaving, setProjSaving] = useState(false)
+
+  // Project target editing
+  const [editingProjTarget, setEditingProjTarget] = useState(null)
+  const [editProjVal, setEditProjVal] = useState('')
+  const [editProjSaving, setEditProjSaving] = useState(false)
+
+  // Phase target editing
+  const [editingTarget, setEditingTarget] = useState(null)
+  const [editVal, setEditVal] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+
+  // Permit URL editing
+  const [editingPermit, setEditingPermit] = useState(false)
+  const [editPermitVal, setEditPermitVal] = useState('')
+  const [permitSaving, setPermitSaving] = useState(false)
+
+  // Add task
+  const [showAddTask, setShowAddTask] = useState(false)
+  const [taskName, setTaskName] = useState('')
+  const [taskNotes, setTaskNotes] = useState('')
+  const [taskJobType, setTaskJobType] = useState('aerial')
+  const [taskSaving, setTaskSaving] = useState(false)
+  const [confirmDeleteTask, setConfirmDeleteTask] = useState(null)
+
+  async function handleDeleteTask(task) {
+    try {
+      // Delete related sessions, entries, submissions first
+      const { data: sessions } = await db.from('work_sessions').select('id').eq('task_id', task.id)
+      const sessionIds = (sessions || []).map(s => s.id)
+      if (sessionIds.length > 0) {
+        const { data: entries } = await db.from('log_entries').select('id').in('session_id', sessionIds)
+        const entryIds = (entries || []).map(e => e.id)
+        if (entryIds.length > 0) await db.from('entry_parts').delete().in('entry_id', entryIds)
+        await db.from('log_entries').delete().in('session_id', sessionIds)
+        await db.from('submissions').delete().in('session_id', sessionIds)
+        await db.from('work_sessions').delete().in('id', sessionIds)
+      }
+      await db.from('tasks').delete().eq('id', task.id)
+
+      setProjects(prev => prev.map(p => {
+        if (p.id !== selProject?.id) return p
+        const updatedPhases = p.phases.map(ph =>
+          ph.id === selPhase.id ? { ...ph, tasks: ph.tasks.filter(t => t.id !== task.id) } : ph
+        )
+        const updated = { ...p, phases: updatedPhases }
+        setSelProject(updated)
+        setSelPhase({ ...selPhase, tasks: selPhase.tasks.filter(t => t.id !== task.id) })
+        return updated
+      }))
+      setConfirmDeleteTask(null)
+      showToast('Task deleted')
+    } catch(e) {
+      showToast('Delete failed: ' + e.message)
+    }
+  }
+
+  async function handleAddTask() {
+    if (!taskName.trim() || !selPhase) return
+    setTaskSaving(true)
+    try {
+      const saved = await addTask(selPhase.id, taskName.trim(), taskJobType, taskNotes.trim(), currentUser?.id)
+      const newTask = { ...saved, type: saved.task_type, notes: saved.scope_notes || '', status: 'open' }
+      setProjects(prev => prev.map(p => {
+        if (p.id !== selProject?.id) return p
+        const updatedPhases = p.phases.map(ph =>
+          ph.id === selPhase.id ? { ...ph, tasks: [...(ph.tasks || []), newTask] } : ph
+        )
+        const updated = { ...p, phases: updatedPhases }
+        setSelProject(updated)
+        setSelPhase({ ...selPhase, tasks: [...(selPhase.tasks || []), newTask] })
+        return updated
+      }))
+      setTaskName('')
+      setTaskNotes('')
+      setTaskJobType('aerial')
+      setShowAddTask(false)
+      showToast('Task added')
+    } catch(e) {
+      showToast('Failed: ' + e.message)
+    } finally {
+      setTaskSaving(false)
+    }
+  }
+
+  async function handleAddPhase() {
+    if (!phaseName.trim() || !selProject) return
+    setPhaseSaving(true)
+    try {
+      const nextSeq = (selProject.phases?.length || 0) + 1
+      const insert = {
+        project_id: selProject.id,
+        name: phaseName.trim(),
+        sequence_order: nextSeq,
+        permit_url: phasePermitUrl.trim() || null,
+      }
+      TARGET_FIELDS.forEach(f => {
+        insert[f.col] = parseInt(phaseTargets[f.key]) || 0
+      })
+
+      const { data, error } = await db.from('phases').insert(insert).select().single()
+      if (error) throw error
+
+      const newPhase = { ...data, tasks: [] }
+      setProjects(prev => prev.map(p => {
+        if (p.id !== selProject.id) return p
+        const updated = { ...p, phases: [...(p.phases || []), newPhase] }
+        setSelProject(updated)
+        return updated
+      }))
+
+      setPhaseName('')
+      setPhaseTargets({})
+      setPhasePermitUrl('')
+      setShowAddPhase(false)
+      showToast(`Phase added: ${data.name}`)
+    } catch (e) {
+      showToast('Failed: ' + e.message)
+    } finally {
+      setPhaseSaving(false)
+    }
+  }
+
+  async function handleAddProject() {
+    if (!projName.trim()) return
+    setProjSaving(true)
+    try {
+      const insert = {
+        name: projName.trim(),
+        region: projRegion.trim() || projName.trim(),
+        status: 'active',
+      }
+      PROJECT_TARGET_FIELDS.forEach(f => { insert[f.key] = parseInt(projTargets[f.key]) || 0 })
+      const { data, error } = await db.from('projects').insert(insert).select().single()
+      if (error) throw error
+
+      setProjects(prev => [...prev, { ...data, fiber: data.total_fiber_ft, conduit: data.total_conduit_ft, phases: [] }])
+      setProjName(''); setProjRegion(''); setProjFiber(''); setProjTargets({})
+      setShowAddProject(false)
+      showToast(`Project created: ${data.name}`)
+    } catch (e) {
+      showToast('Failed: ' + e.message)
+    } finally {
+      setProjSaving(false)
+    }
+  }
+
+  async function savePermitUrl() {
+    setPermitSaving(true)
+    try {
+      const url = editPermitVal.trim() || null
+      await db.from('phases').update({ permit_url: url }).eq('id', selPhase.id)
+
+      const updatedPhase = { ...selPhase, permit_url: url }
+      setSelPhase(updatedPhase)
+      setProjects(prev => prev.map(p => {
+        if (p.id !== selProject?.id) return p
+        const updatedPhases = p.phases.map(ph => ph.id === selPhase.id ? updatedPhase : ph)
+        const updated = { ...p, phases: updatedPhases }
+        setSelProject(updated)
+        return updated
+      }))
+
+      setEditingPermit(false)
+      showToast('Permit link updated')
+    } catch(e) {
+      showToast('Update failed: ' + e.message)
+    } finally {
+      setPermitSaving(false)
+    }
+  }
+
+  async function saveTarget(phase, field) {
+    setEditSaving(true)
+    try {
+      const val = parseInt(editVal) || 0
+      await db.from('phases').update({ [field.col]: val }).eq('id', phase.id)
+
+      // Update local state
+      setProjects(prev => prev.map(p => {
+        if (p.id !== selProject?.id) return p
+        const updatedPhases = p.phases.map(ph =>
+          ph.id === phase.id ? { ...ph, [field.col]: val } : ph
+        )
+        const updated = { ...p, phases: updatedPhases }
+        setSelProject(updated)
+        if (selPhase?.id === phase.id) setSelPhase({ ...selPhase, [field.col]: val })
+        return updated
+      }))
+
+      setEditingTarget(null)
+      showToast(`${field.label} target updated`)
+    } catch (e) {
+      showToast('Update failed: ' + e.message)
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  async function saveProjectTarget(field) {
+    setEditProjSaving(true)
+    try {
+      const val = parseInt(editProjVal) || 0
+      await db.from('projects').update({ [field.key]: val }).eq('id', selProject.id)
+      const updated = { ...selProject, [field.key]: val }
+      setSelProject(updated)
+      setProjects(prev => prev.map(p => p.id === selProject.id ? { ...p, [field.key]: val } : p))
+      setEditingProjTarget(null)
+      showToast(`${field.label} target updated`)
+    } catch(e) {
+      showToast('Update failed: ' + e.message)
+    } finally {
+      setEditProjSaving(false)
+    }
+  }
+
+  // Phase detail view
+  if (selPhase && selProject) {
+    const done = selPhase.tasks?.filter(t => t.status === 'done' || t.status === 'approved').length || 0
+    const total = selPhase.tasks?.length || 0
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div style={{ padding: '16px 20px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button onClick={() => setSelPhase(null)} style={{ fontSize: 20, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer' }}>←</button>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: 17 }}>{selPhase.name}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{selProject.name}</div>
+            </div>
+            {selPhase.permit_url && (
+              <a
+                href={selPhase.permit_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '6px 12px', background: 'var(--orange)', color: 'white',
+                  borderRadius: 20, fontSize: 12, fontWeight: 700,
+                  textDecoration: 'none', flexShrink: 0,
+                }}>
+                📄 Permit
+              </a>
+            )}
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+
+          {/* Permit URL row */}
+          <div style={{
+            background: 'var(--surface)', border: `1px solid ${editingPermit ? 'var(--orange)' : 'var(--border)'}`,
+            borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 14,
+            display: 'flex', alignItems: 'center', gap: 10
+          }}>
+            <span style={{ fontSize: 16 }}>📄</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 2 }}>PERMIT</div>
+              {editingPermit ? (
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    type="url"
+                    value={editPermitVal}
+                    onChange={e => setEditPermitVal(e.target.value)}
+                    placeholder="https://drive.google.com/..."
+                    autoFocus
+                    style={{
+                      flex: 1, padding: '4px 8px', background: 'var(--surface2)',
+                      border: '1.5px solid var(--orange)', borderRadius: 'var(--r-xs)',
+                      color: 'var(--text)', fontSize: 12, minWidth: 0,
+                    }}
+                    onKeyDown={e => { if (e.key === 'Enter') savePermitUrl(); if (e.key === 'Escape') setEditingPermit(false) }}
+                  />
+                  <button onClick={savePermitUrl} disabled={permitSaving}
+                    style={{ padding: '4px 10px', background: 'var(--orange)', color: 'white', border: 'none', borderRadius: 'var(--r-xs)', fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>
+                    {permitSaving ? '...' : 'Save'}
+                  </button>
+                  <button onClick={() => setEditingPermit(false)}
+                    style={{ padding: '4px 8px', background: 'var(--gray-lt)', color: 'var(--muted)', border: 'none', borderRadius: 'var(--r-xs)', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>✕</button>
+                </div>
+              ) : selPhase.permit_url ? (
+                <div style={{ fontSize: 12, color: 'var(--orange)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {selPhase.permit_url}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: 'var(--hint)' }}>No permit linked</div>
+              )}
+            </div>
+            <button
+              onClick={() => { setEditingPermit(true); setEditPermitVal(selPhase.permit_url || '') }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, color: 'var(--muted)', flexShrink: 0 }}>
+              ✏️
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div className="sec-label" style={{ margin: 0 }}>Phase targets</div>
+            <span style={{ fontSize: 11, color: 'var(--hint)' }}>tap to edit</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 16 }}>
+            {TARGET_FIELDS.map(field => {
+              const current = selPhase[field.col] || selPhase[field.key] || 0
+              const isEditing = editingTarget === `${selPhase.id}-${field.key}`
+              return (
+                <div key={field.key} style={{
+                  background: 'var(--surface)', border: `1px solid ${isEditing ? 'var(--orange)' : 'var(--border)'}`,
+                  borderRadius: 'var(--r-sm)', padding: '8px 10px'
+                }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 600, marginBottom: 3 }}>{field.label}</div>
+                  {isEditing ? (
+                    <div>
+                      <input type="number" value={editVal} onChange={e => setEditVal(e.target.value)} autoFocus
+                        style={{ width: '100%', padding: '3px 4px', background: 'transparent', border: 'none', color: 'var(--orange)', fontSize: 15, fontWeight: 800, outline: 'none' }}
+                        onKeyDown={e => { if (e.key === 'Enter') saveTarget(selPhase, field); if (e.key === 'Escape') setEditingTarget(null) }} />
+                      <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                        <button onClick={() => saveTarget(selPhase, field)} disabled={editSaving}
+                          style={{ flex: 1, padding: '3px 0', background: 'var(--orange)', color: 'white', border: 'none', borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                          {editSaving ? '...' : 'Save'}
+                        </button>
+                        <button onClick={() => setEditingTarget(null)}
+                          style={{ padding: '3px 6px', background: 'var(--gray-lt)', color: 'var(--muted)', border: 'none', borderRadius: 4, fontSize: 11, cursor: 'pointer' }}>✕</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button onClick={() => { setEditingTarget(`${selPhase.id}-${field.key}`); setEditVal(String(current)) }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, width: '100%', textAlign: 'left' }}>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: current > 0 ? 'var(--orange)' : 'var(--hint)' }}>
+                        {current > 0 ? current.toLocaleString() : '—'}
+                      </div>
+                      <div style={{ fontSize: 9, color: 'var(--hint)' }}>{field.unit}</div>
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Tasks */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, marginBottom: 8 }}>
+            <div className="sec-label" style={{ margin: 0 }}>Tasks — {done} done / {total} total</div>
+            <button onClick={() => setShowAddTask(true)}
+              style={{ fontSize: 13, color: 'var(--orange)', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+              + Add task
+            </button>
+          </div>
+
+          {(() => {
+            const tasks = selPhase.tasks || []
+            const openT = tasks.filter(t => t.status === 'open' || (!t.status))
+            const pendingT = tasks.filter(t => t.status === 'pending')
+            const approvedT = tasks.filter(t => t.status === 'approved' || t.status === 'done')
+
+            const CreatorChip = ({ task }) => {
+              const c = task.creator
+              if (!c) return null
+              return (
+                <span className="creator-chip" title={c.name}>
+                  <span className="creator-initials">{c.initials}</span>
+                  <span className="creator-name">{c.name}</span>
+                </span>
+              )
+            }
+
+            return (
+              <>
+                {openT.map(t => {
+                  const jt = JOB_TYPES.find(j => j.id === (t.type || t.task_type)) || JOB_TYPES[0]
+                  return (
+                    <div key={t.id} style={{
+                      background: 'var(--surface)', border: '1px solid var(--border)',
+                      borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 6,
+                      display: 'flex', alignItems: 'center', gap: 10
+                    }}>
+                      <span style={{ fontSize: 16 }}>{jt.icon}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>
+                          {t.name}
+                          <CreatorChip task={t} />
+                        </div>
+                        {t.notes && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t.notes}</div>}
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--gray-lt)', color: 'var(--muted)' }}>Open</span>
+                      <button onClick={() => setConfirmDeleteTask(t)}
+                        style={{ background: 'var(--red-lt)', border: 'none', borderRadius: 'var(--r-xs)', padding: '4px 8px', cursor: 'pointer', fontSize: 13, color: 'var(--red)' }}>
+                        🗑
+                      </button>
+                    </div>
+                  )
+                })}
+
+                {pendingT.map(t => {
+                  const jt = JOB_TYPES.find(j => j.id === (t.type || t.task_type)) || JOB_TYPES[0]
+                  return (
+                    <div key={t.id} style={{
+                      background: 'var(--surface)', border: '1px solid var(--border)',
+                      borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 6,
+                      display: 'flex', alignItems: 'center', gap: 10
+                    }}>
+                      <span style={{ fontSize: 16 }}>{jt.icon}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>
+                          {t.name}
+                          <CreatorChip task={t} />
+                        </div>
+                        {t.notes && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t.notes}</div>}
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--amber-lt)', color: 'var(--amber)' }}>Pending</span>
+                      <button onClick={() => setConfirmDeleteTask(t)}
+                        style={{ background: 'var(--red-lt)', border: 'none', borderRadius: 'var(--r-xs)', padding: '4px 8px', cursor: 'pointer', fontSize: 13, color: 'var(--red)' }}>
+                        🗑
+                      </button>
+                    </div>
+                  )
+                })}
+
+                {approvedT.map(t => (
+                  <div key={t.id} style={{
+                    background: 'var(--surface)', border: '1px solid var(--border)',
+                    borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 6,
+                    display: 'flex', alignItems: 'center', gap: 10, opacity: 0.6
+                  }}>
+                    <span style={{ fontSize: 14, color: 'var(--teal-mid)' }}>✓</span>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--muted)', flex: 1, minWidth: 0 }}>
+                      {t.name}
+                      <CreatorChip task={t} />
+                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--teal-lt)', color: 'var(--teal-mid)' }}>
+                      {t.status === 'approved' ? 'Approved' : 'Done'}
+                    </span>
+                    <button onClick={() => setConfirmDeleteTask(t)}
+                      style={{ background: 'var(--red-lt)', border: 'none', borderRadius: 'var(--r-xs)', padding: '4px 8px', cursor: 'pointer', fontSize: 13, color: 'var(--red)' }}>
+                      🗑
+                    </button>
+                  </div>
+                ))}
+              </>
+            )
+          })()}
+
+          {(selPhase.tasks || []).length === 0 && (
+            <div style={{ textAlign: 'center', padding: '20px 0', fontSize: 13, color: 'var(--hint)' }}>
+              No tasks yet — add one above
+            </div>
+          )}
+
+          {/* Delete task confirmation */}
+          {confirmDeleteTask && (
+            <div className="overlay open" onClick={e => e.target === e.currentTarget && setConfirmDeleteTask(null)}>
+              <div className="overlay-sheet">
+                <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Delete task?</div>
+                <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 20 }}>
+                  "{confirmDeleteTask.name}" and all its logged data will be permanently removed.
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setConfirmDeleteTask(null)}>Cancel</button>
+                  <button className="btn btn-danger" style={{ flex: 2 }} onClick={() => handleDeleteTask(confirmDeleteTask)}>
+                    Delete task
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Add task overlay */}
+          {showAddTask && (
+            <div className="overlay open" onClick={e => e.target === e.currentTarget && setShowAddTask(false)}>
+              <div className="overlay-sheet">
+                <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Add Task</div>
+                <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>Adding to {selPhase.name}</div>
+
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>Job type</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {JOB_TYPES.map(jt => (
+                      <button key={jt.id}
+                        className={`job-chip${taskJobType === jt.id ? ' selected' : ''}`}
+                        onClick={() => setTaskJobType(jt.id)}>
+                        {jt.icon} {jt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="field">
+                  <label>Task name / location</label>
+                  <input type="text" placeholder="e.g. Elm St Poles 14–21"
+                    value={taskName} onChange={e => setTaskName(e.target.value)} autoFocus />
+                </div>
+                <div className="field">
+                  <label>Notes (optional)</label>
+                  <textarea placeholder="Scope notes, special conditions..."
+                    value={taskNotes} onChange={e => setTaskNotes(e.target.value)} style={{ minHeight: 56 }} />
+                </div>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowAddTask(false)}>Cancel</button>
+                  <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleAddTask}
+                    disabled={taskSaving || !taskName.trim()}>
+                    {taskSaving ? 'Saving...' : 'Add task'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // Project detail view
+  if (selProject) {
+    const totalTasks = selProject.phases?.reduce((a, ph) => a + ph.tasks.length, 0) || 0
+    const doneTasks = selProject.phases?.reduce((a, ph) => a + ph.tasks.filter(t => t.status === 'done' || t.status === 'approved').length, 0) || 0
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div style={{ padding: '16px 20px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button onClick={() => setSelProject(null)} style={{ fontSize: 20, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer' }}>←</button>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 17 }}>{selProject.name}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{selProject.region}</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: 14 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 4 }}>TASKS</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--orange)' }}>{doneTasks}/{totalTasks}</div>
+              <div style={{ fontSize: 11, color: 'var(--hint)' }}>done</div>
+            </div>
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: 14 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 4 }}>PHASES</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--orange)' }}>{selProject.phases?.length || 0}</div>
+              <div style={{ fontSize: 11, color: 'var(--hint)' }}>total</div>
+            </div>
+          </div>
+
+          {/* Project-level targets — editable */}
+          <div className="sec-label" style={{ marginBottom: 8 }}>Project targets — tap to edit</div>
+          {PROJECT_TARGET_FIELDS.map(f => {
+            const current = selProject[f.key] || 0
+            const isEditing = editingProjTarget === f.key
+            return (
+              <div key={f.key} style={{
+                background: 'var(--surface)', border: '1px solid var(--border)',
+                borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 6,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+              }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{f.label}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{f.unit}</div>
+                </div>
+                {isEditing ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="number" value={editProjVal} onChange={e => setEditProjVal(e.target.value)} autoFocus
+                      style={{ width: 100, padding: '6px 10px', background: 'var(--surface2)', border: '1.5px solid var(--orange)', borderRadius: 'var(--r-xs)', color: 'var(--text)', fontSize: 16, fontWeight: 700, textAlign: 'right' }}
+                      onKeyDown={e => { if (e.key === 'Enter') saveProjectTarget(f); if (e.key === 'Escape') setEditingProjTarget(null) }} />
+                    <button onClick={() => saveProjectTarget(f)} disabled={editProjSaving}
+                      style={{ padding: '6px 12px', background: 'var(--orange)', color: 'white', border: 'none', borderRadius: 'var(--r-xs)', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                      {editProjSaving ? '...' : 'Save'}
+                    </button>
+                    <button onClick={() => setEditingProjTarget(null)}
+                      style={{ padding: '6px 10px', background: 'var(--gray-lt)', color: 'var(--muted)', border: 'none', borderRadius: 'var(--r-xs)', fontSize: 13, cursor: 'pointer' }}>✕</button>
+                  </div>
+                ) : (
+                  <button onClick={() => { setEditingProjTarget(f.key); setEditProjVal(String(current)) }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', textAlign: 'right' }}>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: current > 0 ? 'var(--orange)' : 'var(--hint)' }}>{current.toLocaleString()}</div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>tap to edit</div>
+                  </button>
+                )}
+              </div>
+            )
+          })}
+          <div style={{ marginBottom: 16 }} />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <div className="sec-label" style={{ margin: 0 }}>Phases — tap to edit targets</div>
+            <button onClick={() => setShowAddPhase(true)}
+              style={{ fontSize: 13, color: 'var(--orange)', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+              + Add phase
+            </button>
+          </div>
+
+          {(selProject.phases || []).map(ph => {
+            const done = ph.tasks.filter(t => t.status === 'done' || t.status === 'approved').length
+            const total = ph.tasks.length
+            const pct = total > 0 ? Math.round(done / total * 100) : 0
+            const hasTargets = TARGET_FIELDS.some(f => (ph[f.col] || ph[f.key] || 0) > 0)
+
+            return (
+              <div key={ph.id}
+                onClick={() => setSelPhase(ph)}
+                style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 8, cursor: 'pointer' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontWeight: 700 }}>{ph.name}</span>
+                      {ph.permit_url && (
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10, background: 'var(--orange)', color: 'white' }}>
+                          📄 Permit
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                      {done}/{total} tasks
+                      {hasTargets && (
+                        <span style={{ marginLeft: 8, color: 'var(--hint)' }}>
+                          {TARGET_FIELDS.filter(f => (ph[f.col] || ph[f.key] || 0) > 0).map(f =>
+                            `${(ph[f.col] || ph[f.key] || 0).toLocaleString()} ${f.unit} ${f.label}`
+                          ).join(' · ')}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 12 }}>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--orange)' }}>{pct}%</div>
+                    <span style={{ fontSize: 16, color: 'var(--muted)' }}>›</span>
+                  </div>
+                </div>
+                <div className="prog-bar" style={{ marginTop: 8 }}>
+                  <div className="prog-fill" style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            )
+          })}
+
+          {(!selProject.phases || selProject.phases.length === 0) && (
+            <div style={{ textAlign: 'center', padding: 24, color: 'var(--hint)', fontSize: 13 }}>No phases yet — add one above</div>
+          )}
+        </div>
+
+        {showAddPhase && (
+          <div className="overlay open" onClick={e => e.target === e.currentTarget && setShowAddPhase(false)}>
+            <div className="overlay-sheet">
+              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Add Phase</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>Adding to {selProject.name}</div>
+
+              <div className="field">
+                <label>Phase name</label>
+                <input type="text" placeholder="e.g. Elk Ridge Greenfield 2026" value={phaseName}
+                  onChange={e => setPhaseName(e.target.value)} autoFocus />
+              </div>
+
+              <div className="field">
+                <label>Permit URL (optional)</label>
+                <input type="url" placeholder="https://drive.google.com/..."
+                  value={phasePermitUrl} onChange={e => setPhasePermitUrl(e.target.value)} />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {TARGET_FIELDS.map(f => (
+                  <div className="field" key={f.key}>
+                    <label>{f.label} target ({f.unit})</label>
+                    <input type="number" placeholder="0"
+                      value={phaseTargets[f.key] || ''}
+                      onChange={e => setPhaseTargets(prev => ({ ...prev, [f.key]: e.target.value }))} />
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowAddPhase(false)}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleAddPhase}
+                  disabled={phaseSaving || !phaseName.trim()}>
+                  {phaseSaving ? 'Saving...' : 'Add phase'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Project list
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div style={{ fontWeight: 800, fontSize: 17 }}>Projects</div>
+          <button onClick={() => setShowAddProject(true)}
+            style={{ padding: '7px 14px', background: 'var(--orange)', color: 'white', border: 'none', borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+            + New project
+          </button>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px' }}>
+        {projects.map(p => {
+          const totalTasks = p.phases?.reduce((a, ph) => a + ph.tasks.length, 0) || 0
+          const doneTasks = p.phases?.reduce((a, ph) => a + ph.tasks.filter(t => t.status === 'done' || t.status === 'approved').length, 0) || 0
+          const pct = totalTasks > 0 ? Math.round(doneTasks / totalTasks * 100) : 0
+
+          return (
+            <div key={p.id} onClick={() => setSelProject(p)}
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: 16, marginBottom: 10, cursor: 'pointer' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 16 }}>{p.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                    {p.phases?.length || 0} phases · {totalTasks} tasks
+                  </div>
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--orange)' }}>{pct}%</div>
+              </div>
+              <div className="prog-bar">
+                <div className="prog-fill" style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {showAddProject && (
+        <div className="overlay open" onClick={e => e.target === e.currentTarget && setShowAddProject(false)}>
+          <div className="overlay-sheet">
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>New Project</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>Add a new market or build area</div>
+
+            <div className="field">
+              <label>Project name</label>
+              <input type="text" placeholder="e.g. Spanish Fork, Saratoga Springs" value={projName} onChange={e => setProjName(e.target.value)} autoFocus />
+            </div>
+            <div className="field">
+              <label>Region</label>
+              <input type="text" placeholder="e.g. Utah Valley, Wasatch Front" value={projRegion} onChange={e => setProjRegion(e.target.value)} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {PROJECT_TARGET_FIELDS.map(f => (
+                <div className="field" key={f.key}>
+                  <label>{f.label} target ({f.unit})</label>
+                  <input type="number" placeholder="0"
+                    value={projTargets[f.key] || ''}
+                    onChange={e => setProjTargets(prev => ({ ...prev, [f.key]: e.target.value }))} />
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowAddProject(false)}>Cancel</button>
+              <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleAddProject}
+                disabled={projSaving || !projName.trim()}>
+                {projSaving ? 'Creating...' : 'Create project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

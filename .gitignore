@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Local env overrides — anything ending in .local is per-machine and never committed.
+# .env (no .local suffix) IS committed and holds the project defaults.
+.env.local
+.env.*.local
+
+# Editor / OS junk
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
+
+# Supabase CLI temp state
+supabase/.temp/
+
+# Claude Code session data
+.claude/
