@@ -1,16 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { useApp } from './AppContext'
+import { buildEmailFromUsername } from './lib/admin'
 
 // Standard username + password login. Replaces the old UserPicker now that
 // crew rosters are growing past the point where a grid of avatars is useful.
 //
 // Username format: firstname.lastname (e.g. "francisco.molina"). The app
 // auto-appends @fiberlog.utahbroadband.com to form the synthetic email
-// stored in Supabase Auth. If the user types a full email (anything with
-// an "@"), we use it as-is, so admins can still sign in with their real
-// address if they're set up that way.
+// stored in Supabase Auth (handled by buildEmailFromUsername in lib/admin).
+// If the user types a full email (anything with an "@"), it's used as-is.
 
-const EMAIL_DOMAIN = '@fiberlog.utahbroadband.com'
 const REMEMBERED_USERNAME_KEY = 'fiberlog_remembered_username'
 
 export default function Login() {
@@ -33,17 +32,6 @@ export default function Login() {
     }
   }, [])
 
-  // Build the email we'll send to Supabase Auth from whatever the user typed.
-  // - "francisco.molina" → "francisco.molina@fiberlog.utahbroadband.com"
-  // - "chris.riddell@fiberlog.utahbroadband.com" → unchanged
-  // - "  Francisco.Molina  " → trimmed and lowercased
-  function resolveEmail(raw) {
-    const cleaned = (raw || '').trim().toLowerCase()
-    if (!cleaned) return ''
-    if (cleaned.includes('@')) return cleaned
-    return cleaned + EMAIL_DOMAIN
-  }
-
   async function handleSubmit(e) {
     if (e) e.preventDefault()
     if (submitting) return
@@ -59,7 +47,7 @@ export default function Login() {
       return
     }
 
-    const email = resolveEmail(trimmed)
+    const email = buildEmailFromUsername(trimmed)
 
     // Find the local user record matching this email so we can pass the
     // full user object to login() — login() does the actual auth call,

@@ -32,7 +32,7 @@ function getJobType(task) {
 }
 
 export default function TaskList({ project, phase, onSelect, onBack, onUserTap }) {
-  const { currentUser, updateTask, showToast, lang } = useApp()
+  const { currentUser, setTaskLocal, showToast, lang } = useApp()
   const [tasks, setTasks] = useState(phase.tasks || [])
   const [showNewTask, setShowNewTask] = useState(false)
   const [taskName, setTaskName] = useState('')
@@ -93,9 +93,9 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
           return [...prev, hydrated]
         })
         // Defer global update to the microtask queue — React 18's batching means
-        // the setTasks updater above hasn't necessarily run yet, but updateTask
+        // the setTasks updater above hasn't necessarily run yet, but setTaskLocal
         // doesn't depend on local state, so we can queue it directly.
-        Promise.resolve().then(() => updateTask(project.id, phase.id, hydrated))
+        Promise.resolve().then(() => setTaskLocal(project.id, phase.id, hydrated))
       },
       // Task updated (status change, name edit, etc.) — merge and propagate.
       // The realtime payload only has raw columns, so merge with existing
@@ -113,7 +113,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
           // Propagate to global state. Defer to the microtask queue so we
           // don't trigger an AppContext update during this component's render.
           Promise.resolve().then(() => {
-            updateTask(project.id, phase.id, merged)
+            setTaskLocal(project.id, phase.id, merged)
             if (updated.status === 'approved') {
               showToast(`${merged.name} approved`)
             }
@@ -132,7 +132,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
       const saved = await addTask(phase.id, taskName.trim(), jobType, taskNotes.trim(), currentUser?.id)
       const newTask = { ...saved, type: saved.task_type, notes: saved.scope_notes || '', status: 'open' }
       setTasks(prev => prev.find(tk => tk.id === newTask.id) ? prev : [...prev, newTask])
-      updateTask(project.id, phase.id, newTask)
+      setTaskLocal(project.id, phase.id, newTask)
       setTaskName(''); setTaskNotes(''); setJobType('aerial')
       setShowNewTask(false)
       showToast(t('toastTaskAdded', lang))

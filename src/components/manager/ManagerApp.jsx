@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useApp } from '../../AppContext'
+import { useIsWide } from '../../lib/useIsWide'
 import SubmissionsQueue from './SubmissionsQueue'
 import CrewStatus from './CrewStatus'
 import ProjectManager from './ProjectManager'
@@ -9,16 +10,6 @@ import AssemblyEditor from './AssemblyEditor'
 import InventoryView from './InventoryView'
 
 const isCompletedTask = t => t.status === 'done' || t.status === 'approved'
-
-function useIsWide() {
-  const [wide, setWide] = useState(() => window.innerWidth >= 768)
-  useEffect(() => {
-    const fn = () => setWide(window.innerWidth >= 768)
-    window.addEventListener('resize', fn)
-    return () => window.removeEventListener('resize', fn)
-  }, [])
-  return wide
-}
 
 const NAV_ITEMS = [
   { id: 'submissions', label: 'Approvals',   icon: '✅' },

@@ -13,7 +13,7 @@ const TABS = (lang) => [
 const POLE_IDS = ['inter-12','inter-14','inter-16','term-12','term-14','term-16']
 
 export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDone, onUserTap }) {
-  const { currentUser, showToast, lang, assemblies, updateTask } = useApp()
+  const { currentUser, showToast, lang, assemblies, setTaskLocal } = useApp()
 
   // assemblies is now { aerial: [], footage: [], splice: [], underground: [] } from Supabase
   const ASSEMBLIES = assemblies || { aerial: [], footage: [], splice: [], underground: [] }
@@ -323,7 +323,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
         status: 'pending',
         updated_at: new Date().toISOString(),
       }
-      updateTask(project.id, phase.id, updatedTask)
+      setTaskLocal(project.id, phase.id, updatedTask)
       showToast(t('toastSubmitted', lang))
       onSubmitDone()
     } catch(e) {

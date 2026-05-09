@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useApp } from '../../AppContext'
+import { useIsWide } from '../../lib/useIsWide'
 import ProjectList from './ProjectList'
 import PhaseList from './PhaseList'
 import TaskList from './TaskList'
@@ -22,16 +23,6 @@ const JOB_ICONS = { aerial: '🏗️', underground: '⛏️', splice: '🔌', fi
 // so it reappears here.
 const isActiveCrewTask = t => t.status !== 'done' && t.status !== 'approved' && t.status !== 'pending'
 const isCompletedTask = t => t.status === 'done' || t.status === 'approved'
-
-function useIsWide() {
-  const [wide, setWide] = useState(() => window.innerWidth >= 768)
-  useEffect(() => {
-    const fn = () => setWide(window.innerWidth >= 768)
-    window.addEventListener('resize', fn)
-    return () => window.removeEventListener('resize', fn)
-  }, [])
-  return wide
-}
 
 // ─── SIGN OUT CONFIRM ─────────────────────────────────────────────────────────
 function SignOutConfirm({ onConfirm, onCancel, lang }) {

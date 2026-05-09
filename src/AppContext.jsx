@@ -198,7 +198,13 @@ export function AppProvider({ children }) {
     setTimeout(() => setToast(null), duration)
   }
 
-  function updateTask(projectId, phaseId, task) {
+  // Imperatively patch a task in the in-memory project tree. LOCAL-ONLY —
+  // does not persist to the DB. Use this when you've already written to
+  // the DB (or are about to) and want the UI to reflect the change before
+  // the realtime subscription fires. The realtime listener will eventually
+  // arrive at the same state, so this is a latency-hiding tool, not a
+  // source of truth.
+  function setTaskLocal(projectId, phaseId, task) {
     setProjects(prev => prev.map(p => {
       if (p.id !== projectId) return p
       return {
@@ -228,7 +234,7 @@ export function AppProvider({ children }) {
       currentSession, setCurrentSession,
       loading, error,
       toast, showToast,
-      updateTask,
+      setTaskLocal,
       reload: loadAll,
       // Theme
       darkMode, setDarkMode, toggleDarkMode,
