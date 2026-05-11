@@ -172,7 +172,46 @@ npx supabase login                             # auth supabase CLI (first time)
 1. **Reconcile workflow** — paste actual counts from an audit CSV back, auto-generate adjust movements
 2. **Onboard new infrastructure + field tech crew** — schema is ready, do via the Users admin
 3. **Sonar transaction CSV importer** — daily install transactions → bulk `issue` movements off truck stock. Sample format at `C:\Users\admin\Desktop\Claude stuff\West field tech report (6).csv`
-4. **Crew "what's on my truck" view + load/return** — read-only stock filtered to assigned truck, plus simplified movement sheet for warehouse → truck and truck → warehouse transfers (we started this — partial design only, no code yet)
+4. **Crew inventory UI + permissions framework** — backend complete, UI pending. **Decisions locked, ready to build next session:**
+
+    **Backend (done):**
+    - 16 personal trucks auto-created (one per active crew/contractor user, named `<FirstName>'s Truck`, assigned via `inventory_locations.assigned_to`).
+    - Trigger `trg_ensure_crew_truck` auto-creates a truck on new crew/contractor user insert OR role/is_active flip.
+    - RPC `public.record_crew_movement(operation, part_id, quantity, other_location_id, unit, notes, vendor_invoice, unit_cost, task_id)` — single entry point for all five ops (load, return, issue, scrap, transfer). SECURITY DEFINER, auth.uid()-guarded, EXECUTE granted only to authenticated.
+    - 7 legacy "rollup buckets" (`Crew - Drop`, `Crew - Splice`, `Contractor - RNS`, etc.) are untouched — they hold ~97K units of imported stock and now function as additional "load from" sources.
+
+    **Phase 1 — crew UI for Load + Return** (start here):
+    - **Nav placement:** top of crew sidebar above the projects tree (and a dedicated bottom-tab on narrow screens).
+    - **Scope this session:** only Load + Return. Issue/Scrap/Transfer deferred to a follow-up — the RPC already supports them, just no UI yet.
+    - **New files:**
+      - `src/components/crew/MyStockView.jsx` — read-only stock list scoped to the caller's truck. Search, group by category. Realtime subscription on `inventory_movements` filtered to `from_location_id=my_truck OR to_location_id=my_truck`.
+      - `src/components/crew/CrewMovementSheet.jsx` — unified overlay sheet with a `mode` prop ('load' | 'return'). Reuse the existing overlay-sheet pattern from `manager/RecordMovementSheet.jsx`.
+    - **Modifications:**
+      - `src/components/crew/CrewApp.jsx` — add "📦 My Stock" entry at the top of the sidebar (wide) and bottom-nav (narrow). New screen state `'mystock'`.
+      - `src/lib/inventory.js` — add `getMyTruck()`, `getMyTruckStock()`, `recordCrewMovement({ operation, partId, quantity, otherLocationId, notes, ... })` wrapping the RPC.
+    - **Reusable patterns:** `searchPartsCatalog` (supabase.js), `getLocations`/`getStockByLocation` (inventory.js), overlay sheet shell from `RecordMovementSheet`, stock-row rendering from `InventoryStockTab`.
+
+    **Phase 2 — per-user operation overrides** (½ session after Phase 1):
+    - **Migration:** new table `crew_operation_permissions(user_id, operation, allowed bool, reason, updated_at)` with PK on `(user_id, operation)`. Empty rows = default allow. RLS: auth SELECT, staff write.
+    - **RPC update:** in `record_crew_movement`, before the operation case, check the table — if a `allowed=false` row exists for `(auth.uid(), p_operation)`, raise `42501`.
+    - **JS/UI:**
+      - `src/lib/admin.js` — `getUserPermissions(userId)`, `setUserOperationPermission(userId, op, allowed, reason)`.
+      - `src/components/manager/AdminUsersView.jsx` — add a "Permissions" section in the user-edit sheet with 5 toggles. Shows all 5 ops even though UI only exposes 2 — future-proof.
+      - `src/components/crew/MyStockView.jsx` — on mount, load caller's permissions; hide the Load/Return buttons that are denied. RPC is the authority; UI is a courtesy.
+
+    **Phase 3 — crew_type × part-department restrictions** (½–1 session after Phase 2):
+    - **Migration:** new table `crew_type_part_restrictions(crew_type, department)` — whitelist, PK on both. Empty rows for a crew_type = no restriction. RLS same pattern.
+    - **RPC update:** in `record_crew_movement`, lookup `parts_catalog.department` for `p_part_id`. If the caller's `crew_type` has any rows in the table, the part's department must be in the allowed set. **Parts with `department IS NULL` are allowed for all crew types** (lenient default for BoxHero drafts).
+    - **Current departments:** `Fiber Construction` (155), `Drop Installation` (17), `Underground construction` (13), `Splice` (3), `Customer Installation` (1). New departments can be added later as the part taxonomy stabilizes (e.g., when Infrastructure crew is onboarded).
+    - **JS/UI:**
+      - `src/lib/admin.js` — `getCrewTypePartRestrictions()`, `setCrewTypePartRestriction(crewType, department, allowed)`.
+      - New: `src/components/manager/CrewTypePermissionsView.jsx` — checkbox-grid matrix (rows: 8 crew_types, columns: N departments). Accessed from AdminPanel.
+      - `MyStockView` Load picker hides parts whose department is blocked for the caller's crew_type.
+
+    **Future follow-ups (deferred):**
+    - Issue / Scrap / Transfer UI flows (RPC already supports them; just need sheets and buttons).
+    - Migrate stock from the 7 legacy rollup buckets to specific crew trucks (manual work — managers do this via the existing Bulk Move sheet whenever they want).
+    - Auto-deduct on submission approval for `aerial`/`underground`/`splice`/`infrastructure` crews (backlog item #9 — depends on Phase 1 being shipped).
 5. **Sage daily export** — Edge Function pattern, stamps `exported_at` + `export_batch_id` on included movements
 6. **Per-line `project_id` on `log_entries`** — schema change for field-tech multi-cost-center allocation (Wave / Gigwave / general). Pending field-tech UI workflow decisions (per-customer vs per-day)
 7. **Field tech UI surface** — flatter "today's installs" list with one-tap into per-customer materials log
