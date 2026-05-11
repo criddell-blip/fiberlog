@@ -221,7 +221,7 @@ npx supabase login                             # auth supabase CLI (first time)
 11. **Security & DB hygiene from Supabase advisor scan** — RLS rewrite + view/function hardening complete. Five lints remain, all intentional or out-of-band:
     - `tasks_insert` and `tasks_update` are wide-open by design (crew need to create tasks and auto-save `working_counts`; the "Continued from X" handoff depends on any-crew updates). Documented exception.
     - `approve_submission` and `is_staff()` are reachable by `authenticated`, intentionally. `approve_submission` is the manager UI's approval RPC and has an `auth.uid()`+role guard inside. `is_staff()` is called by RLS policies and must be executable in the user's context.
-    - Leaked-password protection toggle (Supabase Auth → Settings → enable HaveIBeenPwned check) — **manual, not a SQL fix**.
+    - ~~Leaked-password protection toggle~~ — gated behind Supabase Pro plan. Not worth a plan upgrade for FiberLog's risk profile (no public signup, synthetic emails, admin-set passwords). Free-tier alternative if desired: in Auth → Sign In / Providers → Email, bump minimum password length from 6 → 8 and set a password-requirements rule. Both apply only to new passwords, don't invalidate existing.
     - Performance lints (64 of them, all INFO/WARN, none urgent at current scale): 32 unindexed FKs, 24 duplicate permissive policies, 5 unused indexes, 3 `auth_rls_initplan` cases. Revisit if/when query latency becomes noticeable.
 
     Helper installed: `public.is_staff()` returns true iff `auth.uid()`'s role is `owner` or `manager`. Used by every staff-write RLS policy.
