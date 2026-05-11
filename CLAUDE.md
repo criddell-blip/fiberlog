@@ -179,13 +179,15 @@ npx supabase login                             # auth supabase CLI (first time)
 8. **Locations tab UX** — "View stock" jump-link + stock summary counts on each location card
 9. **Phase 2 auto-deduct on submission approval** — create `issue` movements from assigned truck for parts the crew logged
 10. **BoxHero drafts cleanup** — 476 placeholder drafts with `unit='ea'`. Cable items need `unit='ft'`. Use Bulk edit on Parts tab → Drafts → search "cable" → bulk edit unit=ft.
-11. **Security & DB hygiene from Supabase advisor scan** (run with `mcp_get_advisors`). Nothing here blocks development; tackle as one focused session. In rough order:
-    - **(critical) RLS is permissive on 14 tables.** Every one has a policy of `USING (true) WITH CHECK (true)` for `ALL` on the `authenticated` role: `assemblies`, `assembly_parts`, `emergency_log_parts`, `emergency_logs`, `entry_parts`, `log_entries`, `material_consumption`, `parts_catalog` (UPDATE+INSERT), `phases`, `projects`, `submissions`, `task_assignments`, `tasks`, `users`, `work_sessions`. **In practice the UI doesn't expose this**, but a crew member with devtools could promote themselves to owner via `users` UPDATE, delete any project, read other crews' submissions, etc. Need an access matrix: anon = nothing (except the existing `users_login_picker`); crew = read projects/phases/tasks/assemblies/parts, write only their own log_entries/work_sessions/submissions; manager = everything crew + approve + modify projects; owner = manager + user CRUD. Rewrite policies one table at a time, deploy + smoke test as we go.
-    - **3 SECURITY DEFINER views** (`crew_activity_today`, `project_completion`, `material_summary`) bypass RLS on underlying tables. Verify intentionality, recreate without `SECURITY DEFINER` (or set `security_invoker = true`).
-    - **SECURITY DEFINER functions reachable by anon.** `approve_submission` has its own `auth.uid()` guard so the exposure is theoretical, but `REVOKE EXECUTE ON FUNCTION public.approve_submission(uuid, text) FROM anon;` is good hygiene. The trigger functions (`cascade_task_terminal_to_session`, `update_inventory_stock_on_movement`, `validate_inventory_location_parent`) shouldn't be RPC-callable at all — `REVOKE EXECUTE ... FROM PUBLIC` on each.
-    - **5 legacy functions with mutable `search_path`** (`update_updated_at_column`, `prevent_movement_modification`, `prevent_movement_delete`, `update_session_timestamp`, `increment_session_counts`, `increment_phase_actuals`). `ALTER FUNCTION ... SET search_path = public, pg_temp` on each. New functions added in this session already do this.
-    - **Leaked-password protection** disabled. Single dashboard toggle: Supabase Auth → Settings → enable HaveIBeenPwned check.
-    - **Performance (64 INFO/WARN, none urgent at current scale).** 32 unindexed FKs, 24 duplicate permissive policies (e.g. `assemblies` has both "managers can manage assemblies" and "managers can modify assemblies" — same effect, dedupe), 5 unused indexes (verify the dependent feature shipped before dropping), 3 `auth_rls_initplan` cases where policies call `auth.uid()` per row instead of `(select auth.uid())`.
+11. **Security & DB hygiene from Supabase advisor scan** — RLS rewrite + view/function hardening complete. Five lints remain, all intentional or out-of-band:
+    - `tasks_insert` and `tasks_update` are wide-open by design (crew need to create tasks and auto-save `working_counts`; the "Continued from X" handoff depends on any-crew updates). Documented exception.
+    - `approve_submission` and `is_staff()` are reachable by `authenticated`, intentionally. `approve_submission` is the manager UI's approval RPC and has an `auth.uid()`+role guard inside. `is_staff()` is called by RLS policies and must be executable in the user's context.
+    - Leaked-password protection toggle (Supabase Auth → Settings → enable HaveIBeenPwned check) — **manual, not a SQL fix**.
+    - Performance lints (64 of them, all INFO/WARN, none urgent at current scale): 32 unindexed FKs, 24 duplicate permissive policies, 5 unused indexes, 3 `auth_rls_initplan` cases. Revisit if/when query latency becomes noticeable.
+
+    Helper installed: `public.is_staff()` returns true iff `auth.uid()`'s role is `owner` or `manager`. Used by every staff-write RLS policy.
+
+    Migrations applied: `tighten_rls_policies`, `harden_views_functions_execute_grants`.
 
 ---
 
