@@ -749,7 +749,17 @@ function CrewPermissionsSection({ userId }) {
     try {
       if (deny) {
         const saved = await setUserOperationPermission(userId, op, false, reason)
-        setRows(prev => [...prev.filter(r => r.operation !== op), saved])
+        // Trust our input even if the upsert SELECT-back returned null
+        // (PostgREST quirk on some on-conflict update paths). The data
+        // landed; we just synthesize the row locally.
+        const row = saved || {
+          user_id: userId,
+          operation: op,
+          allowed: false,
+          reason: reason || null,
+          updated_at: new Date().toISOString(),
+        }
+        setRows(prev => [...prev.filter(r => r.operation !== op), row])
       } else {
         await clearUserOperationPermission(userId, op)
         setRows(prev => prev.filter(r => r.operation !== op))

@@ -136,6 +136,11 @@ export async function getUserPermissions(userId) {
 // deny; pass allowed=true to document the explicit allowance (functionally
 // equivalent to deleting the row but kept for audit trail). The
 // updated_at column is bumped by a DB trigger so we don't need to set it.
+//
+// Don't chain .single() here — the supabase-js `.upsert(...).select().single()`
+// combo can return "Cannot coerce the result to a single JSON object" in
+// some on-conflict update paths even when exactly one row landed. Plain
+// .select() + index 0 is more robust.
 export async function setUserOperationPermission(userId, operation, allowed, reason = null) {
   if (!userId || !operation) throw new Error('userId and operation required')
   const { data, error } = await db
@@ -145,9 +150,8 @@ export async function setUserOperationPermission(userId, operation, allowed, rea
       { onConflict: 'user_id,operation' }
     )
     .select()
-    .single()
   if (error) throw error
-  return data
+  return Array.isArray(data) && data.length > 0 ? data[0] : null
 }
 
 // Remove the explicit row for (user, operation) — reverts to default-allow.
