@@ -114,3 +114,49 @@ export async function getAllUsers() {
   if (error) throw error
   return data || []
 }
+
+// ─── CREW OPERATION PERMISSIONS ──────────────────────────────────────────────
+
+// All operations a manager can override per-user. Order matters for UI display.
+export const CREW_OPERATIONS = ['load', 'return', 'issue', 'scrap', 'transfer']
+
+// Fetch all permission rows for a single user. Empty array = default-allow
+// for every operation. A row with allowed=false denies that operation.
+export async function getUserPermissions(userId) {
+  if (!userId) return []
+  const { data, error } = await db
+    .from('crew_operation_permissions')
+    .select('*')
+    .eq('user_id', userId)
+  if (error) throw error
+  return data || []
+}
+
+// Upsert a single per-user operation permission. Pass allowed=false to
+// deny; pass allowed=true to document the explicit allowance (functionally
+// equivalent to deleting the row but kept for audit trail). The
+// updated_at column is bumped by a DB trigger so we don't need to set it.
+export async function setUserOperationPermission(userId, operation, allowed, reason = null) {
+  if (!userId || !operation) throw new Error('userId and operation required')
+  const { data, error } = await db
+    .from('crew_operation_permissions')
+    .upsert(
+      { user_id: userId, operation, allowed, reason: reason || null },
+      { onConflict: 'user_id,operation' }
+    )
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+// Remove the explicit row for (user, operation) — reverts to default-allow.
+export async function clearUserOperationPermission(userId, operation) {
+  if (!userId || !operation) throw new Error('userId and operation required')
+  const { error } = await db
+    .from('crew_operation_permissions')
+    .delete()
+    .eq('user_id', userId)
+    .eq('operation', operation)
+  if (error) throw error
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useApp } from '../../AppContext'
-import { getMyTruckStock } from '../../lib/inventory'
+import { getMyTruckStock, getMyCrewPermissions } from '../../lib/inventory'
 import CrewMovementSheet from './CrewMovementSheet'
 
 // Crew-facing "what's on my truck" view. Read-only stock list scoped to
@@ -20,13 +20,20 @@ export default function MyStockView({ onBack, onUserTap }) {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [sheetMode, setSheetMode] = useState(null)   // 'load' | 'return' | null
+  // Set of operation strings the caller is *denied* (per crew_operation_permissions).
+  // Empty by default = everything allowed. RPC enforces server-side too.
+  const [deniedOps, setDeniedOps] = useState(() => new Set())
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const { truck: t, stock: s } = await getMyTruckStock()
+      const [{ truck: t, stock: s }, perms] = await Promise.all([
+        getMyTruckStock(),
+        getMyCrewPermissions(),
+      ])
       setTruck(t)
       setStock(s)
+      setDeniedOps(new Set(perms.filter(p => p.allowed === false).map(p => p.operation)))
     } catch (e) {
       console.error('Load my-stock failed:', e)
       showToast('Could not load stock: ' + e.message)
@@ -36,6 +43,9 @@ export default function MyStockView({ onBack, onUserTap }) {
   }, [showToast])
 
   useEffect(() => { load() }, [load])
+
+  const canLoad   = !deniedOps.has('load')
+  const canReturn = !deniedOps.has('return')
 
   // Client-side filter — stock lists for crew should never be huge (tens
   // to maybe a couple hundred parts), so doing this in JS keeps things
@@ -95,24 +105,35 @@ export default function MyStockView({ onBack, onUserTap }) {
         </div>
 
         {/* Action buttons. Load / Return only for now; Issue/Scrap/Transfer
-            ship in a follow-up. */}
+            ship in a follow-up. Buttons disappear entirely if a manager has
+            denied that operation for this crew member (per
+            crew_operation_permissions). RPC re-checks server-side regardless. */}
         <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            className="btn btn-primary"
-            style={{ flex: 1 }}
-            onClick={() => setSheetMode('load')}
-            disabled={!truck || loading}
-          >
-            ⬇ Load
-          </button>
-          <button
-            className="btn btn-ghost"
-            style={{ flex: 1 }}
-            onClick={() => setSheetMode('return')}
-            disabled={!truck || loading || stock.length === 0}
-          >
-            ↩ Return
-          </button>
+          {canLoad && (
+            <button
+              className="btn btn-primary"
+              style={{ flex: 1 }}
+              onClick={() => setSheetMode('load')}
+              disabled={!truck || loading}
+            >
+              ⬇ Load
+            </button>
+          )}
+          {canReturn && (
+            <button
+              className="btn btn-ghost"
+              style={{ flex: 1 }}
+              onClick={() => setSheetMode('return')}
+              disabled={!truck || loading || stock.length === 0}
+            >
+              ↩ Return
+            </button>
+          )}
+          {!canLoad && !canReturn && (
+            <div style={{ flex: 1, padding: '8px 12px', textAlign: 'center', fontSize: 12, color: 'var(--muted)', background: 'var(--surface2)', borderRadius: 'var(--r-sm)' }}>
+              No movements permitted — ask your manager.
+            </div>
+          )}
           <button
             onClick={load}
             disabled={loading}

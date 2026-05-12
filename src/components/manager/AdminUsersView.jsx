@@ -4,6 +4,8 @@ import {
   createUser, updateUserMetadata, deactivateUser, reactivateUser,
   resetUserPassword, getAllUsers,
   buildEmailFromUsername, generateInitials,
+  CREW_OPERATIONS,
+  getUserPermissions, setUserOperationPermission, clearUserOperationPermission,
 } from '../../lib/admin'
 
 const ROLE_OPTIONS = [
@@ -587,6 +589,13 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, onCancel, onSubmit 
             </label>
           )}
 
+          {/* Movement permissions (edit only; only applies to crew/contractor).
+              Saves immediately on toggle — independent of the form Save button
+              since it writes a separate table. */}
+          {!isNew && (role === 'crew' || role === 'contractor') && (
+            <CrewPermissionsSection userId={user?.id} />
+          )}
+
           {error && (
             <div style={{
               padding: '8px 12px',
@@ -687,6 +696,152 @@ function ResetPasswordSheet({ user, onCancel, onSubmit }) {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── Crew operation permissions section ──────────────────────────────────
+// Renders 5 toggles (one per crew operation). Default state for each op
+// is "allowed" (= no row in crew_operation_permissions for that op).
+// Toggling off creates/updates a row with allowed=false. Toggling back on
+// deletes the row. Reason field appears when an op is denied; saves on blur.
+//
+// Saves are live (per-toggle) rather than batched with the parent form's
+// submit, because permissions live in a different table and the user-edit
+// form has a different lifecycle.
+
+const OPERATION_LABELS = {
+  load:     { icon: '⬇', label: 'Load',     desc: 'Warehouse → my truck' },
+  return:   { icon: '↩', label: 'Return',   desc: 'My truck → warehouse' },
+  issue:    { icon: '⬆', label: 'Issue',    desc: 'Consumed in field (manual)' },
+  scrap:    { icon: '✕', label: 'Scrap',    desc: 'Damaged / written off' },
+  transfer: { icon: '↔', label: 'Transfer', desc: 'My truck → another crew' },
+}
+
+function CrewPermissionsSection({ userId }) {
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [busyOp, setBusyOp] = useState(null)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
+    setLoading(true)
+    getUserPermissions(userId)
+      .then(d => { if (!cancelled) setRows(d || []) })
+      .catch(e => { if (!cancelled) setErr(e.message || 'Failed to load permissions') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [userId])
+
+  const denyByOp = useMemo(() => {
+    const m = {}
+    for (const r of rows) {
+      if (r.allowed === false) m[r.operation] = r
+    }
+    return m
+  }, [rows])
+
+  async function setDenied(op, deny, reason = null) {
+    if (!userId) return
+    setBusyOp(op); setErr('')
+    try {
+      if (deny) {
+        const saved = await setUserOperationPermission(userId, op, false, reason)
+        setRows(prev => [...prev.filter(r => r.operation !== op), saved])
+      } else {
+        await clearUserOperationPermission(userId, op)
+        setRows(prev => prev.filter(r => r.operation !== op))
+      }
+    } catch (e) {
+      setErr(e.message || 'Update failed')
+    } finally {
+      setBusyOp(null)
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{
+        fontSize: 12, fontWeight: 700, color: 'var(--muted)',
+        textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6,
+      }}>
+        Movement permissions
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--hint)', marginBottom: 8 }}>
+        Every operation is allowed by default. Toggle off to block this user from doing it.
+      </div>
+
+      {loading && (
+        <div style={{ padding: 8, color: 'var(--muted)', fontSize: 12 }}>Loading…</div>
+      )}
+
+      {!loading && CREW_OPERATIONS.map(op => {
+        const meta = OPERATION_LABELS[op]
+        const deny = denyByOp[op]
+        const denied = !!deny
+        const busy = busyOp === op
+        return (
+          <div
+            key={op}
+            style={{
+              border: `1px solid ${denied ? 'var(--red)' : 'var(--border)'}`,
+              background: denied ? 'var(--red-lt)' : 'var(--surface)',
+              borderRadius: 'var(--r-sm)',
+              padding: '8px 12px',
+              marginBottom: 6,
+            }}
+          >
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={!denied}
+                disabled={busy}
+                onChange={e => setDenied(op, !e.target.checked)}
+                style={{ cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: 16, width: 18, textAlign: 'center' }}>{meta.icon}</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: denied ? 'var(--red)' : 'var(--text)' }}>
+                  {meta.label} {denied && <span style={{ fontWeight: 400, fontSize: 11 }}>— blocked</span>}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{meta.desc}</div>
+              </div>
+              {busy && <span style={{ fontSize: 11, color: 'var(--muted)' }}>saving…</span>}
+            </label>
+
+            {denied && (
+              <div style={{ marginTop: 8, paddingLeft: 38 }}>
+                <input
+                  type="text"
+                  defaultValue={deny.reason || ''}
+                  placeholder="Reason (shown to crew when they try)"
+                  onBlur={e => {
+                    const next = e.target.value.trim() || null
+                    if (next !== (deny.reason || null)) {
+                      setDenied(op, true, next)
+                    }
+                  }}
+                  autoComplete="off"
+                  name={`perm-reason-${op}`}
+                  style={{
+                    width: '100%', padding: '6px 10px', fontSize: 12,
+                    border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)',
+                    background: 'var(--bg)',
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {err && (
+        <div style={{ padding: '6px 10px', fontSize: 12, color: 'var(--red)', background: 'var(--red-lt)', borderRadius: 'var(--r-xs)' }}>
+          {err}
+        </div>
+      )}
     </div>
   )
 }

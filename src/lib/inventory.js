@@ -344,6 +344,23 @@ export async function getMyTruckStock() {
   return { truck, stock }
 }
 
+// Return the calling user's operation-permission rows. Empty array = the
+// caller can do every crew operation (default-allow). Each row in the
+// result is `{ operation, allowed, reason, updated_at }`; rows with
+// allowed=false are denials the UI should honor. Authoritative check
+// is server-side in record_crew_movement; this is just so the UI can
+// hide buttons it shouldn't show.
+export async function getMyCrewPermissions() {
+  const { data: { session } } = await db.auth.getSession()
+  if (!session?.user?.id) return []
+  const { data, error } = await db
+    .from('crew_operation_permissions')
+    .select('operation, allowed, reason, updated_at')
+    .eq('user_id', session.user.id)
+  if (error) throw error
+  return data || []
+}
+
 // Record a movement on behalf of the calling crew member via the
 // public.record_crew_movement RPC. Operation is one of:
 //   'load'     warehouse/bucket → my truck   (other = source)
