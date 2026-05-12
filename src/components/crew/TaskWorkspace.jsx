@@ -13,7 +13,7 @@ const TABS = (lang) => [
 const POLE_IDS = ['inter-12','inter-14','inter-16','term-12','term-14','term-16']
 
 export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDone, onUserTap }) {
-  const { currentUser, showToast, lang, assemblies, setTaskLocal } = useApp()
+  const { currentUser, showToast, lang, assemblies, setTaskLocal, projects } = useApp()
 
   // assemblies is now { aerial: [], footage: [], splice: [], underground: [] } from Supabase
   const ASSEMBLIES = assemblies || { aerial: [], footage: [], splice: [], underground: [] }
@@ -41,6 +41,14 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
   const [partSearchQuery, setPartSearchQuery] = useState('')
   const [partSearchResults, setPartSearchResults] = useState([])
   const [conduitSizes, setConduitSizes] = useState({ 'bore-ft': '', 'plow-ft': '' })
+
+  // Project-routing override. NULL = use task's natural project. If the
+  // crew picks a different project here, the submission saves the override
+  // and approval routes materials to that bucket instead. Phase actuals
+  // stay on the natural phase regardless — this is purely a material
+  // routing override for the "this task is in the wrong project" case.
+  const [projectIdOverride, setProjectIdOverride] = useState(null)
+  const effectiveProjectId = projectIdOverride || project?.id || null
 
   // Track when the draft is loaded so we don't overwrite the DB with empty
   // state during the initial render before fetch completes
@@ -130,6 +138,9 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
         if (wc.fiberCount) setFiberCount(wc.fiberCount)
         if (wc.note) setNote(wc.note)
         if (typeof wc.hoursWorked === 'number') setHoursWorked(wc.hoursWorked)
+        // Project-routing override (Flavor A). Persisted in working_counts so
+        // the picker state survives refresh / handoff like everything else.
+        if (wc.projectIdOverride) setProjectIdOverride(wc.projectIdOverride)
 
         // Show "continued from X" indicator if someone else worked on this task
         if (data.last_worked_by && data.last_worked_by !== currentUser?.id && data.last_user) {
@@ -154,7 +165,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     if (!draftLoaded || !currentUser?.id) return
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     saveTimeoutRef.current = setTimeout(async () => {
-      const draft = { counts, partQtyOverrides, extraParts, conduitSizes, fiberCount, note, hoursWorked }
+      const draft = { counts, partQtyOverrides, extraParts, conduitSizes, fiberCount, note, hoursWorked, projectIdOverride }
       try {
         const { error } = await db.from('tasks').update({
           working_counts: draft,
@@ -169,7 +180,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       }
     }, 800)
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current) }
-  }, [counts, partQtyOverrides, extraParts, conduitSizes, fiberCount, note, hoursWorked, task.id, currentUser?.id, draftLoaded])
+  }, [counts, partQtyOverrides, extraParts, conduitSizes, fiberCount, note, hoursWorked, projectIdOverride, task.id, currentUser?.id, draftLoaded])
 
   async function handlePartSearch(q) {
     setPartSearchQuery(q)
@@ -298,6 +309,12 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
         total_splice_cases: summary.spliceCases || 0,
         total_handholes: summary.handholes || 0,
         total_vaults: summary.vaults || 0,
+        // Only persist the override if it differs from the task's natural
+        // project. NULL means "use task→phase→project for routing."
+        project_id_override:
+          projectIdOverride && projectIdOverride !== project?.id
+            ? projectIdOverride
+            : null,
         status: 'pending',
       })
       if (error) throw error
@@ -389,6 +406,57 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
               </span>
             )}
           </span>
+        </div>
+      )}
+
+      {/* Project routing override (Flavor A). Lets the crew tag the work
+          to a different project's bucket without moving the task itself.
+          NULL = use task's natural project. Only the bucket destination
+          changes; phase actuals + reports still belong to the task's
+          actual phase. */}
+      {projects && projects.length > 1 && (
+        <div style={{
+          background: projectIdOverride && projectIdOverride !== project?.id
+            ? 'var(--amber-lt)' : 'var(--surface2)',
+          borderBottom: '1px solid var(--border)',
+          padding: '6px 14px',
+          display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>
+            {lang === 'es' ? 'Materiales asignados a:' : 'Routing materials to:'}
+          </span>
+          <select
+            value={projectIdOverride || project?.id || ''}
+            onChange={e => {
+              const picked = e.target.value
+              setProjectIdOverride(picked === project?.id ? null : picked)
+            }}
+            style={{
+              flex: 1, minWidth: 0,
+              padding: '3px 6px', fontSize: 12, fontWeight: 700,
+              border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)',
+              background: 'var(--surface)', color: 'var(--text)',
+            }}
+          >
+            {projects.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.name}{p.id === project?.id ? (lang === 'es' ? ' (predeterminado)' : ' (default)') : ''}
+              </option>
+            ))}
+          </select>
+          {projectIdOverride && projectIdOverride !== project?.id && (
+            <button
+              onClick={() => setProjectIdOverride(null)}
+              title={lang === 'es' ? 'Restablecer' : 'Reset to default'}
+              style={{
+                fontSize: 10, color: 'var(--amber)', background: 'none',
+                border: 'none', cursor: 'pointer', fontWeight: 700,
+                whiteSpace: 'nowrap', padding: '0 2px',
+              }}
+            >
+              ↺ {lang === 'es' ? 'Restablecer' : 'Reset'}
+            </button>
+          )}
         </div>
       )}
 

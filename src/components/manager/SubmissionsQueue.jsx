@@ -94,7 +94,8 @@ export default function SubmissionsQueue() {
           work_sessions!submissions_session_id_fkey (
             session_date, task_id,
             tasks ( name, task_type, phases ( name, projects ( name ) ) )
-          )`)
+          ),
+          override_project:projects!submissions_project_id_override_fkey ( id, name )`)
         .order('created_at', { ascending: false })
         .eq('archived', false)
         .limit(200)
@@ -206,7 +207,8 @@ export default function SubmissionsQueue() {
           work_sessions!submissions_session_id_fkey (
             session_date, task_id,
             tasks ( name, task_type, phases ( name, projects ( name ) ) )
-          )`)
+          ),
+          override_project:projects!submissions_project_id_override_fkey ( id, name )`)
         .eq('archived', true)
         .order('archived_at', { ascending: false })
         .limit(100)
@@ -345,6 +347,16 @@ export default function SubmissionsQueue() {
                 <div style={{ color: 'var(--muted)', marginTop: 2 }}>
                   {selected.work_sessions.tasks.phases?.projects?.name} › {selected.work_sessions.tasks.phases?.name}
                 </div>
+                {selected.override_project && (
+                  <div style={{
+                    marginTop: 8, padding: '6px 10px',
+                    background: 'var(--amber-lt)', color: 'var(--amber)',
+                    borderRadius: 'var(--r-xs)', fontSize: 11, fontWeight: 700,
+                    display: 'inline-block',
+                  }}>
+                    ⤳ Materials routing to <strong>{selected.override_project.name}</strong> on approval
+                  </div>
+                )}
               </div>
             )}
 
