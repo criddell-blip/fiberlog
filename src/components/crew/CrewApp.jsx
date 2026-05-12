@@ -5,6 +5,7 @@ import ProjectList from './ProjectList'
 import PhaseList from './PhaseList'
 import TaskList from './TaskList'
 import TaskWorkspace from './TaskWorkspace'
+import MyStockView from './MyStockView'
 
 const JOB_COLORS = {
   aerial:      { bg: 'var(--teal-lt)',   text: 'var(--teal-mid)' },
@@ -56,9 +57,14 @@ function SignOutConfirm({ onConfirm, onCancel, lang }) {
 }
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
-function CrewSidebar({ projects, selTask, onSelectTask, onSelectPhase, currentUser, onUserTap }) {
+function CrewSidebar({
+  projects, selTask, view, onSelectMyStock, onSelectTask, onSelectPhase,
+  currentUser, onUserTap,
+}) {
   const [expandedProject, setExpandedProject] = useState(projects[0]?.id || null)
   const [expandedPhase, setExpandedPhase] = useState(null)
+
+  const isMyStock = view === 'mystock'
 
   return (
     <div style={{
@@ -94,8 +100,30 @@ function CrewSidebar({ projects, selTask, onSelectTask, onSelectPhase, currentUs
         </div>
       </div>
 
+      {/* My Stock entry — sits above the project tree per the design.
+          Active state mirrors the main panel's view. */}
+      <button
+        onClick={onSelectMyStock}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '10px 14px',
+          background: isMyStock ? 'var(--orange-lt)' : 'transparent',
+          border: 'none',
+          borderLeft: isMyStock ? '3px solid var(--orange)' : '3px solid transparent',
+          color: isMyStock ? 'var(--orange)' : 'var(--text)',
+          fontWeight: isMyStock ? 800 : 600,
+          fontSize: 13,
+          cursor: 'pointer',
+          textAlign: 'left',
+          flexShrink: 0,
+        }}
+      >
+        <span style={{ fontSize: 16 }}>📦</span>
+        <span>My Stock</span>
+      </button>
+
       {/* Project / phase / task tree */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0 20px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 20px' }}>
         <div style={{
           fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
           letterSpacing: '.06em', color: 'var(--hint)', padding: '8px 14px 4px'
@@ -233,6 +261,11 @@ export default function CrewApp() {
   const isWide = useIsWide()
 
   const [screen, setScreen] = useState('projects')
+  // Wide-layout main-panel view. 'projects' (default) shows the project
+  // tree → TaskList/TaskWorkspace flow. 'mystock' replaces the right panel
+  // with MyStockView. Narrow layout uses `screen` instead for the same
+  // distinction (screen='mystock' is a peer of 'projects'/'phases'/etc.).
+  const [view, setView] = useState('projects')
   // We track selections by ID, not by snapshot — so they always pick up the
   // latest data from `projects` (which AppContext keeps in sync via realtime
   // and createTask/approval flows).
@@ -257,6 +290,7 @@ export default function CrewApp() {
     setSelProjectId(project.id)
     setSelPhaseId(phase.id)
     setSelTaskId(task.id)
+    setView('projects')
   }
 
   function handleSignOut() {
@@ -288,14 +322,21 @@ export default function CrewApp() {
         <CrewSidebar
           projects={projects}
           selTask={selTask}
+          view={view}
+          onSelectMyStock={() => setView('mystock')}
           onSelectTask={handleSidebarTaskSelect}
-          onSelectPhase={(project, phase) => { setSelProjectId(project.id); setSelPhaseId(phase.id); setSelTaskId(null) }}
+          onSelectPhase={(project, phase) => {
+            setSelProjectId(project.id); setSelPhaseId(phase.id); setSelTaskId(null)
+            setView('projects')
+          }}
           currentUser={currentUser}
           onUserTap={() => setShowSignOut(true)}
         />
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {!selTask ? (
+          {view === 'mystock' ? (
+            <MyStockView onUserTap={() => setShowSignOut(true)} />
+          ) : !selTask ? (
             selProject && selPhase ? (
               <TaskList
                 project={selProject}
@@ -343,6 +384,13 @@ export default function CrewApp() {
       {screen === 'projects' && (
         <ProjectList
           onSelect={p => { setSelProjectId(p.id); navTo('phases') }}
+          onOpenMyStock={() => navTo('mystock')}
+          onUserTap={() => setShowSignOut(true)}
+        />
+      )}
+      {screen === 'mystock' && (
+        <MyStockView
+          onBack={() => navTo('projects')}
           onUserTap={() => setShowSignOut(true)}
         />
       )}

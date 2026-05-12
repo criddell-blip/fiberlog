@@ -11,7 +11,7 @@ function getProjectStyle(name, index) {
   return { icon: PROJECT_ICONS[i], cls: PROJECT_COLORS[i] }
 }
 
-export default function ProjectList({ onSelect, onUserTap }) {
+export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
   const { projects, currentUser, lang } = useApp()
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
@@ -33,6 +33,31 @@ export default function ProjectList({ onSelect, onUserTap }) {
 
       {/* Scroll body */}
       <div className="scroll-body">
+        {/* My Stock entry point — sits above the project list per design. */}
+        {onOpenMyStock && (
+          <div
+            className="card card-tap"
+            onClick={onOpenMyStock}
+            style={{ borderLeft: '3px solid var(--orange)' }}
+          >
+            <div style={{
+              width: 48, height: 48, borderRadius: 12, flexShrink: 0,
+              background: 'var(--orange-lt)', border: '1.5px solid var(--orange-dk)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 24,
+            }}>
+              📦
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>My Stock</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                What's on your truck — load and return
+              </div>
+            </div>
+            <div style={{ fontSize: 20, color: 'var(--border2)', flexShrink: 0 }}>›</div>
+          </div>
+        )}
+
         <div className="sec-label">{t('yourProjects', lang)}</div>
 
         {projects.length === 0 && (

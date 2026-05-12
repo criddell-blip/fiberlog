@@ -312,6 +312,70 @@ export async function recordMovementsBatch(movements) {
   return data || []
 }
 
+// ─── CREW SELF-SERVICE ──────────────────────────────────────────────────────
+
+// Resolve the caller's personal truck (the inventory_location auto-created
+// when the user was made a crew/contractor). Returns the row or null if
+// the caller has none — e.g. role isn't crew yet, or the trigger hasn't
+// fired (shouldn't happen post-backfill but defensive).
+export async function getMyTruck() {
+  const { data: { session } } = await db.auth.getSession()
+  if (!session?.user?.id) return null
+  const { data, error } = await db
+    .from('inventory_locations')
+    .select('*')
+    .eq('assigned_to', session.user.id)
+    .eq('type', 'truck')
+    .eq('is_active', true)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  return data
+}
+
+// Fetch caller's truck + stock at it in one round trip. Stock rows have
+// the parts_catalog joined. Returns { truck, stock: [...] } — truck is
+// null if the caller has none, in which case stock is [].
+export async function getMyTruckStock() {
+  const truck = await getMyTruck()
+  if (!truck) return { truck: null, stock: [] }
+  const stock = await getStockByLocation(truck.id)
+  return { truck, stock }
+}
+
+// Record a movement on behalf of the calling crew member via the
+// public.record_crew_movement RPC. Operation is one of:
+//   'load'     warehouse/bucket → my truck   (other = source)
+//   'return'   my truck → warehouse          (other = destination)
+//   'issue'    my truck → install            (no other)
+//   'scrap'    my truck → scrapped           (no other)
+//   'transfer' my truck → another crew truck (other = destination)
+// The RPC enforces auth, validates the operation, and inserts the
+// movement; the existing inventory_stock trigger handles stock math.
+export async function recordCrewMovement({
+  operation, partId, quantity, otherLocationId,
+  unit, notes, vendorInvoice, unitCost, taskId,
+} = {}) {
+  if (!operation) throw new Error('operation required')
+  if (!partId) throw new Error('partId required')
+  if (!quantity || Number(quantity) <= 0) throw new Error('quantity must be > 0')
+
+  const { data, error } = await db.rpc('record_crew_movement', {
+    p_operation: operation,
+    p_part_id: partId,
+    p_quantity: Number(quantity),
+    p_other_location_id: otherLocationId || null,
+    p_unit: unit || null,
+    p_notes: notes || null,
+    p_vendor_invoice: vendorInvoice || null,
+    p_unit_cost: unitCost == null || unitCost === '' ? null : Number(unitCost),
+    p_task_id: taskId || null,
+  })
+  if (error) throw error
+  return data
+}
+
 // ─── PARTS CATALOG ──────────────────────────────────────────────────────────
 
 export async function getPartsCatalogIndex() {
