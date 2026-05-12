@@ -226,7 +226,7 @@ npx supabase login                             # auth supabase CLI (first time)
 
     Helper installed: `public.is_staff()` returns true iff `auth.uid()`'s role is `owner` or `manager`. Used by every staff-write RLS policy.
 
-    Migrations applied: `tighten_rls_policies`, `harden_views_functions_execute_grants`.
+    Migrations applied: `tighten_rls_policies`, `harden_views_functions_execute_grants`, `users_staff_update_policy` (fixup — the original RLS rewrite assumed user updates would go through an Edge Function, but `updateUserMetadata` in `lib/admin.js` is direct JS, so a staff UPDATE policy was needed on `public.users`).
 
 ---
 
