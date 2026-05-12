@@ -2,13 +2,14 @@ import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import { db } from '../../lib/supabase'
 import AdminUsersView from './AdminUsersView'
+import CrewTypePermissionsView from './CrewTypePermissionsView'
 
 export default function AdminPanel() {
   const { projects, setProjects, users, showToast, reload } = useApp()
   const [selProject, setSelProject] = useState(null)
   const [loading, setLoading] = useState(false)
   const [confirm, setConfirm] = useState(null)
-  const [view, setView] = useState('projects') // 'projects' | 'crew' | 'boxhero' | 'users'
+  const [view, setView] = useState('projects') // 'projects' | 'crew' | 'boxhero' | 'users' | 'crewperms'
 
   // BoxHero sync
   const [syncing, setSyncing] = useState(false)
@@ -335,6 +336,10 @@ export default function AdminPanel() {
     return <AdminUsersView onBack={() => setView('projects')} />
   }
 
+  if (view === 'crewperms') {
+    return <CrewTypePermissionsView onBack={() => setView('projects')} />
+  }
+
   // ── Crew / password view ────────────────────────────────────────────────────
   if (view === 'crew') {
     const crewMembers = users.filter(u => u.role !== 'owner')
@@ -526,10 +531,21 @@ export default function AdminPanel() {
         <div className="sec-label">Inventory</div>
         <div
           onClick={() => setView('boxhero')}
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 16, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 8, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div style={{ fontWeight: 700, fontSize: 14 }}>📦 BoxHero stock sync</div>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Pull latest stock levels from BoxHero</div>
+          </div>
+          <span style={{ fontSize: 16, color: 'var(--muted)' }}>›</span>
+        </div>
+        <div
+          onClick={() => setView('crewperms')}
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 16, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>🔒 Crew × Department permissions</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+              Restrict which part departments each crew type can move (leave empty for unrestricted)
+            </div>
           </div>
           <span style={{ fontSize: 16, color: 'var(--muted)' }}>›</span>
         </div>

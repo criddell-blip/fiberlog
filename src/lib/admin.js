@@ -120,6 +120,14 @@ export async function getAllUsers() {
 // All operations a manager can override per-user. Order matters for UI display.
 export const CREW_OPERATIONS = ['load', 'return', 'issue', 'scrap', 'transfer']
 
+// All crew_type values supported by the schema (matches users.crew_type CHECK
+// and CREW_TYPE_OPTIONS in AdminUsersView). Used by the
+// CrewTypePermissionsView matrix to render rows.
+export const CREW_TYPES = [
+  'aerial', 'underground', 'splice', 'drop',
+  'locator', 'install', 'infrastructure', 'contractor',
+]
+
 // Fetch all permission rows for a single user. Empty array = default-allow
 // for every operation. A row with allowed=false denies that operation.
 export async function getUserPermissions(userId) {
@@ -163,4 +171,63 @@ export async function clearUserOperationPermission(userId, operation) {
     .eq('user_id', userId)
     .eq('operation', operation)
   if (error) throw error
+}
+
+// ─── CREW TYPE × DEPARTMENT WHITELIST ────────────────────────────────────────
+
+// Fetch every allow row. Each row = (crew_type, department) the crew_type
+// is allowed to move. A crew_type with zero rows = no restriction (allow
+// all). Parts with department=NULL pass regardless (per Phase 3 spec).
+export async function getCrewTypePartRestrictions() {
+  const { data, error } = await db
+    .from('crew_type_part_restrictions')
+    .select('crew_type, department')
+  if (error) throw error
+  return data || []
+}
+
+// Allow `crew_type` to move parts from `department`. INSERT, idempotent
+// via ON CONFLICT DO NOTHING semantics (we use upsert with ignoreDuplicates).
+export async function addCrewTypePartRestriction(crewType, department) {
+  if (!crewType || !department) throw new Error('crewType and department required')
+  const { error } = await db
+    .from('crew_type_part_restrictions')
+    .upsert({ crew_type: crewType, department }, {
+      onConflict: 'crew_type,department',
+      ignoreDuplicates: true,
+    })
+  if (error) throw error
+}
+
+// Revoke the allowance.
+export async function removeCrewTypePartRestriction(crewType, department) {
+  if (!crewType || !department) throw new Error('crewType and department required')
+  const { error } = await db
+    .from('crew_type_part_restrictions')
+    .delete()
+    .eq('crew_type', crewType)
+    .eq('department', department)
+  if (error) throw error
+}
+
+// Distinct, non-null department names from the active parts catalog.
+// Used by CrewTypePermissionsView to render columns. Sorted by part count
+// descending so the most-used departments lead.
+export async function getActivePartDepartments() {
+  const { data, error } = await db
+    .from('parts_catalog')
+    .select('department')
+    .eq('is_active', true)
+    .not('department', 'is', null)
+  if (error) throw error
+  // Tally + sort client-side. parts_catalog isn't huge (~600 rows).
+  const counts = new Map()
+  for (const row of data || []) {
+    const d = (row.department || '').trim()
+    if (!d) continue
+    counts.set(d, (counts.get(d) || 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([department, count]) => ({ department, count }))
 }
