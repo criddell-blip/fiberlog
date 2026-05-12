@@ -196,12 +196,11 @@ npx supabase login                             # auth supabase CLI (first time)
     **Deferred follow-ups (separate backlog items below if revived):**
     - Issue / Scrap / Transfer UI flows (RPC already supports them; just need sheets and buttons in CrewMovementSheet).
     - Migrate stock from the 7 legacy rollup buckets to specific crew trucks (manual via existing Bulk Move sheet).
-    - Auto-deduct on submission approval for `aerial`/`underground`/`splice`/`infrastructure` crews (= backlog item #9, depends on Phase 1 having shipped, which it has).
 5. **Sage daily export** — Edge Function pattern, stamps `exported_at` + `export_batch_id` on included movements
 6. **Per-line `project_id` on `log_entries`** — schema change for field-tech multi-cost-center allocation (Wave / Gigwave / general). Pending field-tech UI workflow decisions (per-customer vs per-day)
 7. **Field tech UI surface** — flatter "today's installs" list with one-tap into per-customer materials log
 8. **Locations tab UX** — "View stock" jump-link + stock summary counts on each location card
-9. **Phase 2 auto-deduct on submission approval** — create `issue` movements from assigned truck for parts the crew logged
+9. ~~**Auto-deduct on submission approval**~~ — ✅ shipped as the **project-bucket variant**. Migration `project_buckets_and_auto_deduct` added a `project_id` FK on `inventory_locations`, backfilled one `job_site` "bucket" per active project (auto-created on future inserts via `trg_ensure_project_job_site`), and extended `approve_submission` to insert one `transfer` movement per distinct part (truck → project bucket) when the submitter's `crew_type` is in `{aerial, underground, splice, infrastructure}`. drop / install / locator / contractor are skipped — they'll feed from Sonar imports (#3). Bypasses the Phase 3 crew_type × department whitelist by design (system-authorized action recording reality). Visible in manager Inventory → Locations → each project's bucket.
 10. **BoxHero drafts cleanup** — 476 placeholder drafts with `unit='ea'`. Cable items need `unit='ft'`. Use Bulk edit on Parts tab → Drafts → search "cable" → bulk edit unit=ft.
 11. **Security & DB hygiene from Supabase advisor scan** — RLS rewrite + view/function hardening complete. Five lints remain, all intentional or out-of-band:
     - `tasks_insert` and `tasks_update` are wide-open by design (crew need to create tasks and auto-save `working_counts`; the "Continued from X" handoff depends on any-crew updates). Documented exception.
