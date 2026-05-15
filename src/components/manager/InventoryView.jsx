@@ -7,6 +7,7 @@ import InventoryPartsTab from './InventoryPartsTab'
 import InventoryMovementsTab from './InventoryMovementsTab'
 import InventoryAuditTab from './InventoryAuditTab'
 import RecordMovementSheet from './RecordMovementSheet'
+import ReceivePOSheet from './ReceivePOSheet'
 import InventoryImportSheet from './InventoryImportSheet'
 
 const SUBTABS = [
@@ -23,6 +24,7 @@ export default function InventoryView() {
   const [locations, setLocations] = useState([])
   const [locationsLoading, setLocationsLoading] = useState(true)
   const [showRecordSheet, setShowRecordSheet] = useState(false)
+  const [showReceiveSheet, setShowReceiveSheet] = useState(false)
   const [showImportSheet, setShowImportSheet] = useState(false)
   // Bumped after a movement is recorded or part is updated, so child tabs
   // re-fetch their data
@@ -59,6 +61,12 @@ export default function InventoryView() {
     showToast('Movement recorded')
   }
 
+  function handlePOReceived(lineCount) {
+    setShowReceiveSheet(false)
+    setRefreshKey(k => k + 1)
+    showToast(`Received ${lineCount} item${lineCount === 1 ? '' : 's'}`)
+  }
+
   function handleLocationsChanged() {
     loadLocations()
     setRefreshKey(k => k + 1)
@@ -80,13 +88,22 @@ export default function InventoryView() {
       <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
           <div style={{ fontWeight: 800, fontSize: 17 }}>Inventory</div>
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <button
               className="btn btn-ghost"
               onClick={() => setShowImportSheet(true)}
               style={{ padding: '6px 12px', fontSize: 13 }}
             >
               ⇪ Import CSV
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => setShowReceiveSheet(true)}
+              disabled={noLocations}
+              title={noLocations ? 'Create a destination location first' : 'Receive a vendor delivery / purchase order'}
+              style={{ padding: '6px 12px', fontSize: 13 }}
+            >
+              📥 Receive PO
             </button>
             <button
               className="btn btn-primary"
@@ -177,6 +194,15 @@ export default function InventoryView() {
           currentUser={currentUser}
           onClose={() => setShowRecordSheet(false)}
           onRecorded={handleMovementRecorded}
+        />
+      )}
+
+      {showReceiveSheet && (
+        <ReceivePOSheet
+          locations={locations}
+          currentUser={currentUser}
+          onClose={() => setShowReceiveSheet(false)}
+          onRecorded={handlePOReceived}
         />
       )}
 
