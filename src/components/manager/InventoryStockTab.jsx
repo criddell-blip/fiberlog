@@ -24,10 +24,15 @@ const SUBMODE_UNBINNED = 'unbinned'
 
 export default function InventoryStockTab({ locations, locationsLoading, refreshKey, jumpToScope }) {
   const { showToast, currentUser } = useApp()
-  const [scope, setScope] = useState('all')
+  // Initialize scope from jumpToScope so the very first load fires with
+  // the right scope — avoids the race where the parent flipped tabs +
+  // signaled a jump, but useState ran first with 'all', kicking off a
+  // getStockSummary() request that could resolve AFTER the
+  // setScope(jumpToScope.locationId) load and overwrite its rows.
+  const [scope, setScope] = useState(() => jumpToScope?.locationId || 'all')
 
-  // When the parent signals a "jump from Locations tab → this location's
-  // stock", apply the scope. The `n` counter ensures repeat jumps to the
+  // Handles the in-place jump case (StockTab already mounted, parent
+  // signals a new jump). The `n` counter ensures repeat jumps to the
   // same location still re-fire the effect.
   useEffect(() => {
     if (jumpToScope?.locationId) setScope(jumpToScope.locationId)
@@ -67,60 +72,69 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
     }
   }, [scope, locations])
 
-  async function load() {
+  // Inline-as-effect with a cancelled flag so a stale fetch never
+  // overwrites a fresher one. Earlier this was a separate load() function
+  // called from useEffect, which raced when scope changed mid-flight.
+  useEffect(() => {
+    let cancelled = false
     setLoading(true)
-    try {
-      if (scope === 'all') {
-        const data = await getStockSummary()
-        setRows(data)
-      } else {
-        const loc = locations.find(l => l.id === scope)
-        const isWarehouse = loc?.type === 'warehouse'
-
-        if (isWarehouse && binScope === SUBMODE_ROLLUP) {
-          const tree = await getStockForWarehouseTree(scope)
-          const byPart = new Map()
-          for (const r of tree) {
-            const qty = Number(r.quantity) || 0
-            if (qty === 0) continue
-            const pc = r.parts_catalog
-            const partId = pc?.id || r.location_id
-            const existing = byPart.get(partId)
-            if (existing) {
-              existing.total += qty
-              existing.locationCount++
-            } else {
-              byPart.set(partId, {
-                part_id: partId,
-                name: pc?.name || partId,
-                unit: pc?.unit || 'ea',
-                category: pc?.category || null,
-                is_active: pc?.is_active !== false,
-                total: qty,
-                locationCount: 1,
-              })
-            }
-          }
-          setRows([...byPart.values()].sort((a, b) => a.name.localeCompare(b.name)))
-        } else if (isWarehouse && binScope === SUBMODE_UNBINNED) {
-          const data = await getStockByLocation(scope)
-          setRows(toRowShape(data))
-        } else if (isWarehouse) {
-          const data = await getStockByLocation(binScope)
-          setRows(toRowShape(data))
+    ;(async () => {
+      try {
+        let nextRows
+        if (scope === 'all') {
+          nextRows = await getStockSummary()
         } else {
-          const data = await getStockByLocation(scope)
-          setRows(toRowShape(data))
-        }
-      }
-    } catch (e) {
-      console.error('Load stock failed:', e)
-    } finally {
-      setLoading(false)
-    }
-  }
+          const loc = locations.find(l => l.id === scope)
+          const isWarehouse = loc?.type === 'warehouse'
 
-  useEffect(() => { load() }, [scope, binScope, refreshKey, internalRefresh])
+          if (isWarehouse && binScope === SUBMODE_ROLLUP) {
+            const tree = await getStockForWarehouseTree(scope)
+            const byPart = new Map()
+            for (const r of tree) {
+              const qty = Number(r.quantity) || 0
+              if (qty === 0) continue
+              const pc = r.parts_catalog
+              const partId = pc?.id || r.location_id
+              const existing = byPart.get(partId)
+              if (existing) {
+                existing.total += qty
+                existing.locationCount++
+              } else {
+                byPart.set(partId, {
+                  part_id: partId,
+                  name: pc?.name || partId,
+                  unit: pc?.unit || 'ea',
+                  category: pc?.category || null,
+                  is_active: pc?.is_active !== false,
+                  total: qty,
+                  locationCount: 1,
+                })
+              }
+            }
+            nextRows = [...byPart.values()].sort((a, b) => a.name.localeCompare(b.name))
+          } else if (isWarehouse && binScope === SUBMODE_UNBINNED) {
+            nextRows = toRowShape(await getStockByLocation(scope))
+          } else if (isWarehouse) {
+            nextRows = toRowShape(await getStockByLocation(binScope))
+          } else {
+            nextRows = toRowShape(await getStockByLocation(scope))
+          }
+        }
+        if (cancelled) return
+        setRows(nextRows)
+      } catch (e) {
+        if (cancelled) return
+        console.error('Load stock failed:', e)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+    // locations intentionally omitted — its reference changes on every
+    // parent refresh; we only want to re-fetch when scope/binScope or
+    // an explicit refresh signal changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, binScope, refreshKey, internalRefresh])
 
   useEffect(() => {
     setSelectedIds(new Set())
