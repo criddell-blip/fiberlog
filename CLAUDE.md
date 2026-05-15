@@ -202,6 +202,28 @@ npx supabase login                             # auth supabase CLI (first time)
 8. ~~**Locations tab UX**~~ — ✅ shipped. Each location card and bin row shows distinct-part count + total-unit count in the subtitle, plus a 📦 Stock → pill that jumps to the Stock tab pre-scoped to that location. Warehouses roll up their bins. Backed by `getStockCountsByLocation()` in `lib/inventory.js`.
 9. ~~**Auto-deduct on submission approval**~~ — ✅ shipped as the **project-bucket variant**. Migration `project_buckets_and_auto_deduct` added a `project_id` FK on `inventory_locations`, backfilled one `job_site` "bucket" per active project (auto-created on future inserts via `trg_ensure_project_job_site`), and extended `approve_submission` to insert one `transfer` movement per distinct part (truck → project bucket) when the submitter's `crew_type` is in `{aerial, underground, splice, infrastructure}`. drop / install / locator / contractor are skipped — they'll feed from Sonar imports (#3). Bypasses the Phase 3 crew_type × department whitelist by design (system-authorized action recording reality). Visible in manager Inventory → Locations → each project's bucket.
 10. **BoxHero drafts cleanup** — 476 placeholder drafts with `unit='ea'`. Cable items need `unit='ft'`. Use Bulk edit on Parts tab → Drafts → search "cable" → bulk edit unit=ft.
+
+12. **Receive materials via vendor PO** — first-class purchase-order workflow. Today the schema supports it minimally: `inventory_movements.movement_type='receive'` is allowed (CHECK requires `from_location_id IS NULL`, `to_location_id NOT NULL`), and `vendor_invoice` + `unit_cost` columns already exist on movements. What's missing is the workflow on top.
+
+    **Minimum viable shape (one focused session):**
+    - New "Receive PO" sheet under manager Inventory (or its own button alongside ＋ Record movement). Lets the manager enter:
+      - Vendor (free text or pick a `type='vendor'` location)
+      - PO number / invoice reference (saved into each line's `vendor_invoice`)
+      - Destination warehouse/bin
+      - Multiple line items: `[part, qty, unit_cost]` rows added inline
+    - On submit: one `receive` movement per line, all sharing the PO ref. Stock auto-increments via the existing trigger. Manager sees them in the Movements tab grouped by PO ref.
+    - No new tables — purely a multi-row UI on top of the existing `inventory_movements` semantics. ~half a session.
+
+    **Bigger version (later, if needed):**
+    - `purchase_orders` table with status (`open` | `partial` | `closed`) and per-line expected qty.
+    - Partial receipts: receive 8 of 10 ordered against a PO; PO stays `partial` until reconciled.
+    - Vendor catalog (probably reuse `inventory_locations` type='vendor' but add a vendor profile sheet — contact, terms, default shipping warehouse).
+    - "What's on order?" / overdue PO reports.
+    - PO PDF upload + parser (way down the road).
+
+    **Don't forget:**
+    - Receive movements should bypass the `crew_type × department` whitelist (it's a manager-authorized inbound, not crew-initiated).
+    - The existing `recordMovement` JS validates `receive` requires `to` only; the new sheet should use the same RPC path or `recordMovementsBatch` to insert all the lines.
 11. **Security & DB hygiene from Supabase advisor scan** — RLS rewrite + view/function hardening complete. Five lints remain, all intentional or out-of-band:
     - `tasks_insert` and `tasks_update` are wide-open by design (crew need to create tasks and auto-save `working_counts`; the "Continued from X" handoff depends on any-crew updates). Documented exception.
     - `approve_submission` and `is_staff()` are reachable by `authenticated`, intentionally. `approve_submission` is the manager UI's approval RPC and has an `auth.uid()`+role guard inside. `is_staff()` is called by RLS policies and must be executable in the user's context.
