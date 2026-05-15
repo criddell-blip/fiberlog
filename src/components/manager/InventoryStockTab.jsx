@@ -22,9 +22,17 @@ const TYPE_ICONS = {
 const SUBMODE_ROLLUP = 'rollup'
 const SUBMODE_UNBINNED = 'unbinned'
 
-export default function InventoryStockTab({ locations, locationsLoading, refreshKey }) {
+export default function InventoryStockTab({ locations, locationsLoading, refreshKey, jumpToScope }) {
   const { showToast, currentUser } = useApp()
   const [scope, setScope] = useState('all')
+
+  // When the parent signals a "jump from Locations tab → this location's
+  // stock", apply the scope. The `n` counter ensures repeat jumps to the
+  // same location still re-fire the effect.
+  useEffect(() => {
+    if (jumpToScope?.locationId) setScope(jumpToScope.locationId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpToScope?.n])
   const [binScope, setBinScope] = useState(SUBMODE_ROLLUP)
   const [bins, setBins] = useState([])
   const [rows, setRows] = useState([])

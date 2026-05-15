@@ -27,6 +27,16 @@ export default function InventoryView() {
   // Bumped after a movement is recorded or part is updated, so child tabs
   // re-fetch their data
   const [refreshKey, setRefreshKey] = useState(0)
+  // When the user clicks "View stock" on a location card, we set this and
+  // flip the tab. StockTab reads it on mount + on change to seed its
+  // scope; the counter ensures repeat clicks on the same location still
+  // re-fire the effect.
+  const [stockJump, setStockJump] = useState({ locationId: null, n: 0 })
+
+  function jumpToStock(locationId) {
+    setStockJump(prev => ({ locationId, n: prev.n + 1 }))
+    setTab('stock')
+  }
 
   async function loadLocations() {
     setLocationsLoading(true)
@@ -129,6 +139,7 @@ export default function InventoryView() {
             locations={locations}
             locationsLoading={locationsLoading}
             refreshKey={refreshKey}
+            jumpToScope={stockJump}
           />
         )}
         {tab === 'locations' && (
@@ -136,6 +147,8 @@ export default function InventoryView() {
             locations={locations}
             loading={locationsLoading}
             onChanged={handleLocationsChanged}
+            onJumpToStock={jumpToStock}
+            refreshKey={refreshKey}
           />
         )}
         {tab === 'parts' && (

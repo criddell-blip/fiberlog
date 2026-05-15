@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import {
   createLocation, updateLocation, deactivateLocation, getBinsForWarehouse,
+  getStockCountsByLocation,
 } from '../../lib/inventory'
 
 const TYPE_LABELS = {
@@ -22,7 +23,7 @@ const TYPE_ICONS = {
   bin:       '📥',
 }
 
-export default function InventoryLocationsTab({ locations, loading, onChanged }) {
+export default function InventoryLocationsTab({ locations, loading, onChanged, onJumpToStock, refreshKey }) {
   const { users, showToast } = useApp()
   const [editing, setEditing] = useState(null)        // location being edited (or 'new')
   const [addingBinFor, setAddingBinFor] = useState(null)  // warehouse object when adding a bin
@@ -32,6 +33,18 @@ export default function InventoryLocationsTab({ locations, loading, onChanged })
   // the top-level locations prop. Keyed by warehouse id.
   const [binsByWarehouse, setBinsByWarehouse] = useState({})
   const [loadingBins, setLoadingBins] = useState(false)
+
+  // Stock summary counts per location id. Refreshed alongside locations
+  // and after any movement (refreshKey bumps).
+  const [stockCounts, setStockCounts] = useState(() => new Map())
+
+  useEffect(() => {
+    let cancelled = false
+    getStockCountsByLocation()
+      .then(m => { if (!cancelled) setStockCounts(m) })
+      .catch(e => console.warn('Stock counts failed:', e))
+    return () => { cancelled = true }
+  }, [locations, refreshKey])
 
   // Refresh bin lists whenever the locations prop changes — covers both
   // warehouse adds/removes and our own bin operations
@@ -187,6 +200,19 @@ export default function InventoryLocationsTab({ locations, loading, onChanged })
                 </div>
                 {list.map(loc => {
                   const bins = type === 'warehouse' ? (binsByWarehouse[loc.id] || []) : []
+                  const counts = stockCounts.get(loc.id)
+                  // Warehouse rollup: own counts + sum of bin counts so the
+                  // header reflects everything inside the warehouse tree.
+                  const rollup = type === 'warehouse' && bins.length > 0
+                    ? bins.reduce((acc, b) => {
+                        const c = stockCounts.get(b.id)
+                        if (c) {
+                          acc.distinctParts += c.distinctParts
+                          acc.totalUnits += c.totalUnits
+                        }
+                        return acc
+                      }, { distinctParts: counts?.distinctParts || 0, totalUnits: counts?.totalUnits || 0 })
+                    : counts
                   return (
                     <div key={loc.id} style={{ marginBottom: 6 }}>
                       {/* Warehouse / location header row */}
@@ -209,10 +235,35 @@ export default function InventoryLocationsTab({ locations, loading, onChanged })
                               }}>{bins.length} bin{bins.length === 1 ? '' : 's'}</span>
                             )}
                           </div>
-                          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-                            {loc.assigned_user ? `Assigned to ${loc.assigned_user.name}` : (loc.notes || '—')}
+                          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+                            <span>
+                              {loc.assigned_user ? `Assigned to ${loc.assigned_user.name}` : (loc.notes || '—')}
+                            </span>
+                            {rollup && rollup.distinctParts > 0 && (
+                              <>
+                                <span style={{ color: 'var(--hint)' }}>·</span>
+                                <span title="Distinct parts in stock">
+                                  <strong style={{ color: 'var(--text)' }}>{rollup.distinctParts.toLocaleString()}</strong> part{rollup.distinctParts === 1 ? '' : 's'}
+                                </span>
+                                <span style={{ color: 'var(--hint)' }}>·</span>
+                                <span title="Total units across all parts">
+                                  <strong style={{ color: 'var(--text)' }}>{rollup.totalUnits.toLocaleString()}</strong> unit{rollup.totalUnits === 1 ? '' : 's'}
+                                </span>
+                              </>
+                            )}
                           </div>
                         </div>
+                        {onJumpToStock && rollup && rollup.distinctParts > 0 && (
+                          <button
+                            onClick={() => onJumpToStock(loc.id)}
+                            title="View stock at this location"
+                            style={{
+                              fontSize: 11, color: 'var(--orange)', background: 'var(--orange-lt)',
+                              border: '1px solid var(--orange-dk)', borderRadius: 14, padding: '3px 10px',
+                              cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
+                            }}
+                          >📦 Stock →</button>
+                        )}
                         {type === 'warehouse' && (
                           <button
                             onClick={() => setAddingBinFor(loc)}
@@ -242,32 +293,52 @@ export default function InventoryLocationsTab({ locations, loading, onChanged })
                           borderTop: 'none',
                           padding: '4px 0',
                         }}>
-                          {bins.map((bin, i) => (
-                            <div key={bin.id} style={{
-                              display: 'flex', alignItems: 'center', gap: 10,
-                              padding: '8px 14px 8px 36px',
-                              borderBottom: i < bins.length - 1 ? '1px solid var(--border)' : 'none',
-                            }}>
-                              <span style={{ fontSize: 14, color: 'var(--hint)' }}>↳</span>
-                              <span style={{ fontSize: 13 }}>📥</span>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontWeight: 600, fontSize: 12 }}>{bin.name}</div>
-                                {bin.notes && (
-                                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 1 }}>
-                                    {bin.notes}
+                          {bins.map((bin, i) => {
+                            const binCounts = stockCounts.get(bin.id)
+                            return (
+                              <div key={bin.id} style={{
+                                display: 'flex', alignItems: 'center', gap: 10,
+                                padding: '8px 14px 8px 36px',
+                                borderBottom: i < bins.length - 1 ? '1px solid var(--border)' : 'none',
+                              }}>
+                                <span style={{ fontSize: 14, color: 'var(--hint)' }}>↳</span>
+                                <span style={{ fontSize: 13 }}>📥</span>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontWeight: 600, fontSize: 12 }}>{bin.name}</div>
+                                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 1, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5 }}>
+                                    {bin.notes && <span>{bin.notes}</span>}
+                                    {binCounts && binCounts.distinctParts > 0 && (
+                                      <>
+                                        {bin.notes && <span style={{ color: 'var(--hint)' }}>·</span>}
+                                        <span><strong style={{ color: 'var(--text)' }}>{binCounts.distinctParts.toLocaleString()}</strong> part{binCounts.distinctParts === 1 ? '' : 's'}</span>
+                                        <span style={{ color: 'var(--hint)' }}>·</span>
+                                        <span><strong style={{ color: 'var(--text)' }}>{binCounts.totalUnits.toLocaleString()}</strong> unit{binCounts.totalUnits === 1 ? '' : 's'}</span>
+                                      </>
+                                    )}
                                   </div>
+                                </div>
+                                {onJumpToStock && binCounts && binCounts.distinctParts > 0 && (
+                                  <button
+                                    onClick={() => onJumpToStock(bin.id)}
+                                    title="View stock in this bin"
+                                    style={{
+                                      fontSize: 10, color: 'var(--orange)', background: 'var(--orange-lt)',
+                                      border: '1px solid var(--orange-dk)', borderRadius: 12, padding: '2px 8px',
+                                      cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
+                                    }}
+                                  >📦 Stock →</button>
                                 )}
+                                <button
+                                  onClick={() => setEditing(bin)}
+                                  style={{ fontSize: 11, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                                >Edit</button>
+                                <button
+                                  onClick={() => handleDeactivate(bin)}
+                                  style={{ fontSize: 11, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                                >Retire</button>
                               </div>
-                              <button
-                                onClick={() => setEditing(bin)}
-                                style={{ fontSize: 11, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
-                              >Edit</button>
-                              <button
-                                onClick={() => handleDeactivate(bin)}
-                                style={{ fontSize: 11, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
-                              >Retire</button>
-                            </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       )}
                     </div>

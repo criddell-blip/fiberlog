@@ -134,6 +134,27 @@ export async function getStockSummary() {
   return [...byPart.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
+// Cheap per-location summary: how many distinct parts and total units sit
+// at each location. One inventory_stock pull, aggregated client-side.
+// Returns Map<location_id, { distinctParts, totalUnits }>. Used by the
+// Locations tab to badge each card with what's actually inside.
+export async function getStockCountsByLocation() {
+  const { data, error } = await db
+    .from('inventory_stock')
+    .select('location_id, quantity')
+  if (error) throw error
+  const m = new Map()
+  for (const r of data || []) {
+    const qty = Number(r.quantity) || 0
+    if (qty === 0) continue
+    const cur = m.get(r.location_id) || { distinctParts: 0, totalUnits: 0 }
+    cur.distinctParts += 1
+    cur.totalUnits += qty
+    m.set(r.location_id, cur)
+  }
+  return m
+}
+
 // Get total stock per part across all locations. Used by the Parts admin
 // to sort drafts by stock volume (so high-volume drafts surface first).
 // Returns Map<part_id, totalQty>.
