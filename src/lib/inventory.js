@@ -536,6 +536,36 @@ export async function updatePartsBatch(ids, updates) {
   return { updated, errors }
 }
 
+// Insert a single part. Used by the Receive PO flow when the manager
+// types a part the catalog hasn't seen before. Defaults to is_active=true
+// since this is a real-world receive (the part exists, you're holding it).
+// `category` is recomputed from department + material_group so it stays
+// consistent with the rest of the catalog.
+export async function createPart({ id, name, unit, department, material_group, barcode, is_active = true }) {
+  if (!id || !String(id).trim()) throw new Error('Part SKU is required')
+  if (!name || !String(name).trim()) throw new Error('Part name is required')
+  const cleanId = String(id).trim()
+  const cleanName = String(name).trim()
+  const dept = department && String(department).trim() ? String(department).trim() : null
+  const matGrp = material_group && String(material_group).trim() ? String(material_group).trim() : null
+
+  const { data, error } = await db
+    .from('parts_catalog')
+    .insert({
+      id: cleanId,
+      name: cleanName,
+      unit: unit && String(unit).trim() ? String(unit).trim() : 'ea',
+      department: dept,
+      material_group: matGrp,
+      category: buildCategory(dept, matGrp),
+      barcode: barcode && String(barcode).trim() ? String(barcode).trim() : null,
+      is_active,
+    })
+    .select()
+  if (error) throw error
+  return Array.isArray(data) && data.length > 0 ? data[0] : null
+}
+
 // Bulk-create draft parts during a CSV import. Each draft gets is_active=false
 // so it's marked as needing review.
 //

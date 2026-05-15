@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { recordMovementsBatch, getBinsForWarehouse } from '../../lib/inventory'
+import {
+  recordMovementsBatch, getBinsForWarehouse,
+  createPart, updatePart,
+} from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
 
 // Receive PO / vendor delivery sheet (backlog #12 MVP).
@@ -58,6 +61,40 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
     if (!canSubmit) return
     setSubmitting(true)
     try {
+      // Step 1: create any brand-new parts. If a SKU collides or fails,
+      // we abort the whole submit so we don't end up with movements
+      // referencing missing rows. Previously-created parts in the same
+      // batch stay in the catalog (they're real parts the user typed in)
+      // — they just won't have stock until the user retries.
+      const newPartLines = validLines.filter(l => l.part?.isNew)
+      for (const l of newPartLines) {
+        try {
+          await createPart({
+            id: l.part.id,
+            name: l.part.name,
+            unit: l.part.unit,
+            department: l.part.department,
+            material_group: l.part.material_group,
+            barcode: l.part.barcode,
+            is_active: true,
+          })
+        } catch (e) {
+          throw new Error(`Couldn't create part "${l.part.id}": ${e.message || e}`)
+        }
+      }
+
+      // Step 2: apply pending attribute edits to existing parts. Same
+      // failure semantics — abort if any edit fails.
+      const editedLines = validLines.filter(l => !l.part?.isNew && l.pendingAttrs)
+      for (const l of editedLines) {
+        try {
+          await updatePart(l.part.id, l.pendingAttrs)
+        } catch (e) {
+          throw new Error(`Couldn't update part "${l.part.id}": ${e.message || e}`)
+        }
+      }
+
+      // Step 3: insert all the receive movements as a batch
       const noteFromVendor = vendorName.trim()
         ? `Vendor: ${vendorName.trim()}`
         : null
@@ -227,17 +264,31 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
 }
 
 // ─── one row in the line items list ─────────────────────────────────────
+// Three UI modes: 'idle' (search-or-show-picked), 'creating' (form for a
+// brand-new part), 'editing' (form for tweaking the picked part's attrs).
+// Editing fills `line.pendingAttrs`; creating sets `line.part.isNew=true`.
+// The parent's handleSubmit reads both and does the catalog work before
+// inserting the receive movements.
 
 function ReceiveLineRow({ line, onChange, onRemove }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
   const searchTimer = useRef(null)
 
-  // Debounced part search (only while no part is picked)
+  const [mode, setMode] = useState('idle')   // 'idle' | 'creating' | 'editing'
+  const [fSku, setFSku]       = useState('')
+  const [fName, setFName]     = useState('')
+  const [fUnit, setFUnit]     = useState('ea')
+  const [fDept, setFDept]     = useState('')
+  const [fMatGrp, setFMatGrp] = useState('')
+
+  // Search active only when no part picked AND we're not in a form mode
   useEffect(() => {
-    if (line.part) { setResults([]); return }
+    if (line.part || mode !== 'idle') { setResults([]); return }
     if (!query || query.length < 2) { setResults([]); return }
     if (searchTimer.current) clearTimeout(searchTimer.current)
+    setSearching(true)
     searchTimer.current = setTimeout(async () => {
       try {
         const data = await searchPartsCatalog(query, { limit: 8 })
@@ -245,37 +296,210 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
       } catch (e) {
         console.warn('Part search failed:', e)
         setResults([])
+      } finally {
+        setSearching(false)
       }
     }, 200)
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current) }
-  }, [query, line.part])
+  }, [query, line.part, mode])
 
   function pickPart(p) {
-    onChange({ part: p })
+    onChange({
+      part: { id: p.id, name: p.name, unit: p.unit, isNew: false,
+              department: p.department, material_group: p.material_group },
+      pendingAttrs: null,
+    })
     setQuery('')
     setResults([])
   }
 
+  function startCreate() {
+    setFSku('')
+    setFName(query)        // pre-fill name from search query
+    setFUnit('ea')
+    setFDept('')
+    setFMatGrp('')
+    setMode('creating')
+  }
+
+  function startEdit() {
+    if (!line.part) return
+    const cur = line.pendingAttrs || {}
+    setFUnit(cur.unit ?? line.part.unit ?? 'ea')
+    setFDept(cur.department ?? line.part.department ?? '')
+    setFMatGrp(cur.material_group ?? line.part.material_group ?? '')
+    setMode('editing')
+  }
+
+  function saveCreate() {
+    if (!fSku.trim() || !fName.trim()) return
+    onChange({
+      part: {
+        id: fSku.trim(),
+        name: fName.trim(),
+        unit: fUnit.trim() || 'ea',
+        department: fDept.trim() || null,
+        material_group: fMatGrp.trim() || null,
+        isNew: true,
+      },
+      pendingAttrs: null,
+    })
+    setMode('idle')
+    setQuery('')
+  }
+
+  function saveEdit() {
+    onChange({
+      pendingAttrs: {
+        unit: fUnit.trim() || 'ea',
+        department: fDept.trim() || null,
+        material_group: fMatGrp.trim() || null,
+      },
+    })
+    setMode('idle')
+  }
+
+  function cancelForm() { setMode('idle') }
+
+  // ── Form rendering shared between create + edit modes ──
+  if (mode === 'creating' || mode === 'editing') {
+    const isCreate = mode === 'creating'
+    return (
+      <div style={{
+        marginBottom: 6, padding: 10,
+        background: isCreate ? 'var(--teal-lt)' : 'var(--orange-lt)',
+        border: `1.5px solid ${isCreate ? 'var(--teal)' : 'var(--orange)'}`,
+        borderRadius: 'var(--r-sm)',
+      }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: isCreate ? 'var(--teal-dk)' : 'var(--orange)', marginBottom: 8 }}>
+          {isCreate ? '＋ Create new part' : `✎ Edit attributes — ${line.part?.name}`}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: isCreate ? '1fr 2fr 80px' : '1fr 2fr 80px', gap: 6, marginBottom: 6 }}>
+          {isCreate ? (
+            <>
+              <input
+                type="text" value={fSku}
+                onChange={e => setFSku(e.target.value)}
+                placeholder="SKU * (e.g. ACM-1234)"
+                autoComplete="off" name={`po-form-sku-${line.tempId}`}
+                style={inputStyle()}
+              />
+              <input
+                type="text" value={fName}
+                onChange={e => setFName(e.target.value)}
+                placeholder="Part name *"
+                autoComplete="off" name={`po-form-name-${line.tempId}`}
+                style={inputStyle()}
+              />
+            </>
+          ) : (
+            <>
+              <div style={{ ...inputStyle(), background: 'var(--surface2)', color: 'var(--muted)' }}>{line.part?.id}</div>
+              <div style={{ ...inputStyle(), background: 'var(--surface2)', color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{line.part?.name}</div>
+            </>
+          )}
+          <select
+            value={fUnit}
+            onChange={e => setFUnit(e.target.value)}
+            style={inputStyle()}
+          >
+            <option value="ea">ea</option>
+            <option value="ft">ft</option>
+            <option value="in">in</option>
+            <option value="m">m</option>
+            <option value="lb">lb</option>
+            <option value="kg">kg</option>
+            <option value="set">set</option>
+            <option value="roll">roll</option>
+            <option value="box">box</option>
+          </select>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
+          <input
+            type="text" value={fDept}
+            onChange={e => setFDept(e.target.value)}
+            placeholder="Department (optional)"
+            autoComplete="off" name={`po-form-dept-${line.tempId}`}
+            style={inputStyle()}
+            list={`po-form-dept-list-${line.tempId}`}
+          />
+          <input
+            type="text" value={fMatGrp}
+            onChange={e => setFMatGrp(e.target.value)}
+            placeholder="Material group (optional)"
+            autoComplete="off" name={`po-form-mat-${line.tempId}`}
+            style={inputStyle()}
+          />
+          {/* Hint: matches the existing 5 departments, plus free text */}
+          <datalist id={`po-form-dept-list-${line.tempId}`}>
+            <option value="Fiber Construction" />
+            <option value="Drop Installation" />
+            <option value="Underground construction" />
+            <option value="Splice" />
+            <option value="Customer Installation" />
+          </datalist>
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+          <button onClick={cancelForm}
+            style={{ fontSize: 11, color: 'var(--muted)', background: 'none', border: '1px solid var(--border2)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 600 }}>
+            Cancel
+          </button>
+          <button
+            onClick={isCreate ? saveCreate : saveEdit}
+            disabled={isCreate && (!fSku.trim() || !fName.trim())}
+            style={{
+              fontSize: 11, color: 'white',
+              background: isCreate ? 'var(--teal-dk)' : 'var(--orange)',
+              border: 'none', borderRadius: 6, padding: '4px 12px',
+              cursor: 'pointer', fontWeight: 700,
+            }}
+          >
+            {isCreate ? 'Save part' : 'Save changes'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Default 'idle' mode: search OR picked-part chip + qty/cost ──
   return (
     <div style={{
       display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 6,
       padding: 8, background: 'var(--surface2)', borderRadius: 'var(--r-sm)',
     }}>
-      {/* Part picker */}
+      {/* Part picker / picked chip */}
       <div style={{ flex: 2, minWidth: 0, position: 'relative' }}>
         {line.part ? (
           <div style={{
             padding: '6px 10px', background: 'var(--surface)',
-            border: '1px solid var(--border)', borderRadius: 6,
+            border: `1px solid ${line.part.isNew ? 'var(--teal)' : 'var(--border)'}`,
+            borderRadius: 6,
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{line.part.name}</div>
+              <div style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {line.part.name}
+                {line.part.isNew && (
+                  <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 6, background: 'var(--teal)', color: 'white' }}>NEW</span>
+                )}
+                {line.pendingAttrs && (
+                  <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 6, background: 'var(--orange)', color: 'white' }}>EDITED</span>
+                )}
+              </div>
               <div style={{ fontSize: 10, color: 'var(--hint)' }}>{line.part.id}</div>
             </div>
+            {!line.part.isNew && (
+              <button
+                onClick={startEdit}
+                title="Edit unit / department / material group"
+                style={{ fontSize: 10, color: 'var(--orange)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap' }}
+              >edit attrs</button>
+            )}
             <button
-              onClick={() => onChange({ part: null })}
-              style={{ fontSize: 10, color: 'var(--orange)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap' }}
+              onClick={() => onChange({ part: null, pendingAttrs: null })}
+              style={{ fontSize: 10, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap' }}
             >change</button>
           </div>
         ) : (
@@ -287,11 +511,12 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
               autoComplete="off" name={`po-line-part-${line.tempId}`}
               style={{ width: '100%', padding: '6px 10px', fontSize: 12, border: '1px solid var(--border2)', borderRadius: 6, background: 'var(--bg)' }}
             />
-            {results.length > 0 && (
+            {/* Results dropdown OR "no match → create new" prompt */}
+            {(results.length > 0 || (query.length >= 2 && !searching)) && (
               <div style={{
                 position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0,
                 background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 6, zIndex: 5, maxHeight: 220, overflowY: 'auto',
+                borderRadius: 6, zIndex: 5, maxHeight: 240, overflowY: 'auto',
                 boxShadow: '0 6px 18px rgba(0,0,0,0.25)',
               }}>
                 {results.map(p => (
@@ -303,6 +528,19 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
                     <div style={{ fontSize: 10, color: 'var(--hint)' }}>{p.id}</div>
                   </div>
                 ))}
+                {/* "No match" / "Add new" affordance always visible at bottom
+                    when we have a query, even if there are partial matches */}
+                <div
+                  onClick={startCreate}
+                  style={{
+                    padding: '8px 10px', cursor: 'pointer',
+                    background: 'var(--teal-lt)', color: 'var(--teal-dk)',
+                    fontWeight: 700, fontSize: 12,
+                    borderTop: results.length > 0 ? '1px solid var(--border)' : 'none',
+                  }}
+                >
+                  ＋ Create new part {query.trim() && <span style={{ fontWeight: 400 }}>— "{query.trim()}"</span>}
+                </div>
               </div>
             )}
           </>
@@ -320,7 +558,9 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
           style={{ width: '100%', padding: '6px 10px', fontSize: 12, border: '1px solid var(--border2)', borderRadius: 6, background: 'var(--bg)', textAlign: 'right' }}
         />
         {line.part && (
-          <div style={{ fontSize: 9, color: 'var(--hint)', textAlign: 'right', marginTop: 2 }}>{line.part.unit || 'ea'}</div>
+          <div style={{ fontSize: 9, color: 'var(--hint)', textAlign: 'right', marginTop: 2 }}>
+            {line.pendingAttrs?.unit || line.part.unit || 'ea'}
+          </div>
         )}
       </div>
 
@@ -348,3 +588,12 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
     </div>
   )
 }
+
+const inputStyle = () => ({
+  padding: '6px 10px',
+  fontSize: 12,
+  border: '1px solid var(--border2)',
+  borderRadius: 6,
+  background: 'var(--bg)',
+  color: 'var(--text)',
+})
