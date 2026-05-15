@@ -196,7 +196,46 @@ npx supabase login                             # auth supabase CLI (first time)
     **Deferred follow-ups (separate backlog items below if revived):**
     - Issue / Scrap / Transfer UI flows (RPC already supports them; just need sheets and buttons in CrewMovementSheet).
     - Migrate stock from the 7 legacy rollup buckets to specific crew trucks (manual via existing Bulk Move sheet).
-5. **Sage daily export** — Edge Function pattern, stamps `exported_at` + `export_batch_id` on included movements
+5. **Sage Intacct daily export** — Edge Function pattern, stamps `exported_at` + `export_batch_id` on included movements. **Format spec gathered:**
+
+    Target format: standard Sage Intacct **Inventory Transactions** import template (the comprehensive one — covers transfers, receipts, issues, adjustments via the `TRANSACTIONTYPE` column). Sample template the owner provided was 46 columns; the columns we'd actually populate from FiberLog data:
+
+    | Sage column | FiberLog source | Notes |
+    |---|---|---|
+    | `TRANSACTIONTYPE` | constant per `movement_type` | needs the owner's exact Sage template names |
+    | `DATE` | `inventory_movements.created_at` | YYYY-MM-DD |
+    | `STATE` | `Draft` (safe default) or `Post` | configurable |
+    | `LINE` | row index per document | 1, 2, 3… |
+    | `ITEMID` | `parts_catalog.id` | likely matches Sage if both are BoxHero-driven |
+    | `WAREHOUSEID` | `inventory_locations.name` → Sage code | **needs a mapping table** |
+    | `QUANTITY` | `inventory_movements.quantity` | direct |
+    | `UNIT` | `parts_catalog.unit` | Sage values: Count / Length / Time / Volume / Weight |
+    | `PRICE` | `inventory_movements.unit_cost` | optional |
+    | `REFERENCENO` | `inventory_movements.id` or `submission_id` | for Sage→FiberLog traceback |
+    | `MESSAGE` / `MEMO` | `inventory_movements.notes` | auto-deduct text, vendor info |
+    | `INVDOCUMENTENTRY_PROJECTID` | `projects.name` → Sage project code | for project-bucket transfers |
+    | `INVDOCUMENTENTRY_VENDORID` | parsed from receive notes (`Vendor: X`) | optional |
+    | `BINID` | bin name when destination is a bin | optional |
+    | `DEPARTMENTID` | `parts_catalog.department` → Sage code | optional |
+
+    Movement-type mapping:
+    - `receive` → `Inventory Receipt` (or whatever Sage calls it locally)
+    - `transfer` (incl. crew load + project-bucket auto-deduct) → `Inventory Transfer`
+    - `return` → also `Inventory Transfer` (or a separate "Stock Return" template)
+    - `issue` → `Inventory Issue`
+    - `scrap` → `Inventory Adjustment` (or `Scrap`)
+    - `adjust` → `Inventory Adjustment`
+
+    **Open questions to answer before building:**
+    1. **Sage transaction template names** — Sage Intacct lets these be customized per company. We need the exact strings for each FiberLog `movement_type`.
+    2. **Do `parts_catalog.id` SKUs match Sage's `ITEMID`?** Probably yes (both BoxHero-rooted) but confirm with a few examples.
+    3. **Warehouse code mapping** — FiberLog uses full names; Sage uses codes. Need a small lookup (one-time table or config).
+    4. **Project code mapping** — same question for project buckets → Sage project codes.
+    5. **Personal trucks: skip or map?** They aren't real Sage warehouses. Either filter them out at export time (only export movements where source/destination is a real warehouse / project bucket / vendor) or map them all to a single "Crew" warehouse in Sage.
+    6. **Cadence** — daily? Manual button per export? My guess: a "Sage Export" button in the manager Inventory header that produces a CSV file ready for Sage upload + stamps the included movements with `exported_at` so they don't get re-exported next time.
+    7. **`BASECURR`** — USD assumed; the field exists for multi-currency setups.
+
+    The simpler `Warehouse transfers.csv` Sage template the owner also shared (just 6 header columns: Document number, Date, Description, Reference number, Transfer type, State) is header-only and not the right format — it lacks per-item lines. The Inventory Transactions template above is what we want.
 6. **Per-line `project_id` on `log_entries`** — schema change for field-tech multi-cost-center allocation (Wave / Gigwave / general). Pending field-tech UI workflow decisions (per-customer vs per-day)
 7. **Field tech UI surface** — flatter "today's installs" list with one-tap into per-customer materials log
 8. ~~**Locations tab UX**~~ — ✅ shipped. Each location card and bin row shows distinct-part count + total-unit count in the subtitle, plus a 📦 Stock → pill that jumps to the Stock tab pre-scoped to that location. Warehouses roll up their bins. Backed by `getStockCountsByLocation()` in `lib/inventory.js`.
