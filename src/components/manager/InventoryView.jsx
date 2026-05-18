@@ -8,6 +8,7 @@ import InventoryMovementsTab from './InventoryMovementsTab'
 import InventoryAuditTab from './InventoryAuditTab'
 import RecordMovementSheet from './RecordMovementSheet'
 import ReceivePOSheet from './ReceivePOSheet'
+import ReconcileSheet from './ReconcileSheet'
 import InventoryImportSheet from './InventoryImportSheet'
 
 const SUBTABS = [
@@ -25,6 +26,7 @@ export default function InventoryView() {
   const [locationsLoading, setLocationsLoading] = useState(true)
   const [showRecordSheet, setShowRecordSheet] = useState(false)
   const [showReceiveSheet, setShowReceiveSheet] = useState(false)
+  const [showReconcileSheet, setShowReconcileSheet] = useState(false)
   const [showImportSheet, setShowImportSheet] = useState(false)
   // Bumped after a movement is recorded or part is updated, so child tabs
   // re-fetch their data
@@ -67,6 +69,12 @@ export default function InventoryView() {
     showToast(`Received ${lineCount} item${lineCount === 1 ? '' : 's'}`)
   }
 
+  function handleReconcileApplied(count) {
+    setShowReconcileSheet(false)
+    setRefreshKey(k => k + 1)
+    showToast(`Applied ${count} adjustment${count === 1 ? '' : 's'}`)
+  }
+
   function handleLocationsChanged() {
     loadLocations()
     setRefreshKey(k => k + 1)
@@ -104,6 +112,15 @@ export default function InventoryView() {
               style={{ padding: '6px 12px', fontSize: 13 }}
             >
               📥 Receive PO
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => setShowReconcileSheet(true)}
+              disabled={noLocations}
+              title={noLocations ? 'Create a location first' : 'Upload a filled-in Audit CSV to reconcile system stock to a physical count'}
+              style={{ padding: '6px 12px', fontSize: 13 }}
+            >
+              🔄 Reconcile
             </button>
             <button
               className="btn btn-primary"
@@ -203,6 +220,13 @@ export default function InventoryView() {
           currentUser={currentUser}
           onClose={() => setShowReceiveSheet(false)}
           onRecorded={handlePOReceived}
+        />
+      )}
+
+      {showReconcileSheet && (
+        <ReconcileSheet
+          onClose={() => setShowReconcileSheet(false)}
+          onApplied={handleReconcileApplied}
         />
       )}
 
