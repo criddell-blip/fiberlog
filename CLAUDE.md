@@ -171,7 +171,7 @@ npx supabase login                             # auth supabase CLI (first time)
 
 1. ~~**Reconcile workflow**~~ — ✅ shipped. 🔄 Reconcile button in the Inventory header opens `ReconcileSheet.jsx`. Upload the filled-in Audit CSV → app matches each row (SKU + Location/Bin) to live `inventory_stock`, computes variance vs **current** system stock (not the CSV's Expected Qty — so drift between export and upload is handled correctly), shows a sortable preview with per-row include/exclude toggles, applies one `adjust` movement per actionable row via `recordMovementsBatch`. No schema change.
 2. **Onboard new infrastructure + field tech crew** — schema is ready, do via the Users admin
-3. **Sonar transaction CSV importer** — daily install transactions → bulk `issue` movements off truck stock. Sample format at `C:\Users\admin\Desktop\Claude stuff\West field tech report (6).csv`
+3. ~~**Sonar transaction CSV importer**~~ — ✅ MVP shipped. ⚡ Sonar button in the Inventory header opens `SonarImportSheet.jsx`. Upload the daily Sonar CSV → app extracts the unique `Previous Inventory Location` values and `Model | Display Name` values, auto-matches each (first name → user; substring → part), shows mapping pickers grouped at the top, then a per-transaction preview table. Apply → one `issue` movement per ready row, off the matched crew's truck. Notes include date, customer, city, and a `[sonar:<itemId>]` token. Sample format: `C:\Users\admin\Desktop\Claude stuff\West field tech report (6).csv`. **Future:** persisted mappings (two tiny `sonar_*_map` tables) if manager finds re-picking annoying; duplicate detection by `[sonar:id]` token.
 4. **Crew inventory UI + permissions framework** — ✅ **Phases 1–3 shipped.** What's live:
 
     **Backend:**
