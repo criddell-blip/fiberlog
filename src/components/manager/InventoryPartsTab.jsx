@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../AppContext'
-import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart } from '../../lib/inventory'
+import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, SONAR_ROUTING_OPTIONS } from '../../lib/inventory'
 
 const COMMON_UNITS = ['ea', 'ft', 'm', 'in', 'lb', 'kg', 'box', 'roll', 'spool', 'pair', 'pack', 'kit']
 
@@ -447,6 +447,7 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
   )
 
   const [isActive, setIsActive] = useState(part.is_active !== false)
+  const [sonarRouting, setSonarRouting] = useState(part.sonar_routing || 'ask')
   const [saving, setSaving] = useState(false)
 
   const previewCategory = useMemo(() => {
@@ -469,6 +470,7 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
         item_type: itemType.trim() || null,
         material_group: materialGroup.trim() || null,
         is_active: isActive,
+        sonar_routing: sonarRouting,
       })
     } finally {
       setSaving(false)
@@ -519,6 +521,24 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
               <span style={{ fontSize: 10, color: 'var(--hint)', marginLeft: 6 }}>
                 (built from Department + Material group)
               </span>
+            </div>
+          </div>
+
+          {/* Sonar routing policy — determines where Sonar imports send this
+              part. Set once per SKU; persists across imports. */}
+          <div className="field">
+            <label>Sonar import routing</label>
+            <select
+              value={sonarRouting}
+              onChange={e => setSonarRouting(e.target.value)}
+              style={{ width: '100%', padding: '10px 12px', fontSize: 14, border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--bg)', color: 'var(--text)' }}
+            >
+              {SONAR_ROUTING_OPTIONS.map(o => (
+                <option key={o.id} value={o.id}>{o.label}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
+              {SONAR_ROUTING_OPTIONS.find(o => o.id === sonarRouting)?.desc}
             </div>
           </div>
 
@@ -573,11 +593,14 @@ function BulkEditSheet({ count, distinctValues, onCancel, onSave }) {
   const [itemType, setItemType] = useState('')
   const [itemTypeCustom, setItemTypeCustom] = useState(false)
 
+  const [editSonarRouting, setEditSonarRouting] = useState(false)
+  const [sonarRouting, setSonarRouting] = useState('ask')
+
   const [activeMode, setActiveMode] = useState('unchanged')
 
   const [saving, setSaving] = useState(false)
 
-  const anyFieldChecked = editUnit || editDept || editMatGrp || editItemType || activeMode !== 'unchanged'
+  const anyFieldChecked = editUnit || editDept || editMatGrp || editItemType || editSonarRouting || activeMode !== 'unchanged'
 
   async function handleSubmit() {
     if (!anyFieldChecked) return
@@ -586,6 +609,7 @@ function BulkEditSheet({ count, distinctValues, onCancel, onSave }) {
     if (editDept) updates.department = department.trim() || null
     if (editMatGrp) updates.material_group = materialGroup.trim() || null
     if (editItemType) updates.item_type = itemType.trim() || null
+    if (editSonarRouting) updates.sonar_routing = sonarRouting
     if (activeMode === 'active') updates.is_active = true
     if (activeMode === 'draft')  updates.is_active = false
 
@@ -631,6 +655,21 @@ function BulkEditSheet({ count, distinctValues, onCancel, onSave }) {
             <FieldWithCustom value={itemType} onChange={setItemType}
               custom={itemTypeCustom} setCustom={setItemTypeCustom}
               options={distinctValues.itemTypes} placeholder="custom item type" allowEmpty />
+          </BulkField>
+
+          <BulkField label="Sonar import routing" checked={editSonarRouting} onToggle={setEditSonarRouting}>
+            <select
+              value={sonarRouting}
+              onChange={e => setSonarRouting(e.target.value)}
+              style={{ width: '100%', padding: '8px 10px', fontSize: 14, border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--bg)', color: 'var(--text)' }}
+            >
+              {SONAR_ROUTING_OPTIONS.map(o => (
+                <option key={o.id} value={o.id}>{o.label}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
+              {SONAR_ROUTING_OPTIONS.find(o => o.id === sonarRouting)?.desc}
+            </div>
           </BulkField>
 
           <div style={{
