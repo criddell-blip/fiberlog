@@ -9,6 +9,7 @@ import InventoryAuditTab from './InventoryAuditTab'
 import RecordMovementSheet from './RecordMovementSheet'
 import ReceivePOSheet from './ReceivePOSheet'
 import ReconcileSheet from './ReconcileSheet'
+import SonarImportSheet from './SonarImportSheet'
 import InventoryImportSheet from './InventoryImportSheet'
 
 const SUBTABS = [
@@ -27,6 +28,7 @@ export default function InventoryView() {
   const [showRecordSheet, setShowRecordSheet] = useState(false)
   const [showReceiveSheet, setShowReceiveSheet] = useState(false)
   const [showReconcileSheet, setShowReconcileSheet] = useState(false)
+  const [showSonarSheet, setShowSonarSheet] = useState(false)
   const [showImportSheet, setShowImportSheet] = useState(false)
   // Bumped after a movement is recorded or part is updated, so child tabs
   // re-fetch their data
@@ -75,6 +77,12 @@ export default function InventoryView() {
     showToast(`Applied ${count} adjustment${count === 1 ? '' : 's'}`)
   }
 
+  function handleSonarApplied(count) {
+    setShowSonarSheet(false)
+    setRefreshKey(k => k + 1)
+    showToast(`Issued ${count} Sonar transaction${count === 1 ? '' : 's'}`)
+  }
+
   function handleLocationsChanged() {
     loadLocations()
     setRefreshKey(k => k + 1)
@@ -121,6 +129,15 @@ export default function InventoryView() {
               style={{ padding: '6px 12px', fontSize: 13 }}
             >
               🔄 Reconcile
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => setShowSonarSheet(true)}
+              disabled={noLocations}
+              title={noLocations ? 'Create a location first' : 'Import a Sonar daily install report (issues consumed parts off crew trucks)'}
+              style={{ padding: '6px 12px', fontSize: 13 }}
+            >
+              ⚡ Sonar
             </button>
             <button
               className="btn btn-primary"
@@ -227,6 +244,13 @@ export default function InventoryView() {
         <ReconcileSheet
           onClose={() => setShowReconcileSheet(false)}
           onApplied={handleReconcileApplied}
+        />
+      )}
+
+      {showSonarSheet && (
+        <SonarImportSheet
+          onClose={() => setShowSonarSheet(false)}
+          onApplied={handleSonarApplied}
         />
       )}
 
