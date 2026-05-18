@@ -45,17 +45,26 @@ src/
     crew/                 ← UI for non-manager users (logging work, parts used, etc.)
       CrewApp.jsx         ← entry point, sidebar + workspace
       ProjectList.jsx, PhaseList.jsx, TaskList.jsx, TaskWorkspace.jsx
+      MyStockView.jsx     ← crew's personal-truck inventory view (Load + Return UI)
+      CrewMovementSheet.jsx ← unified overlay for load/return (other ops are RPC-supported, UI deferred)
       workspace/          ← logging-specific subviews
     manager/              ← UI for owner/manager users
       ManagerApp.jsx      ← entry, top-level nav (Approvals / Crew / Projects / Reports / Assemblies / Inventory / Admin)
-      AdminPanel.jsx      ← admin home
-      AdminUsersView.jsx  ← user CRUD (add/edit/deactivate/reset password)
-      InventoryView.jsx   ← inventory section (5 sub-tabs)
+      AdminPanel.jsx      ← admin home — wires Users, Reset-password, BoxHero sync, Crew×Dept permissions
+      AdminUsersView.jsx  ← user CRUD + per-user movement permission toggles
+      CrewTypePermissionsView.jsx ← crew_type × department matrix (whitelist UI)
+      InventoryView.jsx   ← inventory section (5 sub-tabs + 5 sheet buttons: Import / Receive PO / Reconcile / Sonar / Record movement)
       InventoryStockTab.jsx, InventoryLocationsTab.jsx, InventoryPartsTab.jsx,
       InventoryMovementsTab.jsx, InventoryAuditTab.jsx
-      RecordMovementSheet.jsx, BulkMoveSheet.jsx, InventoryImportSheet.jsx
+      RecordMovementSheet.jsx ← arbitrary single-movement entry
+      ReceivePOSheet.jsx  ← multi-line vendor delivery (creates new parts inline, edits attrs)
+      ReconcileSheet.jsx  ← audit CSV round-trip → adjust movements
+      SonarImportSheet.jsx ← daily install report → bulk issue movements
+      BulkMoveSheet.jsx, InventoryImportSheet.jsx
       AssemblyEditor.jsx  ← assembly templates (kits crew can pre-fill from)
-      ReportsView.jsx, SubmissionsQueue.jsx, ProjectManager.jsx
+      ReportsView.jsx, SubmissionsQueue.jsx, ProjectManager.jsx, CrewStatus.jsx
+  lib/
+    useIsWide.js          ← shared 768px-breakpoint hook (used by both CrewApp and ManagerApp)
 supabase/
   functions/
     admin-set-password/index.ts   ← reset another user's password (owners/managers only)
@@ -88,7 +97,20 @@ supabase/
 - `inventory_movements.movement_type`: `receive | transfer | return | issue | scrap | adjust`
 - Movements with `from_location_id` decrement source stock, `to_location_id` increment destination
 - `adjust` is special: positive (to only) or negative (from only)
+- `inventory_movements.notes` and `vendor_invoice` are both `text` (no length limit) — Receive PO writes the vendor name into notes, Sonar import writes `[sonar:<itemId>]` for future dedup
 - A trigger updates `inventory_stock` automatically when a movement is inserted
+- **CHECK constraint `movement_endpoints_valid`** enforces correct from/to per type (e.g., `receive` requires `to NOT NULL, from NULL`; `transfer`/`return` require both and different). The JS `validateMovement()` in `lib/inventory.js` mirrors this so we fail fast.
+
+### Project buckets
+- Every active project auto-gets an `inventory_locations` row with `type='job_site'` and `project_id` set (FK to projects). Trigger `trg_ensure_project_job_site` creates one on project insert/activation.
+- These buckets receive auto-deduct transfers from crew trucks on submission approval (for aerial/underground/splice/infrastructure crew types).
+
+### Per-user + per-crew-type permissions
+- `crew_operation_permissions(user_id, operation, allowed bool, reason, updated_at)` — explicit deny rows (empty table = default-allow). Checked by `record_crew_movement` RPC.
+- `crew_type_part_restrictions(crew_type, department)` — whitelist (empty for a crew_type = unrestricted). Parts with `department IS NULL` bypass. Checked by `record_crew_movement` RPC. **NOT** checked by `approve_submission` auto-deduct (system action).
+
+### Submission routing override
+- `submissions.project_id_override` — nullable FK to projects. If set, `approve_submission` routes auto-deduct to this project's bucket instead of the task's natural project. Phase actuals stay on the natural phase. Persisted by `TaskWorkspace`'s in-task picker.
 
 ### Parts catalog
 - `parts_catalog.id` is the SKU (text PK)
@@ -114,6 +136,37 @@ Two are deployed and active:
 Pattern for new edge functions: copy `admin-set-password` as the template. JWT verification + service_role for privileged ops.
 
 Deploy: `npx supabase functions deploy <name>` (you may need `supabase login` first).
+
+---
+
+## Database RPCs (canonical list)
+
+All `SECURITY DEFINER`, all with `SET search_path = public, pg_temp`. EXECUTE on the trigger-only functions is revoked from `anon`/`authenticated`/`PUBLIC`.
+
+| RPC | Called from JS | Purpose |
+|---|---|---|
+| `approve_submission(p_submission_id, p_note)` | `lib/supabase.js` → `approveSubmission` | Atomic + idempotent submission approval. Increments phase actuals, flips task to `approved`, clears `working_counts`, auto-deducts materials (truck → project bucket) for aerial/underground/splice/infrastructure crews. Honors `submissions.project_id_override` for bucket routing. |
+| `record_crew_movement(operation, part_id, quantity, other_location_id, ...)` | `lib/inventory.js` → `recordCrewMovement` | Single entry point for crew load/return/issue/scrap/transfer. Checks per-user permission, crew_type×department whitelist, then inserts the movement. |
+| `save_log_entry(...)` | `lib/supabase.js` → `saveEntry` | Atomic insert of `log_entries` + `entry_parts`. |
+| `replace_assembly(p_assembly jsonb, p_parts jsonb)` | `lib/supabase.js` → `saveAssembly` | Atomic upsert of assembly + replace of `assembly_parts`. |
+| `is_staff()` | RLS policies | Returns true if `auth.uid()`'s role is owner/manager. STABLE. |
+| `cascade_task_terminal_to_session()` | Trigger only | When task status → pending/approved/done, flips matching `started` work_sessions to `submitted`. |
+| `ensure_crew_truck()` | Trigger only | Auto-creates a personal truck for new crew/contractor users. |
+| `ensure_project_job_site()` | Trigger only | Auto-creates a job_site bucket for new active projects. |
+| `crew_op_perms_touch_updated_at()` | Trigger only | Bumps `updated_at` on `crew_operation_permissions` UPDATE. |
+| `update_inventory_stock_on_movement()` | Trigger only | Maintains `inventory_stock` from `inventory_movements` inserts. |
+| `validate_inventory_location_parent()` | Trigger only | Enforces bin parent rules (only warehouses can be parents, single-level only). |
+| `increment_phase_actuals(...)` | (legacy, kept for compatibility — `approve_submission` does the work inline now) | |
+| `increment_session_counts(...)`, `update_session_timestamp()`, `update_updated_at_column()`, `prevent_movement_modification()`, `prevent_movement_delete()` | Triggers / legacy | |
+
+---
+
+## Tests
+
+`npm test` (one-shot) or `npm run test:watch`. Vitest configured via `package.json` only — no separate config file.
+
+- `src/lib/calculations.test.js` — 34 tests covering bolt-size mapping, lashing math (ceil rounding), structure mappings, mergeParts dedupe. Covers the arithmetic most likely to silently regress when SKU maps or per-100ft ratios get tweaked.
+- No component tests yet. The crew workflow + manager sheets are smoke-tested manually via the deployed app.
 
 ---
 
@@ -160,6 +213,8 @@ For any input that's NOT meant to be filled by the browser's saved-credentials l
 ```bash
 npm run dev                                    # local dev (port 5173)
 npm run build                                  # production build
+npm run test                                   # run vitest once
+npm run test:watch                             # vitest in watch mode
 npm run deploy                                 # deploy to gh-pages
 npx supabase functions deploy <name>           # deploy an edge function
 npx supabase login                             # auth supabase CLI (first time)
@@ -192,6 +247,10 @@ npx supabase login                             # auth supabase CLI (first time)
     - `AdminPanel` → 🔒 Crew × Department permissions → checkbox matrix (8 crew_types × active departments, optimistic save).
 
     **Migrations applied:** `crew_personal_trucks_and_movement_rpc`, `crew_operation_permissions`, `crew_type_part_restrictions`.
+
+    **Crew-side project routing override (Flavor A — ✅ shipped):**
+    - `TaskWorkspace` shows a chip-style picker below the topbar: "Routing materials to: \<project\> ▾". Default = task's natural project. Picking another project sets `submissions.project_id_override` on submit. `approve_submission` honors it for auto-deduct bucket routing; phase actuals stay on the natural phase regardless.
+    - `SubmissionsQueue` detail modal surfaces an amber chip "⤳ Materials routing to \<project\> on approval" when override is set, so manager sees it pre-approval.
 
     **Deferred follow-ups (separate backlog items below if revived):**
     - Issue / Scrap / Transfer UI flows (RPC already supports them; just need sheets and buttons in CrewMovementSheet).
@@ -242,7 +301,12 @@ npx supabase login                             # auth supabase CLI (first time)
 9. ~~**Auto-deduct on submission approval**~~ — ✅ shipped as the **project-bucket variant**. Migration `project_buckets_and_auto_deduct` added a `project_id` FK on `inventory_locations`, backfilled one `job_site` "bucket" per active project (auto-created on future inserts via `trg_ensure_project_job_site`), and extended `approve_submission` to insert one `transfer` movement per distinct part (truck → project bucket) when the submitter's `crew_type` is in `{aerial, underground, splice, infrastructure}`. drop / install / locator / contractor are skipped — they'll feed from Sonar imports (#3). Bypasses the Phase 3 crew_type × department whitelist by design (system-authorized action recording reality). Visible in manager Inventory → Locations → each project's bucket.
 10. **BoxHero drafts cleanup** — handled manually by owner via Parts tab → Drafts → bulk edit. ~476 placeholder drafts with `unit='ea'`; cable items need `unit='ft'`.
 
-12. **Receive materials via vendor PO** — ✅ **MVP shipped.** New 📥 Receive PO button in the Inventory header (`src/components/manager/ReceivePOSheet.jsx`) opens a multi-line sheet. Manager enters PO/invoice ref + optional vendor name + a destination (warehouse/bin/truck/job_site) + N line items (part, qty, optional unit_cost). Submit creates one `receive` movement per line via `recordMovementsBatch`, all sharing the PO ref in `vendor_invoice` and the vendor name in `notes`. Existing `inventory_stock` trigger handles the stock math. No schema change needed.
+11. **Receive materials via vendor PO** — ✅ **shipped (MVP + inline part create/edit).** 📥 Receive PO button in the Inventory header (`src/components/manager/ReceivePOSheet.jsx`) opens a multi-line sheet. Manager enters PO/invoice ref + optional vendor name + a destination (warehouse/bin/truck/job_site) + N line items (part, qty, optional unit_cost). Submit creates one `receive` movement per line via `recordMovementsBatch`, all sharing the PO ref in `vendor_invoice` and the vendor name in `notes`.
+
+    **Inline part create / edit attrs at receipt:**
+    - "+ Create new part" appears in the search dropdown — opens an inline teal-bordered form with SKU, Name (pre-filled from search query), Unit dropdown, Department (datalist of existing depts), Material group. Saved part is inserted into `parts_catalog` as `is_active=true` on submit, BEFORE the receive movements (so the FK resolves). NEW badge on the picked-part chip.
+    - For existing parts, an "edit attrs" link opens an orange-bordered form prefilled with current values. SKU/name read-only; Unit/Dept/Material group editable. Applied via `updatePart()` on submit. EDITED badge on the chip.
+    - Partial-failure: if step 1 (createPart) or step 2 (updatePart) fails partway, the whole submit aborts. Already-created parts stay in catalog (no rollback) — user can retry the receive without re-creating them.
 
     **Bigger version (later, if needed):**
     - `purchase_orders` table with status (`open` | `partial` | `closed`) and per-line expected qty.
@@ -250,11 +314,7 @@ npx supabase login                             # auth supabase CLI (first time)
     - Vendor catalog (probably reuse `inventory_locations` type='vendor' but add a vendor profile sheet — contact, terms, default shipping warehouse).
     - "What's on order?" / overdue PO reports.
     - PO PDF upload + parser (way down the road).
-
-    **Don't forget:**
-    - Receive movements should bypass the `crew_type × department` whitelist (it's a manager-authorized inbound, not crew-initiated).
-    - The existing `recordMovement` JS validates `receive` requires `to` only; the new sheet should use the same RPC path or `recordMovementsBatch` to insert all the lines.
-11. **Security & DB hygiene from Supabase advisor scan** — RLS rewrite + view/function hardening complete. Five lints remain, all intentional or out-of-band:
+12. **Security & DB hygiene from Supabase advisor scan** — RLS rewrite + view/function hardening complete. Five lints remain, all intentional or out-of-band:
     - `tasks_insert` and `tasks_update` are wide-open by design (crew need to create tasks and auto-save `working_counts`; the "Continued from X" handoff depends on any-crew updates). Documented exception.
     - `approve_submission` and `is_staff()` are reachable by `authenticated`, intentionally. `approve_submission` is the manager UI's approval RPC and has an `auth.uid()`+role guard inside. `is_staff()` is called by RLS policies and must be executable in the user's context.
     - ~~Leaked-password protection toggle~~ — gated behind Supabase Pro plan. Not worth a plan upgrade for FiberLog's risk profile (no public signup, synthetic emails, admin-set passwords). Free-tier alternative if desired: in Auth → Sign In / Providers → Email, bump minimum password length from 6 → 8 and set a password-requirements rule. Both apply only to new passwords, don't invalidate existing.
@@ -285,9 +345,41 @@ npx supabase login                             # auth supabase CLI (first time)
 
 ---
 
+## How the inventory flows interconnect (cross-feature map)
+
+The inventory side has many entry points that all write to `inventory_movements`. The trigger on that table updates `inventory_stock` automatically. Knowing which flow touches what:
+
+| Entry point | Writes movement type | From → To | Notes |
+|---|---|---|---|
+| Crew Load (`CrewMovementSheet` → `record_crew_movement` RPC) | `transfer` | warehouse → caller's truck | Permission-checked |
+| Crew Return (same RPC) | `return` | caller's truck → warehouse | Permission-checked |
+| Crew Issue/Scrap/Transfer | (same RPC, UI not shipped) | caller's truck → (varies) | RPC ready, sheets deferred |
+| Manager Record movement (`RecordMovementSheet`) | any of 6 | any → any | Free-form, no permission filter |
+| Manager Receive PO (`ReceivePOSheet`) | `receive` (× N lines) | NULL → dest | Can create new parts inline |
+| Manager Reconcile (`ReconcileSheet`) | `adjust` (× N lines) | one-sided | Audit CSV round-trip |
+| Manager Sonar import (`SonarImportSheet`) | `issue` (× N lines) | crew truck → NULL | Mapped per-unique-value, not per-row |
+| **Auto-deduct on approval** (`approve_submission` RPC) | `transfer` (× N parts) | submitter's truck → project bucket | Gated on crew_type ∈ {aerial, underground, splice, infrastructure}. Honors `project_id_override`. |
+| BoxHero CSV import (`InventoryImportSheet`) | `adjust` baseline + future flows | varies | Initial seed path |
+
+Things to remember when adding a new entry point:
+- All inserts to `inventory_movements` need `created_by` (RLS would 0-affect otherwise — see the users-update bug we hit). Validate `currentUser?.id` exists before building the payload.
+- For staff-initiated movements (manager UI), the manager already has `is_staff()` so the `mgr_write` RLS policy permits the insert. For crew-initiated, route through `record_crew_movement` RPC which is SECURITY DEFINER and bypasses RLS once it's verified the caller's role.
+- The CHECK constraint `movement_endpoints_valid` will reject bad from/to combos before the trigger runs. `validateMovement()` in `lib/inventory.js` mirrors this — call it before the RPC for friendlier client-side errors.
+- None of the import-style sheets (Receive PO, Reconcile, Sonar) set `task_id` — these are standalone movements not tied to a FiberLog task. Audit reports / Reports view that filter by task won't see them; this is by design.
+
+## Known cross-feature gaps + tech debt
+
+- **MyStockView (crew) has no realtime subscription** — `inventory_stock` isn't in the realtime publication. When a manager applies Sonar/Reconcile/auto-deduct that affects a crew's truck, the crew won't see the change until they manually refresh. Comment in the file is explicit.
+- **`recordMovementsBatch` does no chunking** — single `.insert(payload)` for all rows. Fine up to a few hundred; very large reconciles (5K+ rows) could hit request size limits. No fallback split yet.
+- **Receive PO inline-create doesn't refresh the catalog search index in the same session** — if the manager creates a new SKU then types it in a later line of the same PO, search won't auto-complete. Workaround: close + reopen the sheet.
+- **Receive PO + Sonar sheets aren't responsive on phone** — `maxWidth: 760` works on tablet+; on narrow viewports the line grids overflow. These are admin-only flows so manager-on-laptop is the assumed environment.
+- **Audit CSV round-trip uses location *names***, not IDs. If two trucks happen to display the same first name (e.g. two crew named "Chris"), reconcile may match to the wrong one. Surface = warning, not blocker.
+
 ## Recent major work (in case it helps)
 
+- **Inventory framework rebuild (May 2026):** Crew personal trucks, three-layer permission framework (per-user × crew_type×dept × CHECK constraints), project buckets, auto-deduct on approval, Flavor A project routing override, Receive PO, Reconcile, Sonar import, Locations tab counts + jump-link, Vitest tests for `calculations.js`. See backlog #4, #9, #11.
+- **Security audit (May 2026):** RLS rewrite on 14 tables (was wide-open USING(true)), view + function hardening, EXECUTE grants tightened. See backlog #12.
 - **Bins:** Sub-locations under warehouses, schema + full UI rollout (Locations / Stock / RecordMovement / BulkMove). Single-level nesting only. Bin creation lives on each warehouse card via `+ Bin`.
-- **Audit export:** New `🔍 Audit` sub-tab in Inventory. Filter by scope / part status / stock level / department / material group / staleness. Generates CSV with `Actual Qty` blank column and `Variance = =J<row>-I<row>` formula.
-- **User management:** Full add/edit/deactivate/reset-password from the manager Admin panel via the new Users view.
+- **Audit export:** New `🔍 Audit` sub-tab in Inventory. Filter by scope / part status / stock level / department / material group / staleness. Generates CSV with `Actual Qty` blank column and `Variance = =J<row>-I<row>` formula. Round-trips into the Reconcile sheet.
+- **User management:** Full add/edit/deactivate/reset-password from the manager Admin panel via the new Users view. Per-user movement permission toggles live in the user-edit sheet.
 - **Theme + login:** Dark/light theme persists. Login is username + password with auto-domain append.
