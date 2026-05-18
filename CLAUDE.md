@@ -169,7 +169,7 @@ npx supabase login                             # auth supabase CLI (first time)
 
 ## Backlog (rough priority order)
 
-1. **Reconcile workflow** — paste actual counts from an audit CSV back, auto-generate adjust movements
+1. ~~**Reconcile workflow**~~ — ✅ shipped. 🔄 Reconcile button in the Inventory header opens `ReconcileSheet.jsx`. Upload the filled-in Audit CSV → app matches each row (SKU + Location/Bin) to live `inventory_stock`, computes variance vs **current** system stock (not the CSV's Expected Qty — so drift between export and upload is handled correctly), shows a sortable preview with per-row include/exclude toggles, applies one `adjust` movement per actionable row via `recordMovementsBatch`. No schema change.
 2. **Onboard new infrastructure + field tech crew** — schema is ready, do via the Users admin
 3. **Sonar transaction CSV importer** — daily install transactions → bulk `issue` movements off truck stock. Sample format at `C:\Users\admin\Desktop\Claude stuff\West field tech report (6).csv`
 4. **Crew inventory UI + permissions framework** — ✅ **Phases 1–3 shipped.** What's live:
