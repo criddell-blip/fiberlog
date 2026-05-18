@@ -1,27 +1,29 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import { db } from '../../lib/supabase'
-import { recordMovementsBatch } from '../../lib/inventory'
+import {
+  recordMovementsBatch,
+  getSonarCityMap, setSonarCityBucket,
+  setPartSonarRouting, SONAR_ROUTING_OPTIONS,
+} from '../../lib/inventory'
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
 
 // Sonar daily-install-report importer (backlog #3).
 //
-// Each CSV row represents one inventory item that was installed at a
-// customer site. We post one `issue` movement per row, off the crew's
-// personal truck. Quantity is always 1; no destination (parts are
-// consumed).
+// Each CSV row becomes one `transfer` movement: crew's truck → destination
+// "bucket" (project-tied region OR Gigwave/None for wireless). Buckets
+// accumulate over time and are cleared on Sage export.
 //
-// Two mapping problems Sonar can't solve for us:
-//   1. "Install 1 (Jaco)" → which FiberLog user/truck?
-//      Auto-match: parse first name from the parenthetical and look up
-//      a user whose name starts with that. Manager can override.
-//   2. "Wave LR" → which parts_catalog SKU?
-//      Auto-match: case-insensitive name contains (either direction).
-//      Manager can override.
+// Three mapping layers, each persisted across imports:
+//   1. Crew (Sonar source → FiberLog user) — picked per import, not persisted
+//   2. Part (Sonar model → FiberLog SKU) + per-part routing policy
+//      ('region' | 'gigwave' | 'none' | 'ask'). Routing is saved to
+//      parts_catalog.sonar_routing on pick — persists forever.
+//   3. City (customer city → bucket location) for `region`-routed parts.
+//      Saved to sonar_city_bucket_map on pick — persists forever.
 //
-// UX: pickers are grouped at the top — pick ONCE per unique sonarLoc /
-// sonarModel and every transaction sharing that value resolves. The
-// transactions table below is derived from those mappings.
+// Rows with policy='ask' OR routing='region' but city not yet mapped
+// fall to per-row picker in the transactions table.
 
 const REQUIRED_COLS = [
   'Inventory Item ID',
@@ -29,6 +31,7 @@ const REQUIRED_COLS = [
   'Previous Inventory Location',
   'Date Time',
   'Current Assignee',
+  'Address | City',
 ]
 
 function extractFirstName(sonarLoc) {
@@ -39,25 +42,27 @@ function extractFirstName(sonarLoc) {
 export default function SonarImportSheet({ onClose, onApplied }) {
   const { showToast, currentUser } = useApp()
 
-  // Lookups for the pickers
-  const [crewUsers, setCrewUsers] = useState([])         // active crew/contractor
-  const [trucksByUser, setTrucksByUser] = useState({})   // user_id → truck_id
-  const [parts, setParts] = useState([])                 // active parts_catalog
+  // ── Lookups ─────────────────────────────────────────────────────────────
+  const [crewUsers, setCrewUsers] = useState([])
+  const [trucksByUser, setTrucksByUser] = useState({})
+  const [parts, setParts] = useState([])              // [{id, name, unit, sonar_routing}]
+  const [buckets, setBuckets] = useState([])          // job_site locations (regions + Gigwave/None)
+  const [persistedCityMap, setPersistedCityMap] = useState(() => new Map())  // city UPPER → bucket id
 
-  // CSV state
+  // ── CSV state ───────────────────────────────────────────────────────────
   const [fileName, setFileName] = useState('')
   const [csvRows, setCsvRows] = useState(null)
   const [error, setError] = useState('')
   const [parsing, setParsing] = useState(false)
 
-  // Per-mapping picks
-  const [crewMap, setCrewMap] = useState({})  // sonarLoc → user_id (or '')
-  const [partMap, setPartMap] = useState({})  // sonarModel → part_id (or '')
-
-  // Per-row exclude
+  // ── Per-import picks ────────────────────────────────────────────────────
+  const [crewMap, setCrewMap] = useState({})          // sonarLoc → user_id
+  const [partMap, setPartMap] = useState({})          // sonarModel → part_id
+  const [pendingCityMap, setPendingCityMap] = useState({})  // city UPPER → bucket id (manager picks this session)
+  const [pendingPartRouting, setPendingPartRouting] = useState({}) // part_id → policy
+  const [rowDest, setRowDest] = useState({})          // row idx → bucket id (per-row override / ask-resolution)
   const [excluded, setExcluded] = useState(() => new Set())
 
-  // Submit state
   const [submitting, setSubmitting] = useState(false)
 
   // Fetch lookups on mount
@@ -65,7 +70,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     let cancelled = false
     ;(async () => {
       try {
-        const [usersRes, trucksRes, partsRes] = await Promise.all([
+        const [usersRes, trucksRes, partsRes, bucketsRes, cityMap] = await Promise.all([
           db.from('users')
             .select('id, name, role, crew_type')
             .eq('is_active', true)
@@ -77,19 +82,28 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             .eq('is_active', true)
             .not('assigned_to', 'is', null),
           db.from('parts_catalog')
-            .select('id, name, unit')
+            .select('id, name, unit, sonar_routing')
             .eq('is_active', true)
             .order('name'),
+          db.from('inventory_locations')
+            .select('id, name, project_id')
+            .eq('type', 'job_site')
+            .eq('is_active', true)
+            .order('name'),
+          getSonarCityMap(),
         ])
         if (cancelled) return
-        if (usersRes.error)  throw usersRes.error
-        if (trucksRes.error) throw trucksRes.error
-        if (partsRes.error)  throw partsRes.error
+        if (usersRes.error)   throw usersRes.error
+        if (trucksRes.error)  throw trucksRes.error
+        if (partsRes.error)   throw partsRes.error
+        if (bucketsRes.error) throw bucketsRes.error
         setCrewUsers(usersRes.data || [])
         const tbu = {}
         for (const t of trucksRes.data || []) tbu[t.assigned_to] = t.id
         setTrucksByUser(tbu)
         setParts(partsRes.data || [])
+        setBuckets(bucketsRes.data || [])
+        setPersistedCityMap(cityMap)
       } catch (e) {
         if (!cancelled) setError('Failed to load FiberLog lookups: ' + (e.message || e))
       }
@@ -97,7 +111,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     return () => { cancelled = true }
   }, [])
 
-  // Unique sonar locations + models discovered in the uploaded CSV
+  // ── Unique values extracted from the CSV ────────────────────────────────
   const uniqueSonarLocs = useMemo(() => {
     if (!csvRows) return []
     return [...new Set(csvRows.map(r => r['Previous Inventory Location'] || '').filter(Boolean))]
@@ -106,8 +120,12 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     if (!csvRows) return []
     return [...new Set(csvRows.map(r => r['Model | Display Name'] || '').filter(Boolean))]
   }, [csvRows])
+  const uniqueCities = useMemo(() => {
+    if (!csvRows) return []
+    return [...new Set(csvRows.map(r => (r['Address | City'] || '').trim()).filter(Boolean))]
+  }, [csvRows])
 
-  // Auto-match once when CSV loads. Manager picks override these via dropdowns.
+  // ── Auto-match crew + part on CSV load ──────────────────────────────────
   useEffect(() => {
     if (!csvRows || crewUsers.length === 0) return
     const auto = {}
@@ -117,7 +135,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       const u = crewUsers.find(u => u.name.toLowerCase().split(' ')[0] === first)
       if (u) auto[loc] = u.id
     }
-    setCrewMap(prev => ({ ...auto, ...prev }))   // existing picks win
+    setCrewMap(prev => ({ ...auto, ...prev }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uniqueSonarLocs, crewUsers])
 
@@ -127,7 +145,6 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     for (const model of uniqueSonarModels) {
       const ml = model.toLowerCase().trim()
       if (!ml) continue
-      // Try exact match first, then substring either direction
       const exact = parts.find(p => (p.name || '').toLowerCase() === ml)
       if (exact) { auto[model] = exact.id; continue }
       const sub = parts.find(p => {
@@ -140,10 +157,55 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uniqueSonarModels, parts])
 
+  // Auto-seed city → bucket when city name matches a region/project bucket name
+  useEffect(() => {
+    if (!csvRows || buckets.length === 0) return
+    const auto = {}
+    for (const city of uniqueCities) {
+      const uc = city.toUpperCase()
+      if (persistedCityMap.has(uc) || pendingCityMap[uc]) continue
+      const match = buckets.find(b => (b.name || '').toUpperCase() === uc)
+      if (match) auto[uc] = match.id
+    }
+    if (Object.keys(auto).length > 0) {
+      setPendingCityMap(prev => ({ ...auto, ...prev }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uniqueCities, buckets, persistedCityMap])
+
+  // ── Handlers for picker changes (some live-save to DB) ──────────────────
+  async function handlePartRoutingChange(partId, newPolicy) {
+    if (!partId) return
+    setPendingPartRouting(prev => ({ ...prev, [partId]: newPolicy }))
+    try {
+      await setPartSonarRouting(partId, newPolicy)
+      // Also update local parts list so the picker reflects the new value
+      setParts(prev => prev.map(p => p.id === partId ? { ...p, sonar_routing: newPolicy } : p))
+    } catch (e) {
+      setError(`Failed to save routing for ${partId}: ${e.message}`)
+    }
+  }
+
+  async function handleCityBucketChange(city, bucketId) {
+    const uc = city.toUpperCase()
+    setPendingCityMap(prev => ({ ...prev, [uc]: bucketId }))
+    if (!bucketId) return  // empty = clear (not persisted to DB; if you want to clear use clearSonarCityBucket)
+    try {
+      await setSonarCityBucket(city, bucketId)
+      setPersistedCityMap(prev => {
+        const next = new Map(prev)
+        next.set(uc, bucketId)
+        return next
+      })
+    } catch (e) {
+      setError(`Failed to save city mapping for ${city}: ${e.message}`)
+    }
+  }
+
+  // ── File upload + parse ─────────────────────────────────────────────────
   async function handleFile(file) {
     if (!file) return
-    setError('')
-    setParsing(true)
+    setError(''); setParsing(true)
     setFileName(file.name)
     try {
       const text = await readFileAsText(file)
@@ -163,6 +225,8 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       setExcluded(new Set())
       setCrewMap({})
       setPartMap({})
+      setPendingCityMap({})
+      setRowDest({})
     } catch (e) {
       console.error('Sonar parse failed:', e)
       setError(e.message || String(e))
@@ -172,53 +236,135 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     }
   }
 
-  // Resolved status per row, derived from CSV + current mappings
+  // ── Per-row resolution ──────────────────────────────────────────────────
+  // The merged city map: persisted + this-session pending picks
+  const effectiveCityMap = useMemo(() => {
+    const merged = new Map(persistedCityMap)
+    for (const [k, v] of Object.entries(pendingCityMap)) {
+      if (v) merged.set(k, v)
+      else merged.delete(k)
+    }
+    return merged
+  }, [persistedCityMap, pendingCityMap])
+
+  function getPartRouting(partId) {
+    if (pendingPartRouting[partId]) return pendingPartRouting[partId]
+    const p = parts.find(p => p.id === partId)
+    return p?.sonar_routing || 'ask'
+  }
+
   const resolved = useMemo(() => {
     if (!csvRows) return []
     return csvRows.map((row, idx) => {
       const sonarLoc = row['Previous Inventory Location'] || ''
       const sonarModel = row['Model | Display Name'] || ''
+      const city = (row['Address | City'] || '').trim()
       const userId = crewMap[sonarLoc] || null
       const truckId = userId ? trucksByUser[userId] : null
       const partId = partMap[sonarModel] || null
-      const userName = userId
-        ? crewUsers.find(u => u.id === userId)?.name || ''
-        : ''
-      const partName = partId
-        ? parts.find(p => p.id === partId)?.name || ''
-        : ''
+      const userName = userId ? crewUsers.find(u => u.id === userId)?.name || '' : ''
+      const partName = partId ? parts.find(p => p.id === partId)?.name || '' : ''
+      const routing = partId ? getPartRouting(partId) : null
+
+      // Determine destination
+      let destId = null
+      let destReason = null  // human-readable explanation
       let status = 'ready'
-      if (!userId) status = 'no-crew'
-      else if (!truckId) status = 'no-truck'
-      else if (!partId) status = 'no-part'
+
+      // Per-row override always wins
+      if (rowDest[idx]) {
+        destId = rowDest[idx]
+        destReason = 'manual pick'
+      } else if (!userId) {
+        status = 'no-crew'
+      } else if (!truckId) {
+        status = 'no-truck'
+      } else if (!partId) {
+        status = 'no-part'
+      } else {
+        switch (routing) {
+          case 'gigwave': {
+            const b = buckets.find(b => b.name === 'Gigwave')
+            if (b) { destId = b.id; destReason = 'policy: gigwave' }
+            else status = 'no-gigwave-bucket'
+            break
+          }
+          case 'none': {
+            const b = buckets.find(b => b.name === 'None')
+            if (b) { destId = b.id; destReason = 'policy: none' }
+            else status = 'no-none-bucket'
+            break
+          }
+          case 'region': {
+            if (!city) status = 'no-city'
+            else {
+              const bucketId = effectiveCityMap.get(city.toUpperCase())
+              if (bucketId) { destId = bucketId; destReason = `city: ${city}` }
+              else status = 'city-unmapped'
+            }
+            break
+          }
+          case 'ask':
+          default:
+            status = 'ask'
+            break
+        }
+      }
+      if (status === 'ready' && !destId) status = 'unresolved'
+
+      const destBucket = destId ? buckets.find(b => b.id === destId) : null
       return {
         idx,
         date: row['Date Time'] || '',
         customer: row['Current Assignee'] || '',
-        city: row['Address | City'] || '',
+        city,
         sonarLoc, sonarModel,
         sonarItemId: row['Inventory Item ID'] || '',
         userId, truckId, userName,
         partId, partName,
+        routing,
+        destId,
+        destName: destBucket?.name || null,
+        destReason,
         status,
       }
     })
-  }, [csvRows, crewMap, partMap, trucksByUser, crewUsers, parts])
+  }, [csvRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, effectiveCityMap, rowDest, pendingPartRouting])
 
   const stats = useMemo(() => {
     if (resolved.length === 0) return null
-    let ready = 0, noCrew = 0, noTruck = 0, noPart = 0, excludedCount = 0
+    let ready = 0, blocked = 0, excludedCount = 0
+    const blockReasons = {}
     for (const r of resolved) {
       if (excluded.has(r.idx)) { excludedCount++; continue }
-      switch (r.status) {
-        case 'ready':    ready++;    break
-        case 'no-crew':  noCrew++;   break
-        case 'no-truck': noTruck++;  break
-        case 'no-part':  noPart++;   break
+      if (r.status === 'ready') ready++
+      else {
+        blocked++
+        blockReasons[r.status] = (blockReasons[r.status] || 0) + 1
       }
     }
-    return { total: resolved.length, ready, noCrew, noTruck, noPart, excludedCount }
+    return { total: resolved.length, ready, blocked, blockReasons, excludedCount }
   }, [resolved, excluded])
+
+  // Which cities surface in the City mapping section: any city that:
+  //   - is referenced by a row whose part routes 'region', AND
+  //   - isn't yet in the effective city map
+  const citiesNeedingMap = useMemo(() => {
+    if (!csvRows) return []
+    const seen = new Set()
+    const result = []
+    for (const r of resolved) {
+      if (r.status !== 'city-unmapped') continue
+      const uc = r.city.toUpperCase()
+      if (seen.has(uc)) continue
+      seen.add(uc)
+      result.push(r.city)
+    }
+    return result
+  }, [resolved, csvRows])
+
+  // Region-eligible buckets for city picker (project-tied job_sites)
+  const regionBuckets = useMemo(() => buckets.filter(b => b.project_id != null), [buckets])
 
   function toggleExclude(idx) {
     setExcluded(prev => {
@@ -228,29 +374,33 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     })
   }
 
+  function setRowDestination(idx, bucketId) {
+    setRowDest(prev => ({ ...prev, [idx]: bucketId || null }))
+  }
+
   async function handleApply() {
     setError('')
     setSubmitting(true)
     try {
       const movements = resolved
-        .filter(r => !excluded.has(r.idx) && r.status === 'ready')
+        .filter(r => !excluded.has(r.idx) && r.status === 'ready' && r.destId && r.truckId)
         .map(r => {
-          // Date label for the note. Sonar gives ISO-ish; just take first 16 chars.
           const dateStr = String(r.date).slice(0, 16)
           const noteParts = [
             'Sonar install',
             dateStr,
             r.customer,
             r.city,
+            r.destReason,
             r.sonarItemId && `[sonar:${r.sonarItemId}]`,
           ].filter(Boolean)
           return {
-            movement_type: 'issue',
+            movement_type: 'transfer',
             part_id: r.partId,
             quantity: 1,
             unit: 'ea',
             from_location_id: r.truckId,
-            to_location_id: null,
+            to_location_id: r.destId,
             notes: noteParts.join(' · '),
             created_by: currentUser?.id,
           }
@@ -271,10 +421,10 @@ export default function SonarImportSheet({ onClose, onApplied }) {
 
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && !submitting && onClose()}>
-      <div className="overlay-sheet" style={{ maxWidth: 960, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
+      <div className="overlay-sheet" style={{ maxWidth: 1000, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 2 }}>⚡ Sonar daily install import</div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
-          Upload a Sonar export. Each install row becomes one <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>issue</code> movement off the assigned crew's truck.
+          Each install row becomes one <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>transfer</code> movement from the crew's truck → the right bucket (region for fiber, Gigwave/None for wireless). Buckets accumulate until Sage export drains them.
         </div>
 
         {/* File picker */}
@@ -315,66 +465,115 @@ export default function SonarImportSheet({ onClose, onApplied }) {
 
           {/* Crew mappings */}
           {uniqueSonarLocs.length > 0 && (
-            <MappingSection
-              title="Crew mappings"
-              subtitle="One pick per Sonar source. Auto-matched by the name in parens; override if wrong."
-              accent="var(--teal)"
-              items={uniqueSonarLocs}
-              renderPicker={(sonarLoc) => (
-                <select
-                  value={crewMap[sonarLoc] || ''}
-                  onChange={e => setCrewMap(prev => ({ ...prev, [sonarLoc]: e.target.value }))}
-                  style={selectStyle()}
-                >
-                  <option value="">— pick crew —</option>
-                  {crewUsers.map(u => {
-                    const hasTruck = !!trucksByUser[u.id]
-                    return (
-                      <option key={u.id} value={u.id}>
-                        {u.name}{u.crew_type ? ` (${u.crew_type})` : ''}{hasTruck ? '' : ' — no truck!'}
-                      </option>
-                    )
-                  })}
-                </select>
-              )}
-              statusFor={(loc) => {
+            <Section title="Crew mappings" accent="var(--teal)"
+              subtitle="One pick per Sonar source. Auto-matched by the name in parens; override if wrong.">
+              {uniqueSonarLocs.map(loc => {
                 const userId = crewMap[loc]
-                if (!userId) return { tag: 'unmatched', color: 'var(--amber)' }
-                if (!trucksByUser[userId]) return { tag: 'no truck', color: 'var(--red)' }
-                return { tag: 'matched', color: 'var(--teal-dk)' }
-              }}
-              countFor={(loc) => resolved.filter(r => r.sonarLoc === loc).length}
-            />
+                const hasTruck = userId ? !!trucksByUser[userId] : false
+                const status = !userId ? { tag: 'unmatched', color: 'var(--amber)' }
+                  : !hasTruck ? { tag: 'no truck', color: 'var(--red)' }
+                  : { tag: 'matched', color: 'var(--teal-dk)' }
+                const n = resolved.filter(r => r.sonarLoc === loc).length
+                return (
+                  <MappingRow key={loc}
+                    primary={loc}
+                    secondary={`${n} row${n === 1 ? '' : 's'}`}
+                    status={status}
+                  >
+                    <select
+                      value={userId || ''}
+                      onChange={e => setCrewMap(prev => ({ ...prev, [loc]: e.target.value }))}
+                      style={selectStyle()}
+                    >
+                      <option value="">— pick crew —</option>
+                      {crewUsers.map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.name}{u.crew_type ? ` (${u.crew_type})` : ''}{trucksByUser[u.id] ? '' : ' — no truck!'}
+                        </option>
+                      ))}
+                    </select>
+                  </MappingRow>
+                )
+              })}
+            </Section>
           )}
 
-          {/* Part mappings */}
+          {/* Part mappings — with routing policy picker per part */}
           {uniqueSonarModels.length > 0 && (
-            <MappingSection
-              title="Part mappings"
-              subtitle="One pick per Sonar model. Auto-matched by name; override if wrong."
-              accent="var(--orange)"
-              items={uniqueSonarModels}
-              renderPicker={(sonarModel) => (
-                <select
-                  value={partMap[sonarModel] || ''}
-                  onChange={e => setPartMap(prev => ({ ...prev, [sonarModel]: e.target.value }))}
-                  style={selectStyle()}
-                >
-                  <option value="">— pick part —</option>
-                  {parts.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.id})
-                    </option>
-                  ))}
-                </select>
-              )}
-              statusFor={(model) => {
+            <Section title="Part mappings + routing" accent="var(--orange)"
+              subtitle="Pick the FiberLog SKU AND a routing policy per Sonar model. Policy is saved per part and used on every future import.">
+              {uniqueSonarModels.map(model => {
                 const partId = partMap[model]
-                if (!partId) return { tag: 'unmatched', color: 'var(--amber)' }
-                return { tag: 'matched', color: 'var(--orange-dk)' }
-              }}
-              countFor={(model) => resolved.filter(r => r.sonarModel === model).length}
-            />
+                const routing = partId ? getPartRouting(partId) : null
+                const n = resolved.filter(r => r.sonarModel === model).length
+                const status = !partId ? { tag: 'unmatched', color: 'var(--amber)' }
+                  : routing === 'ask' ? { tag: 'asks per row', color: 'var(--amber)' }
+                  : { tag: routing, color: 'var(--orange-dk)' }
+                return (
+                  <div key={model} style={{
+                    display: 'grid', gridTemplateColumns: '2fr 2fr 2fr auto', gap: 6,
+                    marginBottom: 4, padding: '4px 6px',
+                    background: 'var(--surface2)', borderRadius: 6, alignItems: 'center',
+                  }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{model}</div>
+                      <div style={{ fontSize: 10, color: 'var(--hint)' }}>{n} row{n === 1 ? '' : 's'}</div>
+                    </div>
+                    <select
+                      value={partId || ''}
+                      onChange={e => setPartMap(prev => ({ ...prev, [model]: e.target.value }))}
+                      style={selectStyle()}
+                    >
+                      <option value="">— pick part —</option>
+                      {parts.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} ({p.id})</option>
+                      ))}
+                    </select>
+                    <select
+                      value={routing || ''}
+                      onChange={e => handlePartRoutingChange(partId, e.target.value)}
+                      disabled={!partId}
+                      title={partId ? 'Routing policy for this part (saved to parts_catalog)' : 'Pick a part first'}
+                      style={selectStyle()}
+                    >
+                      <option value="">— policy —</option>
+                      {SONAR_ROUTING_OPTIONS.map(o => (
+                        <option key={o.id} value={o.id}>{o.label}</option>
+                      ))}
+                    </select>
+                    <div style={statusBadgeStyle(status.color)}>{status.tag}</div>
+                  </div>
+                )
+              })}
+            </Section>
+          )}
+
+          {/* City mappings — only shown if any 'region'-routed rows have unmapped cities */}
+          {citiesNeedingMap.length > 0 && (
+            <Section title="City mappings" accent="var(--blue)"
+              subtitle="Some rows route by city. Pick a region bucket per city — saved to sonar_city_bucket_map for future imports.">
+              {citiesNeedingMap.map(city => {
+                const uc = city.toUpperCase()
+                const picked = effectiveCityMap.get(uc) || ''
+                const status = picked
+                  ? { tag: 'mapped', color: 'var(--blue)' }
+                  : { tag: 'needs mapping', color: 'var(--amber)' }
+                return (
+                  <MappingRow key={city} primary={city} secondary={resolved.filter(r => r.city.toUpperCase() === uc).length + ' rows'} status={status}>
+                    <select
+                      value={picked}
+                      onChange={e => handleCityBucketChange(city, e.target.value)}
+                      style={selectStyle()}
+                    >
+                      <option value="">— pick region —</option>
+                      {regionBuckets.map(b => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  </MappingRow>
+                )
+              })}
+            </Section>
           )}
 
           {/* Transactions preview */}
@@ -389,7 +588,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                 <span>Transactions</span>
                 {stats && (
                   <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: 'var(--hint)' }}>
-                    {stats.ready} ready · {stats.noCrew + stats.noPart + stats.noTruck} blocked · {stats.excludedCount} excluded
+                    {stats.ready} ready · {stats.blocked} blocked · {stats.excludedCount} excluded
                   </span>
                 )}
               </div>
@@ -403,6 +602,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                       <th style={thStyle({ textAlign: 'left' })}>Customer / City</th>
                       <th style={thStyle({ textAlign: 'left' })}>Part</th>
                       <th style={thStyle({ textAlign: 'left' })}>Crew</th>
+                      <th style={thStyle({ textAlign: 'left' })}>Destination</th>
                       <th style={thStyle({ textAlign: 'left' })}>Status</th>
                     </tr>
                   </thead>
@@ -410,6 +610,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                     {resolved.map(r => {
                       const isExcluded = excluded.has(r.idx)
                       const isReady = r.status === 'ready'
+                      const needsPicker = r.status === 'ask' || r.status === 'city-unmapped' || r.status === 'unresolved'
                       return (
                         <tr key={r.idx} style={{
                           background: isExcluded
@@ -433,10 +634,35 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                           </td>
                           <td style={tdStyle()}>
                             <div style={{ fontWeight: 600 }}>{r.partName || <em style={{ color: 'var(--amber)' }}>{r.sonarModel}</em>}</div>
-                            {r.partId && <div style={{ fontSize: 10, color: 'var(--hint)' }}>{r.partId}</div>}
+                            {r.partId && (
+                              <div style={{ fontSize: 10, color: 'var(--hint)' }}>
+                                {r.partId}{r.routing ? ` · ${r.routing}` : ''}
+                              </div>
+                            )}
                           </td>
                           <td style={tdStyle()}>
                             <div style={{ fontWeight: 600 }}>{r.userName || <em style={{ color: 'var(--amber)' }}>{r.sonarLoc}</em>}</div>
+                          </td>
+                          <td style={tdStyle()}>
+                            {needsPicker ? (
+                              <select
+                                value={rowDest[r.idx] || ''}
+                                onChange={e => setRowDestination(r.idx, e.target.value)}
+                                style={{ ...selectStyle(), minWidth: 140 }}
+                              >
+                                <option value="">— pick bucket —</option>
+                                {buckets.map(b => (
+                                  <option key={b.id} value={b.id}>{b.name}</option>
+                                ))}
+                              </select>
+                            ) : r.destName ? (
+                              <div>
+                                <div style={{ fontWeight: 600 }}>{r.destName}</div>
+                                {r.destReason && <div style={{ fontSize: 10, color: 'var(--hint)' }}>{r.destReason}</div>}
+                              </div>
+                            ) : (
+                              <span style={{ color: 'var(--hint)' }}>—</span>
+                            )}
                           </td>
                           <td style={tdStyle()}>
                             <StatusBadge status={r.status} />
@@ -465,7 +691,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             {submitting
               ? 'Applying…'
               : stats && stats.ready > 0
-                ? `Apply ${stats.ready} issue${stats.ready === 1 ? '' : 's'}`
+                ? `Apply ${stats.ready} transfer${stats.ready === 1 ? '' : 's'}`
                 : 'Nothing to apply'}
           </button>
         </div>
@@ -476,7 +702,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
 
 // ─── Sub-components ─────────────────────────────────────────────────────
 
-function MappingSection({ title, subtitle, accent, items, renderPicker, statusFor, countFor }) {
+function Section({ title, subtitle, accent, children }) {
   return (
     <div style={{
       marginBottom: 12, padding: 10,
@@ -488,38 +714,39 @@ function MappingSection({ title, subtitle, accent, items, renderPicker, statusFo
         textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 2,
       }}>{title}</div>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{subtitle}</div>
-      {items.map(item => {
-        const s = statusFor(item)
-        const n = countFor(item)
-        return (
-          <div key={item} style={{
-            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4,
-            padding: '4px 6px', background: 'var(--surface2)', borderRadius: 6,
-          }}>
-            <div style={{ flex: 2, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item}</div>
-              <div style={{ fontSize: 10, color: 'var(--hint)' }}>{n} row{n === 1 ? '' : 's'}</div>
-            </div>
-            <div style={{ flex: 3, minWidth: 0 }}>{renderPicker(item)}</div>
-            <div style={{
-              flexShrink: 0, fontSize: 10, fontWeight: 700,
-              padding: '2px 8px', borderRadius: 10,
-              background: 'var(--bg)', color: s.color,
-              border: `1px solid ${s.color}`,
-            }}>{s.tag}</div>
-          </div>
-        )
-      })}
+      {children}
+    </div>
+  )
+}
+
+function MappingRow({ primary, secondary, status, children }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4,
+      padding: '4px 6px', background: 'var(--surface2)', borderRadius: 6,
+    }}>
+      <div style={{ flex: 2, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{primary}</div>
+        {secondary && <div style={{ fontSize: 10, color: 'var(--hint)' }}>{secondary}</div>}
+      </div>
+      <div style={{ flex: 3, minWidth: 0 }}>{children}</div>
+      {status && <div style={statusBadgeStyle(status.color)}>{status.tag}</div>}
     </div>
   )
 }
 
 function StatusBadge({ status }) {
   const map = {
-    ready:    { label: 'ready',           color: 'var(--teal-dk)',  bg: 'var(--teal-lt)' },
-    'no-crew':  { label: 'no crew picked', color: 'var(--amber)',    bg: 'var(--amber-lt)' },
-    'no-truck': { label: 'no truck',       color: 'var(--red)',      bg: 'var(--red-lt)' },
-    'no-part':  { label: 'no part picked', color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+    ready:            { label: 'ready',           color: 'var(--teal-dk)',  bg: 'var(--teal-lt)' },
+    'no-crew':        { label: 'no crew',         color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+    'no-truck':       { label: 'no truck',        color: 'var(--red)',      bg: 'var(--red-lt)' },
+    'no-part':        { label: 'no part',         color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+    'ask':            { label: 'ask: pick dest',  color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+    'no-city':        { label: 'no city',         color: 'var(--red)',      bg: 'var(--red-lt)' },
+    'city-unmapped':  { label: 'city unmapped',   color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+    'no-gigwave-bucket': { label: 'no Gigwave bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
+    'no-none-bucket':    { label: 'no None bucket',    color: 'var(--red)', bg: 'var(--red-lt)' },
+    'unresolved':     { label: 'unresolved',      color: 'var(--amber)',    bg: 'var(--amber-lt)' },
   }
   const m = map[status] || map.ready
   return (
@@ -538,6 +765,13 @@ const selectStyle = () => ({
   borderRadius: 4,
   background: 'var(--bg)',
   color: 'var(--text)',
+})
+
+const statusBadgeStyle = (color) => ({
+  flexShrink: 0, fontSize: 10, fontWeight: 700,
+  padding: '2px 8px', borderRadius: 10,
+  background: 'var(--bg)', color,
+  border: `1px solid ${color}`,
 })
 
 const thStyle = (extra = {}) => ({

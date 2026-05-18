@@ -134,6 +134,69 @@ export async function getStockSummary() {
   return [...byPart.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
+// ─── SONAR ROUTING ───────────────────────────────────────────────────────────
+
+// Each part has a sonar_routing policy that determines where a Sonar import
+// sends its issue/transfer movements. 'ask' = manager picks per row.
+export const SONAR_ROUTING_OPTIONS = [
+  { id: 'region',  label: 'Region (by city)',   desc: 'Look up customer city → region bucket' },
+  { id: 'gigwave', label: 'Always Gigwave',     desc: 'Wireless equipment that always goes to Gigwave' },
+  { id: 'none',    label: 'Always None',        desc: 'Wireless equipment that always goes to None' },
+  { id: 'ask',     label: 'Ask per row',        desc: 'Manager picks the destination for each row at import time' },
+]
+
+// Update a single part's sonar_routing policy. Used by SonarImportSheet's
+// per-model picker; persists across imports so the manager only sets each
+// SKU once.
+export async function setPartSonarRouting(partId, policy) {
+  if (!partId) throw new Error('partId required')
+  if (!['region','gigwave','none','ask'].includes(policy)) {
+    throw new Error(`Invalid sonar_routing: ${policy}`)
+  }
+  const { error } = await db
+    .from('parts_catalog')
+    .update({ sonar_routing: policy })
+    .eq('id', partId)
+  if (error) throw error
+}
+
+// Fetch all city → bucket mappings. Returns a Map<city, location_id>.
+// city keys are stored case-sensitive but we'll do uppercase lookups
+// in the sheet to match Sonar's variable casing.
+export async function getSonarCityMap() {
+  const { data, error } = await db
+    .from('sonar_city_bucket_map')
+    .select('city, location_id')
+  if (error) throw error
+  const m = new Map()
+  for (const row of data || []) {
+    if (row.city) m.set(row.city.toUpperCase(), row.location_id)
+  }
+  return m
+}
+
+// Upsert a city → bucket mapping.
+export async function setSonarCityBucket(city, locationId) {
+  if (!city || !locationId) throw new Error('city and locationId required')
+  const { error } = await db
+    .from('sonar_city_bucket_map')
+    .upsert(
+      { city: city.toUpperCase(), location_id: locationId },
+      { onConflict: 'city' }
+    )
+  if (error) throw error
+}
+
+// Clear a city → bucket mapping (revert to "needs manual pick").
+export async function clearSonarCityBucket(city) {
+  if (!city) return
+  const { error } = await db
+    .from('sonar_city_bucket_map')
+    .delete()
+    .eq('city', city.toUpperCase())
+  if (error) throw error
+}
+
 // Cheap per-location summary: how many distinct parts and total units sit
 // at each location. One inventory_stock pull, aggregated client-side.
 // Returns Map<location_id, { distinctParts, totalUnits }>. Used by the
