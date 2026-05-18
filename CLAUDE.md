@@ -101,13 +101,18 @@ supabase/
 - A trigger updates `inventory_stock` automatically when a movement is inserted
 - **CHECK constraint `movement_endpoints_valid`** enforces correct from/to per type (e.g., `receive` requires `to NOT NULL, from NULL`; `transfer`/`return` require both and different). The JS `validateMovement()` in `lib/inventory.js` mirrors this so we fail fast.
 
-### Project buckets
-- Every active project auto-gets an `inventory_locations` row with `type='job_site'` and `project_id` set (FK to projects). Trigger `trg_ensure_project_job_site` creates one on project insert/activation.
-- These buckets receive auto-deduct transfers from crew trucks on submission approval (for aerial/underground/splice/infrastructure crew types).
+### Accounting buckets (`type='job_site'`)
+- **Region buckets** — one per active project, `project_id` set, auto-created by trigger `trg_ensure_project_job_site` on project insert/activation. Names match the project name. Receive auto-deduct transfers from approval AND `region`-routed Sonar imports.
+- **Wireless buckets** — two non-project locations named exactly `Gigwave` and `None` (created by migration `sonar_routing_buckets_and_map`). Receive `gigwave`/`none`-routed Sonar imports. `project_id` is NULL.
+- All buckets are conceptually staging areas — they accumulate over time and are cleared on Sage export (backlog #5, future).
 
 ### Per-user + per-crew-type permissions
 - `crew_operation_permissions(user_id, operation, allowed bool, reason, updated_at)` — explicit deny rows (empty table = default-allow). Checked by `record_crew_movement` RPC.
 - `crew_type_part_restrictions(crew_type, department)` — whitelist (empty for a crew_type = unrestricted). Parts with `department IS NULL` bypass. Checked by `record_crew_movement` RPC. **NOT** checked by `approve_submission` auto-deduct (system action).
+
+### Sonar import routing
+- `parts_catalog.sonar_routing text NOT NULL DEFAULT 'ask'` — CHECK in `('region','gigwave','none','ask')`. Determines where a Sonar import row's transfer lands.
+- `sonar_city_bucket_map(city PK, location_id, updated_at, updated_by)` — persisted city → bucket mapping for `region`-routed parts. Updated by the SonarImportSheet's city picker. RLS: auth read, staff write. Bump trigger on `updated_at`.
 
 ### Submission routing override
 - `submissions.project_id_override` — nullable FK to projects. If set, `approve_submission` routes auto-deduct to this project's bucket instead of the task's natural project. Phase actuals stay on the natural phase. Persisted by `TaskWorkspace`'s in-task picker.
@@ -226,7 +231,26 @@ npx supabase login                             # auth supabase CLI (first time)
 
 1. ~~**Reconcile workflow**~~ — ✅ shipped. 🔄 Reconcile button in the Inventory header opens `ReconcileSheet.jsx`. Upload the filled-in Audit CSV → app matches each row (SKU + Location/Bin) to live `inventory_stock`, computes variance vs **current** system stock (not the CSV's Expected Qty — so drift between export and upload is handled correctly), shows a sortable preview with per-row include/exclude toggles, applies one `adjust` movement per actionable row via `recordMovementsBatch`. No schema change.
 2. **Onboard new infrastructure + field tech crew** — schema is ready, do via the Users admin
-3. ~~**Sonar transaction CSV importer**~~ — ✅ MVP shipped. ⚡ Sonar button in the Inventory header opens `SonarImportSheet.jsx`. Upload the daily Sonar CSV → app extracts the unique `Previous Inventory Location` values and `Model | Display Name` values, auto-matches each (first name → user; substring → part), shows mapping pickers grouped at the top, then a per-transaction preview table. Apply → one `issue` movement per ready row, off the matched crew's truck. Notes include date, customer, city, and a `[sonar:<itemId>]` token. Sample format: `C:\Users\admin\Desktop\Claude stuff\West field tech report (6).csv`. **Future:** persisted mappings (two tiny `sonar_*_map` tables) if manager finds re-picking annoying; duplicate detection by `[sonar:id]` token.
+3. ~~**Sonar transaction CSV importer**~~ — ✅ shipped (bucket-routing flavor). ⚡ Sonar button in the Inventory header opens `SonarImportSheet.jsx`. Sonar is a **staging translator** — it doesn't consume materials, it routes them into the right **accounting bucket** so Sage export can later attribute them properly.
+
+    **How each row gets routed:**
+    - Each part has a `parts_catalog.sonar_routing` policy (one of `region` | `gigwave` | `none` | `ask`). Set once per SKU, persists.
+      - `region` = look up customer city in `sonar_city_bucket_map` → that region's project bucket
+      - `gigwave` / `none` = always to those wireless buckets
+      - `ask` = manager picks per row at import (default for new SKUs)
+    - The City → region map is persisted in `sonar_city_bucket_map`; manager seeds it incrementally. Auto-seeded when a city name exactly matches a region bucket name (e.g. "HEBER" → Heber bucket).
+    - Sonar movements are `transfer` (truck → bucket), not `issue` — buckets accumulate until Sage export drains them.
+
+    **Three mapping sections in the import sheet:**
+    - Crew (per Sonar source label) — picked per import, not persisted
+    - Part (per Sonar model) + routing policy — live-saves to `parts_catalog.sonar_routing`
+    - City (per unique customer city, only for `region`-routed parts) — live-saves to `sonar_city_bucket_map`
+
+    Notes on each transfer include date, customer, city, the resolved destination reason ("city: HEBER" / "policy: gigwave" etc.), and the `[sonar:<itemId>]` token for future dedup.
+
+    **Migration applied:** `sonar_routing_buckets_and_map` — adds `parts_catalog.sonar_routing`, creates `sonar_city_bucket_map` table, seeds "Gigwave" and "None" non-project `job_site` locations.
+
+    Sample CSV format: `C:\Users\admin\Desktop\Claude stuff\West field tech report (6).csv`.
 4. **Crew inventory UI + permissions framework** — ✅ **Phases 1–3 shipped.** What's live:
 
     **Backend:**
