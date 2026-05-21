@@ -1,8 +1,75 @@
 # FiberLog
 
-A field logging + inventory management app for Utah Broadband (FIF Utah LLC). Used daily by ~20 fiber-crew, install techs, and managers across multiple BEAD-funded buildout sites in Utah (Wasatch County, West Mountain, etc.).
+A field logging + inventory management app for Utah Broadband (FIF Utah LLC). Used daily by ~20 fiber-crew, infrastructure-crew, install techs, and managers across multiple BEAD-funded buildout sites in Utah (Wasatch County, West Mountain, etc.).
 
 Deployed at https://criddell-blip.github.io/fiberlog/ via GitHub Pages.
+
+---
+
+## North star
+
+**FiberLog is the single source of truth for inventory consumption across all field crews.** Materials flow from vendor → warehouse → personal truck → project (region). Each project's consumption becomes the permanent record used for accounting export (Sage) and BEAD reimbursement reporting.
+
+We can't integrate directly with Sonar (CRM) or Sage (accounting). The strategy is:
+- **Eliminate manual dual-logging wherever possible** (infrastructure crew should not be entering work in both FiberLog and Sonar)
+- **Use FiberLog as the consumption ledger** — what was used, by whom, on which project
+- **Export cleanly** — Sage gets a CSV per period; future Sonar export will go back the other way once we have the data we need
+
+---
+
+## The three crew workflows
+
+| Crew | Workflow shape | System | Status |
+|---|---|---|---|
+| **Fiber construction** (aerial / underground / splice / drop / locator) | Project → Phase → Task → Daily passdown | FiberLog only | ✅ Shipped |
+| **Infrastructure** (towers, sites, business installs) | Project → Phase → Task → Daily passdown (same as fiber) | FiberLog only | 🚧 Next up — see below |
+| **Field tech** (Calix/UBNT installs, Wave/wireless) | Customer install ticket (Sonar-scheduled) | Sonar for scheduling + logging; FiberLog imports daily | 📋 Backlog (blocked on Sonar polygon data) |
+
+**Why this split:** Fiber and infrastructure crews work plan-driven jobs against geographic projects — they know which project they're on. Field techs work ticket-driven jobs against customer addresses and don't reliably know which fiber region a customer falls into. Until Sonar provides polygon/address → region mapping, field tech intake stays in Sonar; we'll import nightly when the data is good enough to route automatically.
+
+---
+
+## Infrastructure crew — next implementation push
+
+Infrastructure crew is being onboarded into FiberLog using the **same workflow as fiber crews**. No new code path, no new data model.
+
+**Plan:**
+
+1. **Create projects per infrastructure region** (Ogden Valley, Park City, Heber, etc.) via the existing Projects admin. Same projects fiber crews use — infrastructure phases/tasks live alongside fiber phases/tasks under the same project.
+2. **Onboard infrastructure users** via the Users admin with `crew_type = 'infrastructure'`. Each new user auto-gets a personal truck (`trg_ensure_crew_truck`).
+3. **Infrastructure-specific phases** — within each regional project, create infrastructure phases (e.g. "Tower install — Heber Site 3"). Tasks underneath are the actual work units.
+4. **Materials flow:** Infrastructure crew loads parts → truck → uses on task → submits passdown → manager approves → materials auto-deduct from truck → project bucket (`approve_submission` RPC already includes `infrastructure` in the auto-deduct crew_type list).
+5. **Export:** Sage CSV pulls from project consumption (no separate path needed — same flow as fiber).
+
+**What this replaces:** Infrastructure crew currently dual-logs in FiberLog AND Sonar. Once they're switched over, Sonar entry for infrastructure work stops. Sonar stays only for field tech scheduling.
+
+**What's already in place to support this:**
+- `crew_type = 'infrastructure'` is a valid value (CHECK on `public.users.crew_type`)
+- `approve_submission` RPC auto-deducts for `{aerial, underground, splice, infrastructure}` already
+- Project bucket auto-creation via `trg_ensure_project_job_site` works for any active project
+- Per-user + crew_type × department permissions already cover infrastructure
+- Receive PO, Reconcile, Sonar import flows all work the same for any crew
+
+**No new code is required to support infrastructure crew.** This is a data + onboarding push, not a build.
+
+---
+
+## Field tech (backlog — blocked)
+
+**Why backlogged:** Field techs install at customer addresses. Sonar tracks customers but does not currently tag each customer with which fiber region (Heber / Park City / etc.) they fall under. Without that, when we import Sonar's daily report, we can't reliably route consumed materials to the right project — and routing to a generic "Wave" or "FW" bucket forces a manual reconciliation step downstream that defeats the purpose.
+
+**Unblocks when:** Sonar gets polygon-to-customer address mapping (in progress — tied to BEAD/reconnect address requirements). The polygons already exist from the developer side; they haven't propagated to Sonar yet.
+
+**Approach when unblocked (Option 3 — dispatcher tags at job creation):**
+- Dispatcher (or system, once polygons land) adds a `project` field to Sonar jobs at scheduling time
+- Sonar daily CSV export includes that field
+- FiberLog's Sonar import sheet (already shipped — `SonarImportSheet.jsx`) reads the `project` field and ties each imported submission to that project
+- Manager approves the batch → materials auto-deduct truck → project
+- Sage export includes field tech consumption alongside fiber + infrastructure, all keyed by project
+
+**Why Option 3 over an address lookup table:** A FiberLog-maintained address → project lookup is another manual process. The polygon data exists at the developer level and is moving toward Sonar; building our own lookup would compete with the real source of truth.
+
+**Until then:** Field techs continue logging in Sonar. Their material consumption isn't tracked in FiberLog. Manual Sage entry for field tech materials continues (status quo, pending the unblock).
 
 ---
 
@@ -101,18 +168,25 @@ supabase/
 - A trigger updates `inventory_stock` automatically when a movement is inserted
 - **CHECK constraint `movement_endpoints_valid`** enforces correct from/to per type (e.g., `receive` requires `to NOT NULL, from NULL`; `transfer`/`return` require both and different). The JS `validateMovement()` in `lib/inventory.js` mirrors this so we fail fast.
 
-### Accounting buckets (`type='job_site'`)
-- **Region buckets** — one per active project, `project_id` set, auto-created by trigger `trg_ensure_project_job_site` on project insert/activation. Names match the project name. Receive auto-deduct transfers from approval AND `region`-routed Sonar imports.
-- **Wireless buckets** — two non-project locations named exactly `Gigwave` and `None` (created by migration `sonar_routing_buckets_and_map`). Receive `gigwave`/`none`-routed Sonar imports. `project_id` is NULL.
-- All buckets are conceptually staging areas — they accumulate over time and are cleared on Sage export (backlog #5, future).
+### Accounting destinations (`type='job_site'`)
+- **Project destinations** — one per active project, `project_id` set, auto-created by trigger `trg_ensure_project_job_site` on project insert/activation. Names match the project name. Receive auto-deduct transfers from approval AND `region`-routed Sonar imports.
+- **Gigwave + Fixed Wireless destinations** — these are now first-class projects (created in migration `sites_table_and_wireless_projects`) with their own auto-created project buckets. The pre-existing standalone `Gigwave` bucket from the Sonar work was reconciled to point at the new Gigwave project, so existing Sonar `gigwave` routing keeps working. Same consumption-ledger semantics as fiber regions.
+- **None destination** — non-project standalone location, still receives Sonar `none`-routed wireless. `project_id` is NULL.
+- Project destinations are the permanent record of consumption per project. Sage export pulls from them per period; they are not "drained" in the bucket sense — they are the consumption ledger keyed by project.
+
+### Sites (infra crew's unit of work)
+- `sites(id, name, type fiber|wireless, project_id, address, lat, lng, status active|decommissioned, notes)` — each site belongs to one project (Gigwave / Fixed Wireless / a fiber region). Auto `updated_at` via trigger. RLS: auth read, staff write.
+- `tasks.site_id` (nullable) — infra tasks will point at a site instead of a phase. JS only knows about `phase_id` today; consuming `site_id` requires the infra crew UI build.
+- 198 sites bulk-imported from owner's CSV. 197 mapped to a project; 1 ("Prestige II", originally tagged "Fiber - Mdu") landed unmapped — needs manual project assignment via Sites admin (TBD).
 
 ### Per-user + per-crew-type permissions
 - `crew_operation_permissions(user_id, operation, allowed bool, reason, updated_at)` — explicit deny rows (empty table = default-allow). Checked by `record_crew_movement` RPC.
 - `crew_type_part_restrictions(crew_type, department)` — whitelist (empty for a crew_type = unrestricted). Parts with `department IS NULL` bypass. Checked by `record_crew_movement` RPC. **NOT** checked by `approve_submission` auto-deduct (system action).
 
-### Sonar import routing
+### Sonar import routing (current state)
 - `parts_catalog.sonar_routing text NOT NULL DEFAULT 'ask'` — CHECK in `('region','gigwave','none','ask')`. Determines where a Sonar import row's transfer lands.
 - `sonar_city_bucket_map(city PK, location_id, updated_at, updated_by)` — persisted city → bucket mapping for `region`-routed parts. Updated by the SonarImportSheet's city picker. RLS: auth read, staff write. Bump trigger on `updated_at`.
+- **Future:** when Sonar provides per-job project tagging (polygon data), this routing simplifies — every job comes in pre-tagged with a project, no city lookup needed.
 
 ### Submission routing override
 - `submissions.project_id_override` — nullable FK to projects. If set, `approve_submission` routes auto-deduct to this project's bucket instead of the task's natural project. Phase actuals stay on the natural phase. Persisted by `TaskWorkspace`'s in-task picker.
@@ -229,57 +303,20 @@ npx supabase login                             # auth supabase CLI (first time)
 
 ## Backlog (rough priority order)
 
-1. ~~**Reconcile workflow**~~ — ✅ shipped. 🔄 Reconcile button in the Inventory header opens `ReconcileSheet.jsx`. Upload the filled-in Audit CSV → app matches each row (SKU + Location/Bin) to live `inventory_stock`, computes variance vs **current** system stock (not the CSV's Expected Qty — so drift between export and upload is handled correctly), shows a sortable preview with per-row include/exclude toggles, applies one `adjust` movement per actionable row via `recordMovementsBatch`. No schema change.
-2. **Onboard new infrastructure + field tech crew** — schema is ready, do via the Users admin
-3. ~~**Sonar transaction CSV importer**~~ — ✅ shipped (bucket-routing flavor). ⚡ Sonar button in the Inventory header opens `SonarImportSheet.jsx`. Sonar is a **staging translator** — it doesn't consume materials, it routes them into the right **accounting bucket** so Sage export can later attribute them properly.
+1. **Onboard infrastructure crew** — top priority, no code change required. See "Infrastructure crew — next implementation push" above. Create regional projects, add infrastructure users via Users admin, point them at the existing crew workflow. They auto-deduct to project on approval same as fiber crews. Stop dual-logging in Sonar for infrastructure work once switched over.
 
-    **How each row gets routed:**
-    - Each part has a `parts_catalog.sonar_routing` policy (one of `region` | `gigwave` | `none` | `ask`). Set once per SKU, persists.
-      - `region` = look up customer city in `sonar_city_bucket_map` → that region's project bucket
-      - `gigwave` / `none` = always to those wireless buckets
-      - `ask` = manager picks per row at import (default for new SKUs)
-    - The City → region map is persisted in `sonar_city_bucket_map`; manager seeds it incrementally. Auto-seeded when a city name exactly matches a region bucket name (e.g. "HEBER" → Heber bucket).
-    - Sonar movements are `transfer` (truck → bucket), not `issue` — buckets accumulate until Sage export drains them.
+2. **Task status redesign** (the `is_closed` model) — separately discussed. Decouple task lifecycle from submission approval:
+   - Tasks get an `is_closed` boolean only (manager-controlled)
+   - Submissions keep their own `pending → approved → rejected` lifecycle
+   - Approving a submission no longer mutates task status
+   - Crew can submit multiple passdowns against the same open task (multi-day work)
+   - Manager closes tasks explicitly when the work is done
+   - Fixes the "approved tasks still show open" bug we kept chasing; the bug was structural, not cosmetic
+   - Implementation: add `tasks.is_closed`, `tasks.closed_at`, `tasks.closed_by`. Remove `tasks.status` writes from the submission flow (leave column for now). Update crew + manager rendering to filter by `is_closed`.
 
-    **Three mapping sections in the import sheet:**
-    - Crew (per Sonar source label) — picked per import, not persisted
-    - Part (per Sonar model) + routing policy — live-saves to `parts_catalog.sonar_routing`
-    - City (per unique customer city, only for `region`-routed parts) — live-saves to `sonar_city_bucket_map`
+3. **Field tech Sonar import → project routing** — backlogged behind Sonar polygon/address data landing in their export. See "Field tech (backlog — blocked)" above. Until then, field techs continue in Sonar standalone.
 
-    Notes on each transfer include date, customer, city, the resolved destination reason ("city: HEBER" / "policy: gigwave" etc.), and the `[sonar:<itemId>]` token for future dedup.
-
-    **Migration applied:** `sonar_routing_buckets_and_map` — adds `parts_catalog.sonar_routing`, creates `sonar_city_bucket_map` table, seeds "Gigwave" and "None" non-project `job_site` locations.
-
-    Sample CSV format: `C:\Users\admin\Desktop\Claude stuff\West field tech report (6).csv`.
-4. **Crew inventory UI + permissions framework** — ✅ **Phases 1–3 shipped.** What's live:
-
-    **Backend:**
-    - One personal truck per active crew/contractor user (auto-created by `trg_ensure_crew_truck` on user insert/role-flip; named `<FirstName>'s Truck`, assigned via `inventory_locations.assigned_to`).
-    - RPC `public.record_crew_movement(operation, part_id, quantity, other_location_id, unit, notes, vendor_invoice, unit_cost, task_id)` is the single entry point for all five ops (load / return / issue / scrap / transfer). SECURITY DEFINER, auth.uid()-guarded, three permission layers in order: per-user operation deny → crew_type × department whitelist → operation/quantity/truck checks.
-    - 7 legacy "rollup buckets" (`Crew - Drop`, `Crew - Splice`, `Contractor - RNS`, etc.) are untouched and now function as additional "load from" sources for crew.
-
-    **Permission tables:**
-    - `crew_operation_permissions(user_id, operation, allowed, reason, updated_at)` — empty = default-allow; explicit `allowed=false` row denies. Reason is surfaced in the RPC error.
-    - `crew_type_part_restrictions(crew_type, department)` — whitelist. Empty row for a crew_type = unrestricted. Parts with `department IS NULL` bypass this rule.
-
-    **Crew UI:**
-    - `📦 My Stock` entry at top of crew sidebar (wide) and as a card at the top of ProjectList (narrow). Opens `MyStockView` — read-only stock list scoped to the caller's truck, with Load and Return buttons. Buttons disappear when denied by `crew_operation_permissions`.
-    - `CrewMovementSheet` (mode='load'|'return') handles location pick → part pick → qty pick → submit. Validation against available stock client-side; RPC re-validates everything server-side.
-
-    **Manager UI:**
-    - `AdminUsersView` edit sheet has a "Movement permissions" section with 5 toggles (live save, optional reason input).
-    - `AdminPanel` → 🔒 Crew × Department permissions → checkbox matrix (8 crew_types × active departments, optimistic save).
-
-    **Migrations applied:** `crew_personal_trucks_and_movement_rpc`, `crew_operation_permissions`, `crew_type_part_restrictions`.
-
-    **Crew-side project routing override (Flavor A — ✅ shipped):**
-    - `TaskWorkspace` shows a chip-style picker below the topbar: "Routing materials to: \<project\> ▾". Default = task's natural project. Picking another project sets `submissions.project_id_override` on submit. `approve_submission` honors it for auto-deduct bucket routing; phase actuals stay on the natural phase regardless.
-    - `SubmissionsQueue` detail modal surfaces an amber chip "⤳ Materials routing to \<project\> on approval" when override is set, so manager sees it pre-approval.
-
-    **Deferred follow-ups (separate backlog items below if revived):**
-    - Issue / Scrap / Transfer UI flows (RPC already supports them; just need sheets and buttons in CrewMovementSheet).
-    - Migrate stock from the 7 legacy rollup buckets to specific crew trucks (manual via existing Bulk Move sheet).
-5. **Sage Intacct daily export** — Edge Function pattern, stamps `exported_at` + `export_batch_id` on included movements. **Format spec gathered:**
+4. **Sage Intacct daily export** — Edge Function pattern, stamps `exported_at` + `export_batch_id` on included movements. Format spec gathered:
 
     Target format: standard Sage Intacct **Inventory Transactions** import template (the comprehensive one — covers transfers, receipts, issues, adjustments via the `TRANSACTIONTYPE` column). Sample template the owner provided was 46 columns; the columns we'd actually populate from FiberLog data:
 
@@ -302,51 +339,52 @@ npx supabase login                             # auth supabase CLI (first time)
     | `DEPARTMENTID` | `parts_catalog.department` → Sage code | optional |
 
     Movement-type mapping:
-    - `receive` → `Inventory Receipt` (or whatever Sage calls it locally)
+    - `receive` → `Inventory Receipt`
     - `transfer` (incl. crew load + project-bucket auto-deduct) → `Inventory Transfer`
     - `return` → also `Inventory Transfer` (or a separate "Stock Return" template)
     - `issue` → `Inventory Issue`
     - `scrap` → `Inventory Adjustment` (or `Scrap`)
     - `adjust` → `Inventory Adjustment`
 
-    **Open questions to answer before building:**
-    1. **Sage transaction template names** — Sage Intacct lets these be customized per company. We need the exact strings for each FiberLog `movement_type`.
-    2. **Do `parts_catalog.id` SKUs match Sage's `ITEMID`?** Probably yes (both BoxHero-rooted) but confirm with a few examples.
-    3. **Warehouse code mapping** — FiberLog uses full names; Sage uses codes. Need a small lookup (one-time table or config).
-    4. **Project code mapping** — same question for project buckets → Sage project codes.
-    5. **Personal trucks: skip or map?** They aren't real Sage warehouses. Either filter them out at export time (only export movements where source/destination is a real warehouse / project bucket / vendor) or map them all to a single "Crew" warehouse in Sage.
-    6. **Cadence** — daily? Manual button per export? My guess: a "Sage Export" button in the manager Inventory header that produces a CSV file ready for Sage upload + stamps the included movements with `exported_at` so they don't get re-exported next time.
-    7. **`BASECURR`** — USD assumed; the field exists for multi-currency setups.
+    Open questions before building:
+    1. Sage transaction template names (Sage Intacct lets these be customized per company)
+    2. Do `parts_catalog.id` SKUs match Sage's `ITEMID`? Probably yes (both BoxHero-rooted) but confirm
+    3. Warehouse code mapping (FiberLog uses full names; Sage uses codes)
+    4. Project code mapping (same question for project buckets → Sage project codes)
+    5. Personal trucks: skip or map? Filter them out at export time, or map them all to a single "Crew" warehouse in Sage
+    6. Cadence — daily? Manual button per export?
+    7. `BASECURR` — USD assumed; the field exists for multi-currency setups
 
-    The simpler `Warehouse transfers.csv` Sage template the owner also shared (just 6 header columns: Document number, Date, Description, Reference number, Transfer type, State) is header-only and not the right format — it lacks per-item lines. The Inventory Transactions template above is what we want.
-6. **Per-line `project_id` on `log_entries`** — schema change for field-tech multi-cost-center allocation (Wave / Gigwave / general). Pending field-tech UI workflow decisions (per-customer vs per-day)
-7. **Field tech UI surface** — flatter "today's installs" list with one-tap into per-customer materials log
-8. ~~**Locations tab UX**~~ — ✅ shipped. Each location card and bin row shows distinct-part count + total-unit count in the subtitle, plus a 📦 Stock → pill that jumps to the Stock tab pre-scoped to that location. Warehouses roll up their bins. Backed by `getStockCountsByLocation()` in `lib/inventory.js`.
-9. ~~**Auto-deduct on submission approval**~~ — ✅ shipped as the **project-bucket variant**. Migration `project_buckets_and_auto_deduct` added a `project_id` FK on `inventory_locations`, backfilled one `job_site` "bucket" per active project (auto-created on future inserts via `trg_ensure_project_job_site`), and extended `approve_submission` to insert one `transfer` movement per distinct part (truck → project bucket) when the submitter's `crew_type` is in `{aerial, underground, splice, infrastructure}`. drop / install / locator / contractor are skipped — they'll feed from Sonar imports (#3). Bypasses the Phase 3 crew_type × department whitelist by design (system-authorized action recording reality). Visible in manager Inventory → Locations → each project's bucket.
+5. **Per-line `project_id` on `log_entries`** — schema change for field-tech multi-cost-center allocation. Pending field-tech UI workflow decisions (per-customer vs per-day).
+
+6. **Field tech UI surface** — flatter "today's installs" list with one-tap into per-customer materials log. Blocked by backlog #3.
+
+7. ✅ ~~**Reconcile workflow**~~ — shipped.
+
+8. ✅ ~~**Locations tab UX**~~ — shipped.
+
+9. ✅ ~~**Auto-deduct on submission approval**~~ — shipped as the project-bucket variant.
+
 10. **BoxHero drafts cleanup** — handled manually by owner via Parts tab → Drafts → bulk edit. ~476 placeholder drafts with `unit='ea'`; cable items need `unit='ft'`.
 
-11. **Receive materials via vendor PO** — ✅ **shipped (MVP + inline part create/edit).** 📥 Receive PO button in the Inventory header (`src/components/manager/ReceivePOSheet.jsx`) opens a multi-line sheet. Manager enters PO/invoice ref + optional vendor name + a destination (warehouse/bin/truck/job_site) + N line items (part, qty, optional unit_cost). Submit creates one `receive` movement per line via `recordMovementsBatch`, all sharing the PO ref in `vendor_invoice` and the vendor name in `notes`.
+11. ✅ ~~**Receive materials via vendor PO**~~ — shipped (MVP + inline part create/edit).
 
-    **Inline part create / edit attrs at receipt:**
-    - "+ Create new part" appears in the search dropdown — opens an inline teal-bordered form with SKU, Name (pre-filled from search query), Unit dropdown, Department (datalist of existing depts), Material group. Saved part is inserted into `parts_catalog` as `is_active=true` on submit, BEFORE the receive movements (so the FK resolves). NEW badge on the picked-part chip.
-    - For existing parts, an "edit attrs" link opens an orange-bordered form prefilled with current values. SKU/name read-only; Unit/Dept/Material group editable. Applied via `updatePart()` on submit. EDITED badge on the chip.
-    - Partial-failure: if step 1 (createPart) or step 2 (updatePart) fails partway, the whole submit aborts. Already-created parts stay in catalog (no rollback) — user can retry the receive without re-creating them.
+    Bigger version (later, if needed):
+    - `purchase_orders` table with status (`open` | `partial` | `closed`) and per-line expected qty
+    - Partial receipts
+    - Vendor catalog
+    - "What's on order?" / overdue PO reports
+    - PO PDF upload + parser
 
-    **Bigger version (later, if needed):**
-    - `purchase_orders` table with status (`open` | `partial` | `closed`) and per-line expected qty.
-    - Partial receipts: receive 8 of 10 ordered against a PO; PO stays `partial` until reconciled.
-    - Vendor catalog (probably reuse `inventory_locations` type='vendor' but add a vendor profile sheet — contact, terms, default shipping warehouse).
-    - "What's on order?" / overdue PO reports.
-    - PO PDF upload + parser (way down the road).
 12. **Security & DB hygiene from Supabase advisor scan** — RLS rewrite + view/function hardening complete. Five lints remain, all intentional or out-of-band:
     - `tasks_insert` and `tasks_update` are wide-open by design (crew need to create tasks and auto-save `working_counts`; the "Continued from X" handoff depends on any-crew updates). Documented exception.
     - `approve_submission` and `is_staff()` are reachable by `authenticated`, intentionally. `approve_submission` is the manager UI's approval RPC and has an `auth.uid()`+role guard inside. `is_staff()` is called by RLS policies and must be executable in the user's context.
-    - ~~Leaked-password protection toggle~~ — gated behind Supabase Pro plan. Not worth a plan upgrade for FiberLog's risk profile (no public signup, synthetic emails, admin-set passwords). Free-tier alternative if desired: in Auth → Sign In / Providers → Email, bump minimum password length from 6 → 8 and set a password-requirements rule. Both apply only to new passwords, don't invalidate existing.
+    - ~~Leaked-password protection toggle~~ — gated behind Supabase Pro plan. Not worth a plan upgrade for FiberLog's risk profile.
     - Performance lints (64 of them, all INFO/WARN, none urgent at current scale): 32 unindexed FKs, 24 duplicate permissive policies, 5 unused indexes, 3 `auth_rls_initplan` cases. Revisit if/when query latency becomes noticeable.
 
     Helper installed: `public.is_staff()` returns true iff `auth.uid()`'s role is `owner` or `manager`. Used by every staff-write RLS policy.
 
-    Migrations applied: `tighten_rls_policies`, `harden_views_functions_execute_grants`, `users_staff_update_policy` (fixup — the original RLS rewrite assumed user updates would go through an Edge Function, but `updateUserMetadata` in `lib/admin.js` is direct JS, so a staff UPDATE policy was needed on `public.users`).
+    Migrations applied: `tighten_rls_policies`, `harden_views_functions_execute_grants`, `users_staff_update_policy`.
 
 ---
 
@@ -386,10 +424,10 @@ The inventory side has many entry points that all write to `inventory_movements`
 | BoxHero CSV import (`InventoryImportSheet`) | `adjust` baseline + future flows | varies | Initial seed path |
 
 Things to remember when adding a new entry point:
-- All inserts to `inventory_movements` need `created_by` (RLS would 0-affect otherwise — see the users-update bug we hit). Validate `currentUser?.id` exists before building the payload.
+- All inserts to `inventory_movements` need `created_by` (RLS would 0-affect otherwise). Validate `currentUser?.id` exists before building the payload.
 - For staff-initiated movements (manager UI), the manager already has `is_staff()` so the `mgr_write` RLS policy permits the insert. For crew-initiated, route through `record_crew_movement` RPC which is SECURITY DEFINER and bypasses RLS once it's verified the caller's role.
 - The CHECK constraint `movement_endpoints_valid` will reject bad from/to combos before the trigger runs. `validateMovement()` in `lib/inventory.js` mirrors this — call it before the RPC for friendlier client-side errors.
-- None of the import-style sheets (Receive PO, Reconcile, Sonar) set `task_id` — these are standalone movements not tied to a FiberLog task. Audit reports / Reports view that filter by task won't see them; this is by design.
+- None of the import-style sheets (Receive PO, Reconcile, Sonar) set `task_id` — these are standalone movements not tied to a FiberLog task.
 
 ## Known cross-feature gaps + tech debt
 
@@ -399,11 +437,11 @@ Things to remember when adding a new entry point:
 - **Receive PO + Sonar sheets aren't responsive on phone** — `maxWidth: 760` works on tablet+; on narrow viewports the line grids overflow. These are admin-only flows so manager-on-laptop is the assumed environment.
 - **Audit CSV round-trip uses location *names***, not IDs. If two trucks happen to display the same first name (e.g. two crew named "Chris"), reconcile may match to the wrong one. Surface = warning, not blocker.
 
-## Recent major work (in case it helps)
+## Recent major work
 
-- **Inventory framework rebuild (May 2026):** Crew personal trucks, three-layer permission framework (per-user × crew_type×dept × CHECK constraints), project buckets, auto-deduct on approval, Flavor A project routing override, Receive PO, Reconcile, Sonar import, Locations tab counts + jump-link, Vitest tests for `calculations.js`. See backlog #4, #9, #11.
-- **Security audit (May 2026):** RLS rewrite on 14 tables (was wide-open USING(true)), view + function hardening, EXECUTE grants tightened. See backlog #12.
-- **Bins:** Sub-locations under warehouses, schema + full UI rollout (Locations / Stock / RecordMovement / BulkMove). Single-level nesting only. Bin creation lives on each warehouse card via `+ Bin`.
+- **Inventory framework rebuild (May 2026):** Crew personal trucks, three-layer permission framework (per-user × crew_type×dept × CHECK constraints), project buckets, auto-deduct on approval, Flavor A project routing override, Receive PO, Reconcile, Sonar import, Locations tab counts + jump-link, Vitest tests for `calculations.js`.
+- **Security audit (May 2026):** RLS rewrite on 14 tables (was wide-open USING(true)), view + function hardening, EXECUTE grants tightened.
+- **Bins:** Sub-locations under warehouses, schema + full UI rollout (Locations / Stock / RecordMovement / BulkMove). Single-level nesting only.
 - **Audit export:** New `🔍 Audit` sub-tab in Inventory. Filter by scope / part status / stock level / department / material group / staleness. Generates CSV with `Actual Qty` blank column and `Variance = =J<row>-I<row>` formula. Round-trips into the Reconcile sheet.
 - **User management:** Full add/edit/deactivate/reset-password from the manager Admin panel via the new Users view. Per-user movement permission toggles live in the user-edit sheet.
 - **Theme + login:** Dark/light theme persists. Login is username + password with auto-domain append.
