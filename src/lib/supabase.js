@@ -143,6 +143,39 @@ export async function getInfraTree() {
     .filter(p => p.sites.length > 0)
 }
 
+// Fetch all active sites for a project. Used by the manager-side Sites
+// admin embedded in ProjectManager — the InfraCrewApp already gets sites
+// nested under projects via getInfraTree(), so this is the standalone
+// per-project flavor.
+export async function getSitesByProject(projectId) {
+  const { data, error } = await db
+    .from('sites')
+    .select('*')
+    .eq('project_id', projectId)
+    .eq('status', 'active')
+    .order('name')
+  if (error) throw error
+  return data || []
+}
+
+// Create a site under a project. type is 'wireless' or 'fiber'. Address +
+// notes optional. Status defaults to 'active' at the DB layer.
+export async function addSite({ projectId, name, type, address, notes }) {
+  const { data, error } = await db
+    .from('sites')
+    .insert({
+      project_id: projectId,
+      name,
+      type,
+      address: address || null,
+      notes: notes || null,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
 // Create an infra task anchored to a site. phase_id stays NULL — the
 // tasks_anchor_present CHECK lets this through because site_id is set.
 export async function addInfraTask(siteId, name, jobType, notes, userId) {

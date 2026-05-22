@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
-import { db, addTask } from '../../lib/supabase'
+import { db, addTask, getSitesByProject, addSite } from '../../lib/supabase'
+
+const SITE_TYPES = [
+  { id: 'wireless', label: 'Wireless', icon: '📡' },
+  { id: 'fiber',    label: 'Fiber',    icon: '🏢' },
+]
 
 const JOB_TYPES = [
   { id: 'aerial',      label: 'Aerial',      icon: '🏗️' },
@@ -96,6 +101,58 @@ export default function ProjectManager() {
   const [taskJobType, setTaskJobType] = useState('aerial')
   const [taskSaving, setTaskSaving] = useState(false)
   const [confirmDeleteTask, setConfirmDeleteTask] = useState(null)
+
+  // Sites — loaded when a project is opened. Sites are infra crew's unit of
+  // work (towers, business installs, MDU equipment closets). The Sites
+  // section + "Add site" overlay only render for infra-style projects
+  // (zero phases + non-zero sites), so fiber regional projects stay clean.
+  const [projectSites, setProjectSites] = useState([])
+  const [sitesLoading, setSitesLoading] = useState(false)
+  const [showAddSite, setShowAddSite] = useState(false)
+  const [siteName, setSiteName] = useState('')
+  const [siteType, setSiteType] = useState('wireless')
+  const [siteAddress, setSiteAddress] = useState('')
+  const [siteNotes, setSiteNotes] = useState('')
+  const [siteSaving, setSiteSaving] = useState(false)
+
+  useEffect(() => {
+    if (!selProject?.id) { setProjectSites([]); return }
+    let cancelled = false
+    setSitesLoading(true)
+    getSitesByProject(selProject.id)
+      .then(data => { if (!cancelled) setProjectSites(data) })
+      .catch(e => { console.warn('Sites load failed:', e); if (!cancelled) setProjectSites([]) })
+      .finally(() => { if (!cancelled) setSitesLoading(false) })
+    return () => { cancelled = true }
+  }, [selProject?.id])
+
+  async function handleAddSite() {
+    if (!siteName.trim() || !selProject?.id) return
+    setSiteSaving(true)
+    try {
+      const newSite = await addSite({
+        projectId: selProject.id,
+        name: siteName.trim(),
+        type: siteType,
+        address: siteAddress.trim() || null,
+        notes: siteNotes.trim() || null,
+      })
+      setProjectSites(prev => [...prev, newSite].sort((a, b) => a.name.localeCompare(b.name)))
+      // Bump the list-view count so it stays in sync without a refetch.
+      setSiteCountByProject(prev => ({
+        ...prev,
+        [selProject.id]: (prev[selProject.id] || 0) + 1,
+      }))
+      setShowAddSite(false)
+      setSiteName(''); setSiteAddress(''); setSiteNotes(''); setSiteType('wireless')
+      showToast('Site added')
+    } catch (e) {
+      console.error('Add site failed:', e)
+      showToast('Add site failed: ' + e.message)
+    } finally {
+      setSiteSaving(false)
+    }
+  }
 
   async function handleDeleteTask(task) {
     try {
@@ -585,6 +642,12 @@ export default function ProjectManager() {
   if (selProject) {
     const totalTasks = selProject.phases?.reduce((a, ph) => a + ph.tasks.length, 0) || 0
     const doneTasks = selProject.phases?.reduce((a, ph) => a + ph.tasks.filter(t => t.status === 'done' || t.status === 'approved').length, 0) || 0
+    // A project is "infra-style" if it has zero phases but at least one site.
+    // Drives all the conditional rendering below — swap PHASES stat → SITES,
+    // hide fiber targets section, surface the Sites admin.
+    const phaseCount = selProject.phases?.length || 0
+    const siteCount = siteCountByProject[selProject.id] || projectSites.length || 0
+    const isInfraProject = phaseCount === 0 && siteCount > 0
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -592,7 +655,16 @@ export default function ProjectManager() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <button onClick={() => setSelProject(null)} style={{ fontSize: 20, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer' }}>←</button>
             <div>
-              <div style={{ fontWeight: 800, fontSize: 17 }}>{selProject.name}</div>
+              <div style={{ fontWeight: 800, fontSize: 17 }}>
+                {selProject.name}
+                {isInfraProject && (
+                  <span style={{
+                    marginLeft: 8, padding: '2px 8px', borderRadius: 20,
+                    background: 'var(--teal-lt)', color: 'var(--teal-mid)',
+                    fontSize: 10, fontWeight: 700, verticalAlign: 'middle',
+                  }}>INFRA</span>
+                )}
+              </div>
               <div style={{ fontSize: 12, color: 'var(--muted)' }}>{selProject.region}</div>
             </div>
           </div>
@@ -606,13 +678,22 @@ export default function ProjectManager() {
               <div style={{ fontSize: 11, color: 'var(--hint)' }}>done</div>
             </div>
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: 14 }}>
-              <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 4 }}>PHASES</div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--orange)' }}>{selProject.phases?.length || 0}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 4 }}>
+                {isInfraProject ? 'SITES' : 'PHASES'}
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--orange)' }}>
+                {isInfraProject ? siteCount : phaseCount}
+              </div>
               <div style={{ fontSize: 11, color: 'var(--hint)' }}>total</div>
             </div>
           </div>
 
-          {/* Project-level targets — editable */}
+          {/* Project-level fiber targets. Hidden on infra projects — those
+              metrics (strand/fiber/conduit/MST/splice cases/handholes/vaults)
+              are all fiber-build-specific and would just show zeros, making
+              the page look like it has missing data. */}
+          {!isInfraProject && (
+            <>
           <div className="sec-label" style={{ marginBottom: 8 }}>Project targets — tap to edit</div>
           {PROJECT_TARGET_FIELDS.map(f => {
             const current = selProject[f.key] || 0
@@ -650,7 +731,62 @@ export default function ProjectManager() {
             )
           })}
           <div style={{ marginBottom: 16 }} />
+            </>
+          )}
 
+          {/* Sites section — only meaningful for infra-style projects.
+              List sites + offer "Add site". Mirrors the phases-list pattern
+              just below. Edit/delete is intentionally deferred; the owner
+              uses InfraCrewApp + the DB if a one-off fix is needed. */}
+          {isInfraProject && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <div className="sec-label" style={{ margin: 0 }}>Sites</div>
+                <button onClick={() => setShowAddSite(true)}
+                  style={{ fontSize: 13, color: 'var(--orange)', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+                  + Add site
+                </button>
+              </div>
+              {sitesLoading && (
+                <div style={{ textAlign: 'center', padding: 16, color: 'var(--muted)', fontSize: 12 }}>Loading sites…</div>
+              )}
+              {!sitesLoading && projectSites.length === 0 && (
+                <div style={{ textAlign: 'center', padding: 16, color: 'var(--hint)', fontSize: 12 }}>No sites yet — tap “+ Add site” above.</div>
+              )}
+              {!sitesLoading && projectSites.map(s => (
+                <div key={s.id} style={{
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 6,
+                  display: 'flex', alignItems: 'center', gap: 10,
+                }}>
+                  <span style={{ fontSize: 16 }}>{s.type === 'wireless' ? '📡' : '🏢'}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {s.name}
+                    </div>
+                    {s.address && (
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {s.address}
+                      </div>
+                    )}
+                  </div>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20,
+                    background: s.type === 'wireless' ? 'var(--blue-lt)' : 'var(--teal-lt)',
+                    color: s.type === 'wireless' ? 'var(--blue)' : 'var(--teal-mid)',
+                  }}>
+                    {s.type}
+                  </span>
+                </div>
+              ))}
+              <div style={{ marginBottom: 16 }} />
+            </>
+          )}
+
+          {/* Phases section. Hidden entirely on infra projects (where the
+              Sites section above takes its place). The fiber crews still
+              get the standard phases UI. */}
+          {!isInfraProject && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <div className="sec-label" style={{ margin: 0 }}>Phases — tap to edit targets</div>
             <button onClick={() => setShowAddPhase(true)}
@@ -658,8 +794,9 @@ export default function ProjectManager() {
               + Add phase
             </button>
           </div>
+          )}
 
-          {(selProject.phases || []).map(ph => {
+          {!isInfraProject && (selProject.phases || []).map(ph => {
             const done = ph.tasks.filter(t => t.status === 'done' || t.status === 'approved').length
             const total = ph.tasks.length
             const pct = total > 0 ? Math.round(done / total * 100) : 0
@@ -702,27 +839,65 @@ export default function ProjectManager() {
             )
           })}
 
-          {(!selProject.phases || selProject.phases.length === 0) && (() => {
-            const siteCount = siteCountByProject[selProject.id] || 0
-            // If this project has sites (infra) but no phases (fiber),
-            // explain — the manager isn't missing anything; the work just
-            // lives under sites which are managed in the (TBD) Sites admin.
-            if (siteCount > 0) {
-              return (
-                <div style={{ textAlign: 'center', padding: 24, color: 'var(--hint)', fontSize: 13 }}>
-                  <div style={{ fontSize: 24, marginBottom: 6 }}>🛠️</div>
-                  <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
-                    Infrastructure project — {siteCount} site{siteCount === 1 ? '' : 's'}
-                  </div>
-                  <div>Work here is organized by sites (towers, business installs) rather than phases. Sites admin is coming — for now, infra crew can see + log against them in their own shell.</div>
-                </div>
-              )
-            }
-            return (
-              <div style={{ textAlign: 'center', padding: 24, color: 'var(--hint)', fontSize: 13 }}>No phases yet — add one above</div>
-            )
-          })()}
+          {!isInfraProject && (!selProject.phases || selProject.phases.length === 0) && (
+            <div style={{ textAlign: 'center', padding: 24, color: 'var(--hint)', fontSize: 13 }}>No phases yet — add one above</div>
+          )}
         </div>
+
+        {showAddSite && (
+          <div className="overlay open" onClick={e => e.target === e.currentTarget && setShowAddSite(false)}>
+            <div className="overlay-sheet">
+              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Add Site</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>Adding to {selProject.name}</div>
+
+              <div className="field">
+                <label>Site name</label>
+                <input type="text" placeholder="e.g. Alexis Tower, Spruces MDU"
+                  value={siteName} onChange={e => setSiteName(e.target.value)}
+                  autoFocus autoComplete="off" name="new-site-name" />
+              </div>
+
+              <div className="field">
+                <label>Type</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {SITE_TYPES.map(st => (
+                    <button key={st.id} onClick={() => setSiteType(st.id)}
+                      style={{
+                        flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                        background: siteType === st.id ? 'var(--orange)' : 'var(--gray-lt)',
+                        color: siteType === st.id ? 'white' : 'var(--muted)',
+                        border: 'none', cursor: 'pointer',
+                      }}>
+                      {st.icon} {st.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="field">
+                <label>Address (optional)</label>
+                <input type="text" placeholder="Street, city"
+                  value={siteAddress} onChange={e => setSiteAddress(e.target.value)}
+                  autoComplete="off" name="new-site-address" />
+              </div>
+
+              <div className="field">
+                <label>Notes (optional)</label>
+                <textarea rows={2} placeholder="Tower height, access notes, etc."
+                  value={siteNotes} onChange={e => setSiteNotes(e.target.value)} />
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button className="btn btn-ghost" style={{ flex: 1 }}
+                  onClick={() => setShowAddSite(false)} disabled={siteSaving}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex: 2 }}
+                  onClick={handleAddSite} disabled={siteSaving || !siteName.trim()}>
+                  {siteSaving ? 'Adding…' : 'Add site'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {showAddPhase && (
           <div className="overlay open" onClick={e => e.target === e.currentTarget && setShowAddPhase(false)}>
