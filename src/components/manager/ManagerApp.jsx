@@ -50,8 +50,42 @@ function ThemeToggle({ darkMode, onToggle, compact = false }) {
   )
 }
 
+// Same field crew_types the App.jsx router uses to decide whether a staff
+// user can flip to crew mode. Keep these in sync — if you add a new
+// crew_type with its own shell, list it in both places.
+const VALID_FIELD_CREW_TYPES = ['aerial', 'underground', 'splice', 'drop', 'locator', 'install', 'infrastructure']
+
+// "Switch to crew mode" button for working managers. Disabled with a
+// tooltip when the staff user doesn't have a real field crew_type set
+// (their auto-deduct wouldn't fire on approval anyway — the RPC checks
+// crew_type IN {aerial, underground, splice, infrastructure}). Owners
+// who only ever manage don't need to set crew_type; the button just
+// stays disabled for them and that's fine.
+function SwitchToCrewButton({ currentUser, enterCrewMode }) {
+  const canActAsCrew = VALID_FIELD_CREW_TYPES.includes(currentUser?.crew_type)
+  return (
+    <button
+      onClick={canActAsCrew ? enterCrewMode : undefined}
+      disabled={!canActAsCrew}
+      title={canActAsCrew
+        ? `Switch to ${currentUser.crew_type} crew view to log your own work`
+        : 'Set a field crew_type (aerial / underground / splice / infrastructure / drop / locator / install) on your user via Admin → Users to enable.'}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '5px 10px', borderRadius: 999,
+        border: `1.5px solid ${canActAsCrew ? 'var(--teal)' : 'var(--border2)'}`,
+        background: canActAsCrew ? 'var(--surface2)' : 'transparent',
+        color: canActAsCrew ? 'var(--teal-mid)' : 'var(--hint)',
+        cursor: canActAsCrew ? 'pointer' : 'not-allowed',
+        fontSize: 11, fontWeight: 700, flexShrink: 0,
+      }}>
+      🔧 Crew mode
+    </button>
+  )
+}
+
 // ─── WIDE SIDEBAR ─────────────────────────────────────────────────────────────
-function ManagerSidebar({ tab, setTab, projects, currentUser, selectUser, darkMode, toggleDarkMode, isOwner }) {
+function ManagerSidebar({ tab, setTab, projects, currentUser, selectUser, darkMode, toggleDarkMode, isOwner, enterCrewMode }) {
   const nav = isOwner ? [...NAV_ITEMS, { id: 'admin', label: 'Admin', icon: '⚙️' }] : NAV_ITEMS
 
   const totalTasks = projects.reduce((a, p) => a + p.phases.reduce((b, ph) => b + ph.tasks.length, 0), 0)
@@ -78,9 +112,13 @@ function ManagerSidebar({ tab, setTab, projects, currentUser, selectUser, darkMo
           </div>
         </div>
 
-        {/* Theme toggle on its own row, always visible */}
-        <div style={{ marginBottom: 10 }}>
+        {/* Theme toggle + crew-mode switch on the same row, both always
+            visible. Working managers (anyone with a field crew_type set)
+            use the crew-mode button to flip into the field shell and log
+            their own day; everyone else sees it disabled. */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
           <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} compact />
+          <SwitchToCrewButton currentUser={currentUser} enterCrewMode={enterCrewMode} />
         </div>
 
         {/* User row */}
@@ -168,7 +206,7 @@ export default function ManagerApp() {
   // Theme is sourced from AppContext (centralized + persisted) instead of
   // local component state — that way it survives reloads and stays in sync
   // across the crew app too.
-  const { projects, loading, error, reload, currentUser, selectUser, darkMode, toggleDarkMode } = useApp()
+  const { projects, loading, error, reload, currentUser, selectUser, darkMode, toggleDarkMode, enterCrewMode } = useApp()
   const [tab, setTab] = useState('submissions')
   const isWide = useIsWide()
   const isOwner = currentUser?.role === 'owner'
@@ -214,6 +252,7 @@ export default function ManagerApp() {
           currentUser={currentUser} selectUser={selectUser}
           darkMode={darkMode} toggleDarkMode={toggleDarkMode}
           isOwner={isOwner}
+          enterCrewMode={enterCrewMode}
         />
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {content}
@@ -242,6 +281,7 @@ export default function ManagerApp() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} compact />
+          <SwitchToCrewButton currentUser={currentUser} enterCrewMode={enterCrewMode} />
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{currentUser?.name}</div>
             <button onClick={() => selectUser(null)}

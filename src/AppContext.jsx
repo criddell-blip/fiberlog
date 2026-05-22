@@ -6,6 +6,11 @@ const AppContext = createContext(null)
 // LocalStorage key for the theme preference. Read once at first render so
 // there's no flash of dark mode for users who chose light.
 const THEME_STORAGE_KEY = 'fiberlog_dark_mode'
+// LocalStorage key for the manager↔crew view mode. Working managers (owner
+// or manager role who also field-work) flip into the crew shell to log
+// their own work; we persist so a reload doesn't bounce them back to the
+// manager view mid-task.
+const VIEW_MODE_KEY = 'fiberlog_view_mode'
 
 function readInitialDarkMode() {
   try {
@@ -15,6 +20,14 @@ function readInitialDarkMode() {
     // localStorage unavailable (private mode etc.) — fall through to default
   }
   return true   // default to dark, matching the original :root variables
+}
+
+function readInitialViewMode() {
+  try {
+    const saved = localStorage.getItem(VIEW_MODE_KEY)
+    if (saved === 'crew' || saved === 'manager') return saved
+  } catch (e) {}
+  return 'manager'  // sensible default for staff; non-staff ignore this entirely
 }
 
 export function AppProvider({ children }) {
@@ -30,6 +43,17 @@ export function AppProvider({ children }) {
   // Theme is global state so the toggle works the same way no matter which
   // sub-app the user is in (crew or manager), and it persists across reloads.
   const [darkMode, setDarkMode] = useState(readInitialDarkMode)
+
+  // viewMode controls whether a staff user (owner / manager) sees the
+  // manager portal or the crew shell. Crew users ignore this entirely —
+  // App.jsx never reads viewMode for non-staff. Persisted to localStorage
+  // so reload mid-task doesn't drop the manager back into the manager view.
+  const [viewMode, setViewMode] = useState(readInitialViewMode)
+  useEffect(() => {
+    try { localStorage.setItem(VIEW_MODE_KEY, viewMode) } catch (e) {}
+  }, [viewMode])
+  function enterCrewMode() { setViewMode('crew') }
+  function exitCrewMode()  { setViewMode('manager') }
 
   // Apply the theme attribute on <html> and persist to localStorage every
   // time it changes. The CSS [data-theme="light"] selector flips all the
@@ -192,6 +216,10 @@ export function AppProvider({ children }) {
     setCurrentUser(null)
     setProjects([])
     setAssemblies({})
+    // Reset view mode so the next login (potentially a different user)
+    // doesn't inherit a stale "crew mode" preference.
+    setViewMode('manager')
+    try { localStorage.removeItem(VIEW_MODE_KEY) } catch (e) {}
   }
 
   // Kept for backward compatibility with existing call sites.
@@ -249,6 +277,8 @@ export function AppProvider({ children }) {
       reload: loadAll,
       // Theme
       darkMode, setDarkMode, toggleDarkMode,
+      // View mode (manager↔crew toggle for working managers)
+      viewMode, enterCrewMode, exitCrewMode,
     }}>
       {children}
       {toast && <div className="toast">{toast}</div>}

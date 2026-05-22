@@ -12,6 +12,31 @@ import SiteTaskList from './SiteTaskList'
 // already submitted; the editable workspace is only for 'open' tasks.
 const isReadOnlyTask = t => t.status === 'pending' || t.status === 'approved' || t.status === 'done'
 
+// Back-to-manager pill (see CrewApp for the rationale — same component
+// inlined here so each crew shell stays self-contained).
+function BackToManagerButton({ exitCrewMode, compact = false }) {
+  return (
+    <button
+      onClick={exitCrewMode}
+      title="Return to the manager portal"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: compact ? '4px 8px' : '6px 10px',
+        borderRadius: 999,
+        border: '1.5px solid var(--teal)',
+        background: 'var(--surface2)',
+        color: 'var(--teal-mid)',
+        cursor: 'pointer',
+        fontSize: compact ? 11 : 12,
+        fontWeight: 700,
+        flexShrink: 0,
+      }}>
+      <span style={{ fontSize: compact ? 12 : 14, lineHeight: 1 }}>⚙️</span>
+      <span>Manager</span>
+    </button>
+  )
+}
+
 // Small theme toggle, mirrored from ManagerApp's ThemeToggle for visual
 // consistency. Both shells need this so working crews on a tablet in
 // daylight can flip out of dark mode without going to the manager portal.
@@ -65,8 +90,8 @@ const isActiveCrewTask = t => t.status !== 'done' && t.status !== 'approved' && 
 const isCompletedTask  = t => t.status === 'done' || t.status === 'approved'
 
 // ─── SIGN OUT CONFIRM (copied from CrewApp to keep this shell self-contained) ─
-// Also hosts the theme toggle for narrow layouts (no sidebar to put it in).
-function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode }) {
+// Also hosts the theme toggle + back-to-manager pill for narrow layouts.
+function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode, exitCrewMode }) {
   const { currentUser } = useApp()
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onCancel()}>
@@ -83,9 +108,10 @@ function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode })
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 18 }}>
           {lang === 'es' ? '¿Cerrar sesión?' : 'Sign out?'}
         </div>
-        {toggleDarkMode && (
-          <div style={{ marginBottom: 18 }}>
-            <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} />
+        {(toggleDarkMode || exitCrewMode) && (
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 18 }}>
+            {toggleDarkMode && <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} />}
+            {exitCrewMode && <BackToManagerButton exitCrewMode={exitCrewMode} />}
           </div>
         )}
         <div style={{ display: 'flex', gap: 8 }}>
@@ -107,7 +133,7 @@ function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode })
 // is sites with type icons (wireless 📡 / fiber 🏢) instead of phase names.
 function InfraSidebar({
   projects, selTask, view, onSelectMyStock, onSelectTask, onSelectSite,
-  currentUser, onUserTap, darkMode, toggleDarkMode,
+  currentUser, onUserTap, darkMode, toggleDarkMode, exitCrewMode,
 }) {
   const [expandedProject, setExpandedProject] = useState(projects[0]?.id || null)
   const [expandedSite, setExpandedSite] = useState(null)
@@ -144,6 +170,9 @@ function InfraSidebar({
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
             Infrastructure
+            {exitCrewMode && (
+              <span style={{ marginLeft: 6, color: 'var(--teal-mid)', fontWeight: 700 }}>· acting as crew</span>
+            )}
           </div>
         </div>
       </div>
@@ -301,7 +330,7 @@ function InfraSidebar({
 
       <div style={{
         padding: '10px 14px', borderTop: '1px solid var(--border)',
-        flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6
+        flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{ width: 4, height: 18, background: 'var(--orange)', borderRadius: 2 }} />
@@ -309,9 +338,10 @@ function InfraSidebar({
             FiberLog <span style={{ fontWeight: 500, color: 'var(--muted)' }}>· Infra</span>
           </span>
         </div>
-        {toggleDarkMode && (
-          <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} compact />
-        )}
+        <div style={{ display: 'flex', gap: 4 }}>
+          {exitCrewMode && <BackToManagerButton exitCrewMode={exitCrewMode} compact />}
+          {toggleDarkMode && <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} compact />}
+        </div>
       </div>
     </div>
   )
@@ -319,8 +349,13 @@ function InfraSidebar({
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function InfraCrewApp() {
-  const { currentUser, selectUser, lang, darkMode, toggleDarkMode } = useApp()
+  const { currentUser, selectUser, lang, darkMode, toggleDarkMode, viewMode, exitCrewMode } = useApp()
   const isWide = useIsWide()
+  // Only render the back-to-manager pill for staff users acting as crew
+  // via the toggle. Regular crew users (role=crew) never see it.
+  const isStaffActingAsCrew =
+    (currentUser?.role === 'owner' || currentUser?.role === 'manager') && viewMode === 'crew'
+  const backToManager = isStaffActingAsCrew ? exitCrewMode : null
 
   // Local infra tree — the global AppContext.projects holds the fiber-shaped
   // tree (phases). Infra needs sites, so we maintain our own state here. The
@@ -489,6 +524,7 @@ export default function InfraCrewApp() {
           onUserTap={() => setShowSignOut(true)}
           darkMode={darkMode}
           toggleDarkMode={toggleDarkMode}
+          exitCrewMode={backToManager}
         />
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -548,6 +584,7 @@ export default function InfraCrewApp() {
             onCancel={() => setShowSignOut(false)}
             darkMode={darkMode}
             toggleDarkMode={toggleDarkMode}
+            exitCrewMode={backToManager}
           />
         )}
       </div>
@@ -616,6 +653,7 @@ export default function InfraCrewApp() {
           onCancel={() => setShowSignOut(false)}
           darkMode={darkMode}
           toggleDarkMode={toggleDarkMode}
+          exitCrewMode={backToManager}
         />
       )}
     </div>

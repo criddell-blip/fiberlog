@@ -14,6 +14,33 @@ import MyStockView from './MyStockView'
 // the only path that flips it back to 'open' for re-editing.)
 const isReadOnlyTask = t => t.status === 'pending' || t.status === 'approved' || t.status === 'done'
 
+// "Back to manager" pill — only rendered for staff users acting as crew
+// via the manager↔crew toggle. Helps them flip back without signing out
+// and back in. The visual style intentionally differs from the theme
+// toggle so it reads as a mode-switch action, not a setting.
+function BackToManagerButton({ exitCrewMode, compact = false }) {
+  return (
+    <button
+      onClick={exitCrewMode}
+      title="Return to the manager portal"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: compact ? '4px 8px' : '6px 10px',
+        borderRadius: 999,
+        border: '1.5px solid var(--teal)',
+        background: 'var(--surface2)',
+        color: 'var(--teal-mid)',
+        cursor: 'pointer',
+        fontSize: compact ? 11 : 12,
+        fontWeight: 700,
+        flexShrink: 0,
+      }}>
+      <span style={{ fontSize: compact ? 12 : 14, lineHeight: 1 }}>⚙️</span>
+      <span>Manager</span>
+    </button>
+  )
+}
+
 // Small theme toggle — mirrors ManagerApp's ThemeToggle so the same pill
 // shows up wherever a user can flip dark/light. Without this, crew on a
 // tablet outdoors had no way to switch out of dark mode.
@@ -63,7 +90,8 @@ const isCompletedTask = t => t.status === 'done' || t.status === 'approved'
 
 // ─── SIGN OUT CONFIRM ─────────────────────────────────────────────────────────
 // Hosts the theme toggle for narrow layouts (sidebar isn't rendered).
-function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode }) {
+// Also hosts the back-to-manager pill when applicable.
+function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode, exitCrewMode }) {
   const { currentUser } = useApp()
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onCancel()}>
@@ -80,9 +108,10 @@ function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode })
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 18 }}>
           {lang === 'es' ? '¿Cerrar sesión?' : 'Sign out?'}
         </div>
-        {toggleDarkMode && (
-          <div style={{ marginBottom: 18 }}>
-            <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} />
+        {(toggleDarkMode || exitCrewMode) && (
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 18 }}>
+            {toggleDarkMode && <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} />}
+            {exitCrewMode && <BackToManagerButton exitCrewMode={exitCrewMode} />}
           </div>
         )}
         <div style={{ display: 'flex', gap: 8 }}>
@@ -101,7 +130,7 @@ function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode })
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 function CrewSidebar({
   projects, selTask, view, onSelectMyStock, onSelectTask, onSelectPhase,
-  currentUser, onUserTap, darkMode, toggleDarkMode,
+  currentUser, onUserTap, darkMode, toggleDarkMode, exitCrewMode,
 }) {
   const [expandedProject, setExpandedProject] = useState(projects[0]?.id || null)
   const [expandedPhase, setExpandedPhase] = useState(null)
@@ -138,6 +167,9 @@ function CrewSidebar({
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
             {currentUser?.crew_type || 'Crew'}
+            {exitCrewMode && (
+              <span style={{ marginLeft: 6, color: 'var(--teal-mid)', fontWeight: 700 }}>· acting as crew</span>
+            )}
           </div>
         </div>
       </div>
@@ -288,15 +320,16 @@ function CrewSidebar({
 
       <div style={{
         padding: '10px 14px', borderTop: '1px solid var(--border)',
-        flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6
+        flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{ width: 4, height: 18, background: 'var(--orange)', borderRadius: 2 }} />
           <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.3px' }}>FiberLog</span>
         </div>
-        {toggleDarkMode && (
-          <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} compact />
-        )}
+        <div style={{ display: 'flex', gap: 4 }}>
+          {exitCrewMode && <BackToManagerButton exitCrewMode={exitCrewMode} compact />}
+          {toggleDarkMode && <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} compact />}
+        </div>
       </div>
     </div>
   )
@@ -304,8 +337,13 @@ function CrewSidebar({
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function CrewApp() {
-  const { projects, currentUser, selectUser, loading, error, lang, darkMode, toggleDarkMode } = useApp()
+  const { projects, currentUser, selectUser, loading, error, lang, darkMode, toggleDarkMode, viewMode, exitCrewMode } = useApp()
   const isWide = useIsWide()
+  // Only show the back-to-manager pill when a staff user is acting as
+  // crew via the toggle. Regular crew users never see it.
+  const isStaffActingAsCrew =
+    (currentUser?.role === 'owner' || currentUser?.role === 'manager') && viewMode === 'crew'
+  const backToManager = isStaffActingAsCrew ? exitCrewMode : null
 
   const [screen, setScreen] = useState('projects')
   // Wide-layout main-panel view. 'projects' (default) shows the project
@@ -380,6 +418,7 @@ export default function CrewApp() {
           onUserTap={() => setShowSignOut(true)}
           darkMode={darkMode}
           toggleDarkMode={toggleDarkMode}
+          exitCrewMode={backToManager}
         />
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -431,6 +470,7 @@ export default function CrewApp() {
             onCancel={() => setShowSignOut(false)}
             darkMode={darkMode}
             toggleDarkMode={toggleDarkMode}
+            exitCrewMode={backToManager}
           />
         )}
       </div>
@@ -497,6 +537,7 @@ export default function CrewApp() {
           onCancel={() => setShowSignOut(false)}
           darkMode={darkMode}
           toggleDarkMode={toggleDarkMode}
+          exitCrewMode={backToManager}
         />
       )}
     </div>
