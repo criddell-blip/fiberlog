@@ -284,8 +284,16 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       // from the cleanup that follows. Letting saveEntry errors propagate
       // is intentional — the entry+parts insert is atomic, so failure means
       // nothing landed and we shouldn't continue.
+      //
+      // Gate on (allParts OR extraParts) so a submission where the user
+      // only added parts via "Add part not in list" — no assemblies tapped
+      // — still creates the log_entry. Previously this gated on allParts
+      // alone, which silently dropped extra-only submissions on the floor
+      // (entry_parts row count was 0 even though the UI showed them in the
+      // summary). Especially noticeable for infra crew since there are no
+      // real infra assemblies yet, so they ALL rely on the part search.
       let newEntryId = null
-      if (allParts.length > 0) {
+      if (allParts.length > 0 || extraParts.length > 0) {
         const newEntry = await saveEntry(sid, currentUser.id, task.id, {
           type: 'material', qty: totalLogged,
           notes: note || null,
