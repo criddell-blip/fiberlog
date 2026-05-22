@@ -3,7 +3,7 @@ import { useApp } from '../../AppContext'
 import {
   db, addTask,
   getSitesByProject, addSite, updateSite, decommissionSite,
-  getTaskCountsBySite,
+  getTaskCountsBySite, getTasksBySite, getMaterialsAtSite,
 } from '../../lib/supabase'
 
 const SITE_TYPES = [
@@ -132,8 +132,16 @@ export default function ProjectManager() {
   const [editSiteType, setEditSiteType] = useState('wireless')
   const [editSiteAddress, setEditSiteAddress] = useState('')
   const [editSiteNotes, setEditSiteNotes] = useState('')
+  const [editSiteProjectId, setEditSiteProjectId] = useState('')
   const [editSiteSaving, setEditSiteSaving] = useState(false)
   const [confirmDecommSite, setConfirmDecommSite] = useState(null)
+
+  // Sub-modals stacked on top of Edit Site: tasks-at-site, materials-at-site.
+  // null = closed; a populated object means open. The data is loaded lazily
+  // when the manager taps the corresponding button so we don't pay the
+  // query cost just for opening the edit overlay.
+  const [siteTasksModal, setSiteTasksModal] = useState(null)        // { siteId, siteName, loading, rows }
+  const [siteMaterialsModal, setSiteMaterialsModal] = useState(null)  // { siteId, siteName, loading, rows }
 
   useEffect(() => {
     if (!selProject?.id) {
@@ -165,27 +173,73 @@ export default function ProjectManager() {
     setEditSiteType(s.type || 'wireless')
     setEditSiteAddress(s.address || '')
     setEditSiteNotes(s.notes || '')
+    setEditSiteProjectId(s.project_id || '')
   }
 
   async function handleEditSite() {
     if (!editSite || !editSiteName.trim()) return
     setEditSiteSaving(true)
     try {
+      const newProjectId = editSiteProjectId || null
+      const movedToDifferentProject = newProjectId !== editSite.project_id
       const updated = await updateSite(editSite.id, {
         name: editSiteName.trim(),
         type: editSiteType,
         address: editSiteAddress,
         notes: editSiteNotes,
+        project_id: newProjectId,
       })
-      setProjectSites(prev => prev.map(s => s.id === updated.id ? updated : s)
-        .sort((a, b) => a.name.localeCompare(b.name)))
+      if (movedToDifferentProject) {
+        // Site left this project — drop from the current list and adjust
+        // both project counts so the list view + detail header stay sane
+        // without a refetch.
+        setProjectSites(prev => prev.filter(s => s.id !== updated.id))
+        setSiteCountByProject(prev => {
+          const next = { ...prev }
+          if (editSite.project_id) {
+            next[editSite.project_id] = Math.max(0, (next[editSite.project_id] || 1) - 1)
+          }
+          if (newProjectId) {
+            next[newProjectId] = (next[newProjectId] || 0) + 1
+          }
+          return next
+        })
+        showToast(`Site moved to ${projects.find(p => p.id === newProjectId)?.name || 'new project'}`)
+      } else {
+        setProjectSites(prev => prev.map(s => s.id === updated.id ? updated : s)
+          .sort((a, b) => a.name.localeCompare(b.name)))
+        showToast('Site updated')
+      }
       setEditSite(null)
-      showToast('Site updated')
     } catch (e) {
       console.error('Update site failed:', e)
       showToast('Update failed: ' + e.message)
     } finally {
       setEditSiteSaving(false)
+    }
+  }
+
+  async function openSiteTasks(site) {
+    setSiteTasksModal({ siteId: site.id, siteName: site.name, loading: true, rows: [] })
+    try {
+      const rows = await getTasksBySite(site.id)
+      setSiteTasksModal({ siteId: site.id, siteName: site.name, loading: false, rows })
+    } catch (e) {
+      console.error('Load site tasks failed:', e)
+      showToast('Load tasks failed: ' + e.message)
+      setSiteTasksModal(null)
+    }
+  }
+
+  async function openSiteMaterials(site) {
+    setSiteMaterialsModal({ siteId: site.id, siteName: site.name, loading: true, rows: [] })
+    try {
+      const rows = await getMaterialsAtSite(site.id)
+      setSiteMaterialsModal({ siteId: site.id, siteName: site.name, loading: false, rows })
+    } catch (e) {
+      console.error('Load site materials failed:', e)
+      showToast('Load materials failed: ' + e.message)
+      setSiteMaterialsModal(null)
     }
   }
 
@@ -1100,6 +1154,55 @@ export default function ProjectManager() {
                   onChange={e => setEditSiteNotes(e.target.value)} />
               </div>
 
+              {/* Project picker — lets the manager fix mis-assigned sites
+                  (e.g. Prestige II) without dropping to SQL. Also useful if
+                  a site genuinely moves between projects. */}
+              <div className="field">
+                <label>Project</label>
+                <select value={editSiteProjectId}
+                  onChange={e => setEditSiteProjectId(e.target.value)}
+                  style={{
+                    width: '100%', padding: '8px 10px', fontSize: 13,
+                    background: 'var(--surface2)', color: 'var(--text)',
+                    border: '1.5px solid var(--border2)', borderRadius: 8,
+                  }}>
+                  <option value="">— Unassigned —</option>
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                {editSiteProjectId !== (editSite.project_id || '') && (
+                  <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 4 }}>
+                    ⤳ Will move to {projects.find(p => p.id === editSiteProjectId)?.name || 'Unassigned'} on save.
+                  </div>
+                )}
+              </div>
+
+              {/* Read-only drilldowns — useful before deciding to
+                  decommission or recover materials. */}
+              <div style={{ display: 'flex', gap: 6, marginTop: 4, marginBottom: 12 }}>
+                <button
+                  onClick={() => openSiteTasks(editSite)}
+                  style={{
+                    flex: 1, padding: '8px 10px',
+                    background: 'var(--surface2)', color: 'var(--text)',
+                    border: '1px solid var(--border2)', borderRadius: 8,
+                    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  }}>
+                  🛠️ View tasks ({siteTaskCounts[editSite.id] || 0})
+                </button>
+                <button
+                  onClick={() => openSiteMaterials(editSite)}
+                  style={{
+                    flex: 1, padding: '8px 10px',
+                    background: 'var(--surface2)', color: 'var(--text)',
+                    border: '1px solid var(--border2)', borderRadius: 8,
+                    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  }}>
+                  📦 View materials
+                </button>
+              </div>
+
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                 <button className="btn btn-ghost" style={{ flex: 1 }}
                   onClick={() => setEditSite(null)} disabled={editSiteSaving}>Cancel</button>
@@ -1128,6 +1231,108 @@ export default function ProjectManager() {
                   ⊘ Decommission site
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {siteTasksModal && (
+          <div className="overlay open" onClick={e => e.target === e.currentTarget && setSiteTasksModal(null)}>
+            <div className="overlay-sheet">
+              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Tasks at site</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+                {siteTasksModal.siteName}
+              </div>
+              {siteTasksModal.loading && (
+                <div style={{ textAlign: 'center', padding: 20, color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
+              )}
+              {!siteTasksModal.loading && siteTasksModal.rows.length === 0 && (
+                <div style={{ textAlign: 'center', padding: 20, color: 'var(--hint)', fontSize: 13 }}>
+                  No tasks at this site yet.
+                </div>
+              )}
+              {!siteTasksModal.loading && siteTasksModal.rows.map(t => (
+                <div key={t.id} style={{
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--r-sm)', padding: '10px 12px', marginBottom: 6,
+                  display: 'flex', alignItems: 'center', gap: 10,
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {t.name}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--hint)', marginTop: 2 }}>
+                      {t.task_type || 'task'}{t.creator?.name ? ` · ${t.creator.name}` : ''} · {new Date(t.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </div>
+                  </div>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20,
+                    background:
+                      t.status === 'approved' ? 'var(--teal-lt)' :
+                      t.status === 'pending'  ? 'var(--amber-lt)' :
+                      t.status === 'done'     ? 'var(--gray-lt)'  :
+                                                'var(--orange-lt)',
+                    color:
+                      t.status === 'approved' ? 'var(--teal-mid)' :
+                      t.status === 'pending'  ? 'var(--amber)'    :
+                      t.status === 'done'     ? 'var(--muted)'    :
+                                                'var(--orange)',
+                  }}>
+                    {t.status}
+                  </span>
+                </div>
+              ))}
+              <button className="btn btn-ghost" style={{ width: '100%', marginTop: 12 }}
+                onClick={() => setSiteTasksModal(null)}>Close</button>
+            </div>
+          </div>
+        )}
+
+        {siteMaterialsModal && (
+          <div className="overlay open" onClick={e => e.target === e.currentTarget && setSiteMaterialsModal(null)}>
+            <div className="overlay-sheet">
+              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Materials at site</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+                {siteMaterialsModal.siteName} · summed across all tasks
+              </div>
+              {siteMaterialsModal.loading && (
+                <div style={{ textAlign: 'center', padding: 20, color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
+              )}
+              {!siteMaterialsModal.loading && siteMaterialsModal.rows.length === 0 && (
+                <div style={{ textAlign: 'center', padding: 20, color: 'var(--hint)', fontSize: 13 }}>
+                  No materials consumed at this site yet.
+                </div>
+              )}
+              {!siteMaterialsModal.loading && siteMaterialsModal.rows.length > 0 && (
+                <div style={{ maxHeight: 360, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)' }}>
+                  {siteMaterialsModal.rows.map((p, i) => (
+                    <div key={p.partId} style={{
+                      display: 'flex', alignItems: 'center', padding: '9px 12px',
+                      borderBottom: i < siteMaterialsModal.rows.length - 1 ? '1px solid var(--border)' : 'none',
+                    }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {p.name}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'monospace' }}>{p.partId}</div>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--orange)', flexShrink: 0, marginLeft: 8 }}>
+                        {p.qty.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>{p.unit}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!siteMaterialsModal.loading && siteMaterialsModal.rows.length > 0 && (
+                <div style={{
+                  marginTop: 12, padding: '8px 10px',
+                  background: 'var(--gray-lt)', color: 'var(--muted)',
+                  fontSize: 11, borderRadius: 'var(--r-xs)',
+                }}>
+                  💡 To physically recover any of this, log it via <strong>Inventory → Receive PO</strong> with a note like <em>“Site recovery”</em>.
+                </div>
+              )}
+              <button className="btn btn-ghost" style={{ width: '100%', marginTop: 12 }}
+                onClick={() => setSiteMaterialsModal(null)}>Close</button>
             </div>
           </div>
         )}

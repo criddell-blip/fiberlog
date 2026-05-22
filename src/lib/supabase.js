@@ -206,6 +206,70 @@ export async function decommissionSite(siteId) {
   if (error) throw error
 }
 
+// All tasks anchored to a specific site. Read-only view for the manager —
+// the infra crew workflow already shows tasks under sites, this just lets
+// the manager see them from ProjectManager without logging in as infra.
+export async function getTasksBySite(siteId) {
+  const { data, error } = await db
+    .from('tasks')
+    .select('*, creator:users!tasks_created_by_fkey(name, initials)')
+    .eq('site_id', siteId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+// Aggregated parts consumed at a site, derived from inventory_movements
+// keyed on (task_id IN site's tasks). Returns a flat array of
+// { partId, name, unit, qty, lastMovedAt }, sorted by qty desc.
+//
+// Powers the "View materials consumed" modal — supports the
+// decommission-and-recover decision (manager sees what was installed
+// before deciding what to physically pull and log as a PO).
+//
+// We sum movements regardless of from/to direction — the question is
+// "what landed at this site," and right now auto-deduct transfers
+// (truck → project bucket with task_id set) are the primary signal.
+// If a recovery PO with the same task_id later writes a return, this
+// summary will (correctly) show the net consumption.
+export async function getMaterialsAtSite(siteId) {
+  // Two-step to avoid relying on a deep PostgREST join: get the site's
+  // task ids first, then aggregate movements against them.
+  const { data: tasks, error: tErr } = await db
+    .from('tasks').select('id').eq('site_id', siteId)
+  if (tErr) throw tErr
+  const taskIds = (tasks || []).map(t => t.id)
+  if (taskIds.length === 0) return []
+
+  const { data: moves, error: mErr } = await db
+    .from('inventory_movements')
+    .select('part_id, quantity, movement_type, created_at, parts_catalog ( id, name, unit )')
+    .in('task_id', taskIds)
+  if (mErr) throw mErr
+
+  const totals = {}
+  ;(moves || []).forEach(m => {
+    const id = m.parts_catalog?.id || m.part_id
+    if (!id) return
+    if (!totals[id]) {
+      totals[id] = {
+        partId: id,
+        name: m.parts_catalog?.name || id,
+        unit: m.parts_catalog?.unit || 'ea',
+        qty: 0,
+        lastMovedAt: null,
+      }
+    }
+    totals[id].qty += m.quantity || 0
+    if (!totals[id].lastMovedAt || m.created_at > totals[id].lastMovedAt) {
+      totals[id].lastMovedAt = m.created_at
+    }
+  })
+  return Object.values(totals)
+    .filter(p => p.qty !== 0)
+    .sort((a, b) => b.qty - a.qty)
+}
+
 // Count active tasks per site for a project. Used by ProjectManager's Sites
 // section to badge each site with its workload. Returns { [site_id]: count }.
 export async function getTaskCountsBySite(projectId) {
