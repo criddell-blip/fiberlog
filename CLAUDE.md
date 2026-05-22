@@ -77,6 +77,24 @@ Infrastructure crew gets a **sites-shaped shell** — same overall flow as fiber
 
 ---
 
+## Working-manager toggle (manager ↔ crew mode)
+
+Some managers are also field workers. They needed to log their own day's work without juggling two accounts. The toggle lets a single staff user (`role = owner | manager`) flip into the crew shell to log work, then flip back.
+
+**Where it lives:**
+- `viewMode` (`'manager' | 'crew'`) in `AppContext`, persisted to `localStorage.fiberlog_view_mode`. Reset to `'manager'` on logout so the next user doesn't inherit a stale preference. Exposed as `enterCrewMode()` + `exitCrewMode()` helpers.
+- `App.jsx` router: when `isStaff && viewMode === 'crew' && currentUser.crew_type ∈ VALID_FIELD_CREW_TYPES`, routes to `CrewApp` (or `InfraCrewApp` if `crew_type === 'infrastructure'`) instead of `ManagerApp`. The `VALID_FIELD_CREW_TYPES` list (`aerial | underground | splice | drop | locator | install | infrastructure`) is duplicated in `App.jsx` and `ManagerApp.jsx`'s `SwitchToCrewButton` — keep them in sync.
+- ManagerApp sidebar + narrow top bar: `🔧 Crew mode` pill. Disabled with tooltip when no field `crew_type` set.
+- CrewApp + InfraCrewApp sidebar footers + SignOutConfirm overlays: `⚙️ Manager` pill (only rendered when `isStaffActingAsCrew`). User chip subtitle picks up an "· acting as crew" callout in teal so the manager remembers which mode they're in.
+
+**Same identity, same truck.** No account sprawl. All inventory, audit trail, and approval flows use the same `user_id`.
+
+**Auto-deduct caveat:** `approve_submission` still requires `crew_type ∈ {aerial, underground, splice, infrastructure}` for the truck → project bucket transfer to fire. A manager with `crew_type = 'drop'` (or `'locator'`/`'install'`/`'contractor'`) can log work in crew mode but their approvals won't auto-deduct. Documented; not enforced in the router because the manager might legitimately want to log non-deducting work.
+
+**What this is NOT:** a unified app shell. Crew users (`role = 'crew'`) never see the manager portal and never interact with `viewMode`. The toggle is staff-only.
+
+---
+
 ## Field tech (backlog — blocked)
 
 **Why backlogged:** Field techs install at customer addresses. Sonar tracks customers but does not currently tag each customer with which fiber region (Heber / Park City / etc.) they fall under. Without that, when we import Sonar's daily report, we can't reliably route consumed materials to the right project — and routing to a generic "Wave" or "FW" bucket forces a manual reconciliation step downstream that defeats the purpose.
@@ -124,7 +142,7 @@ Infrastructure crew gets a **sites-shaped shell** — same overall flow as fiber
 ```
 src/
   AppContext.jsx          ← global state, auth, projects, users, realtime subscriptions
-  App.jsx                 ← top-level routing: role=owner/manager → ManagerApp; crew_type='infrastructure' → InfraCrewApp; everyone else → CrewApp
+  App.jsx                 ← top-level routing: role=owner/manager → ManagerApp (unless viewMode='crew' AND has field crew_type → routes to the appropriate crew shell); crew_type='infrastructure' → InfraCrewApp; everyone else → CrewApp
   index.css               ← CSS variables for both light + dark theme
   lib/
     supabase.js           ← Supabase client + DB helpers (projects, users, tasks, etc.)
@@ -135,6 +153,7 @@ src/
     crew/                 ← UI for non-manager users (logging work, parts used, etc.)
       CrewApp.jsx         ← fiber-crew entry: Project → Phase → Task → Workspace
       ProjectList.jsx, PhaseList.jsx, TaskList.jsx, TaskWorkspace.jsx
+      TaskSummaryView.jsx ← read-only inspection of pending/approved/done tasks (parts, hours, notes, status, manager feedback) — both crew shells route here when isReadOnlyTask(task)
       MyStockView.jsx     ← crew's personal-truck inventory view (Load + Return UI)
       CrewMovementSheet.jsx ← unified overlay for load/return (other ops are RPC-supported, UI deferred)
       workspace/          ← logging-specific subviews (used by both shells)
@@ -206,8 +225,9 @@ supabase/
 - `tasks.site_id` (nullable) — infra tasks anchor here. Consumed by `getInfraTree()` + `InfraCrewApp`.
 - `tasks.phase_id` is now **nullable** (was NOT NULL). CHECK `tasks_anchor_present` ensures every task has at least one of `{phase_id, site_id}` — never both NULL.
 - `approve_submission` increments phase actuals only when `phase_id IS NOT NULL` (infra has no site actuals concept). Auto-deduct resolves the project bucket via override → phase's project → site's project, so infra approvals deduct cleanly into the site's project bucket.
-- 198 sites bulk-imported from owner's CSV. 197 mapped to a project; 1 ("Prestige II", originally tagged "Fiber - Mdu") landed unmapped — `getInfraTree()` logs a console.warn and drops it from the tree until an owner picks a project (current Sites admin doesn't expose project reassignment yet; one-shot SQL or a `tasks_anchor_present`-respecting `updateSite({ projectId })` call resolves it).
-- Sites admin lives in `ProjectManager.jsx`'s project detail view — only renders for infra-style projects (0 phases + ≥1 site). Helpers in `lib/supabase.js`: `getSitesByProject`, `addSite`, `updateSite`, `decommissionSite`, `getTaskCountsBySite`.
+- 198 sites bulk-imported from owner's CSV. All mapped to a project (the last unmapped one, "Prestige II", was assigned to Heber on May 22). `getInfraTree()` still has a defensive console.warn for any future unmapped sites.
+- Sites admin lives in `ProjectManager.jsx`'s project detail view — only renders for infra-style projects (0 phases + ≥1 site). Full CRUD: add / edit (rename, change type, address, notes, **move to different project**) / decommission (soft-delete via status='decommissioned'). Decommission confirm hints to log physical equipment recovery as a Receive PO with a "Site decommissioned" note. Edit Site overlay also exposes two read-only drilldowns: **View tasks** (the site's tasks with name + type + status pill) and **View materials** (parts summed across all task_id-linked inventory_movements). Search + type pills render when ≥8 sites. Per-site task count badges.
+- Helpers in `lib/supabase.js`: `getSitesByProject`, `addSite`, `updateSite` (handles project moves), `decommissionSite`, `getTaskCountsBySite`, `getTasksBySite`, `getMaterialsAtSite`.
 - Helpers in `lib/supabase.js`: `getInfraTree()` (projects-with-sites-with-tasks shape), `addInfraTask(siteId, ...)`.
 
 ### Per-user + per-crew-type permissions
@@ -318,6 +338,7 @@ For any input that's NOT meant to be filled by the browser's saved-credentials l
 ### Persistence
 - `localStorage.fiberlog_dark_mode` — theme preference
 - `localStorage.fiberlog_remembered_username` — last login username
+- `localStorage.fiberlog_view_mode` — `'manager' | 'crew'` for the working-manager toggle. Reset to `'manager'` on logout in `AppContext.logout()` so a different next-user doesn't inherit it.
 
 ---
 
@@ -337,7 +358,7 @@ npx supabase login                             # auth supabase CLI (first time)
 
 ## Backlog (rough priority order)
 
-1. **Onboard infrastructure crew** — substantially shipped (May 2026). Sites table + 198-row import, InfraCrewApp shell, crew-aware TaskWorkspace tab, `approve_submission` auto-deducts via `sites.project_id` fallback, project buckets backfilled for Wasatch Front + West Mountain, SubmissionsQueue + ReportsView handle infra rows, Sites admin (add/edit/decommission/search/task-count) embedded in ProjectManager. Remaining: (a) map the 1 unmapped site (Prestige II), (b) author real infra kits in AssemblyEditor (Chris's call), (c) onboard more infra users beyond Chad. Stop dual-logging in Sonar for infrastructure work once switched over.
+1. **Onboard infrastructure crew** — substantially shipped (May 2026). Sites table + 198-row import (all mapped to a project), InfraCrewApp shell, crew-aware TaskWorkspace tab strip, `TaskSummaryView` for read-only inspection of submitted tasks, `approve_submission` auto-deducts via `sites.project_id` fallback, project buckets backfilled for Wasatch Front + West Mountain, SubmissionsQueue + ReportsView coalesce phase/site, Sites admin (add / edit including move-to-project / decommission / search / task-count + per-site materials and tasks drilldowns) embedded in ProjectManager. Remaining: (a) author real infra kits in AssemblyEditor (Chris's call), (b) onboard more infra users beyond Chad. Stop dual-logging in Sonar for infrastructure work once switched over.
 
 2. **Task status redesign** (the `is_closed` model) — separately discussed. Decouple task lifecycle from submission approval:
    - Tasks get an `is_closed` boolean only (manager-controlled)
@@ -474,6 +495,8 @@ Things to remember when adding a new entry point:
 
 ## Recent major work
 
+- **Working-manager toggle + crew read-only view (May 2026):** `viewMode` in AppContext + `App.jsx` router lets staff users flip into the crew shell to log their own work; `🔧 Crew mode` / `⚙️ Manager` pills in both portals, "acting as crew" badge on the crew user chip. `TaskSummaryView` gives crews a read-only inspection of pending/approved/done tasks (parts, hours, scope notes, status banner, flag reasons / manager notes); both `CrewApp` and `InfraCrewApp` route to it via a shared `isReadOnlyTask` check. Completed tasks made tappable in both crew shells, dates rendered on completed rows, dark-mode toggle ported into both crew shells. Password min length corrected 6 → 8 in admin UI to match Supabase Auth's enforcement. Last unmapped site (Prestige II) mapped to Heber.
+- **Sites admin polish (May 2026):** Edit Site overlay gained move-to-project (project picker), View tasks drilldown, View materials drilldown (parts summed across all task_id-linked movements). Decommission confirm hints to log physical equipment recovery as a Receive PO with a "Site decommissioned" note. Search + type-pill filtering renders when ≥8 sites. Per-site active task count badge. Helpers added to `lib/supabase.js`: `updateSite`, `decommissionSite`, `getTaskCountsBySite`, `getTasksBySite`, `getMaterialsAtSite`, `getTaskSummary`.
 - **Infrastructure crew end-to-end (May 2026):** `sites` table + 198-row CSV import, `tasks.phase_id` nullable with `tasks_anchor_present` CHECK, `InfraCrewApp` shell (Project → Site → Task), crew-type-aware `TaskWorkspace` tab strip, `approve_submission` auto-deducts via `sites.project_id` fallback, project buckets backfilled for Wasatch Front + West Mountain. Manager-side polish: `SubmissionsQueue` + `ReportsView` coalesce phase/site, `crew_activity_today` view rewritten, `ProjectManager` surfaces an embedded Sites admin (add / edit / decommission / search / task-count). Realtime channel collision fix (`nextChannelSuffix()`). Extra-parts-dropped-on-submit fix in `TaskWorkspace`.
 - **Inventory framework rebuild (May 2026):** Crew personal trucks, three-layer permission framework (per-user × crew_type×dept × CHECK constraints), project buckets, auto-deduct on approval, Flavor A project routing override, Receive PO, Reconcile, Sonar import, Locations tab counts + jump-link, Vitest tests for `calculations.js`.
 - **Security audit (May 2026):** RLS rewrite on 14 tables (was wide-open USING(true)), view + function hardening, EXECUTE grants tightened.
