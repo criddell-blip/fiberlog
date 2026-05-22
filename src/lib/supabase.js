@@ -176,6 +176,62 @@ export async function addSite({ projectId, name, type, address, notes }) {
   return data
 }
 
+// Update site attrs. patch is { name?, type?, address?, notes?, project_id? }.
+// Empty strings get coerced to NULL on the optional fields so the DB doesn't
+// store cosmetic blanks.
+export async function updateSite(siteId, patch) {
+  const clean = { ...patch }
+  if ('address' in clean) clean.address = clean.address?.trim() || null
+  if ('notes' in clean)   clean.notes   = clean.notes?.trim() || null
+  const { data, error } = await db
+    .from('sites')
+    .update(clean)
+    .eq('id', siteId)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+// Soft-delete via status='decommissioned'. Sites are FK targets for
+// tasks.site_id, so a hard delete would break historical records.
+// getInfraTree() + getSitesByProject() both filter status='active', so a
+// decommissioned site falls out of the UI immediately while its tasks
+// (and their submissions / movements) remain linked for the audit trail.
+export async function decommissionSite(siteId) {
+  const { error } = await db
+    .from('sites')
+    .update({ status: 'decommissioned' })
+    .eq('id', siteId)
+  if (error) throw error
+}
+
+// Count active tasks per site for a project. Used by ProjectManager's Sites
+// section to badge each site with its workload. Returns { [site_id]: count }.
+export async function getTaskCountsBySite(projectId) {
+  // Two-step: get the site ids for the project, then count tasks against
+  // those ids. Avoids relying on a deep join PostgREST has to navigate.
+  const { data: sites, error: sErr } = await db
+    .from('sites')
+    .select('id')
+    .eq('project_id', projectId)
+    .eq('status', 'active')
+  if (sErr) throw sErr
+  const ids = (sites || []).map(s => s.id)
+  if (ids.length === 0) return {}
+  const { data: tasks, error: tErr } = await db
+    .from('tasks')
+    .select('site_id')
+    .in('site_id', ids)
+  if (tErr) throw tErr
+  const counts = {}
+  ;(tasks || []).forEach(t => {
+    if (!t.site_id) return
+    counts[t.site_id] = (counts[t.site_id] || 0) + 1
+  })
+  return counts
+}
+
 // Create an infra task anchored to a site. phase_id stays NULL — the
 // tasks_anchor_present CHECK lets this through because site_id is set.
 export async function addInfraTask(siteId, name, jobType, notes, userId) {

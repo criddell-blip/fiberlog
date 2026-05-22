@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
-import { db, addTask, getSitesByProject, addSite } from '../../lib/supabase'
+import {
+  db, addTask,
+  getSitesByProject, addSite, updateSite, decommissionSite,
+  getTaskCountsBySite,
+} from '../../lib/supabase'
 
 const SITE_TYPES = [
   { id: 'wireless', label: 'Wireless', icon: '📡' },
@@ -107,6 +111,7 @@ export default function ProjectManager() {
   // section + "Add site" overlay only render for infra-style projects
   // (zero phases + non-zero sites), so fiber regional projects stay clean.
   const [projectSites, setProjectSites] = useState([])
+  const [siteTaskCounts, setSiteTaskCounts] = useState({})  // { site_id: count }
   const [sitesLoading, setSitesLoading] = useState(false)
   const [showAddSite, setShowAddSite] = useState(false)
   const [siteName, setSiteName] = useState('')
@@ -115,16 +120,96 @@ export default function ProjectManager() {
   const [siteNotes, setSiteNotes] = useState('')
   const [siteSaving, setSiteSaving] = useState(false)
 
+  // Sites search / filter — Gigwave has 128 sites, the unfiltered list is
+  // unscrollable. Empty query + 'all' type = no-op.
+  const [siteQuery, setSiteQuery] = useState('')
+  const [siteTypeFilter, setSiteTypeFilter] = useState('all')
+
+  // Edit-site overlay state. selSite is the row being edited (kept separate
+  // from add-site state so the two overlays don't share inputs).
+  const [editSite, setEditSite] = useState(null)
+  const [editSiteName, setEditSiteName] = useState('')
+  const [editSiteType, setEditSiteType] = useState('wireless')
+  const [editSiteAddress, setEditSiteAddress] = useState('')
+  const [editSiteNotes, setEditSiteNotes] = useState('')
+  const [editSiteSaving, setEditSiteSaving] = useState(false)
+  const [confirmDecommSite, setConfirmDecommSite] = useState(null)
+
   useEffect(() => {
-    if (!selProject?.id) { setProjectSites([]); return }
+    if (!selProject?.id) {
+      setProjectSites([]); setSiteTaskCounts({}); return
+    }
     let cancelled = false
     setSitesLoading(true)
-    getSitesByProject(selProject.id)
-      .then(data => { if (!cancelled) setProjectSites(data) })
+    // Load sites + per-site task counts in parallel. Counts are best-effort —
+    // if that call fails the sites still render, just without badges.
+    Promise.all([
+      getSitesByProject(selProject.id),
+      getTaskCountsBySite(selProject.id).catch(e => {
+        console.warn('Site task counts failed:', e); return {}
+      }),
+    ])
+      .then(([sites, counts]) => {
+        if (cancelled) return
+        setProjectSites(sites)
+        setSiteTaskCounts(counts)
+      })
       .catch(e => { console.warn('Sites load failed:', e); if (!cancelled) setProjectSites([]) })
       .finally(() => { if (!cancelled) setSitesLoading(false) })
     return () => { cancelled = true }
   }, [selProject?.id])
+
+  function openEditSite(s) {
+    setEditSite(s)
+    setEditSiteName(s.name || '')
+    setEditSiteType(s.type || 'wireless')
+    setEditSiteAddress(s.address || '')
+    setEditSiteNotes(s.notes || '')
+  }
+
+  async function handleEditSite() {
+    if (!editSite || !editSiteName.trim()) return
+    setEditSiteSaving(true)
+    try {
+      const updated = await updateSite(editSite.id, {
+        name: editSiteName.trim(),
+        type: editSiteType,
+        address: editSiteAddress,
+        notes: editSiteNotes,
+      })
+      setProjectSites(prev => prev.map(s => s.id === updated.id ? updated : s)
+        .sort((a, b) => a.name.localeCompare(b.name)))
+      setEditSite(null)
+      showToast('Site updated')
+    } catch (e) {
+      console.error('Update site failed:', e)
+      showToast('Update failed: ' + e.message)
+    } finally {
+      setEditSiteSaving(false)
+    }
+  }
+
+  async function handleDecommissionSite() {
+    if (!confirmDecommSite) return
+    const id = confirmDecommSite.id
+    setEditSiteSaving(true)
+    try {
+      await decommissionSite(id)
+      setProjectSites(prev => prev.filter(s => s.id !== id))
+      setSiteCountByProject(prev => ({
+        ...prev,
+        [selProject.id]: Math.max(0, (prev[selProject.id] || 1) - 1),
+      }))
+      setConfirmDecommSite(null)
+      setEditSite(null)
+      showToast('Site decommissioned')
+    } catch (e) {
+      console.error('Decommission failed:', e)
+      showToast('Decommission failed: ' + e.message)
+    } finally {
+      setEditSiteSaving(false)
+    }
+  }
 
   async function handleAddSite() {
     if (!siteName.trim() || !selProject?.id) return
@@ -738,50 +823,121 @@ export default function ProjectManager() {
               List sites + offer "Add site". Mirrors the phases-list pattern
               just below. Edit/delete is intentionally deferred; the owner
               uses InfraCrewApp + the DB if a one-off fix is needed. */}
-          {isInfraProject && (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <div className="sec-label" style={{ margin: 0 }}>Sites</div>
-                <button onClick={() => setShowAddSite(true)}
-                  style={{ fontSize: 13, color: 'var(--orange)', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
-                  + Add site
-                </button>
-              </div>
-              {sitesLoading && (
-                <div style={{ textAlign: 'center', padding: 16, color: 'var(--muted)', fontSize: 12 }}>Loading sites…</div>
-              )}
-              {!sitesLoading && projectSites.length === 0 && (
-                <div style={{ textAlign: 'center', padding: 16, color: 'var(--hint)', fontSize: 12 }}>No sites yet — tap “+ Add site” above.</div>
-              )}
-              {!sitesLoading && projectSites.map(s => (
-                <div key={s.id} style={{
-                  background: 'var(--surface)', border: '1px solid var(--border)',
-                  borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 6,
-                  display: 'flex', alignItems: 'center', gap: 10,
-                }}>
-                  <span style={{ fontSize: 16 }}>{s.type === 'wireless' ? '📡' : '🏢'}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {s.name}
-                    </div>
-                    {s.address && (
-                      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {s.address}
+          {isInfraProject && (() => {
+            // Filter sites by search + type. Done in-render — projectSites
+            // tops out at a few hundred even on Gigwave, no need to memoize.
+            const q = siteQuery.trim().toLowerCase()
+            const filteredSites = projectSites.filter(s => {
+              if (siteTypeFilter !== 'all' && s.type !== siteTypeFilter) return false
+              if (!q) return true
+              return (
+                s.name.toLowerCase().includes(q) ||
+                (s.address || '').toLowerCase().includes(q)
+              )
+            })
+            // Only show the type pills for types that actually exist —
+            // a 100%-wireless project shouldn't carry a "Fiber" tab.
+            const availableTypes = Array.from(new Set(projectSites.map(s => s.type)))
+            return (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div className="sec-label" style={{ margin: 0 }}>
+                    Sites
+                    <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--hint)', fontWeight: 600 }}>
+                      {filteredSites.length}{filteredSites.length !== projectSites.length ? ` of ${projectSites.length}` : ''}
+                    </span>
+                  </div>
+                  <button onClick={() => setShowAddSite(true)}
+                    style={{ fontSize: 13, color: 'var(--orange)', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+                    + Add site
+                  </button>
+                </div>
+
+                {/* Search + type filter — only render when there's enough
+                    sites to make scrolling annoying. Below ~8 the list is
+                    fine raw. */}
+                {projectSites.length >= 8 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <input type="text" value={siteQuery}
+                      onChange={e => setSiteQuery(e.target.value)}
+                      placeholder="Search sites by name or address"
+                      autoComplete="off" name="site-filter"
+                      style={{
+                        width: '100%', padding: '8px 12px', fontSize: 13,
+                        background: 'var(--surface2)', color: 'var(--text)',
+                        border: '1.5px solid var(--border2)', borderRadius: 8,
+                        boxSizing: 'border-box',
+                      }} />
+                    {availableTypes.length > 1 && (
+                      <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                        {['all', ...availableTypes].map(tval => (
+                          <button key={tval} onClick={() => setSiteTypeFilter(tval)}
+                            style={{
+                              padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                              background: siteTypeFilter === tval ? 'var(--orange)' : 'var(--gray-lt)',
+                              color: siteTypeFilter === tval ? 'white' : 'var(--muted)',
+                              border: 'none', cursor: 'pointer',
+                            }}>
+                            {tval === 'all' ? 'All' : (tval === 'wireless' ? '📡 Wireless' : '🏢 Fiber')}
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>
-                  <span style={{
-                    fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20,
-                    background: s.type === 'wireless' ? 'var(--blue-lt)' : 'var(--teal-lt)',
-                    color: s.type === 'wireless' ? 'var(--blue)' : 'var(--teal-mid)',
-                  }}>
-                    {s.type}
-                  </span>
-                </div>
-              ))}
-              <div style={{ marginBottom: 16 }} />
-            </>
-          )}
+                )}
+
+                {sitesLoading && (
+                  <div style={{ textAlign: 'center', padding: 16, color: 'var(--muted)', fontSize: 12 }}>Loading sites…</div>
+                )}
+                {!sitesLoading && projectSites.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: 16, color: 'var(--hint)', fontSize: 12 }}>No sites yet — tap “+ Add site” above.</div>
+                )}
+                {!sitesLoading && projectSites.length > 0 && filteredSites.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: 16, color: 'var(--hint)', fontSize: 12 }}>No sites match the filter.</div>
+                )}
+                {!sitesLoading && filteredSites.map(s => {
+                  const taskCount = siteTaskCounts[s.id] || 0
+                  return (
+                    <div key={s.id} onClick={() => openEditSite(s)}
+                      style={{
+                        background: 'var(--surface)', border: '1px solid var(--border)',
+                        borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 6,
+                        display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+                      }}>
+                      <span style={{ fontSize: 16 }}>{s.type === 'wireless' ? '📡' : '🏢'}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {s.name}
+                        </div>
+                        {s.address && (
+                          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {s.address}
+                          </div>
+                        )}
+                      </div>
+                      {taskCount > 0 && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20,
+                          background: 'var(--orange-lt)', color: 'var(--orange)',
+                        }}>
+                          {taskCount} task{taskCount === 1 ? '' : 's'}
+                        </span>
+                      )}
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20,
+                        background: s.type === 'wireless' ? 'var(--blue-lt)' : 'var(--teal-lt)',
+                        color: s.type === 'wireless' ? 'var(--blue)' : 'var(--teal-mid)',
+                      }}>
+                        {s.type}
+                      </span>
+                      <span style={{ fontSize: 14, color: 'var(--hint)' }}>›</span>
+                    </div>
+                  )
+                })}
+                <div style={{ marginBottom: 16 }} />
+              </>
+            )
+          })()}
 
           {/* Phases section. Hidden entirely on infra projects (where the
               Sites section above takes its place). The fiber crews still
@@ -893,6 +1049,106 @@ export default function ProjectManager() {
                 <button className="btn btn-primary" style={{ flex: 2 }}
                   onClick={handleAddSite} disabled={siteSaving || !siteName.trim()}>
                   {siteSaving ? 'Adding…' : 'Add site'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {editSite && (
+          <div className="overlay open" onClick={e => e.target === e.currentTarget && setEditSite(null)}>
+            <div className="overlay-sheet">
+              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Edit Site</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
+                {selProject.name} · {(siteTaskCounts[editSite.id] || 0)} task{(siteTaskCounts[editSite.id] || 0) === 1 ? '' : 's'}
+              </div>
+
+              <div className="field">
+                <label>Site name</label>
+                <input type="text" value={editSiteName}
+                  onChange={e => setEditSiteName(e.target.value)}
+                  autoFocus autoComplete="off" name="edit-site-name" />
+              </div>
+
+              <div className="field">
+                <label>Type</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {SITE_TYPES.map(st => (
+                    <button key={st.id} onClick={() => setEditSiteType(st.id)}
+                      style={{
+                        flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                        background: editSiteType === st.id ? 'var(--orange)' : 'var(--gray-lt)',
+                        color: editSiteType === st.id ? 'white' : 'var(--muted)',
+                        border: 'none', cursor: 'pointer',
+                      }}>
+                      {st.icon} {st.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="field">
+                <label>Address (optional)</label>
+                <input type="text" value={editSiteAddress}
+                  onChange={e => setEditSiteAddress(e.target.value)}
+                  autoComplete="off" name="edit-site-address" />
+              </div>
+
+              <div className="field">
+                <label>Notes (optional)</label>
+                <textarea rows={2} value={editSiteNotes}
+                  onChange={e => setEditSiteNotes(e.target.value)} />
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button className="btn btn-ghost" style={{ flex: 1 }}
+                  onClick={() => setEditSite(null)} disabled={editSiteSaving}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex: 2 }}
+                  onClick={handleEditSite} disabled={editSiteSaving || !editSiteName.trim()}>
+                  {editSiteSaving ? 'Saving…' : 'Save changes'}
+                </button>
+              </div>
+
+              {/* Decommission lives under a thin divider — keeps it
+                  recoverable but visually distinct from "Save changes"
+                  so the manager doesn't fat-finger it. Hard-delete is
+                  intentionally NOT offered because sites are FK targets
+                  for tasks; decommission flips status='decommissioned'
+                  and the UI filters them out everywhere. */}
+              <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
+                <button
+                  onClick={() => setConfirmDecommSite(editSite)}
+                  disabled={editSiteSaving}
+                  style={{
+                    width: '100%', padding: '8px 12px',
+                    background: 'none', border: '1px solid var(--red)',
+                    color: 'var(--red)', borderRadius: 8,
+                    fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                  }}>
+                  ⊘ Decommission site
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {confirmDecommSite && (
+          <div className="overlay open" onClick={e => e.target === e.currentTarget && setConfirmDecommSite(null)}>
+            <div className="overlay-sheet" style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>⊘</div>
+              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Decommission this site?</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
+                <strong>{confirmDecommSite.name}</strong>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--hint)', marginBottom: 18 }}>
+                It disappears from the crew + manager UI, but its task history (and any approved consumption) stays linked for the audit trail.
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-ghost" style={{ flex: 1 }}
+                  onClick={() => setConfirmDecommSite(null)} disabled={editSiteSaving}>Cancel</button>
+                <button className="btn btn-danger" style={{ flex: 2 }}
+                  onClick={handleDecommissionSite} disabled={editSiteSaving}>
+                  {editSiteSaving ? 'Working…' : 'Decommission'}
                 </button>
               </div>
             </div>
