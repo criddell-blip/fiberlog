@@ -5,7 +5,14 @@ import ProjectList from './ProjectList'
 import PhaseList from './PhaseList'
 import TaskList from './TaskList'
 import TaskWorkspace from './TaskWorkspace'
+import TaskSummaryView from './TaskSummaryView'
 import MyStockView from './MyStockView'
+
+// Tasks in these states aren't editable from the crew workspace — they go
+// to the read-only TaskSummaryView so the crew can inspect what they
+// submitted without thinking they can re-edit it. (Manager flagging is
+// the only path that flips it back to 'open' for re-editing.)
+const isReadOnlyTask = t => t.status === 'pending' || t.status === 'approved' || t.status === 'done'
 
 const JOB_COLORS = {
   aerial:      { bg: 'var(--teal-lt)',   text: 'var(--teal-mid)' },
@@ -355,6 +362,14 @@ export default function CrewApp() {
                 <div style={{ fontSize: 13 }}>Expand a project → phase → task to start logging</div>
               </div>
             )
+          ) : isReadOnlyTask(selTask) ? (
+            <TaskSummaryView
+              project={selProject}
+              phase={selPhase}
+              task={selTask}
+              onBack={() => setSelTaskId(null)}
+              onUserTap={() => setShowSignOut(true)}
+            />
           ) : (
             <TaskWorkspace
               project={selProject}
@@ -412,14 +427,24 @@ export default function CrewApp() {
         />
       )}
       {screen === 'workspace' && selTask && (
-        <TaskWorkspace
-          project={selProject}
-          phase={selPhase}
-          task={selTask}
-          onBack={() => navTo('tasks')}
-          onSubmitDone={() => { setSelTaskId(null); navTo('projects') }}
-          onUserTap={() => setShowSignOut(true)}
-        />
+        isReadOnlyTask(selTask) ? (
+          <TaskSummaryView
+            project={selProject}
+            phase={selPhase}
+            task={selTask}
+            onBack={() => navTo('tasks')}
+            onUserTap={() => setShowSignOut(true)}
+          />
+        ) : (
+          <TaskWorkspace
+            project={selProject}
+            phase={selPhase}
+            task={selTask}
+            onBack={() => navTo('tasks')}
+            onSubmitDone={() => { setSelTaskId(null); navTo('projects') }}
+            onUserTap={() => setShowSignOut(true)}
+          />
+        )
       )}
       {showSignOut && (
         <SignOutConfirm

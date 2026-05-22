@@ -353,7 +353,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, onCancel, onSubmit 
     if (!name.trim()) { setError('Name is required'); return }
     if (isNew) {
       if (!username.trim()) { setError('Username is required'); return }
-      if (!password || password.length < 6) { setError('Password must be at least 6 characters'); return }
+      if (!password || password.length < 8) { setError('Password must be at least 8 characters'); return }
       if (usernameConflict) { setError('Username already taken'); return }
     }
     if (!ROLE_OPTIONS.find(r => r.id === role)) { setError('Pick a role'); return }
@@ -521,13 +521,13 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, onCancel, onSubmit 
           {/* Password — new users only */}
           {isNew && (
             <div className="field">
-              <label>Initial password * (minimum 6 characters)</label>
+              <label>Initial password * (minimum 8 characters)</label>
               <div style={{ display: 'flex', gap: 6 }}>
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="At least 6 characters"
+                  placeholder="At least 8 characters"
                   autoComplete="new-password"
                   name="new-user-password"
                   style={{ flex: 1 }}
@@ -613,7 +613,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, onCancel, onSubmit 
             className="btn btn-primary"
             style={{ flex: 2 }}
             onClick={handleSubmit}
-            disabled={submitting || !name.trim() || (isNew && (!username.trim() || password.length < 6 || usernameConflict))}
+            disabled={submitting || !name.trim() || (isNew && (!username.trim() || password.length < 8 || usernameConflict))}
           >
             {submitting ? 'Saving…' : (isNew ? 'Create user' : 'Save changes')}
           </button>
@@ -632,7 +632,7 @@ function ResetPasswordSheet({ user, onCancel, onSubmit }) {
   const [showPw, setShowPw] = useState(false)
 
   async function handleSubmit() {
-    if (!pw || pw.length < 6) { setError('Password must be at least 6 characters'); return }
+    if (!pw || pw.length < 8) { setError('Password must be at least 8 characters'); return }
     setSubmitting(true)
     setError('')
     try {
@@ -652,7 +652,7 @@ function ResetPasswordSheet({ user, onCancel, onSubmit }) {
         </div>
 
         <div className="field">
-          <label>New password (minimum 6 characters)</label>
+          <label>New password (minimum 8 characters)</label>
           <div style={{ display: 'flex', gap: 6 }}>
             <input
               type={showPw ? 'text' : 'password'}

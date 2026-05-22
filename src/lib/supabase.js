@@ -510,6 +510,90 @@ export async function approveSubmission(id, note) {
   if (error) throw error
 }
 
+// Crew-side read-only inspection of a submitted task: latest submission +
+// its parts + status. Used by TaskSummaryView so the crew can tap a
+// pending / approved / done task in their sidebar and see what was
+// submitted without entering the editable TaskWorkspace.
+//
+// Returns null if no submission exists (a task can be marked 'done' or
+// 'approved' without ever having had a submission in weird edge cases).
+//
+// We look up by task_id rather than session_id — a session can span
+// multiple tasks, and we want the latest submission whose work_sessions
+// row points at THIS task.
+export async function getTaskSummary(taskId) {
+  // Latest submission for the task. We sort by created_at DESC; on
+  // re-submit (manager flagged → crew fixed → resubmitted) handleSubmit
+  // deletes prior pending/flagged rows, so usually there's just one
+  // current row plus historical approved ones.
+  const { data: subs, error: sErr } = await db
+    .from('submissions')
+    .select(`
+      id, status, created_at, reviewed_at, hours_worked,
+      flag_reason, manager_notes, session_id, user_id,
+      total_strand_ft, total_fiber_ft, total_conduit_ft,
+      total_mst_hst, total_splice_cases, total_handholes,
+      total_vaults, total_poles,
+      users!submissions_user_id_fkey ( name, initials ),
+      reviewer:users!submissions_reviewed_by_fkey ( name, initials ),
+      work_sessions!submissions_session_id_fkey ( task_id )
+    `)
+    .eq('archived', false)
+    .order('created_at', { ascending: false })
+    .limit(20)
+  if (sErr) throw sErr
+
+  // Filter client-side — PostgREST can't filter on a joined column directly
+  // without a !inner. We want all submissions whose session points at our
+  // task. Keep the first (most recent) match.
+  const match = (subs || []).find(s => s.work_sessions?.task_id === taskId)
+  if (!match) return null
+
+  // Aggregate parts for the submission's session, scoped to this task.
+  // (One session can have entries for multiple tasks; le.task_id keeps
+  // them straight.)
+  const { data: entries, error: eErr } = await db
+    .from('log_entries')
+    .select('id, task_id, footage_amt, note_text, entry_type')
+    .eq('session_id', match.session_id)
+  if (eErr) throw eErr
+
+  const taskEntries = (entries || []).filter(e => !e.task_id || e.task_id === taskId)
+  if (taskEntries.length === 0) {
+    return { submission: match, parts: [], notes: [] }
+  }
+
+  const { data: parts, error: pErr } = await db
+    .from('entry_parts')
+    .select('quantity, part_id, parts_catalog ( id, name, unit )')
+    .in('entry_id', taskEntries.map(e => e.id))
+  if (pErr) throw pErr
+
+  const totals = {}
+  ;(parts || []).forEach(p => {
+    const id = p.parts_catalog?.id || p.part_id
+    if (!id) return
+    if (!totals[id]) {
+      totals[id] = {
+        partId: id,
+        name: p.parts_catalog?.name || id,
+        unit: p.parts_catalog?.unit || 'ea',
+        qty: 0,
+      }
+    }
+    totals[id].qty += p.quantity || 0
+  })
+  const aggregatedParts = Object.values(totals)
+    .filter(p => p.qty > 0)
+    .sort((a, b) => b.qty - a.qty)
+
+  const notes = taskEntries
+    .map(e => e.note_text)
+    .filter(Boolean)
+
+  return { submission: match, parts: aggregatedParts, notes }
+}
+
 // ─── REALTIME ─────────────────────────────────────────────────────────────────
 // Channel-name uniqueness: Date.now() alone is not enough. AppContext and
 // InfraCrewApp both call subscribeToAllTaskChanges from useEffects keyed on

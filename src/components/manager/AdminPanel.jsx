@@ -77,8 +77,8 @@ export default function AdminPanel() {
       showToast('Password cannot be empty')
       return
     }
-    if (pwd.length < 6) {
-      showToast('Password must be at least 6 characters')
+    if (pwd.length < 8) {
+      showToast('Password must be at least 8 characters')
       return
     }
     setPwSaving(true)
@@ -402,7 +402,7 @@ export default function AdminPanel() {
                 <label>New password</label>
                 <input
                   type="text"
-                  placeholder="At least 6 characters"
+                  placeholder="At least 8 characters"
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
                   autoFocus

@@ -4,8 +4,13 @@ import { useIsWide } from '../../../lib/useIsWide'
 import { getInfraTree, subscribeToAllTaskChanges } from '../../../lib/supabase'
 import MyStockView from '../MyStockView'
 import TaskWorkspace from '../TaskWorkspace'
+import TaskSummaryView from '../TaskSummaryView'
 import SitesList from './SitesList'
 import SiteTaskList from './SiteTaskList'
+
+// See CrewApp.jsx — same rule. Read-only summary for tasks the crew has
+// already submitted; the editable workspace is only for 'open' tasks.
+const isReadOnlyTask = t => t.status === 'pending' || t.status === 'approved' || t.status === 'done'
 
 // ─── ABOUT THIS SHELL ─────────────────────────────────────────────────────────
 // Infrastructure crews work against SITES (towers, business installs, MDU
@@ -474,6 +479,14 @@ export default function InfraCrewApp() {
                 <div style={{ fontSize: 13 }}>Expand a project → site → task to start logging</div>
               </div>
             )
+          ) : isReadOnlyTask(selTask) ? (
+            <TaskSummaryView
+              project={selProject}
+              phase={workspacePhaseShim}
+              task={selTask}
+              onBack={() => setSelTaskId(null)}
+              onUserTap={() => setShowSignOut(true)}
+            />
           ) : (
             <TaskWorkspace
               project={selProject}
@@ -533,14 +546,24 @@ export default function InfraCrewApp() {
         />
       )}
       {screen === 'workspace' && selTask && (
-        <TaskWorkspace
-          project={selProject}
-          phase={workspacePhaseShim}
-          task={selTask}
-          onBack={() => navTo('tasks')}
-          onSubmitDone={() => { setSelTaskId(null); navTo('projects') }}
-          onUserTap={() => setShowSignOut(true)}
-        />
+        isReadOnlyTask(selTask) ? (
+          <TaskSummaryView
+            project={selProject}
+            phase={workspacePhaseShim}
+            task={selTask}
+            onBack={() => navTo('tasks')}
+            onUserTap={() => setShowSignOut(true)}
+          />
+        ) : (
+          <TaskWorkspace
+            project={selProject}
+            phase={workspacePhaseShim}
+            task={selTask}
+            onBack={() => navTo('tasks')}
+            onSubmitDone={() => { setSelTaskId(null); navTo('projects') }}
+            onUserTap={() => setShowSignOut(true)}
+          />
+        )
       )}
       {showSignOut && (
         <SignOutConfirm
