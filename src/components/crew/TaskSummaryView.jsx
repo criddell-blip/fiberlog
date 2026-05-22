@@ -147,6 +147,26 @@ export default function TaskSummaryView({ project, phase, task, onBack, onUserTa
                 )}
               </div>
 
+              {/* Task scope notes — the description set when the task was
+                  created. Sits above the submission totals so the crew
+                  sees "what was this task for" before "what did I log."
+                  We check both `notes` (the alias getFullTree maps from
+                  scope_notes) and `scope_notes` directly so this works
+                  whether the task came through the fiber tree or was
+                  fetched raw. */}
+              {(task.notes || task.scope_notes) && (
+                <>
+                  <div className="sec-label" style={{ marginBottom: 8 }}>Task notes</div>
+                  <div style={{
+                    background: 'var(--surface)', border: '1px solid var(--border)',
+                    borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 14,
+                    fontSize: 13, color: 'var(--text)', whiteSpace: 'pre-wrap',
+                  }}>
+                    {task.notes || task.scope_notes}
+                  </div>
+                </>
+              )}
+
               {/* Hours + footage totals — only rendered when non-zero so
                   infra-style submissions (which mostly have just hours +
                   parts) don't fill the screen with empty fiber metrics. */}

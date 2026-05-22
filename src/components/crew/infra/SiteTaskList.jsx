@@ -226,6 +226,18 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
 
 function TaskCard({ task, onClick, muted }) {
   const isPending = task.status === 'pending'
+  // For pending/approved/done tasks, surface the date the row last
+  // changed — that's when it was submitted (pending) or approved
+  // (approved/done). Active 'open' tasks don't need a date in the card.
+  const showDate = task.status === 'pending' || task.status === 'approved' || task.status === 'done'
+  const when = showDate && task.updated_at
+    ? new Date(task.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    : null
+  const meta = [
+    task.type || task.task_type || 'task',
+    task.creator?.name,
+    when,
+  ].filter(Boolean).join(' · ')
   return (
     <div
       onClick={onClick}
@@ -248,7 +260,7 @@ function TaskCard({ task, onClick, muted }) {
           </div>
         )}
         <div style={{ fontSize: 10, color: 'var(--hint)', marginTop: 2 }}>
-          {task.type || task.task_type || 'task'}{task.creator?.name ? ` · ${task.creator.name}` : ''}
+          {meta}
         </div>
       </div>
       {isPending && (

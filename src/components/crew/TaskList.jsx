@@ -312,6 +312,14 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
 
             {showPast && approvedTasks.map((task, i) => {
               const jt = getJobType(task)
+              // updated_at = the moment status flipped to approved (that's
+              // the most recent write on the task row). Close enough to
+              // "date submitted" for the crew's mental model; an exact
+              // submission timestamp lives on the submissions row, fetched
+              // by TaskSummaryView when they tap in.
+              const when = task.updated_at
+                ? new Date(task.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                : null
               // Tappable so the crew can open TaskSummaryView and inspect
               // what was submitted/approved. The parent's onSelect handler
               // routes pending/approved/done tasks to the summary view.
@@ -330,6 +338,11 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
                     <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {task.name}
                     </div>
+                    {when && (
+                      <div style={{ fontSize: 10, color: 'var(--hint)', marginTop: 1 }}>
+                        {when}
+                      </div>
+                    )}
                   </div>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--teal-lt)', color: 'var(--teal-dk)', flexShrink: 0 }}>
                     ✓
