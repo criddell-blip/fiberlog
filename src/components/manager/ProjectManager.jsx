@@ -1140,8 +1140,16 @@ export default function ProjectManager() {
               <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
                 <strong>{confirmDecommSite.name}</strong>
               </div>
-              <div style={{ fontSize: 12, color: 'var(--hint)', marginBottom: 18 }}>
+              <div style={{ fontSize: 12, color: 'var(--hint)', marginBottom: 12 }}>
                 It disappears from the crew + manager UI, but its task history (and any approved consumption) stays linked for the audit trail.
+              </div>
+              <div style={{
+                fontSize: 12, color: 'var(--amber)',
+                background: 'var(--amber-lt)',
+                borderRadius: 'var(--r-xs)', padding: '8px 10px',
+                marginBottom: 18, textAlign: 'left',
+              }}>
+                💡 If you're physically pulling equipment back, log it as a PO via <strong>Inventory → Receive PO</strong> with a note like <em>“Site decommissioned”</em> so the warehouse stock reflects the recovery.
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn btn-ghost" style={{ flex: 1 }}
