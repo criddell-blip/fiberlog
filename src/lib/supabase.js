@@ -89,6 +89,80 @@ export async function addTask(phaseId, name, jobType, notes, userId) {
   return data
 }
 
+// ─── SITES (INFRA WORKFLOW) ──────────────────────────────────────────────────
+// Infra crews work against sites (towers, business installs, MDU equipment
+// closets) rather than fiber phases. Sites live under projects via
+// sites.project_id. Tasks anchor to either phase_id (fiber) or site_id (infra)
+// — enforced by the tasks_anchor_present CHECK constraint.
+
+// getInfraTree builds the projects-with-sites-with-tasks shape consumed by
+// InfraCrewApp. It mirrors getFullTree() but pivots on sites instead of phases.
+// Returns only projects that actually have sites — keeps the sidebar focused
+// on what infra crew can act on. Fiber-only regional projects (no sites) and
+// projects in non-active status are hidden.
+export async function getInfraTree() {
+  const [{ data: projects, error: pErr }, { data: sites, error: sErr }, { data: tasks, error: tErr }] =
+    await Promise.all([
+      db.from('projects').select('*').eq('status', 'active').order('name'),
+      db.from('sites').select('*').eq('status', 'active').order('name'),
+      // Pull every site-anchored task — same join as getFullTree for creator chip.
+      db.from('tasks')
+        .select('*, creator:users!tasks_created_by_fkey(id, name, initials)')
+        .not('site_id', 'is', null)
+        .order('name'),
+    ])
+  if (pErr) throw pErr
+  if (sErr) throw sErr
+  if (tErr) throw tErr
+
+  // Surface any unmapped sites (project_id IS NULL) so they can't silently
+  // vanish from the tree. Right now we only warn — the Sites admin (TBD)
+  // will give the owner a UI to fix these. Today there's one known case:
+  // Prestige II (originally tagged "Fiber - Mdu") needs a regional project
+  // assignment before infra crew can see it.
+  const unmapped = sites.filter(s => s.project_id == null)
+  if (unmapped.length > 0) {
+    console.warn(
+      `[getInfraTree] ${unmapped.length} site(s) have project_id IS NULL and will not appear in the infra tree until mapped:`,
+      unmapped.map(s => s.name).join(', ')
+    )
+  }
+
+  return projects
+    .map(p => {
+      const projSites = sites
+        .filter(s => s.project_id === p.id)
+        .map(s => ({
+          ...s,
+          tasks: tasks
+            .filter(t => t.site_id === s.id)
+            .map(t => ({ ...t, type: t.task_type || 'aerial', notes: t.scope_notes || '' }))
+        }))
+      return { ...p, sites: projSites }
+    })
+    .filter(p => p.sites.length > 0)
+}
+
+// Create an infra task anchored to a site. phase_id stays NULL — the
+// tasks_anchor_present CHECK lets this through because site_id is set.
+export async function addInfraTask(siteId, name, jobType, notes, userId) {
+  const { data, error } = await db
+    .from('tasks')
+    .insert({
+      site_id: siteId,
+      phase_id: null,
+      name,
+      task_type: jobType,
+      scope_notes: notes,
+      status: 'open',
+      created_by: userId || null,
+    })
+    .select('*, creator:users!tasks_created_by_fkey(id, name, initials)')
+    .single()
+  if (error) throw error
+  return data
+}
+
 // ─── ASSEMBLIES & PARTS ───────────────────────────────────────────────────────
 export async function getAssemblies() {
   const { data, error } = await db
@@ -284,6 +358,24 @@ export async function approveSubmission(id, note) {
 }
 
 // ─── REALTIME ─────────────────────────────────────────────────────────────────
+// Channel-name uniqueness: Date.now() alone is not enough. AppContext and
+// InfraCrewApp both call subscribeToAllTaskChanges from useEffects keyed on
+// `currentUser?.id`, which fire in the same tick after login — same Date.now()
+// value, same channel name. supabase-realtime then refuses the second .on()
+// call ("cannot add postgres_changes callbacks after subscribe()") and the
+// error bubbles up to React, blanking the page. The counter guarantees a
+// unique suffix per call regardless of clock resolution.
+let _realtimeChannelCounter = 0
+// Exported so realtime subscribers in components (SubmissionsQueue, CrewStatus,
+// etc.) can build unique channel names without each reinventing the wheel.
+// Don't reuse a channel name across simultaneous .channel() calls — supabase
+// realtime throws "cannot add postgres_changes callbacks after subscribe()"
+// when two subscribers collide on the same name.
+export function nextChannelSuffix() {
+  _realtimeChannelCounter += 1
+  return `${Date.now()}_${_realtimeChannelCounter}`
+}
+
 // subscribeToTasks listens for INSERT and/or UPDATE events on tasks scoped to a
 // single phase_id. Accepts either a single function (legacy: handles INSERT only)
 // or { onInsert, onUpdate } to subscribe to both. Auto-reconnects if the channel
@@ -311,7 +403,7 @@ export function subscribeToAllTaskChanges({ onInsert, onUpdate, onDelete } = {})
     if (cancelled) return
     if (channel) { try { channel.unsubscribe() } catch {} }
 
-    let ch = db.channel('tasks_all_' + Date.now())
+    let ch = db.channel('tasks_all_' + nextChannelSuffix())
 
     if (onInsert) {
       ch = ch.on('postgres_changes',
@@ -375,7 +467,7 @@ export function subscribeToTasks(phaseId, handlers) {
 
     // Unique channel name on each (re)connect so we don't collide with a stale
     // channel object that's still being torn down.
-    let ch = db.channel('tasks_' + phaseId + '_' + Date.now())
+    let ch = db.channel('tasks_' + phaseId + '_' + nextChannelSuffix())
 
     if (onInsert) {
       ch = ch.on('postgres_changes',

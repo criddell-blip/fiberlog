@@ -22,35 +22,58 @@ We can't integrate directly with Sonar (CRM) or Sage (accounting). The strategy 
 | Crew | Workflow shape | System | Status |
 |---|---|---|---|
 | **Fiber construction** (aerial / underground / splice / drop / locator) | Project → Phase → Task → Daily passdown | FiberLog only | ✅ Shipped |
-| **Infrastructure** (towers, sites, business installs) | Project → Phase → Task → Daily passdown (same as fiber) | FiberLog only | 🚧 Next up — see below |
+| **Infrastructure** (towers, sites, business installs) | Project → **Site** → Task → Daily passdown (sites-shaped shell) | FiberLog only | 🚧 Shell shipped — onboarding next |
 | **Field tech** (Calix/UBNT installs, Wave/wireless) | Customer install ticket (Sonar-scheduled) | Sonar for scheduling + logging; FiberLog imports daily | 📋 Backlog (blocked on Sonar polygon data) |
 
 **Why this split:** Fiber and infrastructure crews work plan-driven jobs against geographic projects — they know which project they're on. Field techs work ticket-driven jobs against customer addresses and don't reliably know which fiber region a customer falls into. Until Sonar provides polygon/address → region mapping, field tech intake stays in Sonar; we'll import nightly when the data is good enough to route automatically.
 
 ---
 
-## Infrastructure crew — next implementation push
+## Infrastructure crew — sites shell
 
-Infrastructure crew is being onboarded into FiberLog using the **same workflow as fiber crews**. No new code path, no new data model.
+Infrastructure crew gets a **sites-shaped shell** — same overall flow as fiber crews (sidebar tree → task list → workspace → daily passdown), but the middle layer is **sites** instead of phases. A tower / business install / MDU closet is one site; tasks are the work units against it.
 
-**Plan:**
+**Why a separate shell instead of reusing phases:** Phases work for fiber because each region has a handful of phases that span long stretches of work. Infra has ~150 active sites — modeling each as a phase would bury the actual work in a 150-deep phase list per project. Sites are the natural unit; the schema and UI now reflect that.
 
-1. **Create projects per infrastructure region** (Ogden Valley, Park City, Heber, etc.) via the existing Projects admin. Same projects fiber crews use — infrastructure phases/tasks live alongside fiber phases/tasks under the same project.
-2. **Onboard infrastructure users** via the Users admin with `crew_type = 'infrastructure'`. Each new user auto-gets a personal truck (`trg_ensure_crew_truck`).
-3. **Infrastructure-specific phases** — within each regional project, create infrastructure phases (e.g. "Tower install — Heber Site 3"). Tasks underneath are the actual work units.
-4. **Materials flow:** Infrastructure crew loads parts → truck → uses on task → submits passdown → manager approves → materials auto-deduct from truck → project bucket (`approve_submission` RPC already includes `infrastructure` in the auto-deduct crew_type list).
-5. **Export:** Sage CSV pulls from project consumption (no separate path needed — same flow as fiber).
+**Routing:**
+- `App.jsx` checks `currentUser.crew_type === 'infrastructure'` and renders `InfraCrewApp` instead of `CrewApp`. Every other crew_type (aerial / underground / splice / drop / locator / contractor / install) routes to the existing `CrewApp` unchanged — zero blast radius for fiber crews.
 
-**What this replaces:** Infrastructure crew currently dual-logs in FiberLog AND Sonar. Once they're switched over, Sonar entry for infrastructure work stops. Sonar stays only for field tech scheduling.
+**Schema:**
+- `sites` table — name, type (`wireless` | `fiber`), project_id, address, status. 198 rows imported May 2026.
+- `tasks.site_id` — nullable FK to sites. Infra tasks set it; fiber tasks leave it NULL.
+- `tasks.phase_id` — was NOT NULL, now nullable. Infra tasks have site_id with phase_id NULL.
+- CHECK `tasks_anchor_present` — `phase_id IS NOT NULL OR site_id IS NOT NULL`. Every task must be anchored to one or the other.
 
-**What's already in place to support this:**
-- `crew_type = 'infrastructure'` is a valid value (CHECK on `public.users.crew_type`)
-- `approve_submission` RPC auto-deducts for `{aerial, underground, splice, infrastructure}` already
-- Project bucket auto-creation via `trg_ensure_project_job_site` works for any active project
-- Per-user + crew_type × department permissions already cover infrastructure
-- Receive PO, Reconcile, Sonar import flows all work the same for any crew
+**Components (under `src/components/crew/infra/`):**
+- `InfraCrewApp.jsx` — entry point. Mirrors CrewApp's structure (wide + narrow layouts, sign-out, MyStock entry). Loads `getInfraTree()` for the projects-with-sites-with-tasks shape; runs its own realtime subscription on tasks (the global one in AppContext updates the fiber tree only).
+- `SitesList.jsx` — middle layer. Searchable, type-filterable (wireless / fiber pills) list of sites for a project.
+- `SiteTaskList.jsx` — leaf list of tasks under a site + "New task" overlay. Infra-specific job types: maintenance / build / swap / audit / emergency.
+- `TaskWorkspace.jsx` (reused) — the existing fiber workspace is shimmed with `phase={{ id: site.id, name: site.name }}`. It only reads `phase.name` (for display) and `phase.id` (for `setTaskLocal`, a latency-hint that no-ops harmlessly when the fiber tree doesn't contain the task). The tab strip is crew-type-aware: fiber crews see the 4-tab fiber strip (aerial / footage / splice / underground); infra users see a single "Infrastructure" tab backed by `assemblies.crew_type = 'infrastructure'`. Owner authors infra kits in `AssemblyEditor` (manager → Assemblies); they appear immediately in Chad's workspace.
 
-**No new code is required to support infrastructure crew.** This is a data + onboarding push, not a build.
+**Materials flow:**
+- Crew loads parts → truck → uses on task → submits passdown → manager approves → materials auto-deduct from truck to project bucket.
+- `approve_submission` RPC resolves the destination bucket via a three-tier project lookup:
+  1. `submission.project_id_override` (manual override from the workspace picker)
+  2. `phases.project_id` (fiber path — derive from the task's phase)
+  3. `sites.project_id` (infra path — derive from the task's site)
+- Phase actuals still increment only when `phase_id IS NOT NULL` (no "site actuals" concept). The crew_type guard `{aerial, underground, splice, infrastructure}` is unchanged.
+- All 7 infra projects (Fixed Wireless, Gigwave, Heber, Ogden Valley, Park City, Wasatch Front, West Mountain) have project buckets. Wasatch Front + West Mountain were backfilled when the auto-deduct path was wired — they pre-dated `trg_ensure_project_job_site` and never got auto-created. The backfill migration is idempotent so it's safe to rerun.
+
+**Per-site attributes the owner cares about:** name / type / category / address / status. Tower height, power source, etc. are intentionally NOT stored.
+
+**Onboarding remaining:**
+1. Add infra users via Users admin with `crew_type = 'infrastructure'` (each auto-gets a personal truck via `trg_ensure_crew_truck`). Chad Sperry done; rest of infra crew to follow.
+2. Fix the 1 unmapped site (Prestige II / "Fiber - Mdu") — currently `project_id IS NULL`.
+3. Manager-side Sites admin (CRUD) — backlog item, not yet built.
+4. Curate infra assemblies (`assemblies.crew_type = 'infrastructure'`) so the TaskWorkspace tabs are useful instead of showing fiber kits.
+
+**What this replaces:** Infrastructure crew currently dual-logs in FiberLog AND Sonar. Once switched, Sonar entry for infra work stops. Sonar stays only for field tech scheduling.
+
+**Already in place:**
+- `crew_type = 'infrastructure'` is a valid value (CHECK on `public.users.crew_type`).
+- Project bucket auto-creation via `trg_ensure_project_job_site` works for Fixed Wireless + Gigwave + regional projects.
+- Per-user + crew_type × department permissions already cover infrastructure.
+- Receive PO, Reconcile, Sonar import flows all work the same for any crew.
 
 ---
 
@@ -101,7 +124,7 @@ Infrastructure crew is being onboarded into FiberLog using the **same workflow a
 ```
 src/
   AppContext.jsx          ← global state, auth, projects, users, realtime subscriptions
-  App.jsx                 ← top-level routing (login → manager OR crew based on role)
+  App.jsx                 ← top-level routing: role=owner/manager → ManagerApp; crew_type='infrastructure' → InfraCrewApp; everyone else → CrewApp
   index.css               ← CSS variables for both light + dark theme
   lib/
     supabase.js           ← Supabase client + DB helpers (projects, users, tasks, etc.)
@@ -110,11 +133,15 @@ src/
     csvImport.js          ← shared CSV import utilities
   components/
     crew/                 ← UI for non-manager users (logging work, parts used, etc.)
-      CrewApp.jsx         ← entry point, sidebar + workspace
+      CrewApp.jsx         ← fiber-crew entry: Project → Phase → Task → Workspace
       ProjectList.jsx, PhaseList.jsx, TaskList.jsx, TaskWorkspace.jsx
       MyStockView.jsx     ← crew's personal-truck inventory view (Load + Return UI)
       CrewMovementSheet.jsx ← unified overlay for load/return (other ops are RPC-supported, UI deferred)
-      workspace/          ← logging-specific subviews
+      workspace/          ← logging-specific subviews (used by both shells)
+      infra/              ← sites-shaped shell for crew_type='infrastructure'
+        InfraCrewApp.jsx  ← entry: loads getInfraTree(), runs its own task realtime sub
+        SitesList.jsx     ← project's sites, type-filterable (wireless / fiber)
+        SiteTaskList.jsx  ← site's tasks + New-task overlay (infra job types)
     manager/              ← UI for owner/manager users
       ManagerApp.jsx      ← entry, top-level nav (Approvals / Crew / Projects / Reports / Assemblies / Inventory / Admin)
       AdminPanel.jsx      ← admin home — wires Users, Reset-password, BoxHero sync, Crew×Dept permissions
@@ -176,8 +203,11 @@ supabase/
 
 ### Sites (infra crew's unit of work)
 - `sites(id, name, type fiber|wireless, project_id, address, lat, lng, status active|decommissioned, notes)` — each site belongs to one project (Gigwave / Fixed Wireless / a fiber region). Auto `updated_at` via trigger. RLS: auth read, staff write.
-- `tasks.site_id` (nullable) — infra tasks will point at a site instead of a phase. JS only knows about `phase_id` today; consuming `site_id` requires the infra crew UI build.
+- `tasks.site_id` (nullable) — infra tasks anchor here. Consumed by `getInfraTree()` + `InfraCrewApp`.
+- `tasks.phase_id` is now **nullable** (was NOT NULL). CHECK `tasks_anchor_present` ensures every task has at least one of `{phase_id, site_id}` — never both NULL.
+- `approve_submission` increments phase actuals only when `phase_id IS NOT NULL` (infra has no site actuals concept). Auto-deduct resolves the project bucket via override → phase's project → site's project, so infra approvals deduct cleanly into the site's project bucket.
 - 198 sites bulk-imported from owner's CSV. 197 mapped to a project; 1 ("Prestige II", originally tagged "Fiber - Mdu") landed unmapped — needs manual project assignment via Sites admin (TBD).
+- Helpers in `lib/supabase.js`: `getInfraTree()` (projects-with-sites-with-tasks shape), `addInfraTask(siteId, ...)`.
 
 ### Per-user + per-crew-type permissions
 - `crew_operation_permissions(user_id, operation, allowed bool, reason, updated_at)` — explicit deny rows (empty table = default-allow). Checked by `record_crew_movement` RPC.
@@ -224,7 +254,7 @@ All `SECURITY DEFINER`, all with `SET search_path = public, pg_temp`. EXECUTE on
 
 | RPC | Called from JS | Purpose |
 |---|---|---|
-| `approve_submission(p_submission_id, p_note)` | `lib/supabase.js` → `approveSubmission` | Atomic + idempotent submission approval. Increments phase actuals, flips task to `approved`, clears `working_counts`, auto-deducts materials (truck → project bucket) for aerial/underground/splice/infrastructure crews. Honors `submissions.project_id_override` for bucket routing. |
+| `approve_submission(p_submission_id, p_note)` | `lib/supabase.js` → `approveSubmission` | Atomic + idempotent submission approval. Increments phase actuals when phase is set, flips task to `approved`, clears `working_counts`, auto-deducts materials (truck → project bucket) for aerial/underground/splice/infrastructure crews. Bucket lookup: `submissions.project_id_override` → `phases.project_id` → `sites.project_id`. |
 | `record_crew_movement(operation, part_id, quantity, other_location_id, ...)` | `lib/inventory.js` → `recordCrewMovement` | Single entry point for crew load/return/issue/scrap/transfer. Checks per-user permission, crew_type×department whitelist, then inserts the movement. |
 | `save_log_entry(...)` | `lib/supabase.js` → `saveEntry` | Atomic insert of `log_entries` + `entry_parts`. |
 | `replace_assembly(p_assembly jsonb, p_parts jsonb)` | `lib/supabase.js` → `saveAssembly` | Atomic upsert of assembly + replace of `assembly_parts`. |
@@ -303,7 +333,7 @@ npx supabase login                             # auth supabase CLI (first time)
 
 ## Backlog (rough priority order)
 
-1. **Onboard infrastructure crew** — top priority, no code change required. See "Infrastructure crew — next implementation push" above. Create regional projects, add infrastructure users via Users admin, point them at the existing crew workflow. They auto-deduct to project on approval same as fiber crews. Stop dual-logging in Sonar for infrastructure work once switched over.
+1. **Onboard infrastructure crew** — substantially shipped (May 2026). Sites table + 198-row import, InfraCrewApp shell, crew-aware TaskWorkspace tab, `approve_submission` auto-deducts via `sites.project_id` fallback, project buckets backfilled for Wasatch Front + West Mountain, SubmissionsQueue + ReportsView handle infra rows. Remaining: (a) map the 1 unmapped site (Prestige II), (b) author real infra kits in AssemblyEditor (Chris's call), (c) onboard more infra users beyond Chad, (d) build the Sites admin (CRUD) — backlog item, surfaces here. Stop dual-logging in Sonar for infrastructure work once switched over.
 
 2. **Task status redesign** (the `is_closed` model) — separately discussed. Decouple task lifecycle from submission approval:
    - Tasks get an `is_closed` boolean only (manager-controlled)

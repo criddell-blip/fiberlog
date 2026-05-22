@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react'
-import { getTodaySessions, db } from '../../lib/supabase'
+import { getTodaySessions, db, nextChannelSuffix } from '../../lib/supabase'
 
 const CREW_TYPE_ICON = {
   aerial: '🏗️', underground: '⛏️', splice: '🔌',
-  drop: '🏠', locator: '📡', contractor: '🔧'
+  drop: '🏠', locator: '📡', contractor: '🔧',
+  // Infrastructure crew (towers, business installs, MDU equipment closets).
+  // Install techs render with the house emoji distinct from drop crews.
+  infrastructure: '🛠️', install: '🏘️',
 }
 
 const STATUS_CONFIG = {
@@ -21,14 +24,17 @@ export default function CrewStatus() {
   useEffect(() => {
     load()
 
-    // Real-time updates
-    const channel = db.channel('crew_status_live')
+    // Real-time updates. Channel name is dynamic so a remount (e.g. tab
+    // switch back to Crew) doesn't collide with the previous channel that's
+    // still being torn down — the static 'crew_status_live' name caused
+    // "cannot add postgres_changes callbacks after subscribe()" errors.
+    const channel = db.channel('crew_status_live_' + nextChannelSuffix())
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'work_sessions' },
         () => load()
       ).subscribe()
 
-    return () => channel.unsubscribe()
+    return () => { try { channel.unsubscribe() } catch {} }
   }, [])
 
   async function load() {

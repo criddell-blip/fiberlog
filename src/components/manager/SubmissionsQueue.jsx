@@ -1,11 +1,27 @@
 import { useState, useEffect } from 'react'
-import { approveSubmission, db } from '../../lib/supabase'
+import { approveSubmission, db, nextChannelSuffix } from '../../lib/supabase'
 import { useApp } from '../../AppContext'
 
 const STATUS_COLORS = {
   pending: { bg: 'var(--amber-lt)', text: 'var(--amber)', label: 'Pending' },
   approved: { bg: 'var(--teal-lt)', text: 'var(--teal-dk)', label: 'Approved' },
   flagged: { bg: 'var(--red-lt)', text: 'var(--red)', label: 'Flagged' },
+}
+
+// Tasks anchor on either a phase (fiber crews) or a site (infra crews) —
+// never both. submissionLocation picks the right one so the queue's grouping,
+// labels, and overlay all show real project/location names regardless of
+// crew type. Without this, infra submissions landed under "Unknown" with
+// "undefined › TaskName" because the JOIN walked tasks.phases.projects only
+// and phases is NULL for infra.
+function submissionLocation(sub) {
+  const task = sub?.work_sessions?.tasks
+  const phase = task?.phases
+  const site = task?.sites
+  return {
+    projectName: phase?.projects?.name || site?.projects?.name || 'Unknown',
+    locationName: phase?.name || site?.name || null,
+  }
 }
 
 function StatPill({ label, value }) {
@@ -45,9 +61,11 @@ export default function SubmissionsQueue() {
         try { channel.unsubscribe() } catch {}
       }
 
-      // Use a unique name per setup so a reconnect doesn't collide with
-      // a stale channel that hasn't been GC'd yet.
-      channel = db.channel('manager_submissions_' + Date.now())
+      // Use a unique name per setup so a reconnect (or a re-mount on tab
+      // switch) doesn't collide with a stale channel that hasn't been GC'd
+      // yet. nextChannelSuffix() guarantees uniqueness even when two
+      // setupChannel calls land in the same millisecond.
+      channel = db.channel('manager_submissions_' + nextChannelSuffix())
         .on('postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'submissions' },
           payload => {
@@ -93,7 +111,10 @@ export default function SubmissionsQueue() {
         .select(`*, users!submissions_user_id_fkey ( name, initials, crew_type ),
           work_sessions!submissions_session_id_fkey (
             session_date, task_id,
-            tasks ( name, task_type, phases ( name, projects ( name ) ) )
+            tasks ( name, task_type,
+              phases ( name, projects ( name ) ),
+              sites  ( name, projects ( name ) )
+            )
           ),
           override_project:projects!submissions_project_id_override_fkey ( id, name )`)
         .order('created_at', { ascending: false })
@@ -103,8 +124,8 @@ export default function SubmissionsQueue() {
       setSubmissions(data || [])
       const pending = {}
       ;(data || []).forEach(s => {
-        const proj = s.work_sessions?.tasks?.phases?.projects?.name || 'Unknown'
-        if (s.status === 'pending') pending[proj] = true
+        const { projectName } = submissionLocation(s)
+        if (s.status === 'pending') pending[projectName] = true
       })
       setExpandedProjects(pending)
     } catch (e) {
@@ -206,7 +227,10 @@ export default function SubmissionsQueue() {
         .select(`*, users!submissions_user_id_fkey ( name, initials, crew_type ),
           work_sessions!submissions_session_id_fkey (
             session_date, task_id,
-            tasks ( name, task_type, phases ( name, projects ( name ) ) )
+            tasks ( name, task_type,
+              phases ( name, projects ( name ) ),
+              sites  ( name, projects ( name ) )
+            )
           ),
           override_project:projects!submissions_project_id_override_fkey ( id, name )`)
         .eq('archived', true)
@@ -221,9 +245,9 @@ export default function SubmissionsQueue() {
     : submissions.filter(s => filter === 'all' || s.status === filter)
   const grouped = {}
   filtered.forEach(s => {
-    const proj = s.work_sessions?.tasks?.phases?.projects?.name || 'Unknown'
-    if (!grouped[proj]) grouped[proj] = []
-    grouped[proj].push(s)
+    const { projectName } = submissionLocation(s)
+    if (!grouped[projectName]) grouped[projectName] = []
+    grouped[projectName].push(s)
   })
   const sortedProjects = Object.entries(grouped).sort(([, a], [, b]) =>
     new Date(b[0].created_at) - new Date(a[0].created_at)
@@ -288,7 +312,7 @@ export default function SubmissionsQueue() {
               {isOpen && subs.map((sub, i) => {
                 const colors = STATUS_COLORS[sub.status] || STATUS_COLORS.pending
                 const task = sub.work_sessions?.tasks
-                const phase = task?.phases
+                const { locationName } = submissionLocation(sub)
                 return (
                   <div key={sub.id} onClick={() => { setSelected(sub); loadPartsForSubmission(sub) }}
                     style={{
@@ -310,7 +334,7 @@ export default function SubmissionsQueue() {
                             </div>
                           </div>
                         </div>
-                        {task && <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>📍 {phase?.name} › {task.name}</div>}
+                        {task && <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>📍 {locationName || '—'} › {task.name}</div>}
                         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                           <StatPill label="Hrs" value={sub.hours_worked || 0} />
                           {sub.total_poles > 0 && <StatPill label="Poles" value={sub.total_poles} />}
@@ -341,11 +365,13 @@ export default function SubmissionsQueue() {
               {new Date(selected.created_at).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
             </div>
 
-            {selected.work_sessions?.tasks && (
+            {selected.work_sessions?.tasks && (() => {
+              const { projectName, locationName } = submissionLocation(selected)
+              return (
               <div style={{ background: 'var(--bg)', borderRadius: 'var(--r-sm)', padding: '10px 12px', marginBottom: 14, fontSize: 13 }}>
                 <div style={{ fontWeight: 700 }}>{selected.work_sessions.tasks.name}</div>
                 <div style={{ color: 'var(--muted)', marginTop: 2 }}>
-                  {selected.work_sessions.tasks.phases?.projects?.name} › {selected.work_sessions.tasks.phases?.name}
+                  {projectName}{locationName ? ` › ${locationName}` : ''}
                 </div>
                 {selected.override_project && (
                   <div style={{
@@ -358,7 +384,8 @@ export default function SubmissionsQueue() {
                   </div>
                 )}
               </div>
-            )}
+              )
+            })()}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
               {[

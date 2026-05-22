@@ -3,28 +3,49 @@ import { useApp } from '../../AppContext'
 import { startSession, saveEntry, db, searchPartsCatalog } from '../../lib/supabase'
 import { t } from '../../lib/i18n'
 
-const TABS = (lang) => [
+// Tab list is now crew-type aware. Fiber crews see the 4-tab fiber build
+// strip (aerial / footage / splice / underground) — that's the original
+// behavior. Infrastructure crews see a single "Infrastructure" tab because
+// the fiber-build-specific entry modes (footage totals, splice cases,
+// pole inventory) don't apply to tower work. Returning an array keyed off
+// crew_type rather than two separate constants keeps the rendering loop
+// downstream identical for both worlds.
+const FIBER_TABS = (lang) => [
   { id: 'aerial',      label: t('aerialTab', lang),      icon: '🏗️' },
   { id: 'footage',     label: t('footageTab', lang),     icon: '📏' },
   { id: 'splice',      label: t('spliceTab', lang),      icon: '🔌' },
   { id: 'underground', label: t('undergroundTab', lang), icon: '⛏️' },
 ]
+const INFRA_TABS = () => [
+  { id: 'infrastructure', label: 'Infrastructure', icon: '🛠️' },
+]
+function getTabs(crewType, lang) {
+  return crewType === 'infrastructure' ? INFRA_TABS() : FIBER_TABS(lang)
+}
 
 const POLE_IDS = ['inter-12','inter-14','inter-16','term-12','term-14','term-16']
 
 export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDone, onUserTap }) {
   const { currentUser, showToast, lang, assemblies, setTaskLocal, projects } = useApp()
 
-  // assemblies is now { aerial: [], footage: [], splice: [], underground: [] } from Supabase
-  const ASSEMBLIES = assemblies || { aerial: [], footage: [], splice: [], underground: [] }
+  // assemblies is the { aerial: [], footage: [], splice: [], underground: [],
+  // infrastructure: [], install: [] } shape from getAssemblies(). Infra is
+  // included in ALL_ASSEMBLIES so the derived counts / summary code below
+  // can see infra-kit usage (otherwise an infra task's working_counts would
+  // contain ids the workspace doesn't know about, and totals would be wrong).
+  const ASSEMBLIES = assemblies || { aerial: [], footage: [], splice: [], underground: [], infrastructure: [] }
   const ALL_ASSEMBLIES = useMemo(() => [
     ...(ASSEMBLIES.aerial || []),
     ...(ASSEMBLIES.footage || []),
     ...(ASSEMBLIES.splice || []),
     ...(ASSEMBLIES.underground || []),
+    ...(ASSEMBLIES.infrastructure || []),
   ], [assemblies])
 
-  const [tab, setTab] = useState('aerial')
+  // Default tab honors the user's crew_type — infra users land on the
+  // Infrastructure tab, fiber crews land on Aerial as before.
+  const defaultTab = currentUser?.crew_type === 'infrastructure' ? 'infrastructure' : 'aerial'
+  const [tab, setTab] = useState(defaultTab)
   // Working counts are loaded from the task row in the DB, so they survive
   // refresh, device switch, and crew handoff. We init empty and hydrate
   // in the effect below.
@@ -462,7 +483,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
 
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-        {TABS(lang).map(tb => (
+        {getTabs(currentUser?.crew_type, lang).map(tb => (
           <button key={tb.id} onClick={() => setTab(tb.id)} style={{
             flex: 1, padding: '8px 4px', fontSize: 10, fontWeight: 600,
             background: 'none', border: 'none', cursor: 'pointer',

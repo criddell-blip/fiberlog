@@ -115,7 +115,11 @@ export default function ReportsView() {
   async function load() {
     setLoading(true)
     try {
-      // Get approved submissions in date range
+      // Get approved submissions in date range. tasks.sites is joined alongside
+      // tasks.phases so infra submissions (phase_id NULL, site_id set) carry
+      // their project context too — otherwise the project filter below would
+      // silently exclude every infra row and the Sage CSV would be missing
+      // infra material consumption entirely.
       let subQuery = db
         .from('submissions')
         .select(`
@@ -123,7 +127,11 @@ export default function ReportsView() {
           users!submissions_user_id_fkey ( id, name, initials, crew_type ),
           work_sessions!submissions_session_id_fkey (
             task_id,
-            tasks ( name, phases ( name, projects ( id, name ) ) )
+            tasks (
+              name,
+              phases ( name, projects ( id, name ) ),
+              sites  ( name, projects ( id, name ) )
+            )
           )
         `)
         .eq('status', 'approved')
@@ -145,9 +153,11 @@ export default function ReportsView() {
       }))
 
       if (selProject !== 'all') {
-        filteredSubs = filteredSubs.filter(s =>
-          s._session?.tasks?.phases?.projects?.id === selProject
-        )
+        filteredSubs = filteredSubs.filter(s => {
+          const t = s._session?.tasks
+          const projId = t?.phases?.projects?.id || t?.sites?.projects?.id
+          return projId === selProject
+        })
       }
       if (selUser !== 'all') {
         filteredSubs = filteredSubs.filter(s => s.user_id === selUser)
@@ -180,13 +190,19 @@ export default function ReportsView() {
         .select('entry_id, part_id, quantity, parts_catalog ( id, name, unit, boxhero_id, department, item_type, material_group )')
         .in('entry_id', entryIds)
 
-      // Build report rows
+      // Build report rows. project/location names coalesce fiber (phase) and
+      // infra (site) — same row shape so the rest of the view (grouping,
+      // CSV, summaries) doesn't need to know which crew type produced it.
       const reportRows = []
       ;(parts || []).forEach(p => {
         const entry = entryMap[p.entry_id]
         if (!entry) return
         const sub = sessionToSub[entry.session_id]
         if (!sub) return
+
+        const task = sub._session?.tasks
+        const projectName = task?.phases?.projects?.name || task?.sites?.projects?.name || '—'
+        const locationName = task?.phases?.name || task?.sites?.name || '—'
 
         reportRows.push({
           date: new Date(sub.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
@@ -202,9 +218,12 @@ export default function ReportsView() {
           userName: sub.users?.name || 'Unknown',
           userInitials: sub.users?.initials || '?',
           crewType: sub.users?.crew_type || '',
-          projectName: sub._session?.tasks?.phases?.projects?.name || '—',
-          phaseName: sub._session?.tasks?.phases?.name || '—',
-          taskName: sub._session?.tasks?.name || '—',
+          projectName,
+          // phaseName kept as the field name for back-compat with existing
+          // consumers (CSV header is renamed to "Phase / Site" in exportCSV
+          // for clarity to Sage). Holds phase name for fiber, site name for infra.
+          phaseName: locationName,
+          taskName: task?.name || '—',
           submissionId: sub.id,
         })
       })
@@ -525,7 +544,7 @@ export default function ReportsView() {
   }
 
   function exportCSV() {
-    const headers = ['Date', 'Crew Member', 'Crew Type', 'Project', 'Phase', 'Task', 'Part SKU', 'BoxHero ID', 'Barcode', 'Department', 'Type', 'Material Group', 'Part Name', 'Qty', 'Unit']
+    const headers = ['Date', 'Crew Member', 'Crew Type', 'Project', 'Phase / Site', 'Task', 'Part SKU', 'BoxHero ID', 'Barcode', 'Department', 'Type', 'Material Group', 'Part Name', 'Qty', 'Unit']
     const csvRows = [headers, ...rows.map(r => [
       r.date, r.userName, r.crewType, r.projectName, r.phaseName, r.taskName,
       r.partId, r.barcode, barcodeMap[r.partId] || '', r.department, r.itemType, r.materialGroup, r.partName, r.qty, r.unit
@@ -553,11 +572,29 @@ export default function ReportsView() {
                 border: '1.5px solid var(--teal)', borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
               {stockLoading ? 'Loading...' : '📦 Stock levels'}
             </button>
-            <button onClick={generateProjectReport}
-              style={{ padding: '7px 14px', background: 'var(--surface2)', color: 'var(--orange)',
-                border: '1.5px solid var(--orange)', borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-              📄 Progress PDF
-            </button>
+            {/* Progress PDF is fiber-only — it iterates over phases and
+                renders phase actuals vs targets. For infra projects (Gigwave,
+                Fixed Wireless, regional infra-only projects) there are zero
+                phases, so the PDF renders empty. Gate the button so the
+                owner doesn't generate a confusing blank report. Adding a
+                per-site equivalent is a future enhancement (backlog #4 area). */}
+            {(() => {
+              const selProj = selProject !== 'all' ? projects.find(p => p.id === selProject) : null
+              const isInfraOnly = selProj && (!selProj.phases || selProj.phases.length === 0)
+              return (
+                <button onClick={generateProjectReport}
+                  disabled={isInfraOnly}
+                  title={isInfraOnly ? 'Progress PDF is fiber-only (organized by phases). Infra projects don’t use phases yet.' : ''}
+                  style={{ padding: '7px 14px',
+                    background: isInfraOnly ? 'var(--gray-lt)' : 'var(--surface2)',
+                    color: isInfraOnly ? 'var(--hint)' : 'var(--orange)',
+                    border: `1.5px solid ${isInfraOnly ? 'var(--border)' : 'var(--orange)'}`,
+                    borderRadius: 20, fontSize: 13, fontWeight: 700,
+                    cursor: isInfraOnly ? 'not-allowed' : 'pointer' }}>
+                  📄 Progress PDF
+                </button>
+              )
+            })()}
             <button onClick={exportCSV} disabled={rows.length === 0}
               style={{ padding: '7px 14px', background: rows.length > 0 ? 'var(--orange)' : 'var(--gray-lt)',
                 color: rows.length > 0 ? 'white' : 'var(--hint)', border: 'none',

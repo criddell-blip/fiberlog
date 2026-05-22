@@ -1,5 +1,6 @@
 import { AppProvider, useApp } from './AppContext'
 import CrewApp from './components/crew/CrewApp'
+import InfraCrewApp from './components/crew/infra/InfraCrewApp'
 import ManagerApp from './components/manager/ManagerApp'
 import Login from './Login'
 import './styles/global.css'
@@ -40,8 +41,12 @@ function RootRouter() {
   // No user signed in yet — show login form
   if (!currentUser) return <Login />
 
-  // Route by role
+  // Route by role, then by crew_type for the crew shell. Infrastructure crews
+  // work against sites (towers, business installs) — not phases — so they get
+  // a sites-shaped shell. Every other crew_type (aerial / underground / splice
+  // / drop / locator / contractor / install) stays on the existing CrewApp.
   if (currentUser.role === 'manager' || currentUser.role === 'owner') return <ManagerApp />
+  if (currentUser.crew_type === 'infrastructure') return <InfraCrewApp />
   return <CrewApp />
 }
 

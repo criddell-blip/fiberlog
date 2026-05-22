@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import { db, addTask } from '../../lib/supabase'
 
@@ -34,6 +34,30 @@ export default function ProjectManager() {
   const { projects, setProjects, showToast, reload, currentUser } = useApp()
   const [selProject, setSelProject] = useState(null)
   const [selPhase, setSelPhase] = useState(null)
+
+  // Site counts per project. Infra projects (Gigwave / Fixed Wireless /
+  // regional infra projects) are populated by sites — without this count the
+  // project card just shows "0 phases · 0 tasks" and looks broken to the
+  // owner. AppContext's projects tree doesn't carry sites (the fiber + infra
+  // shells each load their own tree), so this is a small standalone fetch.
+  const [siteCountByProject, setSiteCountByProject] = useState({})
+  useEffect(() => {
+    let cancelled = false
+    db.from('sites')
+      .select('project_id')
+      .eq('status', 'active')
+      .then(({ data, error }) => {
+        if (cancelled) return
+        if (error) { console.warn('Site counts load failed:', error); return }
+        const counts = {}
+        ;(data || []).forEach(s => {
+          if (!s.project_id) return
+          counts[s.project_id] = (counts[s.project_id] || 0) + 1
+        })
+        setSiteCountByProject(counts)
+      })
+    return () => { cancelled = true }
+  }, [])
   const [showAddPhase, setShowAddPhase] = useState(false)
   const [showAddProject, setShowAddProject] = useState(false)
 
@@ -678,9 +702,26 @@ export default function ProjectManager() {
             )
           })}
 
-          {(!selProject.phases || selProject.phases.length === 0) && (
-            <div style={{ textAlign: 'center', padding: 24, color: 'var(--hint)', fontSize: 13 }}>No phases yet — add one above</div>
-          )}
+          {(!selProject.phases || selProject.phases.length === 0) && (() => {
+            const siteCount = siteCountByProject[selProject.id] || 0
+            // If this project has sites (infra) but no phases (fiber),
+            // explain — the manager isn't missing anything; the work just
+            // lives under sites which are managed in the (TBD) Sites admin.
+            if (siteCount > 0) {
+              return (
+                <div style={{ textAlign: 'center', padding: 24, color: 'var(--hint)', fontSize: 13 }}>
+                  <div style={{ fontSize: 24, marginBottom: 6 }}>🛠️</div>
+                  <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
+                    Infrastructure project — {siteCount} site{siteCount === 1 ? '' : 's'}
+                  </div>
+                  <div>Work here is organized by sites (towers, business installs) rather than phases. Sites admin is coming — for now, infra crew can see + log against them in their own shell.</div>
+                </div>
+              )
+            }
+            return (
+              <div style={{ textAlign: 'center', padding: 24, color: 'var(--hint)', fontSize: 13 }}>No phases yet — add one above</div>
+            )
+          })()}
         </div>
 
         {showAddPhase && (
@@ -744,15 +785,33 @@ export default function ProjectManager() {
           const totalTasks = p.phases?.reduce((a, ph) => a + ph.tasks.length, 0) || 0
           const doneTasks = p.phases?.reduce((a, ph) => a + ph.tasks.filter(t => t.status === 'done' || t.status === 'approved').length, 0) || 0
           const pct = totalTasks > 0 ? Math.round(doneTasks / totalTasks * 100) : 0
+          const siteCount = siteCountByProject[p.id] || 0
+          // Build the count line conditionally — for an infra-only project
+          // showing "0 phases" is more confusing than helpful. If there are
+          // no phases but sites exist, only show the sites + tasks lines.
+          const phaseCount = p.phases?.length || 0
+          const parts = []
+          if (phaseCount > 0 || siteCount === 0) parts.push(`${phaseCount} phase${phaseCount === 1 ? '' : 's'}`)
+          if (siteCount > 0) parts.push(`${siteCount} site${siteCount === 1 ? '' : 's'}`)
+          parts.push(`${totalTasks} task${totalTasks === 1 ? '' : 's'}`)
 
           return (
             <div key={p.id} onClick={() => setSelProject(p)}
               style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: 16, marginBottom: 10, cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
                 <div>
-                  <div style={{ fontWeight: 800, fontSize: 16 }}>{p.name}</div>
+                  <div style={{ fontWeight: 800, fontSize: 16 }}>
+                    {p.name}
+                    {siteCount > 0 && phaseCount === 0 && (
+                      <span style={{
+                        marginLeft: 8, padding: '2px 8px', borderRadius: 20,
+                        background: 'var(--teal-lt)', color: 'var(--teal-mid)',
+                        fontSize: 10, fontWeight: 700, verticalAlign: 'middle',
+                      }}>INFRA</span>
+                    )}
+                  </div>
                   <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                    {p.phases?.length || 0} phases · {totalTasks} tasks
+                    {parts.join(' · ')}
                   </div>
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--orange)' }}>{pct}%</div>

@@ -393,7 +393,17 @@ export default function AssemblyEditor() {
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--hint)' }}>
             <div style={{ fontSize: 28, marginBottom: 6 }}>{(CREW_TYPES.find(ct => ct.id === selTab) || {}).icon || '📦'}</div>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>No {(CREW_TYPES.find(ct => ct.id === selTab) || {}).label || selTab} assemblies yet</div>
-            <div style={{ fontSize: 12 }}>Click <strong>+ New</strong> to add one, or duplicate an existing assembly from another tab.</div>
+            {selTab === 'infrastructure' ? (
+              <div style={{ fontSize: 12, maxWidth: 360, margin: '0 auto', lineHeight: 1.5 }}>
+                Author kits infra crew taps when logging site work — tower install, antenna swap, UPS replace, business install. Pull parts from the <strong>Network Infrastructure</strong> + <strong>Infrastructure Construction</strong> departments in the catalog. Click <strong>+ New</strong> to build one.
+              </div>
+            ) : selTab === 'install' ? (
+              <div style={{ fontSize: 12, maxWidth: 360, margin: '0 auto', lineHeight: 1.5 }}>
+                Author kits field-tech crew taps when logging customer installs — ONT swap, router install, drop bury. (Currently unused — field tech UI is backlogged behind Sonar polygon data.)
+              </div>
+            ) : (
+              <div style={{ fontSize: 12 }}>Click <strong>+ New</strong> to add one, or duplicate an existing assembly from another tab.</div>
+            )}
           </div>
         )}
         {tabAsms.map(asm => (

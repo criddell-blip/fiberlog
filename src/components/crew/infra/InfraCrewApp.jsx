@@ -1,0 +1,635 @@
+import { useState, useEffect } from 'react'
+import { useApp } from '../../../AppContext'
+import { useIsWide } from '../../../lib/useIsWide'
+import { getInfraTree, subscribeToAllTaskChanges } from '../../../lib/supabase'
+import MyStockView from '../MyStockView'
+import TaskWorkspace from '../TaskWorkspace'
+import SitesList from './SitesList'
+import SiteTaskList from './SiteTaskList'
+
+// ─── ABOUT THIS SHELL ─────────────────────────────────────────────────────────
+// Infrastructure crews work against SITES (towers, business installs, MDU
+// equipment closets) — not fiber phases. This shell mirrors CrewApp's overall
+// shape (sidebar + workspace, wide + narrow layouts, MyStock entry, sign-out)
+// but pivots the project tree on `sites` instead of `phases`.
+//
+// Routing decision: App.jsx checks currentUser.crew_type and renders this
+// for crew_type === 'infrastructure'. Every other crew_type continues to
+// render the existing CrewApp unchanged — zero blast radius for fiber crews.
+//
+// Tasks anchor to either phase_id (fiber) or site_id (infra), enforced by
+// the tasks_anchor_present CHECK constraint. We load the infra tree via
+// getInfraTree() — a sites-shaped variant of getFullTree() that only returns
+// projects which actually have sites.
+
+const SITE_TYPE_ICONS = {
+  wireless: '📡',
+  fiber:    '🏢',
+}
+
+const isActiveCrewTask = t => t.status !== 'done' && t.status !== 'approved' && t.status !== 'pending'
+const isCompletedTask  = t => t.status === 'done' || t.status === 'approved'
+
+// ─── SIGN OUT CONFIRM (copied from CrewApp to keep this shell self-contained) ─
+function SignOutConfirm({ onConfirm, onCancel, lang }) {
+  const { currentUser } = useApp()
+  return (
+    <div className="overlay open" onClick={e => e.target === e.currentTarget && onCancel()}>
+      <div className="overlay-sheet" style={{ textAlign: 'center' }}>
+        <div style={{
+          width: 56, height: 56, borderRadius: '50%',
+          background: 'var(--orange)', margin: '0 auto 12px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontWeight: 800, fontSize: 18, color: 'white',
+        }}>
+          {currentUser?.initials}
+        </div>
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>{currentUser?.name}</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 24 }}>
+          {lang === 'es' ? '¿Cerrar sesión?' : 'Sign out?'}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel}>
+            {lang === 'es' ? 'Cancelar' : 'Cancel'}
+          </button>
+          <button className="btn btn-danger" style={{ flex: 2 }} onClick={onConfirm}>
+            {lang === 'es' ? 'Cerrar sesión' : 'Sign out'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── SIDEBAR ──────────────────────────────────────────────────────────────────
+// Projects → Sites → Tasks tree. Same visual language as the fiber sidebar so
+// crews moving between roles see consistent affordances, but the middle layer
+// is sites with type icons (wireless 📡 / fiber 🏢) instead of phase names.
+function InfraSidebar({
+  projects, selTask, view, onSelectMyStock, onSelectTask, onSelectSite,
+  currentUser, onUserTap,
+}) {
+  const [expandedProject, setExpandedProject] = useState(projects[0]?.id || null)
+  const [expandedSite, setExpandedSite] = useState(null)
+
+  const isMyStock = view === 'mystock'
+
+  return (
+    <div style={{
+      width: 220, flexShrink: 0, background: 'var(--surface)',
+      borderRight: '1px solid var(--border)', display: 'flex',
+      flexDirection: 'column', height: '100%', overflow: 'hidden'
+    }}>
+      {/* User header */}
+      <div style={{
+        padding: '14px 14px 12px', borderBottom: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0
+      }}>
+        <button
+          onClick={onUserTap}
+          style={{
+            width: 36, height: 36, borderRadius: '50%',
+            background: currentUser?.role === 'owner' ? 'var(--orange)' : 'var(--orange-lt)',
+            color: currentUser?.role === 'owner' ? 'white' : 'var(--orange)',
+            border: '1.5px solid var(--orange-dk)',
+            fontWeight: 800, fontSize: 12, flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+          }}
+        >
+          {currentUser?.initials || 'Me'}
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {currentUser?.name}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
+            Infrastructure
+          </div>
+        </div>
+      </div>
+
+      {/* My Stock entry — same affordance as fiber shell. */}
+      <button
+        onClick={onSelectMyStock}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '10px 14px',
+          background: isMyStock ? 'var(--orange-lt)' : 'transparent',
+          border: 'none',
+          borderLeft: isMyStock ? '3px solid var(--orange)' : '3px solid transparent',
+          color: isMyStock ? 'var(--orange)' : 'var(--text)',
+          fontWeight: isMyStock ? 800 : 600,
+          fontSize: 13,
+          cursor: 'pointer',
+          textAlign: 'left',
+          flexShrink: 0,
+        }}
+      >
+        <span style={{ fontSize: 16 }}>📦</span>
+        <span>My Stock</span>
+      </button>
+
+      {/* Project / site / task tree */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 20px' }}>
+        <div style={{
+          fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+          letterSpacing: '.06em', color: 'var(--hint)', padding: '8px 14px 4px'
+        }}>Projects</div>
+
+        {projects.length === 0 && (
+          <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--muted)' }}>
+            No projects with sites yet.
+          </div>
+        )}
+
+        {projects.map(p => {
+          const isExpP = expandedProject === p.id
+          const totalTasks = p.sites.reduce((a, s) => a + s.tasks.length, 0)
+          const doneTasks  = p.sites.reduce((a, s) => a + s.tasks.filter(isCompletedTask).length, 0)
+          const pct = totalTasks > 0 ? Math.round(doneTasks / totalTasks * 100) : 0
+
+          return (
+            <div key={p.id}>
+              <div
+                onClick={() => setExpandedProject(isExpP ? null : p.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 14px', cursor: 'pointer',
+                  background: isExpP ? 'var(--surface2)' : 'transparent',
+                }}
+              >
+                <div style={{
+                  width: 28, height: 28, borderRadius: 7, flexShrink: 0,
+                  background: 'var(--orange-lt)', border: '1.5px solid var(--orange-dk)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 10, fontWeight: 800, color: 'var(--orange)', letterSpacing: '-0.5px'
+                }}>
+                  {p.name.split(' ').map(w => w[0]).join('').slice(0, 3).toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {p.name}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                    {p.sites.length} site{p.sites.length === 1 ? '' : 's'}
+                  </div>
+                  <div style={{ height: 3, background: 'var(--border2)', borderRadius: 2, marginTop: 4, overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: 'var(--orange)', borderRadius: 2 }} />
+                  </div>
+                </div>
+                <span style={{
+                  fontSize: 12, color: 'var(--muted)', flexShrink: 0,
+                  display: 'inline-block',
+                  transform: isExpP ? 'rotate(90deg)' : 'none', transition: 'transform .15s'
+                }}>›</span>
+              </div>
+
+              {isExpP && p.sites.map(s => {
+                const isExpS = expandedSite === s.id
+                const openTasks = s.tasks.filter(isActiveCrewTask)
+                const icon = SITE_TYPE_ICONS[s.type] || '📍'
+
+                return (
+                  <div key={s.id}>
+                    <div
+                      onClick={() => {
+                        setExpandedSite(isExpS ? null : s.id)
+                        onSelectSite(p, s)
+                      }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '7px 14px 7px 22px', cursor: 'pointer',
+                        background: isExpS ? 'var(--surface2)' : 'transparent',
+                      }}
+                    >
+                      <span style={{ fontSize: 12, flexShrink: 0 }}>{icon}</span>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {s.name}
+                      </div>
+                      {openTasks.length > 0 && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, padding: '1px 6px',
+                          borderRadius: 20, background: 'var(--orange-lt)', color: 'var(--orange)', flexShrink: 0
+                        }}>{openTasks.length}</span>
+                      )}
+                      <span style={{
+                        fontSize: 11, color: 'var(--hint)', flexShrink: 0,
+                        display: 'inline-block',
+                        transform: isExpS ? 'rotate(90deg)' : 'none', transition: 'transform .15s'
+                      }}>›</span>
+                    </div>
+
+                    {isExpS && s.tasks.filter(isActiveCrewTask).map(t => {
+                      const isActive = selTask?.id === t.id
+                      const isPending = t.status === 'pending'
+                      return (
+                        <div
+                          key={t.id}
+                          onClick={() => onSelectTask(p, s, t)}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            padding: '7px 14px 7px 30px', cursor: 'pointer',
+                            background: isActive ? 'var(--orange-lt)' : 'transparent',
+                            borderLeft: isActive ? '3px solid var(--orange)' : '3px solid transparent',
+                          }}
+                        >
+                          <span style={{ fontSize: 13, flexShrink: 0 }}>🛠️</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{
+                              fontSize: 12, fontWeight: isActive ? 700 : 500,
+                              color: isActive ? 'var(--orange)' : 'var(--text)',
+                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+                            }}>{t.name}</div>
+                          </div>
+                          {isPending && (
+                            <span style={{
+                              fontSize: 9, fontWeight: 700, padding: '1px 5px',
+                              borderRadius: 20, background: 'var(--amber-lt)',
+                              color: 'var(--amber)', flexShrink: 0
+                            }}>•</span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })}
+      </div>
+
+      <div style={{
+        padding: '10px 14px', borderTop: '1px solid var(--border)',
+        flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6
+      }}>
+        <div style={{ width: 4, height: 18, background: 'var(--orange)', borderRadius: 2 }} />
+        <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.3px' }}>
+          FiberLog <span style={{ fontWeight: 500, color: 'var(--muted)' }}>· Infra</span>
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// ─── MAIN ─────────────────────────────────────────────────────────────────────
+export default function InfraCrewApp() {
+  const { currentUser, selectUser, lang } = useApp()
+  const isWide = useIsWide()
+
+  // Local infra tree — the global AppContext.projects holds the fiber-shaped
+  // tree (phases). Infra needs sites, so we maintain our own state here. The
+  // realtime task subscription below keeps it fresh; getInfraTree() handles
+  // the initial load.
+  const [infraProjects, setInfraProjects] = useState([])
+  const [treeLoading, setTreeLoading] = useState(true)
+  const [treeError, setTreeError] = useState(null)
+
+  const [screen, setScreen] = useState('projects')   // narrow nav
+  const [view, setView]     = useState('projects')   // wide nav (projects | mystock)
+  const [selProjectId, setSelProjectId] = useState(null)
+  const [selSiteId, setSelSiteId]       = useState(null)
+  const [selTaskId, setSelTaskId]       = useState(null)
+  const [showSignOut, setShowSignOut]   = useState(false)
+
+  // Live-derived selection, same pattern as CrewApp — IDs are persisted in
+  // state but the live objects come from infraProjects so updates flow.
+  const selProject = selProjectId ? infraProjects.find(p => p.id === selProjectId) || null : null
+  const selSite    = selProject && selSiteId
+    ? selProject.sites.find(s => s.id === selSiteId) || null
+    : null
+  const selTask    = selSite && selTaskId
+    ? selSite.tasks.find(t => t.id === selTaskId) || null
+    : null
+
+  async function loadTree() {
+    try {
+      setTreeLoading(true)
+      setTreeError(null)
+      const tree = await getInfraTree()
+      setInfraProjects(tree)
+    } catch (err) {
+      console.error('InfraTree load failed:', err)
+      setTreeError(err.message)
+    } finally {
+      setTreeLoading(false)
+    }
+  }
+
+  useEffect(() => { loadTree() }, [])
+
+  // Realtime: keep infra tree fresh when tasks change anywhere in the system.
+  // AppContext's global subscriber updates the FIBER tree (projects/phases)
+  // and won't touch infraProjects, so this shell needs its own.
+  //
+  // We try/catch the whole subscribe + return — earlier a channel-name
+  // collision with AppContext's subscriber threw synchronously during
+  // setup, the error bubbled out of useEffect, and React rendered nothing
+  // (blank screen on login). Channel names are now unique, but defending
+  // here means any future realtime breakage degrades to "no live updates"
+  // instead of "shell doesn't render."
+  useEffect(() => {
+    if (!currentUser?.id) return
+    let sub
+    try {
+      sub = subscribeToAllTaskChanges({
+      onUpdate: (task) => {
+        if (!task.site_id) return  // not an infra task — ignore
+        setInfraProjects(prev => prev.map(p => ({
+          ...p,
+          sites: p.sites.map(s => {
+            if (s.id !== task.site_id) return s
+            if (!s.tasks.some(t => t.id === task.id)) return s
+            return {
+              ...s,
+              tasks: s.tasks.map(t => t.id === task.id
+                ? { ...t, ...task,
+                    type: task.task_type || t.type,
+                    notes: task.scope_notes || t.notes }
+                : t)
+            }
+          })
+        })))
+      },
+      onInsert: (task) => {
+        if (!task.site_id) return
+        setInfraProjects(prev => prev.map(p => ({
+          ...p,
+          sites: p.sites.map(s => {
+            if (s.id !== task.site_id) return s
+            if (s.tasks.some(t => t.id === task.id)) return s
+            return {
+              ...s,
+              tasks: [...s.tasks, {
+                ...task,
+                type: task.task_type || 'aerial',
+                notes: task.scope_notes || '',
+                creator: null,
+              }]
+            }
+          })
+        })))
+      },
+      onDelete: (task) => {
+        if (!task.site_id) return
+        setInfraProjects(prev => prev.map(p => ({
+          ...p,
+          sites: p.sites.map(s => ({
+            ...s,
+            tasks: s.tasks.filter(t => t.id !== task.id)
+          }))
+        })))
+      },
+      })
+    } catch (e) {
+      console.warn('InfraCrewApp: realtime subscription failed; live updates disabled this session.', e)
+    }
+    return () => { try { sub?.unsubscribe() } catch {} }
+  }, [currentUser?.id])
+
+  function navTo(s) { setScreen(s) }
+  function handleSignOut() { selectUser(null); setShowSignOut(false) }
+
+  function handleSidebarTaskSelect(project, site, task) {
+    setSelProjectId(project.id)
+    setSelSiteId(site.id)
+    setSelTaskId(task.id)
+    setView('projects')
+  }
+
+  // TaskWorkspace was built for the fiber phase-shaped flow. We adapt by
+  // passing a phase-shaped shim (`{ id: site.id, name: site.name }`).
+  // TaskWorkspace only reads phase.id (for AppContext.setTaskLocal, which
+  // is a latency-hiding hint that's harmless if it no-ops) and phase.name
+  // (for display in the header). The submit path goes through save_log_entry
+  // which is anchored on session_id/task_id — not phase_id — so it works
+  // unchanged. approve_submission's auto-deduct now handles infra approvals
+  // too: its project lookup chain is override → phases.project_id →
+  // sites.project_id, so materials transfer truck → site's project bucket
+  // on approval. Phase actuals stay skipped (no site-actuals concept).
+  const workspacePhaseShim = selSite ? { id: selSite.id, name: selSite.name } : null
+
+  if (treeLoading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 12 }}>
+      <div style={{ width: 36, height: 36, border: '3px solid var(--teal-lt)', borderTopColor: 'var(--teal)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+      <div style={{ color: 'var(--muted)', fontSize: 14 }}>Loading FiberLog...</div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  )
+
+  if (treeError) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 12, padding: 24 }}>
+      <div style={{ fontSize: 32 }}>⚠️</div>
+      <div style={{ fontWeight: 700 }}>Could not load sites</div>
+      <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center' }}>{treeError}</div>
+      <button className="btn btn-primary" onClick={loadTree}>Retry</button>
+    </div>
+  )
+
+  // ── WIDE LAYOUT ─────────────────────────────────────────────────────────────
+  if (isWide) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, display: 'flex', background: 'var(--bg)' }}>
+        <InfraSidebar
+          projects={infraProjects}
+          selTask={selTask}
+          view={view}
+          onSelectMyStock={() => setView('mystock')}
+          onSelectTask={handleSidebarTaskSelect}
+          onSelectSite={(project, site) => {
+            setSelProjectId(project.id); setSelSiteId(site.id); setSelTaskId(null)
+            setView('projects')
+          }}
+          currentUser={currentUser}
+          onUserTap={() => setShowSignOut(true)}
+        />
+
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {view === 'mystock' ? (
+            <MyStockView onUserTap={() => setShowSignOut(true)} />
+          ) : !selTask ? (
+            selProject && selSite ? (
+              <SiteTaskList
+                project={selProject}
+                site={selSite}
+                onSelect={t => { setSelTaskId(t.id) }}
+                onBack={() => setSelSiteId(null)}
+                onUserTap={() => setShowSignOut(true)}
+                onTaskCreated={() => loadTree()}
+              />
+            ) : selProject ? (
+              <SitesList
+                project={selProject}
+                onSelect={s => { setSelSiteId(s.id); setSelTaskId(null) }}
+                onBack={() => setSelProjectId(null)}
+                onUserTap={() => setShowSignOut(true)}
+              />
+            ) : (
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                height: '100%', flexDirection: 'column', gap: 12, color: 'var(--muted)'
+              }}>
+                <div style={{ fontSize: 40 }}>👈</div>
+                <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>Pick a project from the sidebar</div>
+                <div style={{ fontSize: 13 }}>Expand a project → site → task to start logging</div>
+              </div>
+            )
+          ) : (
+            <TaskWorkspace
+              project={selProject}
+              phase={workspacePhaseShim}
+              task={selTask}
+              onBack={() => setSelTaskId(null)}
+              onSubmitDone={() => setSelTaskId(null)}
+              onUserTap={() => setShowSignOut(true)}
+            />
+          )}
+        </div>
+
+        {showSignOut && (
+          <SignOutConfirm
+            lang={lang}
+            onConfirm={handleSignOut}
+            onCancel={() => setShowSignOut(false)}
+          />
+        )}
+      </div>
+    )
+  }
+
+  // ── NARROW LAYOUT ───────────────────────────────────────────────────────────
+  return (
+    <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+      {screen === 'projects' && (
+        <InfraProjectsScreen
+          projects={infraProjects}
+          onSelectProject={p => { setSelProjectId(p.id); navTo('sites') }}
+          onOpenMyStock={() => navTo('mystock')}
+          onUserTap={() => setShowSignOut(true)}
+        />
+      )}
+      {screen === 'mystock' && (
+        <MyStockView
+          onBack={() => navTo('projects')}
+          onUserTap={() => setShowSignOut(true)}
+        />
+      )}
+      {screen === 'sites' && selProject && (
+        <SitesList
+          project={selProject}
+          onSelect={s => { setSelSiteId(s.id); navTo('tasks') }}
+          onBack={() => navTo('projects')}
+          onUserTap={() => setShowSignOut(true)}
+        />
+      )}
+      {screen === 'tasks' && selProject && selSite && (
+        <SiteTaskList
+          project={selProject}
+          site={selSite}
+          onSelect={t => { setSelTaskId(t.id); navTo('workspace') }}
+          onBack={() => navTo('sites')}
+          onUserTap={() => setShowSignOut(true)}
+          onTaskCreated={() => loadTree()}
+        />
+      )}
+      {screen === 'workspace' && selTask && (
+        <TaskWorkspace
+          project={selProject}
+          phase={workspacePhaseShim}
+          task={selTask}
+          onBack={() => navTo('tasks')}
+          onSubmitDone={() => { setSelTaskId(null); navTo('projects') }}
+          onUserTap={() => setShowSignOut(true)}
+        />
+      )}
+      {showSignOut && (
+        <SignOutConfirm
+          lang={lang}
+          onConfirm={handleSignOut}
+          onCancel={() => setShowSignOut(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── NARROW: PROJECTS SCREEN ──────────────────────────────────────────────────
+// Top-level list of infra projects for phone/small-screen layout. Tapping a
+// project drills into its SitesList. MyStock and sign-out live in the header.
+function InfraProjectsScreen({ projects, onSelectProject, onOpenMyStock, onUserTap }) {
+  const { currentUser } = useApp()
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{
+        padding: '14px 16px', borderBottom: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+        background: 'var(--surface)',
+      }}>
+        <button
+          onClick={onUserTap}
+          style={{
+            width: 36, height: 36, borderRadius: '50%',
+            background: currentUser?.role === 'owner' ? 'var(--orange)' : 'var(--orange-lt)',
+            color: currentUser?.role === 'owner' ? 'white' : 'var(--orange)',
+            border: '1.5px solid var(--orange-dk)',
+            fontWeight: 800, fontSize: 12,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+          }}
+        >
+          {currentUser?.initials || 'Me'}
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 16 }}>Projects</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>Infrastructure</div>
+        </div>
+        <button
+          className="btn btn-ghost"
+          onClick={onOpenMyStock}
+          style={{ padding: '6px 10px', fontSize: 12 }}
+        >
+          📦 My Stock
+        </button>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
+        {projects.length === 0 && (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+            No projects with sites yet.
+          </div>
+        )}
+        {projects.map(p => {
+          const totalTasks = p.sites.reduce((a, s) => a + s.tasks.length, 0)
+          const openTasks  = p.sites.reduce((a, s) => a + s.tasks.filter(isActiveCrewTask).length, 0)
+          return (
+            <button
+              key={p.id}
+              onClick={() => onSelectProject(p)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                padding: 14, marginBottom: 8,
+                background: 'var(--surface)', border: '1px solid var(--border)',
+                borderRadius: 'var(--r)', cursor: 'pointer', textAlign: 'left',
+                color: 'var(--text)',
+              }}
+            >
+              <div style={{
+                width: 40, height: 40, borderRadius: 8, flexShrink: 0,
+                background: 'var(--orange-lt)', border: '1.5px solid var(--orange-dk)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 12, fontWeight: 800, color: 'var(--orange)'
+              }}>
+                {p.name.split(' ').map(w => w[0]).join('').slice(0, 3).toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{p.name}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                  {p.sites.length} site{p.sites.length === 1 ? '' : 's'} · {openTasks} open / {totalTasks} total task{totalTasks === 1 ? '' : 's'}
+                </div>
+              </div>
+              <span style={{ fontSize: 16, color: 'var(--hint)' }}>›</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}

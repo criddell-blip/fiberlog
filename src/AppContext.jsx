@@ -62,6 +62,12 @@ export function AppProvider({ children }) {
 
     const sub = subscribeToAllTaskChanges({
       onUpdate: (task) => {
+        // Infra tasks (phase_id NULL, site_id set) are owned by InfraCrewApp's
+        // own subscriber — bail out early here so we don't pretend to handle
+        // them and silently drop the update. Without the guard the .map()
+        // below walks every phase looking for a NULL id which always misses,
+        // wasting CPU and obscuring intent.
+        if (!task.phase_id) return
         // Merge payload into the existing task to preserve the joined
         // `creator` field (realtime payloads don't include joins).
         setProjects(prev => prev.map(p => ({
@@ -81,6 +87,7 @@ export function AppProvider({ children }) {
         })))
       },
       onInsert: (task) => {
+        if (!task.phase_id) return  // infra tasks → InfraCrewApp's subscriber handles them
         // Add to the right phase if not already present. Creator is missing
         // (no join in realtime payload); the chip will just be absent until
         // next full reload — acceptable trade for not doing an extra query
@@ -103,6 +110,10 @@ export function AppProvider({ children }) {
         })))
       },
       onDelete: (task) => {
+        // Delete payloads only carry the OLD row's id reliably; phase_id may
+        // also be in there but we don't gate on it — a fiber task delete with
+        // missing phase_id should still flush from the tree. The filter is
+        // already a no-op for ids we don't have.
         setProjects(prev => prev.map(p => ({
           ...p,
           phases: p.phases.map(ph => ({
