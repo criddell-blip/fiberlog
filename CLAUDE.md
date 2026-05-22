@@ -64,7 +64,7 @@ Infrastructure crew gets a **sites-shaped shell** — same overall flow as fiber
 **Onboarding remaining:**
 1. Add infra users via Users admin with `crew_type = 'infrastructure'` (each auto-gets a personal truck via `trg_ensure_crew_truck`). Chad Sperry done; rest of infra crew to follow.
 2. Fix the 1 unmapped site (Prestige II / "Fiber - Mdu") — currently `project_id IS NULL`.
-3. Manager-side Sites admin (CRUD) — backlog item, not yet built.
+3. Sites admin shipped — embedded in ProjectManager's project detail view. Add / edit (rename, change type, address, notes) / decommission (soft delete via status='decommissioned'). Search + type pills render when ≥8 sites. Per-site task count badges. Decommission confirm hints to log physical equipment recovery as a PO with a "Site decommissioned" note. No hard-delete; sites are FK targets for tasks.
 4. Curate infra assemblies (`assemblies.crew_type = 'infrastructure'`) so the TaskWorkspace tabs are useful instead of showing fiber kits.
 
 **What this replaces:** Infrastructure crew currently dual-logs in FiberLog AND Sonar. Once switched, Sonar entry for infra work stops. Sonar stays only for field tech scheduling.
@@ -206,7 +206,8 @@ supabase/
 - `tasks.site_id` (nullable) — infra tasks anchor here. Consumed by `getInfraTree()` + `InfraCrewApp`.
 - `tasks.phase_id` is now **nullable** (was NOT NULL). CHECK `tasks_anchor_present` ensures every task has at least one of `{phase_id, site_id}` — never both NULL.
 - `approve_submission` increments phase actuals only when `phase_id IS NOT NULL` (infra has no site actuals concept). Auto-deduct resolves the project bucket via override → phase's project → site's project, so infra approvals deduct cleanly into the site's project bucket.
-- 198 sites bulk-imported from owner's CSV. 197 mapped to a project; 1 ("Prestige II", originally tagged "Fiber - Mdu") landed unmapped — needs manual project assignment via Sites admin (TBD).
+- 198 sites bulk-imported from owner's CSV. 197 mapped to a project; 1 ("Prestige II", originally tagged "Fiber - Mdu") landed unmapped — `getInfraTree()` logs a console.warn and drops it from the tree until an owner picks a project (current Sites admin doesn't expose project reassignment yet; one-shot SQL or a `tasks_anchor_present`-respecting `updateSite({ projectId })` call resolves it).
+- Sites admin lives in `ProjectManager.jsx`'s project detail view — only renders for infra-style projects (0 phases + ≥1 site). Helpers in `lib/supabase.js`: `getSitesByProject`, `addSite`, `updateSite`, `decommissionSite`, `getTaskCountsBySite`.
 - Helpers in `lib/supabase.js`: `getInfraTree()` (projects-with-sites-with-tasks shape), `addInfraTask(siteId, ...)`.
 
 ### Per-user + per-crew-type permissions
@@ -308,6 +309,9 @@ Use the existing CSS classes. Wrapper:
 ### Refresh pattern
 Parent components own a `refreshKey` integer that gets bumped (`setRefreshKey(k => k + 1)`) after a mutation. Children include it in a `useEffect` dependency array to refetch.
 
+### Realtime channel names
+Always build channel names via `nextChannelSuffix()` (exported from `lib/supabase.js`) — e.g. `db.channel('crew_status_live_' + nextChannelSuffix())`. Two subscribers using `Date.now()` alone (or a static name) can collide in the same tick and supabase-realtime throws "cannot add postgres_changes callbacks after subscribe()", which kills the React render. The helper appends a process-local counter so collision is impossible. Defensively wrap component-level `subscribeToAllTaskChanges` / `db.channel(...)` calls in try/catch so realtime breakage degrades to "no live updates" instead of "blank shell" (see `InfraCrewApp.jsx` for the pattern).
+
 ### Browser autofill suppression
 For any input that's NOT meant to be filled by the browser's saved-credentials list, use `autoComplete="off"` plus a non-standard `name=` like `name="user-search"`. For password reset / new-password fields, use `autoComplete="new-password"`. Past bug: opening the reset-password sheet was autofilling the user's username into the search field below.
 
@@ -333,7 +337,7 @@ npx supabase login                             # auth supabase CLI (first time)
 
 ## Backlog (rough priority order)
 
-1. **Onboard infrastructure crew** — substantially shipped (May 2026). Sites table + 198-row import, InfraCrewApp shell, crew-aware TaskWorkspace tab, `approve_submission` auto-deducts via `sites.project_id` fallback, project buckets backfilled for Wasatch Front + West Mountain, SubmissionsQueue + ReportsView handle infra rows. Remaining: (a) map the 1 unmapped site (Prestige II), (b) author real infra kits in AssemblyEditor (Chris's call), (c) onboard more infra users beyond Chad, (d) build the Sites admin (CRUD) — backlog item, surfaces here. Stop dual-logging in Sonar for infrastructure work once switched over.
+1. **Onboard infrastructure crew** — substantially shipped (May 2026). Sites table + 198-row import, InfraCrewApp shell, crew-aware TaskWorkspace tab, `approve_submission` auto-deducts via `sites.project_id` fallback, project buckets backfilled for Wasatch Front + West Mountain, SubmissionsQueue + ReportsView handle infra rows, Sites admin (add/edit/decommission/search/task-count) embedded in ProjectManager. Remaining: (a) map the 1 unmapped site (Prestige II), (b) author real infra kits in AssemblyEditor (Chris's call), (c) onboard more infra users beyond Chad. Stop dual-logging in Sonar for infrastructure work once switched over.
 
 2. **Task status redesign** (the `is_closed` model) — separately discussed. Decouple task lifecycle from submission approval:
    - Tasks get an `is_closed` boolean only (manager-controlled)
@@ -466,9 +470,11 @@ Things to remember when adding a new entry point:
 - **Receive PO inline-create doesn't refresh the catalog search index in the same session** — if the manager creates a new SKU then types it in a later line of the same PO, search won't auto-complete. Workaround: close + reopen the sheet.
 - **Receive PO + Sonar sheets aren't responsive on phone** — `maxWidth: 760` works on tablet+; on narrow viewports the line grids overflow. These are admin-only flows so manager-on-laptop is the assumed environment.
 - **Audit CSV round-trip uses location *names***, not IDs. If two trucks happen to display the same first name (e.g. two crew named "Chris"), reconcile may match to the wrong one. Surface = warning, not blocker.
+- **TaskWorkspace submit — empty assemblies path:** `handleSubmit` gates the `saveEntry` call on `(allParts.length > 0 || extraParts.length > 0)`. If you ever change that condition, make sure both paths still create the log_entry — the earlier bug was gating on `allParts` alone, which silently dropped extra-only submissions on the floor. Especially relevant for infra crew while their kit catalog is still empty (they rely on "Add part not in list").
 
 ## Recent major work
 
+- **Infrastructure crew end-to-end (May 2026):** `sites` table + 198-row CSV import, `tasks.phase_id` nullable with `tasks_anchor_present` CHECK, `InfraCrewApp` shell (Project → Site → Task), crew-type-aware `TaskWorkspace` tab strip, `approve_submission` auto-deducts via `sites.project_id` fallback, project buckets backfilled for Wasatch Front + West Mountain. Manager-side polish: `SubmissionsQueue` + `ReportsView` coalesce phase/site, `crew_activity_today` view rewritten, `ProjectManager` surfaces an embedded Sites admin (add / edit / decommission / search / task-count). Realtime channel collision fix (`nextChannelSuffix()`). Extra-parts-dropped-on-submit fix in `TaskWorkspace`.
 - **Inventory framework rebuild (May 2026):** Crew personal trucks, three-layer permission framework (per-user × crew_type×dept × CHECK constraints), project buckets, auto-deduct on approval, Flavor A project routing override, Receive PO, Reconcile, Sonar import, Locations tab counts + jump-link, Vitest tests for `calculations.js`.
 - **Security audit (May 2026):** RLS rewrite on 14 tables (was wide-open USING(true)), view + function hardening, EXECUTE grants tightened.
 - **Bins:** Sub-locations under warehouses, schema + full UI rollout (Locations / Stock / RecordMovement / BulkMove). Single-level nesting only.
