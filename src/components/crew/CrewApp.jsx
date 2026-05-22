@@ -14,6 +14,35 @@ import MyStockView from './MyStockView'
 // the only path that flips it back to 'open' for re-editing.)
 const isReadOnlyTask = t => t.status === 'pending' || t.status === 'approved' || t.status === 'done'
 
+// Small theme toggle — mirrors ManagerApp's ThemeToggle so the same pill
+// shows up wherever a user can flip dark/light. Without this, crew on a
+// tablet outdoors had no way to switch out of dark mode.
+function ThemeToggle({ darkMode, onToggle, compact = false }) {
+  return (
+    <button
+      onClick={onToggle}
+      title={`Switch to ${darkMode ? 'light' : 'dark'} mode`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: compact ? '4px 8px' : '6px 10px',
+        borderRadius: 999,
+        border: '1.5px solid var(--border2)',
+        background: 'var(--surface2)',
+        color: 'var(--text)',
+        cursor: 'pointer',
+        fontSize: compact ? 11 : 12,
+        fontWeight: 700,
+        flexShrink: 0,
+      }}
+    >
+      <span style={{ fontSize: compact ? 13 : 15, lineHeight: 1 }}>
+        {darkMode ? '🌙' : '☀️'}
+      </span>
+      <span>{darkMode ? 'Dark' : 'Light'}</span>
+    </button>
+  )
+}
+
 const JOB_COLORS = {
   aerial:      { bg: 'var(--teal-lt)',   text: 'var(--teal-mid)' },
   underground: { bg: 'var(--amber-lt)',  text: 'var(--amber)' },
@@ -33,7 +62,8 @@ const isActiveCrewTask = t => t.status !== 'done' && t.status !== 'approved' && 
 const isCompletedTask = t => t.status === 'done' || t.status === 'approved'
 
 // ─── SIGN OUT CONFIRM ─────────────────────────────────────────────────────────
-function SignOutConfirm({ onConfirm, onCancel, lang }) {
+// Hosts the theme toggle for narrow layouts (sidebar isn't rendered).
+function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode }) {
   const { currentUser } = useApp()
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onCancel()}>
@@ -47,9 +77,14 @@ function SignOutConfirm({ onConfirm, onCancel, lang }) {
           {currentUser?.initials}
         </div>
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>{currentUser?.name}</div>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 24 }}>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 18 }}>
           {lang === 'es' ? '¿Cerrar sesión?' : 'Sign out?'}
         </div>
+        {toggleDarkMode && (
+          <div style={{ marginBottom: 18 }}>
+            <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} />
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel}>
             {lang === 'es' ? 'Cancelar' : 'Cancel'}
@@ -66,7 +101,7 @@ function SignOutConfirm({ onConfirm, onCancel, lang }) {
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 function CrewSidebar({
   projects, selTask, view, onSelectMyStock, onSelectTask, onSelectPhase,
-  currentUser, onUserTap,
+  currentUser, onUserTap, darkMode, toggleDarkMode,
 }) {
   const [expandedProject, setExpandedProject] = useState(projects[0]?.id || null)
   const [expandedPhase, setExpandedPhase] = useState(null)
@@ -253,10 +288,15 @@ function CrewSidebar({
 
       <div style={{
         padding: '10px 14px', borderTop: '1px solid var(--border)',
-        flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6
+        flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6
       }}>
-        <div style={{ width: 4, height: 18, background: 'var(--orange)', borderRadius: 2 }} />
-        <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.3px' }}>FiberLog</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 4, height: 18, background: 'var(--orange)', borderRadius: 2 }} />
+          <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.3px' }}>FiberLog</span>
+        </div>
+        {toggleDarkMode && (
+          <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} compact />
+        )}
       </div>
     </div>
   )
@@ -264,7 +304,7 @@ function CrewSidebar({
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function CrewApp() {
-  const { projects, currentUser, selectUser, loading, error, lang } = useApp()
+  const { projects, currentUser, selectUser, loading, error, lang, darkMode, toggleDarkMode } = useApp()
   const isWide = useIsWide()
 
   const [screen, setScreen] = useState('projects')
@@ -338,6 +378,8 @@ export default function CrewApp() {
           }}
           currentUser={currentUser}
           onUserTap={() => setShowSignOut(true)}
+          darkMode={darkMode}
+          toggleDarkMode={toggleDarkMode}
         />
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -387,6 +429,8 @@ export default function CrewApp() {
             lang={lang}
             onConfirm={handleSignOut}
             onCancel={() => setShowSignOut(false)}
+            darkMode={darkMode}
+            toggleDarkMode={toggleDarkMode}
           />
         )}
       </div>
@@ -451,6 +495,8 @@ export default function CrewApp() {
           lang={lang}
           onConfirm={handleSignOut}
           onCancel={() => setShowSignOut(false)}
+          darkMode={darkMode}
+          toggleDarkMode={toggleDarkMode}
         />
       )}
     </div>

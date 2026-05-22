@@ -140,7 +140,10 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
               {showPast ? '▾' : '▸'} {completedTasks.length} completed task{completedTasks.length === 1 ? '' : 's'}
             </button>
             {showPast && completedTasks.map(t => (
-              <TaskCard key={t.id} task={t} muted />
+              // Tappable — routes through onSelect which the parent
+              // (InfraCrewApp) sends to TaskSummaryView for read-only
+              // inspection of what was submitted/approved.
+              <TaskCard key={t.id} task={t} onClick={() => onSelect(t)} muted />
             ))}
           </>
         )}

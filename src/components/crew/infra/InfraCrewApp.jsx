@@ -12,6 +12,35 @@ import SiteTaskList from './SiteTaskList'
 // already submitted; the editable workspace is only for 'open' tasks.
 const isReadOnlyTask = t => t.status === 'pending' || t.status === 'approved' || t.status === 'done'
 
+// Small theme toggle, mirrored from ManagerApp's ThemeToggle for visual
+// consistency. Both shells need this so working crews on a tablet in
+// daylight can flip out of dark mode without going to the manager portal.
+function ThemeToggle({ darkMode, onToggle, compact = false }) {
+  return (
+    <button
+      onClick={onToggle}
+      title={`Switch to ${darkMode ? 'light' : 'dark'} mode`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: compact ? '4px 8px' : '6px 10px',
+        borderRadius: 999,
+        border: '1.5px solid var(--border2)',
+        background: 'var(--surface2)',
+        color: 'var(--text)',
+        cursor: 'pointer',
+        fontSize: compact ? 11 : 12,
+        fontWeight: 700,
+        flexShrink: 0,
+      }}
+    >
+      <span style={{ fontSize: compact ? 13 : 15, lineHeight: 1 }}>
+        {darkMode ? '🌙' : '☀️'}
+      </span>
+      <span>{darkMode ? 'Dark' : 'Light'}</span>
+    </button>
+  )
+}
+
 // ─── ABOUT THIS SHELL ─────────────────────────────────────────────────────────
 // Infrastructure crews work against SITES (towers, business installs, MDU
 // equipment closets) — not fiber phases. This shell mirrors CrewApp's overall
@@ -36,7 +65,8 @@ const isActiveCrewTask = t => t.status !== 'done' && t.status !== 'approved' && 
 const isCompletedTask  = t => t.status === 'done' || t.status === 'approved'
 
 // ─── SIGN OUT CONFIRM (copied from CrewApp to keep this shell self-contained) ─
-function SignOutConfirm({ onConfirm, onCancel, lang }) {
+// Also hosts the theme toggle for narrow layouts (no sidebar to put it in).
+function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode }) {
   const { currentUser } = useApp()
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onCancel()}>
@@ -50,9 +80,14 @@ function SignOutConfirm({ onConfirm, onCancel, lang }) {
           {currentUser?.initials}
         </div>
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>{currentUser?.name}</div>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 24 }}>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 18 }}>
           {lang === 'es' ? '¿Cerrar sesión?' : 'Sign out?'}
         </div>
+        {toggleDarkMode && (
+          <div style={{ marginBottom: 18 }}>
+            <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} />
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel}>
             {lang === 'es' ? 'Cancelar' : 'Cancel'}
@@ -72,7 +107,7 @@ function SignOutConfirm({ onConfirm, onCancel, lang }) {
 // is sites with type icons (wireless 📡 / fiber 🏢) instead of phase names.
 function InfraSidebar({
   projects, selTask, view, onSelectMyStock, onSelectTask, onSelectSite,
-  currentUser, onUserTap,
+  currentUser, onUserTap, darkMode, toggleDarkMode,
 }) {
   const [expandedProject, setExpandedProject] = useState(projects[0]?.id || null)
   const [expandedSite, setExpandedSite] = useState(null)
@@ -266,12 +301,17 @@ function InfraSidebar({
 
       <div style={{
         padding: '10px 14px', borderTop: '1px solid var(--border)',
-        flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6
+        flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6
       }}>
-        <div style={{ width: 4, height: 18, background: 'var(--orange)', borderRadius: 2 }} />
-        <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.3px' }}>
-          FiberLog <span style={{ fontWeight: 500, color: 'var(--muted)' }}>· Infra</span>
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 4, height: 18, background: 'var(--orange)', borderRadius: 2 }} />
+          <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.3px' }}>
+            FiberLog <span style={{ fontWeight: 500, color: 'var(--muted)' }}>· Infra</span>
+          </span>
+        </div>
+        {toggleDarkMode && (
+          <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} compact />
+        )}
       </div>
     </div>
   )
@@ -279,7 +319,7 @@ function InfraSidebar({
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function InfraCrewApp() {
-  const { currentUser, selectUser, lang } = useApp()
+  const { currentUser, selectUser, lang, darkMode, toggleDarkMode } = useApp()
   const isWide = useIsWide()
 
   // Local infra tree — the global AppContext.projects holds the fiber-shaped
@@ -447,6 +487,8 @@ export default function InfraCrewApp() {
           }}
           currentUser={currentUser}
           onUserTap={() => setShowSignOut(true)}
+          darkMode={darkMode}
+          toggleDarkMode={toggleDarkMode}
         />
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -504,6 +546,8 @@ export default function InfraCrewApp() {
             lang={lang}
             onConfirm={handleSignOut}
             onCancel={() => setShowSignOut(false)}
+            darkMode={darkMode}
+            toggleDarkMode={toggleDarkMode}
           />
         )}
       </div>
@@ -570,6 +614,8 @@ export default function InfraCrewApp() {
           lang={lang}
           onConfirm={handleSignOut}
           onCancel={() => setShowSignOut(false)}
+          darkMode={darkMode}
+          toggleDarkMode={toggleDarkMode}
         />
       )}
     </div>

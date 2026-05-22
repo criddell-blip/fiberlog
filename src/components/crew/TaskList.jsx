@@ -312,14 +312,18 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
 
             {showPast && approvedTasks.map((task, i) => {
               const jt = getJobType(task)
+              // Tappable so the crew can open TaskSummaryView and inspect
+              // what was submitted/approved. The parent's onSelect handler
+              // routes pending/approved/done tasks to the summary view.
               return (
-                <div key={task.id} style={{
+                <div key={task.id} onClick={() => onSelect(task)} style={{
                   display: 'flex', alignItems: 'center', gap: 10,
                   padding: '8px 14px',
                   background: 'transparent',
                   borderTop: i === 0 ? '1px solid var(--border)' : 'none',
                   borderBottom: '1px solid var(--border)',
                   opacity: 0.55,
+                  cursor: 'pointer',
                 }}>
                   <span style={{ fontSize: 14, flexShrink: 0 }}>{jt.icon}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -330,6 +334,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
                   <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--teal-lt)', color: 'var(--teal-dk)', flexShrink: 0 }}>
                     ✓
                   </span>
+                  <span style={{ fontSize: 14, color: 'var(--hint)', flexShrink: 0 }}>›</span>
                 </div>
               )
             })}
