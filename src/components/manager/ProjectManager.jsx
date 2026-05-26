@@ -1217,20 +1217,25 @@ export default function ProjectManager() {
                   so the manager doesn't fat-finger it. Hard-delete is
                   intentionally NOT offered because sites are FK targets
                   for tasks; decommission flips status='decommissioned'
-                  and the UI filters them out everywhere. */}
-              <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
-                <button
-                  onClick={() => setConfirmDecommSite(editSite)}
-                  disabled={editSiteSaving}
-                  style={{
-                    width: '100%', padding: '8px 12px',
-                    background: 'none', border: '1px solid var(--red)',
-                    color: 'var(--red)', borderRadius: 8,
-                    fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                  }}>
-                  ⊘ Decommission site
-                </button>
-              </div>
+                  and the UI filters them out everywhere.
+                  Owner-only: managers can edit attrs + move to project,
+                  but retiring a location is owner-gated since it removes
+                  it from every UI list system-wide. */}
+              {currentUser?.role === 'owner' && (
+                <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
+                  <button
+                    onClick={() => setConfirmDecommSite(editSite)}
+                    disabled={editSiteSaving}
+                    style={{
+                      width: '100%', padding: '8px 12px',
+                      background: 'none', border: '1px solid var(--red)',
+                      color: 'var(--red)', borderRadius: 8,
+                      fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                    }}>
+                    ⊘ Decommission site
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
