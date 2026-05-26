@@ -146,11 +146,15 @@ function InfraSidebar({
       borderRight: '1px solid var(--border)', display: 'flex',
       flexDirection: 'column', height: '100%', overflow: 'hidden'
     }}>
-      {/* User header */}
+      {/* User header — see CrewApp.jsx for the layout rationale. Two
+          stacked rows: user info, then a settings ribbon (theme +
+          back-to-manager pills). Mirrors ManagerApp so working managers
+          find the mode toggle in the same spot in both portals. */}
       <div style={{
         padding: '14px 14px 12px', borderBottom: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0
+        display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0
       }}>
+       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button
           onClick={onUserTap}
           style={{
@@ -175,6 +179,14 @@ function InfraSidebar({
             )}
           </div>
         </div>
+       </div>
+
+       {(toggleDarkMode || exitCrewMode) && (
+         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+           {toggleDarkMode && <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} compact />}
+           {exitCrewMode && <BackToManagerButton exitCrewMode={exitCrewMode} compact />}
+         </div>
+       )}
       </div>
 
       {/* My Stock entry — same affordance as fiber shell. */}
@@ -328,20 +340,16 @@ function InfraSidebar({
         })}
       </div>
 
+      {/* Footer — just the wordmark. Toggles moved to the header
+          ribbon so they're discoverable in the same spot as ManagerApp. */}
       <div style={{
         padding: '10px 14px', borderTop: '1px solid var(--border)',
-        flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap'
+        flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ width: 4, height: 18, background: 'var(--orange)', borderRadius: 2 }} />
-          <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.3px' }}>
-            FiberLog <span style={{ fontWeight: 500, color: 'var(--muted)' }}>· Infra</span>
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {exitCrewMode && <BackToManagerButton exitCrewMode={exitCrewMode} compact />}
-          {toggleDarkMode && <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} compact />}
-        </div>
+        <div style={{ width: 4, height: 18, background: 'var(--orange)', borderRadius: 2 }} />
+        <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.3px' }}>
+          FiberLog <span style={{ fontWeight: 500, color: 'var(--muted)' }}>· Infra</span>
+        </span>
       </div>
     </div>
   )

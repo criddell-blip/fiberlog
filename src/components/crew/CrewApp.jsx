@@ -143,11 +143,19 @@ function CrewSidebar({
       borderRight: '1px solid var(--border)', display: 'flex',
       flexDirection: 'column', height: '100%', overflow: 'hidden'
     }}>
-      {/* User header */}
+      {/* User header. Lays out as two stacked rows:
+            row 1 — avatar + name + crew_type subtitle
+            row 2 — settings ribbon (theme + back-to-manager pills)
+          The ribbon mirrors ManagerApp's header so a working manager
+          finds the mode switch in the same spot in both portals — they
+          tap Crew Mode at the top of the manager sidebar, and tap
+          Manager at the top of the crew sidebar. Previously the
+          Manager pill lived in the footer and was easy to miss. */}
       <div style={{
         padding: '14px 14px 12px', borderBottom: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0
+        display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0
       }}>
+       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button
           onClick={onUserTap}
           style={{
@@ -172,6 +180,16 @@ function CrewSidebar({
             )}
           </div>
         </div>
+       </div>
+
+       {/* Settings ribbon — both toggles sit here so they're easy to
+           find at the top of the sidebar, matching ManagerApp's layout. */}
+       {(toggleDarkMode || exitCrewMode) && (
+         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+           {toggleDarkMode && <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} compact />}
+           {exitCrewMode && <BackToManagerButton exitCrewMode={exitCrewMode} compact />}
+         </div>
+       )}
       </div>
 
       {/* My Stock entry — sits above the project tree per the design.
@@ -318,18 +336,14 @@ function CrewSidebar({
         })}
       </div>
 
+      {/* Footer — just the wordmark now. Theme + back-to-manager pills
+          moved to the header ribbon so they're easier to spot. */}
       <div style={{
         padding: '10px 14px', borderTop: '1px solid var(--border)',
-        flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap'
+        flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ width: 4, height: 18, background: 'var(--orange)', borderRadius: 2 }} />
-          <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.3px' }}>FiberLog</span>
-        </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {exitCrewMode && <BackToManagerButton exitCrewMode={exitCrewMode} compact />}
-          {toggleDarkMode && <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} compact />}
-        </div>
+        <div style={{ width: 4, height: 18, background: 'var(--orange)', borderRadius: 2 }} />
+        <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.3px' }}>FiberLog</span>
       </div>
     </div>
   )
