@@ -47,6 +47,16 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [showBulkMove, setShowBulkMove] = useState(false)
 
+  // Two-tier location filter:
+  //   typeFilter — top ribbon: 'all' | 'warehouse' | 'truck' | 'job_site'
+  //                drives which secondary pills are visible
+  //   scope (above) — the actual selected location (or 'all')
+  // The old single-row pill wall scaled badly past ~10 locations; with
+  // 40+ pills it ate ~25% of vertical space. The ribbon collapses it.
+  // 'all' as type keeps everything visible — same as before — but is
+  // no longer the only way to find a location.
+  const [typeFilter, setTypeFilter] = useState('all')
+
   const lastClickedIndexRef = useRef(null)
   const [internalRefresh, setInternalRefresh] = useState(0)
 
@@ -248,14 +258,48 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
 
   return (
     <div style={{ position: 'relative', paddingBottom: selectedCount > 0 ? 76 : 0 }}>
-      {/* Top-level location pills */}
+      {/* Type ribbon — primary filter. Click a type to scope the
+          secondary pills below. Counts per type help the owner spot
+          which bucket contains the location they're looking for. */}
+      {(() => {
+        const counts = locations.reduce((acc, l) => {
+          acc[l.type] = (acc[l.type] || 0) + 1
+          return acc
+        }, {})
+        const typeOptions = [
+          { id: 'all',       label: 'All',             icon: null,  count: locations.length },
+          { id: 'warehouse', label: 'Warehouses',      icon: '🏭', count: counts.warehouse || 0 },
+          { id: 'truck',     label: 'Trucks',          icon: '🚚', count: counts.truck     || 0 },
+          { id: 'job_site',  label: 'Project buckets', icon: '📍', count: counts.job_site  || 0 },
+        ].filter(t => t.id === 'all' || t.count > 0)
+        return (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+            {typeOptions.map(t => (
+              <button key={t.id}
+                onClick={() => setTypeFilter(t.id)}
+                style={{
+                  ...pillStyle(typeFilter === t.id),
+                  fontWeight: 800,
+                }}>
+                {t.icon || '📦'} {t.label} <span style={{ fontWeight: 600, opacity: 0.8 }}>({t.count})</span>
+              </button>
+            ))}
+          </div>
+        )
+      })()}
+
+      {/* Secondary location pills — filtered by the selected type.
+          'All locations' stays as the no-scope option. When a type is
+          chosen, only matching locations show. */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
         <button onClick={() => setScope('all')} style={pillStyle(scope === 'all')}>All locations</button>
-        {locations.map(loc => (
-          <button key={loc.id} onClick={() => setScope(loc.id)} style={pillStyle(scope === loc.id)}>
-            {TYPE_ICONS[loc.type] || '📦'} {loc.assigned_user?.name || loc.name}
-          </button>
-        ))}
+        {locations
+          .filter(loc => typeFilter === 'all' || loc.type === typeFilter)
+          .map(loc => (
+            <button key={loc.id} onClick={() => setScope(loc.id)} style={pillStyle(scope === loc.id)}>
+              {TYPE_ICONS[loc.type] || '📦'} {loc.assigned_user?.name || loc.name}
+            </button>
+          ))}
       </div>
 
       {/* Bin sub-pills (only when a warehouse is scoped) */}
