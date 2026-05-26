@@ -45,6 +45,46 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   // and after any movement (refreshKey bumps).
   const [stockCounts, setStockCounts] = useState(() => new Map())
 
+  // Warehouse + aisle collapse state. With 165+ bins under Main Warehouse,
+  // a flat expanded list is a scroll wall. Default: all warehouses and
+  // aisles collapsed. User expands the warehouse → sees aisle headers
+  // grouped by the "Aisle X" prefix on bin names → expands a specific
+  // aisle to see its bins. "Other" group catches Bulk Pipe Storage,
+  // Aisle 1 bay 12, anything that doesn't match the pattern.
+  const [expandedWarehouses, setExpandedWarehouses] = useState(() => new Set())
+  const [expandedAisles, setExpandedAisles] = useState(() => new Set())
+
+  function toggleWarehouse(id) {
+    setExpandedWarehouses(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  function toggleAisle(key) {
+    setExpandedAisles(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+  }
+
+  // Group bins by the "Aisle X" prefix on their name. Returns sorted
+  // groups: numbered aisles ascending, then "Other" at the bottom.
+  function groupBinsByAisle(bins) {
+    const map = new Map()
+    for (const bin of bins) {
+      const m = (bin.name || '').match(/^Aisle\s+(\S+?)\s*[,/]/i)
+      const key = m ? m[1] : 'other'
+      const label = m ? `Aisle ${m[1]}` : 'Other'
+      if (!map.has(key)) {
+        map.set(key, { key, label, bins: [], sortKey: m ? (parseInt(m[1], 10) || 999) : 9999 })
+      }
+      map.get(key).bins.push(bin)
+    }
+    return Array.from(map.values()).sort((a, b) => a.sortKey - b.sortKey)
+  }
+
   // Retire-with-recovery modal state. When `retiring` is set, we load the
   // location's current stock and offer per-part recovery into another
   // location. selectedParts shape mirrors ProjectManager's decommission
@@ -312,16 +352,31 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                         return acc
                       }, { distinctParts: counts?.distinctParts || 0, totalUnits: counts?.totalUnits || 0 })
                     : counts
+                  const isWhExpandable = type === 'warehouse' && bins.length > 0
+                  const isWhExpanded = isWhExpandable && expandedWarehouses.has(loc.id)
+                  const aisleGroups = isWhExpanded ? groupBinsByAisle(bins) : []
+                  // Click-stopper for action buttons so they don't also
+                  // toggle the warehouse expansion.
+                  const stop = handler => e => { e.stopPropagation(); handler() }
                   return (
                     <div key={loc.id} style={{ marginBottom: 6 }}>
                       {/* Warehouse / location header row */}
-                      <div style={{
-                        background: 'var(--surface)', border: '1px solid var(--border)',
-                        borderRadius: bins.length > 0 ? 'var(--r-sm) var(--r-sm) 0 0' : 'var(--r-sm)',
-                        padding: '10px 14px',
-                        display: 'flex', alignItems: 'center', gap: 12,
-                        borderBottom: bins.length > 0 ? '1px solid var(--border)' : '1px solid var(--border)',
-                      }}>
+                      <div
+                        onClick={isWhExpandable ? () => toggleWarehouse(loc.id) : undefined}
+                        style={{
+                          background: 'var(--surface)', border: '1px solid var(--border)',
+                          borderRadius: isWhExpanded ? 'var(--r-sm) var(--r-sm) 0 0' : 'var(--r-sm)',
+                          padding: '10px 14px',
+                          display: 'flex', alignItems: 'center', gap: 12,
+                          cursor: isWhExpandable ? 'pointer' : 'default',
+                        }}>
+                        {isWhExpandable && (
+                          <span style={{
+                            fontSize: 14, color: 'var(--muted)', display: 'inline-block',
+                            transform: isWhExpanded ? 'rotate(90deg)' : 'none',
+                            transition: 'transform .15s', width: 12, textAlign: 'center',
+                          }}>›</span>
+                        )}
                         <span style={{ fontSize: 20 }}>{TYPE_ICONS[type]}</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 700, fontSize: 14 }}>
@@ -354,7 +409,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                         </div>
                         {onJumpToStock && rollup && rollup.distinctParts > 0 && (
                           <button
-                            onClick={() => onJumpToStock(loc.id)}
+                            onClick={stop(() => onJumpToStock(loc.id))}
                             title="View stock at this location"
                             style={{
                               fontSize: 11, color: 'var(--orange)', background: 'var(--orange-lt)',
@@ -365,7 +420,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                         )}
                         {type === 'warehouse' && (
                           <button
-                            onClick={() => setAddingBinFor(loc)}
+                            onClick={stop(() => setAddingBinFor(loc))}
                             style={{
                               fontSize: 11, color: 'var(--teal)', background: 'var(--teal-lt)',
                               border: '1px solid var(--teal)', borderRadius: 14, padding: '3px 10px',
@@ -374,19 +429,22 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                           >＋ Bin</button>
                         )}
                         <button
-                          onClick={() => setEditing(loc)}
+                          onClick={stop(() => setEditing(loc))}
                           style={{ fontSize: 12, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
                         >Edit</button>
                         {isOwner && (
                           <button
-                            onClick={() => handleDeactivate(loc)}
+                            onClick={stop(() => handleDeactivate(loc))}
                             style={{ fontSize: 12, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
                           >Retire</button>
                         )}
                       </div>
 
-                      {/* Bins under this warehouse — indented sub-rows */}
-                      {bins.length > 0 && (
+                      {/* Bins under this warehouse — grouped by aisle,
+                          each aisle independently collapsible. Only the
+                          aisles the user opens render their bin rows,
+                          which keeps a 165-bin warehouse navigable. */}
+                      {isWhExpanded && (
                         <div style={{
                           background: 'var(--surface2)',
                           borderRadius: '0 0 var(--r-sm) var(--r-sm)',
@@ -394,51 +452,91 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                           borderTop: 'none',
                           padding: '4px 0',
                         }}>
-                          {bins.map((bin, i) => {
-                            const binCounts = stockCounts.get(bin.id)
+                          {aisleGroups.map((group, gi) => {
+                            const aisleKey = `${loc.id}:${group.key}`
+                            const isAisleExpanded = expandedAisles.has(aisleKey)
+                            // Stock rollup per aisle so the header shows
+                            // how loaded each aisle is at a glance.
+                            const aisleRollup = group.bins.reduce((acc, b) => {
+                              const c = stockCounts.get(b.id)
+                              if (c) { acc.distinctParts += c.distinctParts; acc.totalUnits += c.totalUnits }
+                              return acc
+                            }, { distinctParts: 0, totalUnits: 0 })
                             return (
-                              <div key={bin.id} style={{
-                                display: 'flex', alignItems: 'center', gap: 10,
-                                padding: '8px 14px 8px 36px',
-                                borderBottom: i < bins.length - 1 ? '1px solid var(--border)' : 'none',
+                              <div key={group.key} style={{
+                                borderBottom: gi < aisleGroups.length - 1 ? '1px solid var(--border)' : 'none',
                               }}>
-                                <span style={{ fontSize: 14, color: 'var(--hint)' }}>↳</span>
-                                <span style={{ fontSize: 13 }}>📥</span>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontWeight: 600, fontSize: 12 }}>{bin.name}</div>
-                                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 1, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5 }}>
-                                    {bin.notes && <span>{bin.notes}</span>}
-                                    {binCounts && binCounts.distinctParts > 0 && (
-                                      <>
-                                        {bin.notes && <span style={{ color: 'var(--hint)' }}>·</span>}
-                                        <span><strong style={{ color: 'var(--text)' }}>{binCounts.distinctParts.toLocaleString()}</strong> part{binCounts.distinctParts === 1 ? '' : 's'}</span>
-                                        <span style={{ color: 'var(--hint)' }}>·</span>
-                                        <span><strong style={{ color: 'var(--text)' }}>{binCounts.totalUnits.toLocaleString()}</strong> unit{binCounts.totalUnits === 1 ? '' : 's'}</span>
-                                      </>
-                                    )}
-                                  </div>
+                                <div
+                                  onClick={() => toggleAisle(aisleKey)}
+                                  style={{
+                                    display: 'flex', alignItems: 'center', gap: 8,
+                                    padding: '7px 14px 7px 20px',
+                                    cursor: 'pointer',
+                                    background: isAisleExpanded ? 'var(--surface)' : 'transparent',
+                                  }}>
+                                  <span style={{
+                                    fontSize: 12, color: 'var(--muted)', display: 'inline-block',
+                                    transform: isAisleExpanded ? 'rotate(90deg)' : 'none',
+                                    transition: 'transform .15s', width: 10, textAlign: 'center',
+                                  }}>›</span>
+                                  <span style={{ fontSize: 13, fontWeight: 700 }}>{group.label}</span>
+                                  <span style={{
+                                    fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10,
+                                    background: 'var(--gray-lt)', color: 'var(--muted)',
+                                  }}>{group.bins.length}</span>
+                                  {aisleRollup.distinctParts > 0 && (
+                                    <span style={{ fontSize: 11, color: 'var(--hint)', marginLeft: 'auto' }}>
+                                      {aisleRollup.distinctParts.toLocaleString()} part{aisleRollup.distinctParts === 1 ? '' : 's'} · {aisleRollup.totalUnits.toLocaleString()} units
+                                    </span>
+                                  )}
                                 </div>
-                                {onJumpToStock && binCounts && binCounts.distinctParts > 0 && (
-                                  <button
-                                    onClick={() => onJumpToStock(bin.id)}
-                                    title="View stock in this bin"
-                                    style={{
-                                      fontSize: 10, color: 'var(--orange)', background: 'var(--orange-lt)',
-                                      border: '1px solid var(--orange-dk)', borderRadius: 12, padding: '2px 8px',
-                                      cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
-                                    }}
-                                  >📦 Stock →</button>
-                                )}
-                                <button
-                                  onClick={() => setEditing(bin)}
-                                  style={{ fontSize: 11, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
-                                >Edit</button>
-                                {isOwner && (
-                                  <button
-                                    onClick={() => handleDeactivate(bin)}
-                                    style={{ fontSize: 11, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
-                                  >Retire</button>
-                                )}
+                                {isAisleExpanded && group.bins.map((bin, i) => {
+                                  const binCounts = stockCounts.get(bin.id)
+                                  return (
+                                    <div key={bin.id} style={{
+                                      display: 'flex', alignItems: 'center', gap: 10,
+                                      padding: '6px 14px 6px 44px',
+                                      borderTop: '1px solid var(--border)',
+                                    }}>
+                                      <span style={{ fontSize: 13 }}>📥</span>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontWeight: 600, fontSize: 12 }}>{bin.name}</div>
+                                        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 1, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5 }}>
+                                          {bin.notes && <span>{bin.notes}</span>}
+                                          {binCounts && binCounts.distinctParts > 0 && (
+                                            <>
+                                              {bin.notes && <span style={{ color: 'var(--hint)' }}>·</span>}
+                                              <span><strong style={{ color: 'var(--text)' }}>{binCounts.distinctParts.toLocaleString()}</strong> part{binCounts.distinctParts === 1 ? '' : 's'}</span>
+                                              <span style={{ color: 'var(--hint)' }}>·</span>
+                                              <span><strong style={{ color: 'var(--text)' }}>{binCounts.totalUnits.toLocaleString()}</strong> unit{binCounts.totalUnits === 1 ? '' : 's'}</span>
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {onJumpToStock && binCounts && binCounts.distinctParts > 0 && (
+                                        <button
+                                          onClick={() => onJumpToStock(bin.id)}
+                                          title="View stock in this bin"
+                                          style={{
+                                            fontSize: 10, color: 'var(--orange)', background: 'var(--orange-lt)',
+                                            border: '1px solid var(--orange-dk)', borderRadius: 12, padding: '2px 8px',
+                                            cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
+                                          }}
+                                        >📦 Stock →</button>
+                                      )}
+                                      <button
+                                        onClick={() => setEditing(bin)}
+                                        style={{ fontSize: 11, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                                      >Edit</button>
+                                      {isOwner && (
+                                        <button
+                                          onClick={() => handleDeactivate(bin)}
+                                          style={{ fontSize: 11, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                                        >Retire</button>
+                                      )}
+                                    </div>
+                                  )
+                                })}
                               </div>
                             )
                           })}
