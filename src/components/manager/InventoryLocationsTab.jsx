@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import {
-  createLocation, updateLocation, deactivateLocation, getBinsForWarehouse,
-  getStockCountsByLocation,
+  createLocation, updateLocation, deactivateLocation, deactivateLocationWithRecovery,
+  getBinsForWarehouse, getStockCountsByLocation, getStockByLocation,
 } from '../../lib/inventory'
 
 const TYPE_LABELS = {
@@ -44,6 +44,17 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   // Stock summary counts per location id. Refreshed alongside locations
   // and after any movement (refreshKey bumps).
   const [stockCounts, setStockCounts] = useState(() => new Map())
+
+  // Retire-with-recovery modal state. When `retiring` is set, we load the
+  // location's current stock and offer per-part recovery into another
+  // location. selectedParts shape mirrors ProjectManager's decommission
+  // modal: { [partId]: { selected, qty, name, unit } }.
+  const [retiring, setRetiring] = useState(null)
+  const [retireStock, setRetireStock] = useState([])
+  const [retireSelectedParts, setRetireSelectedParts] = useState({})
+  const [retireDestinationId, setRetireDestinationId] = useState('')
+  const [retireLoading, setRetireLoading] = useState(false)
+  const [retireSaving, setRetireSaving] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -157,20 +168,101 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
     }
   }
 
-  async function handleDeactivate(loc) {
-    if (!window.confirm(`Deactivate "${loc.name}"? Stock and movement history are preserved, but it won't show up for new movements.`)) return
+  // Click handler — opens the retire modal. The modal then loads stock
+  // at the location + offers per-part recovery before flipping is_active.
+  function handleDeactivate(loc) {
+    setRetiring(loc)
+  }
+
+  // Load stock for the location being retired (so the owner sees what's
+  // there before deciding what to recover). Cleared on close so the next
+  // open starts fresh.
+  useEffect(() => {
+    if (!retiring) {
+      setRetireStock([]); setRetireSelectedParts({}); setRetireDestinationId('')
+      return
+    }
+    let cancelled = false
+    setRetireLoading(true)
+    getStockByLocation(retiring.id)
+      .then(rows => {
+        if (cancelled) return
+        // Filter to positive stock — negative or zero rows aren't
+        // physical inventory to recover, so don't surface them in the picker.
+        const positive = rows.filter(r => Number(r.quantity) > 0)
+        setRetireStock(positive)
+        setRetireSelectedParts(Object.fromEntries(
+          positive.map(r => [
+            r.parts_catalog?.id,
+            {
+              selected: false,
+              qty: Number(r.quantity),
+              name: r.parts_catalog?.name || r.parts_catalog?.id,
+              unit: r.parts_catalog?.unit || 'ea',
+            },
+          ])
+        ))
+      })
+      .catch(e => {
+        console.warn('Stock load for retire failed:', e)
+        showToast('Could not load stock: ' + e.message)
+      })
+      .finally(() => { if (!cancelled) setRetireLoading(false) })
+    return () => { cancelled = true }
+  }, [retiring, showToast])
+
+  function toggleRetirePart(partId) {
+    setRetireSelectedParts(prev => ({
+      ...prev,
+      [partId]: { ...prev[partId], selected: !prev[partId]?.selected },
+    }))
+  }
+  function setRetirePartQty(partId, qty) {
+    const n = Math.max(0, Number(qty) || 0)
+    setRetireSelectedParts(prev => ({
+      ...prev,
+      [partId]: { ...prev[partId], qty: n },
+    }))
+  }
+  function selectAllRetireParts(select) {
+    setRetireSelectedParts(prev => Object.fromEntries(
+      Object.entries(prev).map(([id, v]) => [id, { ...v, selected: select }])
+    ))
+  }
+
+  async function handleConfirmRetire() {
+    if (!retiring) return
+    const recoveryItems = Object.entries(retireSelectedParts)
+      .filter(([, v]) => v.selected && v.qty > 0)
+      .map(([partId, v]) => ({ partId, quantity: v.qty, unit: v.unit }))
+    if (recoveryItems.length > 0 && !retireDestinationId) {
+      showToast('Pick a destination for the parts you selected.')
+      return
+    }
+    setRetireSaving(true)
     try {
-      await deactivateLocation(loc.id)
-      showToast('Deactivated')
-      if (loc.type === 'bin' && loc.parent_location_id) {
-        // Refetch the parent warehouse's bins so the deactivated bin disappears
-        const updated = await getBinsForWarehouse(loc.parent_location_id)
-        setBinsByWarehouse(prev => ({ ...prev, [loc.parent_location_id]: updated }))
+      await deactivateLocationWithRecovery(
+        retiring.id,
+        recoveryItems,
+        recoveryItems.length > 0 ? retireDestinationId : null,
+      )
+      const wasBin = retiring.type === 'bin'
+      const parentId = retiring.parent_location_id
+      showToast(recoveryItems.length > 0
+        ? `Retired · ${recoveryItems.length} part${recoveryItems.length === 1 ? '' : 's'} recovered`
+        : 'Retired')
+      setRetiring(null)
+      if (wasBin && parentId) {
+        const updated = await getBinsForWarehouse(parentId)
+        setBinsByWarehouse(prev => ({ ...prev, [parentId]: updated }))
       } else {
         onChanged()
       }
     } catch (e) {
-      showToast('Deactivate failed: ' + e.message)
+      console.error('Retire failed:', e)
+      showToast('Retire failed: ' + e.message)
+    } finally {
+      setRetireSaving(false)
     }
   }
 
@@ -390,6 +482,177 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
           onSave={(formData) => handleSaveBin(formData, addingBinFor)}
         />
       )}
+
+      {retiring && (() => {
+        const selectedItems = Object.values(retireSelectedParts).filter(v => v.selected && v.qty > 0)
+        const recoveryCount = selectedItems.length
+        const allSelected = retireStock.length > 0
+          && retireStock.every(r => retireSelectedParts[r.parts_catalog?.id]?.selected)
+        // Valid destinations: any other active non-bin location plus the
+        // bins of warehouses we know about. Exclude the location being
+        // retired. Warehouses are listed first (most common destination).
+        const destOptions = []
+        ;[...(locations || [])]
+          .filter(l => l.id !== retiring.id && l.is_active !== false)
+          .sort((a, b) => {
+            // warehouses first, then job_sites, then trucks
+            const order = { warehouse: 0, job_site: 1, truck: 2, scrap: 3, vendor: 4 }
+            const o = (order[a.type] ?? 9) - (order[b.type] ?? 9)
+            if (o !== 0) return o
+            return (a.name || '').localeCompare(b.name || '')
+          })
+          .forEach(l => destOptions.push(l))
+        return (
+        <div className="overlay open" onClick={e => e.target === e.currentTarget && !retireSaving && setRetiring(null)}>
+          <div className="overlay-sheet" style={{ maxWidth: 600 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+              <div style={{ fontSize: 22 }}>{TYPE_ICONS[retiring.type] || '📍'}</div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 17 }}>
+                  Retire <strong>{retiring.name}</strong>?
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  {TYPE_LABELS[retiring.type] || retiring.type} · {retireStock.length || 0} part type{retireStock.length === 1 ? '' : 's'} with stock
+                </div>
+              </div>
+            </div>
+
+            <div className="sec-label" style={{ marginTop: 16, marginBottom: 6 }}>
+              Move stock to another location? <span style={{ color: 'var(--hint)', fontWeight: 600, marginLeft: 6 }}>(strongly recommended if there's stock here)</span>
+            </div>
+
+            {retireLoading && (
+              <div style={{ textAlign: 'center', padding: 20, color: 'var(--muted)', fontSize: 13 }}>Loading stock…</div>
+            )}
+
+            {!retireLoading && retireStock.length === 0 && (
+              <div style={{
+                background: 'var(--surface)', border: '1px solid var(--border)',
+                borderRadius: 'var(--r-sm)', padding: 14, textAlign: 'center',
+                color: 'var(--hint)', fontSize: 12, marginBottom: 12,
+              }}>
+                No stock at this location — safe to retire as-is.
+              </div>
+            )}
+
+            {!retireLoading && retireStock.length > 0 && (
+              <>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <button
+                    onClick={() => selectAllRetireParts(!allSelected)}
+                    style={{
+                      fontSize: 11, fontWeight: 700, padding: '4px 10px',
+                      background: 'var(--surface2)', color: 'var(--teal-mid)',
+                      border: '1.5px solid var(--teal)', borderRadius: 999, cursor: 'pointer',
+                    }}>
+                    {allSelected ? '☐ Deselect all' : '☑ Select all'}
+                  </button>
+                  <span style={{ fontSize: 11, color: 'var(--hint)', alignSelf: 'center' }}>
+                    {recoveryCount} of {retireStock.length} selected
+                  </span>
+                </div>
+
+                <div style={{
+                  border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+                  maxHeight: 280, overflowY: 'auto', marginBottom: 10,
+                }}>
+                  {retireStock.map((r, i) => {
+                    const partId = r.parts_catalog?.id
+                    const sel = retireSelectedParts[partId] || {}
+                    const maxQty = Number(r.quantity)
+                    return (
+                      <div key={partId} style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '8px 12px',
+                        borderBottom: i < retireStock.length - 1 ? '1px solid var(--border)' : 'none',
+                        background: sel.selected ? 'var(--teal-lt)' : 'transparent',
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={sel.selected || false}
+                          onChange={() => toggleRetirePart(partId)}
+                          style={{ flexShrink: 0, cursor: 'pointer' }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {r.parts_catalog?.name || partId}
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'monospace' }}>
+                            {partId} · on-hand {maxQty.toLocaleString()} {r.parts_catalog?.unit || 'ea'}
+                          </div>
+                        </div>
+                        <input
+                          type="number"
+                          min={0}
+                          max={maxQty}
+                          value={sel.qty ?? maxQty}
+                          disabled={!sel.selected}
+                          onChange={e => setRetirePartQty(partId, e.target.value)}
+                          style={{
+                            width: 80, padding: '4px 8px', textAlign: 'right',
+                            fontSize: 13, fontWeight: 700,
+                            background: sel.selected ? 'var(--bg)' : 'var(--gray-lt)',
+                            color: sel.selected ? 'var(--orange)' : 'var(--hint)',
+                            border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)',
+                          }}
+                        />
+                        <span style={{ fontSize: 11, color: 'var(--muted)', width: 28 }}>{r.parts_catalog?.unit || 'ea'}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="field">
+                  <label>Move selected parts to</label>
+                  <select
+                    value={retireDestinationId}
+                    onChange={e => setRetireDestinationId(e.target.value)}
+                    disabled={recoveryCount === 0}
+                    style={{
+                      width: '100%', padding: '8px 10px', fontSize: 13,
+                      background: recoveryCount === 0 ? 'var(--gray-lt)' : 'var(--surface2)',
+                      color: recoveryCount === 0 ? 'var(--hint)' : 'var(--text)',
+                      border: '1.5px solid var(--border2)', borderRadius: 8,
+                    }}>
+                    <option value="">— Pick a location —</option>
+                    {destOptions.map(d => (
+                      <option key={d.id} value={d.id}>
+                        {TYPE_ICONS[d.type] || ''} {d.name}{d.type !== 'warehouse' ? ` (${TYPE_LABELS[d.type]})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+
+            {!retireLoading && retireStock.length > 0 && recoveryCount === 0 && (
+              <div style={{
+                fontSize: 11, color: 'var(--amber)',
+                background: 'var(--amber-lt)',
+                borderRadius: 'var(--r-xs)', padding: '8px 10px',
+                marginBottom: 14,
+              }}>
+                ⚠️ Retiring with stock still here leaves it orphaned. The location won't appear in the UI anymore but the inventory_stock rows remain pinned to it. Prefer to move stock out first.
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-ghost" style={{ flex: 1 }}
+                onClick={() => setRetiring(null)} disabled={retireSaving}>Cancel</button>
+              <button className="btn btn-danger" style={{ flex: 2 }}
+                onClick={handleConfirmRetire}
+                disabled={retireSaving || retireLoading || (recoveryCount > 0 && !retireDestinationId)}>
+                {retireSaving
+                  ? 'Working…'
+                  : recoveryCount > 0
+                    ? `Move ${recoveryCount} part${recoveryCount === 1 ? '' : 's'} + Retire`
+                    : 'Retire only'}
+              </button>
+            </div>
+          </div>
+        </div>
+        )
+      })()}
     </div>
   )
 }

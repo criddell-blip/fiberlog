@@ -198,12 +198,36 @@ export async function updateSite(siteId, patch) {
 // getInfraTree() + getSitesByProject() both filter status='active', so a
 // decommissioned site falls out of the UI immediately while its tasks
 // (and their submissions / movements) remain linked for the audit trail.
+//
+// Routes through the decommission_site_with_recovery RPC with an empty
+// recovery list so this thin helper still does the right thing — and so
+// the owner-only check in the RPC gates any caller that bypasses the UI.
 export async function decommissionSite(siteId) {
-  const { error } = await db
-    .from('sites')
-    .update({ status: 'decommissioned' })
-    .eq('id', siteId)
+  return decommissionSiteWithRecovery(siteId, [], null)
+}
+
+// Atomic decommission + optional materials recovery.
+//
+// recoveryItems is an array of { partId, quantity, unit } — empty means
+// "decommission only, no transfers." destinationLocationId is required
+// when recoveryItems has rows.
+//
+// The RPC writes one transfer movement per item (project bucket →
+// destination) before flipping site.status. All in one tx so a mid-batch
+// failure rolls back cleanly.
+export async function decommissionSiteWithRecovery(siteId, recoveryItems, destinationLocationId) {
+  const items = (recoveryItems || []).map(i => ({
+    part_id: i.partId,
+    quantity: i.quantity,
+    unit: i.unit || 'ea',
+  }))
+  const { data, error } = await db.rpc('decommission_site_with_recovery', {
+    p_site_id: siteId,
+    p_recovery_items: items,
+    p_destination_location_id: destinationLocationId || null,
+  })
   if (error) throw error
+  return data
 }
 
 // All tasks anchored to a specific site. Read-only view for the manager —

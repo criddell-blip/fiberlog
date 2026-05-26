@@ -80,8 +80,32 @@ export async function updateLocation(id, updates) {
   return data
 }
 
+// Back-compat thin wrapper. New flow uses deactivateLocationWithRecovery
+// directly to enable the materials-recovery UX. This one stays so any
+// caller that just wants the legacy "flip the bit" behavior keeps working.
 export async function deactivateLocation(id) {
-  return updateLocation(id, { is_active: false })
+  return deactivateLocationWithRecovery(id, [], null)
+}
+
+// Atomic retire + optional materials recovery. RPC handles owner-only
+// gating, source/destination validation, transfer movement inserts, and
+// the final is_active=false flip in one transaction.
+//
+// recoveryItems shape: [{ partId, quantity, unit }]. Empty = retire only.
+// destinationLocationId required when recoveryItems.length > 0.
+export async function deactivateLocationWithRecovery(locationId, recoveryItems, destinationLocationId) {
+  const items = (recoveryItems || []).map(i => ({
+    part_id: i.partId,
+    quantity: i.quantity,
+    unit: i.unit || 'ea',
+  }))
+  const { data, error } = await db.rpc('deactivate_location_with_recovery', {
+    p_location_id: locationId,
+    p_recovery_items: items,
+    p_destination_location_id: destinationLocationId || null,
+  })
+  if (error) throw error
+  return data
 }
 
 // ─── STOCK ───────────────────────────────────────────────────────────────────

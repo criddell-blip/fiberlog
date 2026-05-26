@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import {
   db, addTask,
-  getSitesByProject, addSite, updateSite, decommissionSite,
+  getSitesByProject, addSite, updateSite,
+  decommissionSite, decommissionSiteWithRecovery,
   getTaskCountsBySite, getTasksBySite, getMaterialsAtSite,
 } from '../../lib/supabase'
+import { getLocations } from '../../lib/inventory'
 
 const SITE_TYPES = [
   { id: 'wireless', label: 'Wireless', icon: '📡' },
@@ -135,6 +137,16 @@ export default function ProjectManager() {
   const [editSiteProjectId, setEditSiteProjectId] = useState('')
   const [editSiteSaving, setEditSiteSaving] = useState(false)
   const [confirmDecommSite, setConfirmDecommSite] = useState(null)
+  // Decommission modal state. Populated when confirmDecommSite is set —
+  // we load materials at the site + valid recovery destinations in parallel.
+  // selectedParts shape: { [partId]: { selected: bool, qty: number, name, unit } }
+  // — qty defaults to the consumed total but the user can dial it down for
+  // partial recovery.
+  const [decommMaterials, setDecommMaterials] = useState([])
+  const [decommSelectedParts, setDecommSelectedParts] = useState({})
+  const [decommDestinations, setDecommDestinations] = useState([])
+  const [decommDestinationId, setDecommDestinationId] = useState('')
+  const [decommLoading, setDecommLoading] = useState(false)
 
   // Sub-modals stacked on top of Edit Site: tasks-at-site, materials-at-site.
   // null = closed; a populated object means open. The data is loaded lazily
@@ -243,12 +255,80 @@ export default function ProjectManager() {
     }
   }
 
+  // Whenever the decommission confirm opens, load the site's materials
+  // (so the owner sees what's been consumed) AND the list of valid
+  // destinations for recovery (warehouses only — recovering INTO another
+  // project bucket would just shuffle problems around). Cleared again
+  // when the modal closes so the next open starts fresh.
+  useEffect(() => {
+    if (!confirmDecommSite) {
+      setDecommMaterials([]); setDecommSelectedParts({})
+      setDecommDestinations([]); setDecommDestinationId('')
+      return
+    }
+    let cancelled = false
+    setDecommLoading(true)
+    Promise.all([
+      getMaterialsAtSite(confirmDecommSite.id),
+      getLocations().then(locs => locs.filter(l => l.type === 'warehouse')),
+    ])
+      .then(([mats, dests]) => {
+        if (cancelled) return
+        setDecommMaterials(mats)
+        // Default: nothing selected. User opts in to recovery. Most
+        // decommissions are accounting-only (gear stays installed) so
+        // making "select all" the default would push them toward writing
+        // transfers they didn't intend.
+        setDecommSelectedParts(Object.fromEntries(
+          mats.map(m => [m.partId, { selected: false, qty: m.qty, name: m.name, unit: m.unit }])
+        ))
+        setDecommDestinations(dests)
+        if (dests.length === 1) setDecommDestinationId(dests[0].id)  // auto-pick if only one warehouse
+      })
+      .catch(e => {
+        console.warn('Decommission modal load failed:', e)
+        showToast('Could not load materials: ' + e.message)
+      })
+      .finally(() => { if (!cancelled) setDecommLoading(false) })
+    return () => { cancelled = true }
+  }, [confirmDecommSite])
+
+  function toggleDecommPart(partId) {
+    setDecommSelectedParts(prev => ({
+      ...prev,
+      [partId]: { ...prev[partId], selected: !prev[partId]?.selected },
+    }))
+  }
+  function setDecommPartQty(partId, qty) {
+    const n = Math.max(0, Number(qty) || 0)
+    setDecommSelectedParts(prev => ({
+      ...prev,
+      [partId]: { ...prev[partId], qty: n },
+    }))
+  }
+  function selectAllDecommParts(select) {
+    setDecommSelectedParts(prev => Object.fromEntries(
+      Object.entries(prev).map(([id, v]) => [id, { ...v, selected: select }])
+    ))
+  }
+
   async function handleDecommissionSite() {
     if (!confirmDecommSite) return
     const id = confirmDecommSite.id
+    // Build the recovery list from the user's selections. Parts with
+    // qty=0 are filtered out (selecting then zeroing = "I changed my
+    // mind, don't recover this one"). If nothing selected, this is a
+    // pure decommission (zero transfers, no destination required).
+    const recoveryItems = Object.entries(decommSelectedParts)
+      .filter(([, v]) => v.selected && v.qty > 0)
+      .map(([partId, v]) => ({ partId, quantity: v.qty, unit: v.unit }))
+    if (recoveryItems.length > 0 && !decommDestinationId) {
+      showToast('Pick a destination warehouse for the parts you selected.')
+      return
+    }
     setEditSiteSaving(true)
     try {
-      await decommissionSite(id)
+      await decommissionSiteWithRecovery(id, recoveryItems, recoveryItems.length > 0 ? decommDestinationId : null)
       setProjectSites(prev => prev.filter(s => s.id !== id))
       setSiteCountByProject(prev => ({
         ...prev,
@@ -256,7 +336,9 @@ export default function ProjectManager() {
       }))
       setConfirmDecommSite(null)
       setEditSite(null)
-      showToast('Site decommissioned')
+      showToast(recoveryItems.length > 0
+        ? `Site decommissioned · ${recoveryItems.length} part${recoveryItems.length === 1 ? '' : 's'} recovered`
+        : 'Site decommissioned')
     } catch (e) {
       console.error('Decommission failed:', e)
       showToast('Decommission failed: ' + e.message)
@@ -1342,36 +1424,164 @@ export default function ProjectManager() {
           </div>
         )}
 
-        {confirmDecommSite && (
+        {confirmDecommSite && (() => {
+          const selectedItems = Object.values(decommSelectedParts).filter(v => v.selected && v.qty > 0)
+          const recoveryCount = selectedItems.length
+          const allSelected = decommMaterials.length > 0
+            && decommMaterials.every(m => decommSelectedParts[m.partId]?.selected)
+          return (
           <div className="overlay open" onClick={e => e.target === e.currentTarget && setConfirmDecommSite(null)}>
-            <div className="overlay-sheet" style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>⊘</div>
-              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Decommission this site?</div>
-              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
-                <strong>{confirmDecommSite.name}</strong>
+            <div className="overlay-sheet" style={{ maxWidth: 560 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                <div style={{ fontSize: 24 }}>⊘</div>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 17 }}>Decommission <strong>{confirmDecommSite.name}</strong>?</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                    Site disappears from the UI. Task history stays linked for the audit trail.
+                  </div>
+                </div>
               </div>
-              <div style={{ fontSize: 12, color: 'var(--hint)', marginBottom: 12 }}>
-                It disappears from the crew + manager UI, but its task history (and any approved consumption) stays linked for the audit trail.
+
+              {/* Materials section — what was consumed at this site (from
+                  the project bucket via auto-deduct). Owner picks which
+                  to physically recover; nothing selected = pure
+                  decommission, no movements written. */}
+              <div className="sec-label" style={{ marginTop: 16, marginBottom: 6 }}>
+                Recover materials? <span style={{ color: 'var(--hint)', fontWeight: 600, marginLeft: 6 }}>(optional)</span>
               </div>
+
+              {decommLoading && (
+                <div style={{ textAlign: 'center', padding: 20, color: 'var(--muted)', fontSize: 13 }}>Loading materials…</div>
+              )}
+
+              {!decommLoading && decommMaterials.length === 0 && (
+                <div style={{
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--r-sm)', padding: 14, textAlign: 'center',
+                  color: 'var(--hint)', fontSize: 12, marginBottom: 12,
+                }}>
+                  No materials consumed at this site — nothing to recover.
+                </div>
+              )}
+
+              {!decommLoading && decommMaterials.length > 0 && (
+                <>
+                  {/* Select all / none toggle */}
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    <button
+                      onClick={() => selectAllDecommParts(!allSelected)}
+                      style={{
+                        fontSize: 11, fontWeight: 700, padding: '4px 10px',
+                        background: 'var(--surface2)', color: 'var(--teal-mid)',
+                        border: '1.5px solid var(--teal)', borderRadius: 999, cursor: 'pointer',
+                      }}>
+                      {allSelected ? '☐ Deselect all' : '☑ Select all'}
+                    </button>
+                    <span style={{ fontSize: 11, color: 'var(--hint)', alignSelf: 'center' }}>
+                      {recoveryCount} of {decommMaterials.length} selected
+                    </span>
+                  </div>
+
+                  {/* Materials list — checkbox + name + qty input. The qty
+                      pre-fills with the consumed total; user can dial it
+                      down for partial recovery. */}
+                  <div style={{
+                    border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+                    maxHeight: 240, overflowY: 'auto', marginBottom: 10,
+                  }}>
+                    {decommMaterials.map((m, i) => {
+                      const sel = decommSelectedParts[m.partId] || {}
+                      return (
+                        <div key={m.partId} style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '8px 12px',
+                          borderBottom: i < decommMaterials.length - 1 ? '1px solid var(--border)' : 'none',
+                          background: sel.selected ? 'var(--teal-lt)' : 'transparent',
+                        }}>
+                          <input
+                            type="checkbox"
+                            checked={sel.selected || false}
+                            onChange={() => toggleDecommPart(m.partId)}
+                            style={{ flexShrink: 0, cursor: 'pointer' }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {m.name}
+                            </div>
+                            <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'monospace' }}>
+                              {m.partId} · consumed {m.qty.toLocaleString()} {m.unit}
+                            </div>
+                          </div>
+                          <input
+                            type="number"
+                            min={0}
+                            max={m.qty}
+                            value={sel.qty ?? m.qty}
+                            disabled={!sel.selected}
+                            onChange={e => setDecommPartQty(m.partId, e.target.value)}
+                            style={{
+                              width: 70, padding: '4px 8px', textAlign: 'right',
+                              fontSize: 13, fontWeight: 700,
+                              background: sel.selected ? 'var(--bg)' : 'var(--gray-lt)',
+                              color: sel.selected ? 'var(--orange)' : 'var(--hint)',
+                              border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)',
+                            }}
+                          />
+                          <span style={{ fontSize: 11, color: 'var(--muted)', width: 28 }}>{m.unit}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* Destination dropdown — only required when at least
+                      one part is selected. Greyed when no selection. */}
+                  <div className="field">
+                    <label>Move recovered parts to</label>
+                    <select
+                      value={decommDestinationId}
+                      onChange={e => setDecommDestinationId(e.target.value)}
+                      disabled={recoveryCount === 0}
+                      style={{
+                        width: '100%', padding: '8px 10px', fontSize: 13,
+                        background: recoveryCount === 0 ? 'var(--gray-lt)' : 'var(--surface2)',
+                        color: recoveryCount === 0 ? 'var(--hint)' : 'var(--text)',
+                        border: '1.5px solid var(--border2)', borderRadius: 8,
+                      }}>
+                      <option value="">— Pick a warehouse —</option>
+                      {decommDestinations.map(d => (
+                        <option key={d.id} value={d.id}>{d.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+
               <div style={{
-                fontSize: 12, color: 'var(--amber)',
-                background: 'var(--amber-lt)',
+                fontSize: 11, color: 'var(--hint)',
+                background: 'var(--gray-lt)',
                 borderRadius: 'var(--r-xs)', padding: '8px 10px',
-                marginBottom: 18, textAlign: 'left',
+                marginBottom: 16,
               }}>
-                💡 If you're physically pulling equipment back, log it as a PO via <strong>Inventory → Receive PO</strong> with a note like <em>“Site decommissioned”</em> so the warehouse stock reflects the recovery.
+                💡 Most decommissions are accounting-only — gear stays at the site, we just stop servicing it. Only pick materials to recover if you're physically pulling them back.
               </div>
+
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn btn-ghost" style={{ flex: 1 }}
                   onClick={() => setConfirmDecommSite(null)} disabled={editSiteSaving}>Cancel</button>
                 <button className="btn btn-danger" style={{ flex: 2 }}
-                  onClick={handleDecommissionSite} disabled={editSiteSaving}>
-                  {editSiteSaving ? 'Working…' : 'Decommission'}
+                  onClick={handleDecommissionSite}
+                  disabled={editSiteSaving || decommLoading || (recoveryCount > 0 && !decommDestinationId)}>
+                  {editSiteSaving
+                    ? 'Working…'
+                    : recoveryCount > 0
+                      ? `Recover ${recoveryCount} part${recoveryCount === 1 ? '' : 's'} + Decommission`
+                      : 'Decommission only'}
                 </button>
               </div>
             </div>
           </div>
-        )}
+          )
+        })()}
 
         {showAddPhase && (
           <div className="overlay open" onClick={e => e.target === e.currentTarget && setShowAddPhase(false)}>
