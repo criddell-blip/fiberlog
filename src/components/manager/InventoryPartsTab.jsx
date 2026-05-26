@@ -6,7 +6,11 @@ const COMMON_UNITS = ['ea', 'ft', 'm', 'in', 'lb', 'kg', 'box', 'roll', 'spool',
 
 export default function InventoryPartsTab({ refreshKey, onChanged }) {
   const { showToast } = useApp()
-  const [filter, setFilter] = useState('draft')
+  // Default to the active-parts view. Drafts (auto-created by CSV imports
+  // for SKUs not yet in the catalog) used to be the default since cleanup
+  // was the day-job — the active list is what the owner actually wants
+  // to see first now that drafts are mostly handled.
+  const [filter, setFilter] = useState('active')
   const [search, setSearch] = useState('')
   const [parts, setParts] = useState([])
   const [stockTotals, setStockTotals] = useState(new Map())
