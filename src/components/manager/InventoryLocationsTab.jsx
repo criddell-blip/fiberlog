@@ -53,6 +53,19 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   // Aisle 1 bay 12, anything that doesn't match the pattern.
   const [expandedWarehouses, setExpandedWarehouses] = useState(() => new Set())
   const [expandedAisles, setExpandedAisles] = useState(() => new Set())
+  // Section-level collapse: each top-level type (warehouse/truck/job_site/
+  // vendor/scrap) can be folded so the page isn't a 30-row wall. Default
+  // all collapsed for consistency with the warehouse/aisle pattern — counts
+  // in the header tell you what's there without expanding. User clicks
+  // what they actually want to look at.
+  const [expandedSections, setExpandedSections] = useState(() => new Set())
+  function toggleSection(type) {
+    setExpandedSections(prev => {
+      const next = new Set(prev)
+      if (next.has(type)) next.delete(type); else next.add(type)
+      return next
+    })
+  }
 
   function toggleWarehouse(id) {
     setExpandedWarehouses(prev => {
@@ -329,15 +342,51 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
           {['warehouse', 'truck', 'job_site', 'vendor', 'scrap'].map(type => {
             const list = byType[type] || []
             if (list.length === 0) return null
+            const isSectionExpanded = expandedSections.has(type)
+            // Aggregate stock across the section so the header shows what's
+            // inside without forcing the user to expand.
+            const sectionRollup = list.reduce((acc, loc) => {
+              const bins = type === 'warehouse' ? (binsByWarehouse[loc.id] || []) : []
+              const own = stockCounts.get(loc.id)
+              if (own) {
+                acc.distinctParts += own.distinctParts
+                acc.totalUnits += own.totalUnits
+              }
+              for (const b of bins) {
+                const c = stockCounts.get(b.id)
+                if (c) {
+                  acc.distinctParts += c.distinctParts
+                  acc.totalUnits += c.totalUnits
+                }
+              }
+              return acc
+            }, { distinctParts: 0, totalUnits: 0 })
             return (
-              <div key={type} style={{ marginBottom: 16 }}>
-                <div style={{
-                  fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-                  letterSpacing: '.06em', color: 'var(--hint)', marginBottom: 6
-                }}>
-                  {TYPE_LABELS[type]}{list.length > 1 ? 's' : ''} ({list.length})
+              <div key={type} style={{ marginBottom: 12 }}>
+                <div
+                  onClick={() => toggleSection(type)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '6px 10px', marginBottom: 6,
+                    background: isSectionExpanded ? 'var(--surface2)' : 'transparent',
+                    borderRadius: 'var(--r-xs)',
+                    cursor: 'pointer',
+                    fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+                    letterSpacing: '.06em', color: 'var(--hint)',
+                  }}>
+                  <span style={{
+                    fontSize: 13, color: 'var(--muted)', display: 'inline-block',
+                    transform: isSectionExpanded ? 'rotate(90deg)' : 'none',
+                    transition: 'transform .15s', width: 10, textAlign: 'center',
+                  }}>›</span>
+                  <span>{TYPE_LABELS[type]}{list.length > 1 ? 's' : ''} ({list.length})</span>
+                  {sectionRollup.distinctParts > 0 && (
+                    <span style={{ marginLeft: 'auto', textTransform: 'none', letterSpacing: 0, fontWeight: 600, color: 'var(--muted)' }}>
+                      {sectionRollup.distinctParts.toLocaleString()} part{sectionRollup.distinctParts === 1 ? '' : 's'} · {sectionRollup.totalUnits.toLocaleString()} units
+                    </span>
+                  )}
                 </div>
-                {list.map(loc => {
+                {isSectionExpanded && list.map(loc => {
                   const bins = type === 'warehouse' ? (binsByWarehouse[loc.id] || []) : []
                   const counts = stockCounts.get(loc.id)
                   // Warehouse rollup: own counts + sum of bin counts so the
