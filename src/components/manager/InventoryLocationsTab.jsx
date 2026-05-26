@@ -439,9 +439,31 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                             )}
                           </div>
                           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
-                            <span>
-                              {loc.assigned_user ? `Assigned to ${loc.assigned_user.name}` : (loc.notes || '—')}
-                            </span>
+                            {/* Truck assignment chip — clickable, jumps to
+                                the Edit sheet so you don't have to hunt for
+                                the Edit button. Amber for orphans (truck
+                                exists but no crew member assigned) so they
+                                stand out as needing attention. */}
+                            {type === 'truck' ? (
+                              <button
+                                onClick={stop(() => setEditing(loc))}
+                                title={loc.assigned_user ? `Click to change assignment` : `Click to assign a crew member`}
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                                  padding: '2px 8px', borderRadius: 999,
+                                  background: loc.assigned_user ? 'var(--teal-lt)' : 'var(--amber-lt)',
+                                  color: loc.assigned_user ? 'var(--teal-mid)' : 'var(--amber)',
+                                  border: `1px solid ${loc.assigned_user ? 'var(--teal)' : 'var(--amber)'}`,
+                                  fontSize: 11, fontWeight: 700,
+                                  cursor: 'pointer',
+                                }}>
+                                👤 {loc.assigned_user ? loc.assigned_user.name : 'Unassigned'}
+                              </button>
+                            ) : (
+                              <span>
+                                {loc.assigned_user ? `Assigned to ${loc.assigned_user.name}` : (loc.notes || '—')}
+                              </span>
+                            )}
                             {rollup && rollup.distinctParts > 0 && (
                               <>
                                 <span style={{ color: 'var(--hint)' }}>·</span>
