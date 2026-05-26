@@ -60,7 +60,7 @@ export async function createUser({
 // row. Password resets go through the existing admin-set-password function.
 export async function updateUserMetadata(userId, updates) {
   const allowed = {}
-  for (const key of ['name', 'initials', 'role', 'crew_type', 'language', 'is_active']) {
+  for (const key of ['name', 'initials', 'role', 'crew_type', 'language', 'is_active', 'manager_id']) {
     if (key in updates) allowed[key] = updates[key]
   }
   const { data, error } = await db

@@ -311,6 +311,10 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, onCancel, onSubmit 
   const [username, setUsername] = useState('')
   const [role, setRole] = useState(user?.role || 'crew')
   const [crewType, setCrewType] = useState(user?.crew_type || 'aerial')
+  // Who this user reports to. Drives CrewStatus filtering (managers see
+  // only their direct reports). Empty string = unmanaged; we map to NULL
+  // on save. Owners typically have no manager.
+  const [managerId, setManagerId] = useState(user?.manager_id || '')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [initials, setInitials] = useState(user?.initials || '')
@@ -371,6 +375,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, onCancel, onSubmit 
           initials: initials.trim() || generateInitials(name),
           language,
           is_active: isActive,
+          manager_id: managerId || null,
         })
       } else {
         await onSubmit({
@@ -380,6 +385,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, onCancel, onSubmit 
           initials: initials.trim() || generateInitials(name),
           language,
           is_active: isActive,
+          manager_id: managerId || null,
         })
       }
     } catch (e) {
@@ -515,6 +521,31 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, onCancel, onSubmit 
             </select>
             <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
               For managers and owners this is informational. For crew it determines which assemblies they see.
+            </div>
+          </div>
+
+          {/* Manager — who this user reports to. Drives the CrewStatus
+              filter: managers see only their direct reports; owners see
+              everyone. Self-assignment is filtered out to avoid cycles. */}
+          <div className="field">
+            <label>Reports to (manager)</label>
+            <select
+              value={managerId}
+              onChange={e => setManagerId(e.target.value)}
+              style={{ width: '100%' }}
+            >
+              <option value="">— Unmanaged —</option>
+              {existingUsers
+                .filter(u => (u.role === 'owner' || u.role === 'manager') && u.is_active && u.id !== user?.id)
+                .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+                .map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.role})
+                  </option>
+                ))}
+            </select>
+            <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
+              Determines who sees this user on their Crew tab. Leave blank for owners or unassigned users.
             </div>
           </div>
 

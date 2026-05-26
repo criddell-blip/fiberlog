@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getTodaySessions, db, nextChannelSuffix } from '../../lib/supabase'
+import { useApp } from '../../AppContext'
 
 const CREW_TYPE_ICON = {
   aerial: '🏗️', underground: '⛏️', splice: '🔌',
@@ -17,9 +18,25 @@ const STATUS_CONFIG = {
 }
 
 export default function CrewStatus() {
+  const { currentUser, users } = useApp()
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState(null)
+
+  // Manager-scope filter: a manager (role='manager') only sees crew
+  // members whose users.manager_id points at them. Owners see everyone
+  // (the original behavior). Lookup keyed off the AppContext users list
+  // — that's a stable copy of public.users with manager_id included.
+  // If we don't yet have currentUser (initial paint), don't filter.
+  const isManagerScoped = currentUser?.role === 'manager'
+  const myReportIds = (() => {
+    if (!isManagerScoped) return null  // null = no filter
+    return new Set(
+      (users || [])
+        .filter(u => u.manager_id === currentUser.id)
+        .map(u => u.id)
+    )
+  })()
 
   useEffect(() => {
     load()
@@ -75,11 +92,18 @@ export default function CrewStatus() {
     }
   }
 
-  const active = sessions.filter(s => s.session_status && s.session_status !== 'none')
-  const inactive = sessions.filter(s => !s.session_status || s.session_status === 'none')
+  // Apply the manager-scope filter once, then derive everything else from
+  // the scoped list. Counts at the top of the page reflect what's visible
+  // — a manager seeing 4 reports sees the totals for those 4, not all 21.
+  const scopedSessions = myReportIds
+    ? sessions.filter(s => myReportIds.has(s.user_id))
+    : sessions
 
-  const totalFootage = sessions.reduce((a, s) => a + (s.footage_total || 0), 0)
-  const totalEntries = sessions.reduce((a, s) => a + (s.entry_count || 0), 0)
+  const active = scopedSessions.filter(s => s.session_status && s.session_status !== 'none')
+  const inactive = scopedSessions.filter(s => !s.session_status || s.session_status === 'none')
+
+  const totalFootage = scopedSessions.reduce((a, s) => a + (s.footage_total || 0), 0)
+  const totalEntries = scopedSessions.reduce((a, s) => a + (s.entry_count || 0), 0)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -111,6 +135,24 @@ export default function CrewStatus() {
 
       {/* Crew list */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px' }}>
+        {/* Scope hint for managers — clarifies why they're seeing a
+            subset, and points them at Admin if they're seeing no one. */}
+        {isManagerScoped && !loading && (
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 12,
+            fontSize: 12, color: 'var(--muted)',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          }}>
+            <span>
+              👀 Showing your <strong>{scopedSessions.length}</strong> direct report{scopedSessions.length === 1 ? '' : 's'}.
+              {scopedSessions.length === 0 && (
+                <> No one's reporting to you yet — assign reports via <strong>Admin → Users → Reports to</strong>.</>
+              )}
+            </span>
+          </div>
+        )}
+
         {loading && (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Loading...</div>
         )}
