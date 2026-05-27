@@ -318,18 +318,27 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
         ].filter(t => t.id === 'all' || t.count > 0)
         return (
           <>
-            {/* Type ribbon — primary filter */}
-            <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-              {typeOptions.map(t => (
-                <button key={t.id}
-                  onClick={() => setTypeFilter(t.id)}
-                  style={{
-                    ...pillStyle(typeFilter === t.id),
-                    fontWeight: 800,
-                  }}>
-                  {t.icon || '📦'} {t.label} <span style={{ fontWeight: 600, opacity: 0.8 }}>({t.count})</span>
-                </button>
-              ))}
+            {/* Type filter — was a row of 4 pills, now a single dropdown to
+                save a row inside the (already-collapsible) filter panel. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                Type
+              </div>
+              <select
+                value={typeFilter}
+                onChange={e => setTypeFilter(e.target.value)}
+                style={{
+                  padding: '5px 10px', fontSize: 12, fontWeight: 700,
+                  border: '1.5px solid var(--border2)', borderRadius: 'var(--r-xs)',
+                  background: 'var(--surface2)', color: 'var(--text)',
+                }}
+              >
+                {typeOptions.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.icon || '📦'} {t.label} ({t.count})
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Secondary location pills — filtered by the selected type. */}

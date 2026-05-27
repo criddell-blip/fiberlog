@@ -116,7 +116,9 @@ export default function CrewStatus() {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        {/* Auto-fit so stats drop to 2-col (or 1-col) on really narrow phones.
+            minmax(120px, 1fr) means each card needs ≥120px or it wraps. */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
           {[
             { label: 'Active', value: active.length, color: 'var(--teal)' },
             { label: 'Footage', value: `${totalFootage.toLocaleString()} ft`, color: 'var(--blue)' },

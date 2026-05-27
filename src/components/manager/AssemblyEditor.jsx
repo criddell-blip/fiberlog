@@ -362,28 +362,29 @@ export default function AssemblyEditor() {
           </button>
         </div>
 
-        {/* Tab filter — every crew type, with a count badge so empty
-            crew types look like obvious "build me" placeholders */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-          {CREW_TYPES.map(ct => {
-            const count = countsByCrew[ct.id] || 0
-            const isSelected = selTab === ct.id
-            return (
-              <button key={ct.id} onClick={() => setSelTab(ct.id)}
-                style={{ padding: '5px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none',
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  background: isSelected ? 'var(--orange)' : 'var(--gray-lt)',
-                  color: isSelected ? 'white' : 'var(--muted)' }}>
-                <span>{ct.icon} {ct.label}</span>
-                <span style={{
-                  fontSize: 10, fontWeight: 700,
-                  background: isSelected ? 'rgba(255,255,255,0.25)' : 'var(--surface)',
-                  color: isSelected ? 'white' : (count === 0 ? 'var(--hint)' : 'var(--muted)'),
-                  padding: '1px 6px', borderRadius: 10, minWidth: 18, textAlign: 'center',
-                }}>{count}</span>
-              </button>
-            )
-          })}
+        {/* Crew-type picker — was 6 pills (wrapped to 2 rows on phone);
+            now a single dropdown to save a row. Includes counts so empty
+            crew types still read as "build me" prompts. */}
+        <div style={{ marginBottom: 12 }}>
+          <select
+            value={selTab}
+            onChange={e => setSelTab(e.target.value)}
+            style={{
+              padding: '6px 12px', fontSize: 13, fontWeight: 700,
+              border: '1.5px solid var(--orange)', borderRadius: 20,
+              background: 'var(--orange-lt)', color: 'var(--orange)',
+              cursor: 'pointer', minWidth: 220,
+            }}
+          >
+            {CREW_TYPES.map(ct => {
+              const count = countsByCrew[ct.id] || 0
+              return (
+                <option key={ct.id} value={ct.id}>
+                  {ct.icon} {ct.label} ({count})
+                </option>
+              )
+            })}
+          </select>
         </div>
       </div>
 

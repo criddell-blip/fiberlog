@@ -93,6 +93,10 @@ export default function ProjectManager() {
   // Phase target editing
   const [editingTarget, setEditingTarget] = useState(null)
   const [editVal, setEditVal] = useState('')
+  // Phase-targets accordion. Targets grid eats ~80px even when most fields
+  // are zero; collapsed by default so the phase detail focuses on the
+  // tasks list (the more frequently-touched content).
+  const [phaseTargetsOpen, setPhaseTargetsOpen] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
 
   // Permit URL editing
@@ -645,10 +649,25 @@ export default function ProjectManager() {
             </button>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <div className="sec-label" style={{ margin: 0 }}>Phase targets</div>
-            <span style={{ fontSize: 11, color: 'var(--hint)' }}>tap to edit</span>
-          </div>
+          <button
+            onClick={() => setPhaseTargetsOpen(v => !v)}
+            style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              width: '100%', marginBottom: phaseTargetsOpen ? 8 : 12,
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: '4px 0', textAlign: 'left',
+            }}
+          >
+            <div className="sec-label" style={{ margin: 0 }}>
+              <span style={{
+                display: 'inline-block', transform: phaseTargetsOpen ? 'rotate(90deg)' : 'none',
+                transition: 'transform .15s', marginRight: 6, color: 'var(--muted)',
+              }}>▸</span>
+              Phase targets
+            </div>
+            <span style={{ fontSize: 11, color: 'var(--hint)' }}>{phaseTargetsOpen ? 'tap to edit · ▴ hide' : '▾ show'}</span>
+          </button>
+          {phaseTargetsOpen && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 16 }}>
             {TARGET_FIELDS.map(field => {
               const current = selPhase[field.col] || selPhase[field.key] || 0
@@ -686,6 +705,7 @@ export default function ProjectManager() {
               )
             })}
           </div>
+          )}
 
           {/* Tasks */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, marginBottom: 8 }}>

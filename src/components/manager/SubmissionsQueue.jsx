@@ -264,14 +264,29 @@ export default function SubmissionsQueue() {
           </div>
           <button onClick={loadSubmissions} style={{ fontSize: 13, color: 'var(--teal)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer' }}>Refresh</button>
         </div>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-          {['pending', 'approved', 'flagged', 'all'].map(f => (
-            <button key={f} onClick={() => setFilter(f)} style={{
-              padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-              background: filter === f ? 'var(--orange)' : 'var(--gray-lt)',
-              color: filter === f ? 'white' : 'var(--muted)', border: 'none', cursor: 'pointer', textTransform: 'capitalize'
-            }}>{f}</button>
-          ))}
+        {/* Status filter: dropdown (was 4 wrapping pills, saves ~30px on mobile).
+            Archived toggle stays separate as a pill since it's a 2-state toggle. */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <select
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            style={{
+              padding: '5px 10px', fontSize: 12, fontWeight: 700,
+              border: '1.5px solid var(--orange)',
+              borderRadius: 20,
+              background: 'var(--orange-lt)', color: 'var(--orange)',
+              cursor: 'pointer',
+            }}
+          >
+            {[
+              { id: 'pending',  label: 'Pending' },
+              { id: 'approved', label: 'Approved' },
+              { id: 'flagged',  label: 'Flagged' },
+              { id: 'all',      label: 'All statuses' },
+            ].map(opt => (
+              <option key={opt.id} value={opt.id}>Status: {opt.label}</option>
+            ))}
+          </select>
           <button onClick={() => setShowArchived(prev => !prev)} style={{
             padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
             background: showArchived ? 'var(--gray-mid)' : 'var(--gray-lt)',

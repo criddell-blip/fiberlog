@@ -28,6 +28,25 @@ const CREW_TYPE_OPTIONS = [
   { id: 'contractor',     label: '🛠️ Contractor' },
 ]
 
+// Soft cross-crew detection: infer a likely crew_type from a trailer name's
+// keywords. Used only for the "Assign anyway?" amber warning on the per-user
+// dropdown — does NOT block assignment, just nudges. Returns null if no
+// keyword matches.
+function crewTypeFromName(lower) {
+  if (lower.includes('aerial'))         return 'aerial'
+  if (lower.includes('underground') || lower.includes(' ug '))
+                                        return 'underground'
+  if (lower.includes('splice'))         return 'splice'
+  if (lower.includes('drop'))           return 'drop'
+  if (lower.includes('locator'))        return 'locator'
+  if (lower.includes('install'))        return 'install'
+  if (lower.includes('fiber tech') || lower.includes('ftech'))
+                                        return 'fiber_tech'
+  if (lower.includes('infra') || lower.includes('tower'))
+                                        return 'infrastructure'
+  return null
+}
+
 export default function AdminUsersView({ onBack }) {
   const { showToast, currentUser, reload } = useApp()
   const [users, setUsers] = useState([])
@@ -36,6 +55,7 @@ export default function AdminUsersView({ onBack }) {
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState(null)     // null | { mode: 'new' } | user object
   const [resettingPwFor, setResettingPwFor] = useState(null)
+  const [showBulkAssign, setShowBulkAssign] = useState(false)
 
   const isOwner = currentUser?.role === 'owner'
   // Truck-type locations for the per-user "Pull materials from" dropdown.
@@ -150,6 +170,18 @@ export default function AdminUsersView({ onBack }) {
             <div style={{ fontWeight: 800, fontSize: 17 }}>Users</div>
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>Add, edit, or deactivate users</div>
           </div>
+          {truckLocations.length > 0 && (
+            <button
+              onClick={() => setShowBulkAssign(true)}
+              title="Bulk-assign N users to a shared pull location at once"
+              style={{
+                padding: '7px 14px',
+                background: 'var(--surface2)', color: 'var(--teal-mid)',
+                border: '1.5px solid var(--teal)',
+                borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              }}
+            >🚚 Bulk assign</button>
+          )}
           <button
             onClick={() => setEditing({ mode: 'new' })}
             style={{ padding: '7px 14px', background: 'var(--orange)', color: 'white', border: 'none', borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
@@ -276,6 +308,25 @@ export default function AdminUsersView({ onBack }) {
           user={resettingPwFor}
           onCancel={() => setResettingPwFor(null)}
           onSubmit={(pw) => handleResetPassword(resettingPwFor, pw)}
+        />
+      )}
+
+      {/* Bulk-assign pull location to N users */}
+      {showBulkAssign && (
+        <BulkAssignPullLocationSheet
+          users={users.filter(u => u.is_active)}
+          truckLocations={truckLocations}
+          onCancel={() => setShowBulkAssign(false)}
+          onComplete={(result) => {
+            setShowBulkAssign(false)
+            const msg = []
+            if (result.assigned > 0) msg.push(`${result.assigned} assigned`)
+            if (result.cleared > 0) msg.push(`${result.cleared} cleared`)
+            if (result.transfers > 0) msg.push(`${result.transfers} stock transfers`)
+            if (result.skipped > 0) msg.push(`${result.skipped} unchanged`)
+            showToast(msg.length ? msg.join(' · ') : 'Done')
+            load()
+          }}
         />
       )}
     </div>
@@ -588,6 +639,28 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
                 this will move any stock on the user's personal truck to the new location
                 and deactivate the personal truck.
               </div>
+              {(() => {
+                // Cross-crew soft warning. If the picked trailer's name suggests
+                // a different crew_type than the user's, render an amber note —
+                // doesn't block, just confirms intent.
+                if (!pullLocationId || !crewType) return null
+                const loc = truckLocations.find(l => l.id === pullLocationId)
+                if (!loc) return null
+                const lowerName = (loc.name || '').toLowerCase()
+                const trailerKw = crewTypeFromName(lowerName)
+                if (!trailerKw || trailerKw === crewType) return null
+                return (
+                  <div style={{
+                    marginTop: 6, padding: '6px 10px',
+                    background: 'var(--amber-lt)', color: 'var(--amber)',
+                    border: '1px solid var(--amber)', borderRadius: 'var(--r-xs)',
+                    fontSize: 11, fontWeight: 600,
+                  }}>
+                    ⚠️ <strong>{loc.name}</strong> sounds like a <strong>{trailerKw}</strong> trailer,
+                    but this user's crew type is <strong>{crewType}</strong>. Assign anyway?
+                  </div>
+                )
+              })()}
             </div>
           )}
 
@@ -950,6 +1023,185 @@ function CrewPermissionsSection({ userId }) {
           {err}
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Bulk-assign pull location sheet ──────────────────────────────────────
+// Multi-select users + pick a target trailer (or "Personal truck" to clear).
+// Fires bulk_assign_pull_location with the full user_id array. Atomic
+// per-user: stock migrates from personal truck → trailer, personal truck
+// deactivates. Used for "flip Grady's 6 to Grady's Trailer" scenarios.
+function BulkAssignPullLocationSheet({ users, truckLocations, onCancel, onComplete }) {
+  const [selectedUserIds, setSelectedUserIds] = useState(() => new Set())
+  const [targetLocationId, setTargetLocationId] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [crewTypeFilter, setCrewTypeFilter] = useState('all')
+
+  // Crew-type filter — convenience for "select all aerial guys" workflows.
+  const filteredUsers = useMemo(() => {
+    if (crewTypeFilter === 'all') return users
+    return users.filter(u => u.crew_type === crewTypeFilter)
+  }, [users, crewTypeFilter])
+
+  function toggle(userId) {
+    setSelectedUserIds(prev => {
+      const next = new Set(prev)
+      if (next.has(userId)) next.delete(userId)
+      else next.add(userId)
+      return next
+    })
+  }
+
+  function selectAllFiltered() {
+    setSelectedUserIds(prev => {
+      const next = new Set(prev)
+      filteredUsers.forEach(u => next.add(u.id))
+      return next
+    })
+  }
+
+  function selectNone() { setSelectedUserIds(new Set()) }
+
+  async function handleSubmit() {
+    setError('')
+    if (selectedUserIds.size === 0) { setError('Pick at least one user'); return }
+    setSubmitting(true)
+    try {
+      // Empty string = "Personal truck (clear assignment)" maps to NULL
+      const locationId = targetLocationId || null
+      const result = await bulkAssignPullLocation({
+        userIds: Array.from(selectedUserIds),
+        locationId,
+      })
+      onComplete(result)
+    } catch (e) {
+      setError(e.message || 'Bulk assignment failed')
+      setSubmitting(false)
+    }
+  }
+
+  const selectedTrailer = targetLocationId ? truckLocations.find(l => l.id === targetLocationId) : null
+
+  return (
+    <div className="overlay open" onClick={e => e.target === e.currentTarget && !submitting && onCancel()}>
+      <div className="overlay-sheet" style={{ maxWidth: 560, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flexShrink: 0, marginBottom: 12 }}>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 2 }}>
+            🚚 Bulk assign pull location
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+            Assign N users to a shared trailer at once. Each user's personal-truck stock
+            migrates to the target location, and their personal truck deactivates.
+          </div>
+        </div>
+
+        {/* Target location */}
+        <div className="field" style={{ flexShrink: 0 }}>
+          <label>Target location</label>
+          <select
+            value={targetLocationId}
+            onChange={e => setTargetLocationId(e.target.value)}
+            disabled={submitting}
+          >
+            <option value="">— Personal truck (clear current assignments) —</option>
+            {truckLocations.map(l => (
+              <option key={l.id} value={l.id}>
+                🚚 {l.name}{l.assigned_user?.name ? ` (${l.assigned_user.name}'s personal)` : ' (shared)'}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Crew-type filter + selection controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+          <select
+            value={crewTypeFilter}
+            onChange={e => setCrewTypeFilter(e.target.value)}
+            disabled={submitting}
+            style={{ padding: '6px 10px', fontSize: 12, borderRadius: 'var(--r-xs)', border: '1.5px solid var(--border2)', background: 'var(--surface2)' }}
+          >
+            <option value="all">All crew types</option>
+            {CREW_TYPE_OPTIONS.map(ct => (
+              <option key={ct.id} value={ct.id}>{ct.label}</option>
+            ))}
+          </select>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+            {selectedUserIds.size} selected · {filteredUsers.length} shown
+          </div>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <button onClick={selectAllFiltered} disabled={submitting} className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 11 }}>Select shown</button>
+            <button onClick={selectNone} disabled={submitting} className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 11 }}>None</button>
+          </div>
+        </div>
+
+        {/* User checklist */}
+        <div style={{ flex: 1, overflowY: 'auto', minHeight: 100, marginBottom: 12, border: '1px solid var(--border)', borderRadius: 'var(--r-sm)' }}>
+          {filteredUsers.length === 0 && (
+            <div style={{ padding: 20, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>
+              No users match this filter.
+            </div>
+          )}
+          {filteredUsers.map(u => (
+            <label key={u.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+              borderBottom: '1px solid var(--border)', cursor: 'pointer',
+            }}>
+              <input
+                type="checkbox"
+                checked={selectedUserIds.has(u.id)}
+                onChange={() => toggle(u.id)}
+                disabled={submitting}
+                style={{ cursor: 'pointer' }}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{u.name}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  {u.role}{u.crew_type ? ` · ${u.crew_type}` : ''}
+                  {u.default_pull_location_id && <> · currently assigned</>}
+                </div>
+              </div>
+            </label>
+          ))}
+        </div>
+
+        {/* Confirm summary */}
+        {selectedUserIds.size > 0 && (
+          <div style={{
+            padding: '8px 12px', marginBottom: 10, flexShrink: 0,
+            background: 'var(--orange-lt)', border: '1px solid var(--orange-dk)',
+            borderRadius: 'var(--r-sm)', fontSize: 12, color: 'var(--orange)',
+          }}>
+            <strong>{selectedUserIds.size} user{selectedUserIds.size === 1 ? '' : 's'}</strong>{' '}
+            will be assigned to{' '}
+            <strong>{selectedTrailer ? selectedTrailer.name : 'their personal truck (cleared)'}</strong>.
+            {selectedTrailer && ' Any non-zero stock on each user\'s personal truck will move to the target.'}
+          </div>
+        )}
+
+        {error && (
+          <div style={{
+            padding: '6px 10px', marginBottom: 10, flexShrink: 0,
+            background: 'var(--red-lt)', color: 'var(--red)', fontSize: 12, fontWeight: 600,
+            borderRadius: 'var(--r-xs)',
+          }}>{error}</div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel} disabled={submitting}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-primary"
+            style={{ flex: 2 }}
+            onClick={handleSubmit}
+            disabled={submitting || selectedUserIds.size === 0}
+          >
+            {submitting ? 'Applying…' : `Assign ${selectedUserIds.size} user${selectedUserIds.size === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
