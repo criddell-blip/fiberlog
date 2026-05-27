@@ -4,18 +4,22 @@ import CountStartSheet from './CountStartSheet'
 import CountRunScreen from './CountRunScreen'
 import { getMyActiveRun } from '../../lib/cycleCount'
 
-// Wrapper component that lives inside InventoryView's "Count" sub-tab.
-// Two states:
-//   1. No active run → show an empty-state CTA. Tap "Start cycle count"
-//      → opens CountStartSheet → starts/resumes a run → flip to state 2.
-//   2. Active run → render CountRunScreen, which owns its own header /
-//      scan input / submit / end flows. On exit, flip back to state 1.
+// Lives inside InventoryView's "Count" sub-tab. InventoryView passes
+// `onExitTab` and suppresses its own chrome (action buttons + sub-tab
+// pills) when this is rendered — counter UI gets the full panel so the
+// vertical pixels aren't eaten by Inventory's header on mobile.
 //
-// On mount, auto-check for an in-progress run started by the current user
-// and jump straight to the counter screen if one exists (so reopening the
-// tab after a phone-screen-off doesn't make you go through the start sheet
-// every time).
-export default function CountTab() {
+// Two states:
+//   1. No active run → slim "← Inventory" header + empty-state CTA.
+//   2. Active run → CountRunScreen takes over completely. Its own header
+//      has the back arrow that ends/exits the run; from there we drop
+//      back to state 1 (so the user can start another run or hit
+//      "← Inventory" to leave).
+//
+// On mount, auto-resume an in-progress run started by the current user.
+// Reopening the tab after closing the phone screen shouldn't make you
+// go through the start sheet every time.
+export default function CountTab({ onExitTab }) {
   const { currentUser } = useApp()
   const [activeRun, setActiveRun] = useState(null)
   const [showStart, setShowStart] = useState(false)
@@ -37,14 +41,6 @@ export default function CountTab() {
     return () => { cancelled = true }
   }, [currentUser?.id])
 
-  if (checking) {
-    return (
-      <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>
-        Loading…
-      </div>
-    )
-  }
-
   if (activeRun) {
     return (
       <CountRunScreen
@@ -55,28 +51,45 @@ export default function CountTab() {
   }
 
   return (
-    <>
-      <div style={{
-        padding: '40px 20px', textAlign: 'center',
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 'var(--r)',
-      }}>
-        <div style={{ fontSize: 48, marginBottom: 14 }}>🔢</div>
-        <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 6 }}>
-          Cycle count
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="topbar" style={{ borderBottom: '1px solid var(--border)' }}>
+        <button className="back-btn" onClick={onExitTab} title="Back to Inventory">←</button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="topbar-title">Cycle count</div>
+          <div className="topbar-sub">Inventory · scanner-driven count</div>
         </div>
-        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', maxWidth: 460, margin: '0 auto 20px', lineHeight: 1.4 }}>
-          Walk the warehouse with a USB scanner or phone camera. Scan bins, scan parts,
-          enter counts. Variances that pair across bins auto-reconcile as internal
-          transfers; unmatched variances land in the review queue.
-        </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => setShowStart(true)}
-          style={{ padding: '10px 20px' }}
-        >
-          ＋ Start cycle count
-        </button>
+      </div>
+
+      <div className="scroll-body">
+        {checking ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>
+            Loading…
+          </div>
+        ) : (
+          <div style={{
+            padding: '40px 20px', textAlign: 'center',
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--r)',
+            margin: '0 auto', maxWidth: 540,
+          }}>
+            <div style={{ fontSize: 48, marginBottom: 14 }}>🔢</div>
+            <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 6 }}>
+              Cycle count
+            </div>
+            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', maxWidth: 460, margin: '0 auto 20px', lineHeight: 1.4 }}>
+              Walk the warehouse with a USB scanner or phone camera. Scan bins, scan parts,
+              enter counts. Variances that pair across bins auto-reconcile as internal
+              transfers; unmatched variances land in the review queue.
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowStart(true)}
+              style={{ padding: '10px 20px' }}
+            >
+              ＋ Start cycle count
+            </button>
+          </div>
+        )}
       </div>
 
       {showStart && (
@@ -85,6 +98,6 @@ export default function CountTab() {
           onStarted={(run) => { setShowStart(false); setActiveRun(run) }}
         />
       )}
-    </>
+    </div>
   )
 }

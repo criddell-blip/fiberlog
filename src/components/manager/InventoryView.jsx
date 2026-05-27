@@ -101,6 +101,15 @@ export default function InventoryView() {
 
   const noLocations = !locationsLoading && locations.length === 0
 
+  // Count sub-tab takes over the full panel — its body is a scanner-driven
+  // counter UI that needs every vertical pixel on mobile. The Inventory
+  // chrome (action buttons + sub-tab pills) doesn't apply while counting,
+  // so we suppress it and give CountTab the full panel. Navigation back is
+  // via CountTab's own "← Inventory" button.
+  if (tab === 'count') {
+    return <CountTab onExitTab={() => setTab('stock')} />
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
