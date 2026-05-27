@@ -32,6 +32,70 @@
   --r: 14px;
   --r-sm: 10px;
   --r-xs: 6px;
+
+  /* ─── Phase 1 foundation: extended scale tokens ──────────────────────
+   * Additions only — no existing tokens changed. Adopted by the new
+   * .pill / .banner / .metric / .avatar / .settings-pill / .add-dashed
+   * class families below; legacy inline styles still work unchanged.
+   *
+   * Color-token convention (existing — documented for clarity):
+   *   --{c}      = primary stroke / solid fill
+   *   --{c}-dk   = pressed / strong border
+   *   --{c}-mid  = readable text on -lt bg (auto-flips by theme)
+   *   --{c}-lt   = subtle tinted background (auto-flips by theme:
+   *                dark tint in dark mode, pale tint in light mode)
+   * ─────────────────────────────────────────────────────────────────── */
+
+  /* Type scale */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 20px;
+  --fs-2xl: 28px;
+
+  /* Weight scale */
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-black: 800;
+
+  /* Spacing (4px-based steps; --space-4 is 14px to preserve existing card/topbar padding) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 14px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+  --space-8: 32px;
+
+  /* Radius additions */
+  --r-md: 12px;
+  --r-pill: 999px;
+
+  /* Line height */
+  --lh-tight: 1.15;
+  --lh-snug: 1.25;
+  --lh-base: 1.4;
+
+  /* Semantic color roles — alias existing color tokens.
+   * Resolves at use-time, so light/dark auto-flips via the existing
+   * -lt / -mid overrides in [data-theme="light"]. */
+  --accent-bg: var(--orange-lt);
+  --accent-fg: var(--orange);
+  --accent-border: var(--orange-dk);
+  --success-bg: var(--teal-lt);
+  --success-fg: var(--teal-mid);
+  --success-border: var(--teal);
+  --warning-bg: var(--amber-lt);
+  --warning-fg: var(--amber);
+  --danger-bg: var(--red-lt);
+  --danger-fg: var(--red);
+  --danger-border: var(--red-mid);
+  --info-bg: var(--blue-lt);
+  --info-fg: var(--blue);
 }
 
 
@@ -52,7 +116,6 @@
   --red-lt: #FEE8E8;
   --gray-lt: #F0EFE8;
   --gray-mid: #AAAAAA;
-  --surface3: #FAFAF8;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -201,15 +264,6 @@ select option {
 }
 .field select option { background: var(--surface2); }
 
-/* ── Badge ── */
-.badge {
-  font-size: 11px; font-weight: 700; padding: 3px 8px;
-  border-radius: 20px; display: inline-block;
-}
-.badge-open { background: var(--gray-lt); color: var(--gray); }
-.badge-active { background: var(--orange-lt); color: var(--orange); }
-.badge-done { background: var(--teal-lt); color: var(--teal-mid); }
-
 /* ── Tally control ── */
 .tally-row {
   display: flex; align-items: center; justify-content: space-between;
@@ -318,4 +372,217 @@ select option {
 @media (min-width: 640px) {
   .creator-chip .creator-initials { display: none; }
   .creator-chip .creator-name { display: inline; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * PHASE 1 FOUNDATION — new shared class families
+ * ═══════════════════════════════════════════════════════════════════════
+ * Additive only. Existing classes (.badge, .toast, etc.) are NOT touched
+ * in Phase 1; legacy components keep rendering identically until later
+ * phases swap them out. Visual diff after Phase 1 should be zero.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+/* ─── Pill family ───────────────────────────────────────────────────────
+ * Replaces every inline status pill across TaskList, sidebar count
+ * badges, workspace banners, etc. Tokenized via --{role}-bg/--{role}-fg.
+ * Variants combine: <span class="pill pill-danger pill-sm">. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+  line-height: var(--lh-snug);
+}
+.pill-success { background: var(--success-bg); color: var(--success-fg); }
+.pill-warning { background: var(--warning-bg); color: var(--warning-fg); }
+.pill-danger  { background: var(--danger-bg);  color: var(--danger-fg); }
+.pill-info    { background: var(--info-bg);    color: var(--info-fg); }
+.pill-accent  { background: var(--accent-bg);  color: var(--accent-fg); }
+.pill-muted   { background: var(--gray-lt);    color: var(--muted); }
+.pill-solid-accent { background: var(--orange); color: #fff; }
+.pill-sm  { padding: 1px 6px; font-size: 10px; }
+.pill-dot { width: 8px; height: 8px; padding: 0; border-radius: 50%; gap: 0; }
+
+/* ─── Banner family ─────────────────────────────────────────────────────
+ * Replaces stackable status strips in TaskWorkspace (flag / continuation
+ * / project override / footage totals). Renders as flush-width strip
+ * with consistent padding and a 1px bottom divider — much denser
+ * vertically than the existing card-style banners. */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px var(--space-4);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  flex-shrink: 0;
+  line-height: var(--lh-base);
+}
+.banner-danger  { background: var(--danger-bg);  color: var(--danger-fg); }
+.banner-warning { background: var(--warning-bg); color: var(--warning-fg); }
+.banner-info    { background: var(--info-bg);    color: var(--info-fg); }
+.banner-success { background: var(--success-bg); color: var(--success-fg); }
+.banner-accent  { background: var(--accent-bg);  color: var(--accent-fg); }
+.banner-muted   { background: var(--surface2);   color: var(--muted); }
+.banner-icon    { font-size: 14px; flex-shrink: 0; line-height: 1.3; }
+.banner-body    { flex: 1; min-width: 0; }
+
+/* ─── Metric family ─────────────────────────────────────────────────────
+ * Replaces TaskWorkspace summary 3×3 grid and TaskSummaryView's
+ * flex-wrap stats row. .metric-grid for fixed-column dashboards,
+ * .metric-row for flex-wrap inline stats. */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.metric {
+  background: var(--bg);
+  border-radius: var(--r-sm);
+  padding: var(--space-3);
+  text-align: center;
+}
+.metric-value {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-black);
+  color: var(--text);
+  line-height: var(--lh-tight);
+}
+.metric-label {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.metric-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: var(--space-3) var(--space-4);
+}
+
+/* ─── Add-dashed CTA ────────────────────────────────────────────────────
+ * The "Add part not in list" / "Add task" dashed-border button that's
+ * currently rebuilt inline in AerialWorkspace / SpliceWorkspace /
+ * UndergroundWorkspace / TaskList. */
+.add-dashed {
+  width: 100%;
+  padding: 13px;
+  background: var(--gray-lt);
+  border: 1.5px dashed var(--border2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+.add-dashed.add-accent {
+  border-color: var(--accent-border);
+  color: var(--accent-fg);
+  background: var(--accent-bg);
+}
+
+/* ─── Settings pill ─────────────────────────────────────────────────────
+ * Replaces ThemeToggle + BackToManagerButton inline blobs in CrewApp
+ * (and matching copies in InfraCrewApp). .compact for sidebar, .mode
+ * for the teal-bordered manager-mode variant. */
+.settings-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 6px 10px;
+  border-radius: var(--r-pill);
+  border: 1.5px solid var(--border2);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  flex-shrink: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.settings-pill.compact { padding: 4px 8px; font-size: var(--fs-xs); }
+.settings-pill.mode { border-color: var(--teal); color: var(--teal-mid); }
+
+/* ─── Avatar family ─────────────────────────────────────────────────────
+ * Standardizes the 36/48/56-px circular initials boxes used in the
+ * sidebar, user button, and sign-out sheet. .avatar-owner inverts to
+ * solid orange. */
+.avatar {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-bg);
+  color: var(--accent-fg);
+  border: 1.5px solid var(--accent-border);
+  font-weight: var(--fw-black);
+  flex-shrink: 0;
+  letter-spacing: -0.02em;
+}
+.avatar-sm { width: 28px; height: 28px; font-size: 10px; }
+.avatar-md { width: 36px; height: 36px; font-size: 12px; }
+.avatar-lg { width: 56px; height: 56px; font-size: 18px; }
+.avatar-owner {
+  background: var(--orange);
+  color: #fff;
+  border-color: var(--orange-dk);
+}
+
+/* ─── Tally button — small variant ──────────────────────────────────────
+ * Used by TaskWorkspace summary parts-list ± controls (the existing
+ * 34-px .tally-btn is too large for inline rows). */
+.tally-btn.tally-sm {
+  width: 26px;
+  height: 26px;
+  font-size: 16px;
+}
+
+/* ─── Progress bar — slim variant ───────────────────────────────────────
+ * 3px height for the sidebar's denser project progress indicator. */
+.prog-bar.prog-bar-sm { height: 3px; margin-top: 4px; }
+
+/* ─── Workspace tabs ────────────────────────────────────────────────────
+ * Tab strip used by TaskWorkspace + InfraCrewApp's single-tab variant.
+ * Extracts the inline implementation so both shells share the same
+ * pixel-level styling. */
+.workspace-tabs {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.workspace-tab {
+  flex: 1;
+  padding: 8px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  line-height: var(--lh-tight);
+}
+.workspace-tab-icon { font-size: var(--fs-lg); line-height: 1; }
+.workspace-tab.active {
+  color: var(--accent-fg);
+  border-bottom-color: var(--accent-fg);
 }
