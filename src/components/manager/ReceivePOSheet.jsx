@@ -4,6 +4,7 @@ import {
   createPart, updatePart,
 } from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
+import SkuLabelSheet from './SkuLabelSheet'
 
 // Receive PO / vendor delivery sheet (backlog #12 MVP).
 //
@@ -32,6 +33,10 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
   const [lines, setLines]         = useState(() => [newLine()])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]         = useState('')
+  // After a successful save we capture the received parts so a post-save
+  // "print labels for these items" prompt can use them.
+  const [justReceived, setJustReceived] = useState(null)  // null | array of parts
+  const [showLabelSheet, setShowLabelSheet] = useState(false)
 
   // Load bins when the destination is a warehouse
   useEffect(() => {
@@ -111,7 +116,12 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
         created_by: currentUser?.id,
       }))
       await recordMovementsBatch(movements)
-      onRecorded(validLines.length)
+      // Stash the received parts for the post-save label prompt. Parent
+      // gets notified now (toast + refresh) but the sheet stays open
+      // showing the print-labels offer instead of closing.
+      setJustReceived(validLines.map(l => ({
+        id: l.part.id, name: l.part.name, unit: l.part.unit,
+      })))
     } catch (e) {
       setError(e.message || String(e))
     } finally {
@@ -125,6 +135,48 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
     if (!Number.isFinite(cost)) return sum
     return sum + cost * Number(l.quantity)
   }, 0)
+
+  // After save, show a "labels?" prompt instead of the form. Manager can
+  // print labels for everything they just received, or just dismiss.
+  // Either action notifies the parent and closes.
+  if (justReceived) {
+    const finish = () => { onRecorded(justReceived.length) }
+    return (
+      <>
+        <div className="overlay open" onClick={e => e.target === e.currentTarget && finish()}>
+          <div className="overlay-sheet" style={{ maxWidth: 480, textAlign: 'center' }}>
+            <div style={{ fontSize: 48, marginBottom: 10 }}>✅</div>
+            <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 6 }}>
+              Received {justReceived.length} item{justReceived.length === 1 ? '' : 's'}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 18 }}>
+              Print labels for the items you just received so you can stick them on
+              the boxes as you put them away. Optional — skip if you don't need them.
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={finish}>
+                Skip
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 2 }}
+                onClick={() => setShowLabelSheet(true)}
+              >
+                🏷 Print labels
+              </button>
+            </div>
+          </div>
+        </div>
+        {showLabelSheet && (
+          <SkuLabelSheet
+            parts={justReceived}
+            title={`Print labels for ${justReceived.length} received item${justReceived.length === 1 ? '' : 's'}`}
+            onClose={() => { setShowLabelSheet(false); finish() }}
+          />
+        )}
+      </>
+    )
+  }
 
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && !submitting && onClose()}>

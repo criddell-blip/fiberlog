@@ -5,6 +5,7 @@ import {
   getBinsForWarehouse,
 } from '../../lib/inventory'
 import BulkMoveSheet from './BulkMoveSheet'
+import SkuLabelSheet from './SkuLabelSheet'
 import { useIsWide } from '../../lib/useIsWide'
 
 const TYPE_ICONS = {
@@ -47,6 +48,7 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
 
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [showBulkMove, setShowBulkMove] = useState(false)
+  const [showLabelSheet, setShowLabelSheet] = useState(false)
 
   // Two-tier location filter:
   //   typeFilter — top ribbon: 'all' | 'warehouse' | 'truck' | 'job_site'
@@ -401,6 +403,19 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
             <span style={{ color: 'var(--hint)', marginLeft: 6 }}>· drill into a bin to bulk-move</span>
           )}
         </div>
+        {!loading && filtered.length > 0 && (
+          <button
+            onClick={() => setShowLabelSheet(true)}
+            title="Print SKU labels for the parts shown above"
+            style={{
+              fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 'var(--r-sm)',
+              border: '1.5px solid var(--purple)', background: 'var(--purple-lt)', color: 'var(--purple)', cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            🏷 Labels
+          </button>
+        )}
         {canBulkSelect && filtered.length > 0 && (
           <button
             onClick={allVisibleSelected ? clearSelection : selectAllVisible}
@@ -514,6 +529,18 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
           currentUser={currentUser}
           onClose={() => setShowBulkMove(false)}
           onComplete={handleBulkMoveComplete}
+        />
+      )}
+
+      {showLabelSheet && (
+        <SkuLabelSheet
+          parts={filtered.map(r => ({
+            id: r.parts_catalog?.id || r.part_id,
+            name: r.parts_catalog?.name || r.part_id,
+            unit: r.parts_catalog?.unit || 'ea',
+          })).filter(p => p.id)}
+          title={`Print labels for ${filtered.length} part${filtered.length === 1 ? '' : 's'} at this location`}
+          onClose={() => setShowLabelSheet(false)}
         />
       )}
     </div>

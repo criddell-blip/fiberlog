@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../AppContext'
 import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, SONAR_ROUTING_OPTIONS } from '../../lib/inventory'
+import SkuLabelSheet from './SkuLabelSheet'
 
 const COMMON_UNITS = ['ea', 'ft', 'm', 'in', 'lb', 'kg', 'box', 'roll', 'spool', 'pair', 'pack', 'kit']
 
@@ -17,6 +18,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged }) {
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(null)
   const [bulkEditing, setBulkEditing] = useState(false)
+  const [showLabelSheet, setShowLabelSheet] = useState(false)
 
   // Selection: a Set of part ids checked for bulk operations
   const [selectedIds, setSelectedIds] = useState(() => new Set())
@@ -363,10 +365,19 @@ export default function InventoryPartsTab({ refreshKey, onChanged }) {
             {selectedCount} selected
           </div>
           <button onClick={() => setBulkEditing(true)} style={bulkActionBtn('orange')}>✎ Bulk edit</button>
+          <button onClick={() => setShowLabelSheet(true)} style={bulkActionBtn('purple')}>🏷 Labels</button>
           <button onClick={handleBulkActivate} style={bulkActionBtn('teal')}>✓ Activate</button>
           <button onClick={handleBulkDeactivate} style={bulkActionBtn('amber')}>⊘ Deactivate</button>
           <button onClick={clearSelection} style={bulkActionBtn('ghost')}>Cancel</button>
         </div>
+      )}
+
+      {showLabelSheet && (
+        <SkuLabelSheet
+          parts={filtered.filter(p => selectedIds.has(p.id))}
+          title={`Print labels for ${selectedCount} selected part${selectedCount === 1 ? '' : 's'}`}
+          onClose={() => setShowLabelSheet(false)}
+        />
       )}
 
       {editing && (
@@ -425,6 +436,7 @@ function bulkActionBtn(variant) {
   if (variant === 'orange') return { ...base, border: 'none', background: 'var(--orange)', color: 'white' }
   if (variant === 'teal')   return { ...base, border: '1.5px solid var(--teal)',  background: 'var(--teal-lt)',  color: 'var(--teal)' }
   if (variant === 'amber')  return { ...base, border: '1.5px solid var(--amber)', background: 'var(--amber-lt)', color: 'var(--amber)' }
+  if (variant === 'purple') return { ...base, border: '1.5px solid var(--purple)', background: 'var(--purple-lt)', color: 'var(--purple)' }
   return                         { ...base, border: '1.5px solid var(--border2)', background: 'var(--bg)',     color: 'var(--muted)' }
 }
 

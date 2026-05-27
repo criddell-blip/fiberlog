@@ -5,6 +5,7 @@ import {
   getBinsForWarehouse, getStockCountsByLocation, getStockByLocation,
 } from '../../lib/inventory'
 import BinLabelSheet from '../cycleCount/BinLabelSheet'
+import AisleSignSheet from './AisleSignSheet'
 
 const TYPE_LABELS = {
   warehouse: 'Warehouse',
@@ -36,6 +37,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   const [editing, setEditing] = useState(null)        // location being edited (or 'new')
   const [addingBinFor, setAddingBinFor] = useState(null)  // warehouse object when adding a bin
   const [labelsFor, setLabelsFor] = useState(null)    // warehouse object when printing bin labels
+  const [aisleSignsFor, setAisleSignsFor] = useState(null)  // warehouse object when printing aisle signage
   const [saving, setSaving] = useState(false)
 
   // Bins per warehouse — fetched separately since bins aren't included in
@@ -510,7 +512,18 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                               border: '1px solid var(--purple)', borderRadius: 14, padding: '3px 10px',
                               cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
                             }}
-                          >🏷 Labels</button>
+                          >🏷 Bins</button>
+                        )}
+                        {type === 'warehouse' && bins.length > 0 && (
+                          <button
+                            onClick={stop(() => setAisleSignsFor(loc))}
+                            title="Print full-page aisle signs for warehouse navigation"
+                            style={{
+                              fontSize: 11, color: 'var(--blue)', background: 'var(--blue-lt)',
+                              border: '1px solid var(--blue)', borderRadius: 14, padding: '3px 10px',
+                              cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
+                            }}
+                          >🏷 Aisles</button>
                         )}
                         <button
                           onClick={stop(() => setEditing(loc))}
@@ -671,6 +684,14 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
         <BinLabelSheet
           warehouse={labelsFor}
           onClose={() => setLabelsFor(null)}
+        />
+      )}
+
+      {/* Aisle signage print sheet — one full-page sign per aisle */}
+      {aisleSignsFor && (
+        <AisleSignSheet
+          warehouse={aisleSignsFor}
+          onClose={() => setAisleSignsFor(null)}
         />
       )}
 

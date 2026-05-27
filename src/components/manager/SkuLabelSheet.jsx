@@ -1,0 +1,273 @@
+import { useEffect, useState } from 'react'
+import QRCode from 'qrcode'
+
+// Printable labels for parts. Each label = name + SKU + QR encoding the SKU
+// directly. Stick on product packaging when received; scan during cycle
+// counting to confirm "yes this is Part X" without typing.
+//
+// Used from:
+//   - Parts tab: select N parts → "🏷 Print labels"
+//   - Receive PO sheet: post-save offer for just-received items
+//   - Stock tab: print labels for parts at a chosen location
+//
+// Format picker has three presets — choose at print time:
+//   - US Letter 4-up: plain paper, 4 per page, generous size
+//   - Avery 5163 (10/page, 2×4 in): standard pre-cut adhesive labels
+//   - Avery 5160 (30/page, 1×2 5/8 in): smaller labels for tiny parts
+//
+// Same print-CSS trick as BinLabelSheet: @media print hides everything
+// except .print-labels, page margins via @page.
+const FORMAT_PRESETS = {
+  letter_4up: {
+    label: 'US Letter — 4 per page',
+    description: 'Plain paper, ~3.5×5 in per label, generous size.',
+    pageMargin: '0.4in',
+    columns: 2,
+    rows: 2,
+    qrSize: '1.5in',
+    nameFontPx: 16,
+    skuFontPx: 9,
+    minHeight: '4.5in',
+  },
+  avery_5163: {
+    label: 'Avery 5163 — 10 per page (2×4 in)',
+    description: 'Pre-cut adhesive labels, peel-and-stick.',
+    pageMargin: '0.5in 0.155in',  // top/bottom 0.5in, left/right 0.155in
+    columns: 2,
+    rows: 5,
+    qrSize: '0.95in',
+    nameFontPx: 11,
+    skuFontPx: 7,
+    minHeight: '2in',
+  },
+  avery_5160: {
+    label: 'Avery 5160 — 30 per page (1×2 5/8 in)',
+    description: 'Small address-label sized; tight fit, for small parts.',
+    pageMargin: '0.5in 0.19in',
+    columns: 3,
+    rows: 10,
+    qrSize: '0.7in',
+    nameFontPx: 8,
+    skuFontPx: 6,
+    minHeight: '1in',
+  },
+}
+
+export default function SkuLabelSheet({ parts, title = 'Print SKU labels', onClose }) {
+  // parts is an array of { id, name, unit?, ... } objects
+  const [format, setFormat] = useState('letter_4up')
+  const [selected, setSelected] = useState(() => new Set((parts || []).map(p => p.id)))
+  const [qrCache, setQrCache] = useState({})  // partId → data URL
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      const cache = {}
+      for (const p of (parts || [])) {
+        if (!p?.id) continue
+        cache[p.id] = await QRCode.toDataURL(p.id, {
+          errorCorrectionLevel: 'M',
+          margin: 1,
+          scale: 6,
+        })
+      }
+      if (!cancelled) {
+        setQrCache(cache)
+        setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [parts])
+
+  function toggle(partId) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(partId)) next.delete(partId)
+      else next.add(partId)
+      return next
+    })
+  }
+
+  function selectAll()  { setSelected(new Set((parts || []).map(p => p.id))) }
+  function selectNone() { setSelected(new Set()) }
+
+  function handlePrint() { window.print() }
+
+  const preset = FORMAT_PRESETS[format]
+  const labelsToPrint = (parts || []).filter(p => selected.has(p.id))
+
+  return (
+    <>
+      <style>{`
+        @media print {
+          body * { visibility: hidden !important; }
+          .print-labels, .print-labels * { visibility: visible !important; }
+          .print-labels {
+            position: absolute !important;
+            left: 0 !important; top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important; padding: 0 !important;
+            background: white !important;
+          }
+          .no-print { display: none !important; }
+          @page { margin: ${preset.pageMargin}; }
+        }
+      `}</style>
+
+      <div
+        className="overlay open no-print"
+        onClick={e => e.target === e.currentTarget && onClose()}
+      >
+        <div className="overlay-sheet" style={{ maxWidth: 720 }}>
+          <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4 }}>
+            {title}
+          </div>
+          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 14 }}>
+            Each label has the part name, SKU, and a QR code encoding the SKU.
+            Stick on product packaging; scan during cycle counts to confirm parts.
+          </div>
+
+          {/* Format picker */}
+          <div className="field">
+            <label>Label format</label>
+            <select value={format} onChange={e => setFormat(e.target.value)} style={{ width: '100%' }}>
+              {Object.entries(FORMAT_PRESETS).map(([key, p]) => (
+                <option key={key} value={key}>{p.label}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', marginTop: 4 }}>
+              {preset.description}
+            </div>
+          </div>
+
+          {loading && (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--muted)' }}>
+              Generating QR codes…
+            </div>
+          )}
+
+          {!loading && (parts || []).length === 0 && (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--hint)' }}>
+              No parts to label.
+            </div>
+          )}
+
+          {!loading && (parts || []).length > 0 && (
+            <>
+              {/* Selection controls */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '8px 0', marginBottom: 8,
+                borderBottom: '1px solid var(--border)',
+              }}>
+                <div style={{ flex: 1, fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
+                  {selected.size} of {(parts || []).length} selected
+                </div>
+                <button onClick={selectAll} className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 'var(--fs-xs)' }}>
+                  All
+                </button>
+                <button onClick={selectNone} className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 'var(--fs-xs)' }}>
+                  None
+                </button>
+              </div>
+
+              {/* Part checklist */}
+              <div style={{ maxHeight: 280, overflowY: 'auto', marginBottom: 14 }}>
+                {(parts || []).map(p => (
+                  <label key={p.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '6px 4px', cursor: 'pointer',
+                    borderBottom: '1px solid var(--border)',
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(p.id)}
+                      onChange={() => toggle(p.id)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span style={{ flex: 1, fontSize: 'var(--fs-sm)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {p.name || p.id}
+                    </span>
+                    <span style={{ fontSize: 10, color: 'var(--hint)', fontFamily: '"DM Mono", monospace' }}>
+                      {p.id}
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+                <button
+                  className="btn btn-primary"
+                  style={{ flex: 2 }}
+                  onClick={handlePrint}
+                  disabled={labelsToPrint.length === 0}
+                >
+                  🖨 Print {labelsToPrint.length} label{labelsToPrint.length === 1 ? '' : 's'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Printable layout — visible only during window.print() */}
+      <div className="print-labels" style={{ display: labelsToPrint.length === 0 ? 'none' : 'block' }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${preset.columns}, 1fr)`,
+          gap: 0,
+          width: '100%',
+          color: 'black',
+          background: 'white',
+        }}>
+          {labelsToPrint.map(p => (
+            <div key={p.id} style={{
+              border: '1px dashed #999',
+              padding: format === 'avery_5160' ? '0.05in' : '0.15in',
+              boxSizing: 'border-box',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: preset.minHeight,
+              textAlign: 'center',
+              breakInside: 'avoid',
+              pageBreakInside: 'avoid',
+            }}>
+              <div style={{
+                fontSize: preset.nameFontPx,
+                fontWeight: 700,
+                lineHeight: 1.15,
+                marginBottom: 4,
+                wordBreak: 'break-word',
+                maxWidth: '100%',
+              }}>
+                {p.name || p.id}
+              </div>
+              {qrCache[p.id] && (
+                <img
+                  src={qrCache[p.id]}
+                  alt={`QR for ${p.id}`}
+                  style={{ width: preset.qrSize, height: preset.qrSize }}
+                />
+              )}
+              <div style={{
+                fontSize: preset.skuFontPx,
+                color: '#444',
+                fontFamily: 'monospace',
+                marginTop: 4,
+                wordBreak: 'break-all',
+                maxWidth: '100%',
+              }}>
+                {p.id}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  )
+}
