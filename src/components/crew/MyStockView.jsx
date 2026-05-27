@@ -268,19 +268,13 @@ export default function MyStockView({ onBack, onUserTap }) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+// Uses the shared .metric class for layout + typography, with the value color
+// overridden inline so the parts/units split (teal vs orange) is preserved.
 function Stat({ label, value, color }) {
   return (
-    <div style={{
-      flex: 1, padding: '8px 12px',
-      background: 'var(--surface2)',
-      border: '1px solid var(--border)',
-      borderRadius: 'var(--r-sm)',
-      textAlign: 'center',
-    }}>
-      <div style={{ fontSize: 18, fontWeight: 800, color }}>{value}</div>
-      <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginTop: 2 }}>
-        {label}
-      </div>
+    <div className="metric" style={{ flex: 1, background: 'var(--surface2)', border: '1px solid var(--border)' }}>
+      <div className="metric-value" style={{ color }}>{value}</div>
+      <div className="metric-label">{label}</div>
     </div>
   )
 }

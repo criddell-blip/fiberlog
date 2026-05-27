@@ -118,7 +118,7 @@ Some managers are also field workers. They needed to log their own day's work wi
 
 - **Frontend:** React 18 + Vite + plain JSX (no TypeScript)
 - **Backend:** Supabase (Postgres + Auth + Realtime + Edge Functions)
-- **Styling:** Inline styles + CSS variables (no Tailwind, no CSS modules). Theme tokens live in `src/index.css`.
+- **Styling:** Inline styles + CSS variables (no Tailwind, no CSS modules). Theme tokens + shared classes live in `src/styles/global.css` (imported from `App.jsx`).
 - **Deployment:** `npm run deploy` pushes to `gh-pages` branch
 - **Local dev:** `npm run dev` (Vite default port 5173)
 
@@ -143,7 +143,7 @@ Some managers are also field workers. They needed to log their own day's work wi
 src/
   AppContext.jsx          ← global state, auth, projects, users, realtime subscriptions
   App.jsx                 ← top-level routing: role=owner/manager → ManagerApp (unless viewMode='crew' AND has field crew_type → routes to the appropriate crew shell); crew_type='infrastructure' → InfraCrewApp; everyone else → CrewApp
-  index.css               ← CSS variables for both light + dark theme
+  styles/global.css       ← CSS variables + shared classes (pill, banner, metric, avatar, etc.) for both light + dark theme
   lib/
     supabase.js           ← Supabase client + DB helpers (projects, users, tasks, etc.)
     inventory.js          ← all inventory operations (locations, stock, movements, parts, audit)
