@@ -16,7 +16,7 @@ import { getMyActiveRun, getPendingCountRuns } from '../../lib/cycleCount'
 //   2. No active run, but pending-review runs exist → empty state + a
 //      queue list above the Start CTA. Tap one to review.
 //   3. No active run, no pending reviews → just the empty-state CTA.
-export default function CountTab({ onExitTab }) {
+export default function CountTab({ onExitTab, jumpTo }) {
   const { currentUser } = useApp()
   const [activeRun, setActiveRun] = useState(null)
   const [pendingRuns, setPendingRuns] = useState([])
@@ -24,6 +24,15 @@ export default function CountTab({ onExitTab }) {
   const [reviewRunId, setReviewRunId] = useState(null)
   const [showHistory, setShowHistory] = useState(false)
   const [loading, setLoading] = useState(true)
+
+  // External jump from Locations tab: "Count this bin" creates/resumes
+  // a run + session and asks us to drop the user straight into the
+  // counter for that bin. jumpTo.n changes on each request so even
+  // re-clicking the same bin re-fires.
+  useEffect(() => {
+    if (!jumpTo?.run) return
+    setActiveRun(jumpTo.run)
+  }, [jumpTo?.n])
 
   const loadAll = useCallback(async () => {
     if (!currentUser?.id) { setLoading(false); return }
@@ -47,7 +56,9 @@ export default function CountTab({ onExitTab }) {
   if (activeRun) {
     return (
       <CountRunScreen
+        key={activeRun.id + (jumpTo?.n || 0)}
         run={activeRun}
+        initialBinId={jumpTo?.session?.location_id}
         onExit={async () => { setActiveRun(null); await loadAll() }}
       />
     )

@@ -6,6 +6,7 @@ import {
 } from '../../lib/inventory'
 import BinLabelSheet from '../cycleCount/BinLabelSheet'
 import AisleSignSheet from './AisleSignSheet'
+import LocationDetailPanel from './LocationDetailPanel'
 
 const TYPE_LABELS = {
   warehouse: 'Warehouse',
@@ -25,7 +26,7 @@ const TYPE_ICONS = {
   bin:       '📥',
 }
 
-export default function InventoryLocationsTab({ locations, loading, onChanged, onJumpToStock, refreshKey }) {
+export default function InventoryLocationsTab({ locations, loading, onChanged, onJumpToStock, onJumpToCount, refreshKey }) {
   const { users, showToast, currentUser } = useApp()
   // Retire (deactivate) is owner-only. Managers can do everything else
   // — edit attrs, add bins, jump to stock — but retiring a location is
@@ -38,6 +39,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   const [addingBinFor, setAddingBinFor] = useState(null)  // warehouse object when adding a bin
   const [labelsFor, setLabelsFor] = useState(null)    // warehouse object when printing bin labels
   const [aisleSignsFor, setAisleSignsFor] = useState(null)  // warehouse object when printing aisle signage
+  const [detailFor, setDetailFor] = useState(null)    // any location when opening the drill-in detail panel
   const [saving, setSaving] = useState(false)
 
   // Bins per warehouse — fetched separately since bins aren't included in
@@ -482,16 +484,25 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                             )}
                           </div>
                         </div>
+                        <button
+                          onClick={stop(() => setDetailFor(loc))}
+                          title="Open details panel — view stock, count, export, edit"
+                          style={{
+                            fontSize: 11, color: 'var(--orange)', background: 'var(--orange-lt)',
+                            border: '1px solid var(--orange-dk)', borderRadius: 14, padding: '3px 10px',
+                            cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
+                          }}
+                        >📋 Details</button>
                         {onJumpToStock && rollup && rollup.distinctParts > 0 && (
                           <button
                             onClick={stop(() => onJumpToStock(loc.id))}
                             title="View stock at this location"
                             style={{
-                              fontSize: 11, color: 'var(--orange)', background: 'var(--orange-lt)',
-                              border: '1px solid var(--orange-dk)', borderRadius: 14, padding: '3px 10px',
+                              fontSize: 11, color: 'var(--muted)', background: 'transparent',
+                              border: '1px solid var(--border2)', borderRadius: 14, padding: '3px 10px',
                               cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
                             }}
-                          >📦 Stock →</button>
+                          >📦 Stock</button>
                         )}
                         {type === 'warehouse' && (
                           <button
@@ -611,17 +622,15 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                                           <LastCountedPill ts={bin.last_counted_at} />
                                         </div>
                                       </div>
-                                      {onJumpToStock && binCounts && binCounts.distinctParts > 0 && (
-                                        <button
-                                          onClick={() => onJumpToStock(bin.id)}
-                                          title="View stock in this bin"
-                                          style={{
-                                            fontSize: 10, color: 'var(--orange)', background: 'var(--orange-lt)',
-                                            border: '1px solid var(--orange-dk)', borderRadius: 12, padding: '2px 8px',
-                                            cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
-                                          }}
-                                        >📦 Stock →</button>
-                                      )}
+                                      <button
+                                        onClick={() => setDetailFor(bin)}
+                                        title="Open details — stock, count this bin, export"
+                                        style={{
+                                          fontSize: 10, color: 'var(--orange)', background: 'var(--orange-lt)',
+                                          border: '1px solid var(--orange-dk)', borderRadius: 12, padding: '2px 8px',
+                                          cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
+                                        }}
+                                      >📋 Details</button>
                                       <button
                                         onClick={() => setEditing(bin)}
                                         style={{ fontSize: 11, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
@@ -692,6 +701,21 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
         <AisleSignSheet
           warehouse={aisleSignsFor}
           onClose={() => setAisleSignsFor(null)}
+        />
+      )}
+
+      {/* Location detail drill-in — hub for view-stock / count / export /
+          labels / edit / retire from a single panel. Opened via the
+          "📋 Details" button on warehouse + bin rows. */}
+      {detailFor && (
+        <LocationDetailPanel
+          location={detailFor}
+          isOwner={isOwner}
+          onClose={() => setDetailFor(null)}
+          onJumpToStock={onJumpToStock}
+          onJumpToCount={onJumpToCount}
+          onEdit={(loc) => setEditing(loc)}
+          onRetire={(loc) => handleDeactivate(loc)}
         />
       )}
 

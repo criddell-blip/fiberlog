@@ -484,6 +484,98 @@ export async function bulkAssignPullLocation({ userIds, locationId }) {
   return data
 }
 
+// Build + download an audit-format CSV scoped to one location. Same row
+// shape as InventoryAuditTab's cross-location export so the resulting
+// file imports cleanly into the existing Reconcile sheet flow.
+// Triggered from the LocationDetailPanel's Export CSV button.
+export async function exportLocationStockCSV(location) {
+  // Match the headers/format from InventoryAuditTab.buildAuditCsv
+  const HEADERS = [
+    'SKU', 'Name', 'Category', 'Department', 'Material Group', 'Unit',
+    'Location', 'Bin', 'Expected Qty', 'Actual Qty', 'Variance',
+    'Last Movement', 'Notes',
+  ]
+  const csvField = v => {
+    if (v == null) return ''
+    const s = String(v)
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return '"' + s.replace(/"/g, '""') + '"'
+    }
+    return s
+  }
+
+  // Get stock at the location with full part info
+  const { data: stock, error: stockErr } = await db
+    .from('inventory_stock')
+    .select('*, parts_catalog (id, name, category, department, material_group, unit)')
+    .eq('location_id', location.id)
+  if (stockErr) throw stockErr
+
+  // Resolve last-movement timestamps per part at this location
+  const partIds = (stock || []).map(s => s.part_id).filter(Boolean)
+  let lastMoves = {}
+  if (partIds.length > 0) {
+    const { data: moves } = await db
+      .from('inventory_movements')
+      .select('part_id, created_at')
+      .or(`from_location_id.eq.${location.id},to_location_id.eq.${location.id}`)
+      .in('part_id', partIds)
+      .order('created_at', { ascending: false })
+    for (const m of (moves || [])) {
+      if (!lastMoves[m.part_id]) lastMoves[m.part_id] = m.created_at
+    }
+  }
+
+  // Resolve parent warehouse name for bins
+  let parentName = ''
+  if (location.type === 'bin' && location.parent_location_id) {
+    const { data: parent } = await db
+      .from('inventory_locations')
+      .select('name')
+      .eq('id', location.parent_location_id)
+      .maybeSingle()
+    parentName = parent?.name || ''
+  }
+
+  const isBin = location.type === 'bin'
+  const locName = isBin ? parentName : location.name
+  const binName = isBin ? location.name : ''
+
+  const lines = [HEADERS.map(csvField).join(',')]
+  ;(stock || []).forEach((r, idx) => {
+    const rowNum = idx + 2  // 1-based + header row
+    const pc = r.parts_catalog || {}
+    const fields = [
+      pc.id || r.part_id,
+      pc.name || '',
+      pc.category || '',
+      pc.department || '',
+      pc.material_group || '',
+      pc.unit || 'ea',
+      locName,
+      binName,
+      Number(r.quantity) || 0,
+      '',                          // Actual qty — blank for the counter to fill in
+      `=J${rowNum}-I${rowNum}`,    // Variance formula (Excel/Sheets — Actual minus Expected)
+      lastMoves[r.part_id] ? new Date(lastMoves[r.part_id]).toISOString().slice(0, 10) : '',
+      '',                          // Notes — blank
+    ]
+    lines.push(fields.map(csvField).join(','))
+  })
+
+  const csv = lines.join('\n')
+  const safeName = (location.name || 'location').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()
+  const stamp = new Date().toISOString().slice(0, 10)
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `fiberlog-audit-${safeName}-${stamp}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+  return (stock || []).length
+}
+
 // Fetch caller's truck + stock at it in one round trip. Stock rows have
 // the parts_catalog joined. Returns { truck, stock: [...] } — truck is
 // null if the caller has none, in which case stock is [].

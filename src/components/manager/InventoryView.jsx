@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useApp } from '../../AppContext'
+import { useIsWide } from '../../lib/useIsWide'
 import { getLocations } from '../../lib/inventory'
 import InventoryStockTab from './InventoryStockTab'
 import InventoryLocationsTab from './InventoryLocationsTab'
@@ -24,6 +25,23 @@ const SUBTABS = [
 
 export default function InventoryView() {
   const { showToast, currentUser } = useApp()
+  const isWide = useIsWide()
+  // Mobile action-menu state. On phone the 4 secondary actions (Import / PO /
+  // Reconcile / Sonar) collapse behind a "⋯ More" button to keep the header
+  // slim; primary "+ Record movement" stays visible. Closed by default.
+  const [actionMenuOpen, setActionMenuOpen] = useState(false)
+  const actionMenuRef = useRef(null)
+  // Auto-close the menu on outside-tap (matches native popover UX)
+  useEffect(() => {
+    if (!actionMenuOpen) return
+    const handler = (e) => {
+      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target)) {
+        setActionMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [actionMenuOpen])
   const [tab, setTab] = useState('stock')
   const [locations, setLocations] = useState([])
   const [locationsLoading, setLocationsLoading] = useState(true)
@@ -40,10 +58,21 @@ export default function InventoryView() {
   // scope; the counter ensures repeat clicks on the same location still
   // re-fire the effect.
   const [stockJump, setStockJump] = useState({ locationId: null, n: 0 })
+  // Count jump — flips to Count tab and seeds CountTab with a specific run +
+  // optional session to auto-open. Used by LocationDetailPanel's "Count this
+  // bin" action so the manager goes directly into the bin's session instead
+  // of starting from Count tab's empty state. Counter (n) ensures repeat
+  // clicks on the same target still re-fire the effect.
+  const [countJump, setCountJump] = useState({ run: null, session: null, n: 0 })
 
   function jumpToStock(locationId) {
     setStockJump(prev => ({ locationId, n: prev.n + 1 }))
     setTab('stock')
+  }
+
+  function jumpToCount(run, session) {
+    setCountJump(prev => ({ run, session, n: prev.n + 1 }))
+    setTab('count')
   }
 
   async function loadLocations() {
@@ -107,7 +136,7 @@ export default function InventoryView() {
   // so we suppress it and give CountTab the full panel. Navigation back is
   // via CountTab's own "← Inventory" button.
   if (tab === 'count') {
-    return <CountTab onExitTab={() => setTab('stock')} />
+    return <CountTab onExitTab={() => setTab('stock')} jumpTo={countJump} />
   }
 
   return (
@@ -115,41 +144,92 @@ export default function InventoryView() {
       <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
           <div style={{ fontWeight: 800, fontSize: 17 }}>Inventory</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <button
-              className="btn btn-ghost"
-              onClick={() => setShowImportSheet(true)}
-              style={{ padding: '6px 12px', fontSize: 13 }}
-            >
-              ⇪ Import CSV
-            </button>
-            <button
-              className="btn btn-ghost"
-              onClick={() => setShowReceiveSheet(true)}
-              disabled={noLocations}
-              title={noLocations ? 'Create a destination location first' : 'Receive a vendor delivery / purchase order'}
-              style={{ padding: '6px 12px', fontSize: 13 }}
-            >
-              📥 Receive PO
-            </button>
-            <button
-              className="btn btn-ghost"
-              onClick={() => setShowReconcileSheet(true)}
-              disabled={noLocations}
-              title={noLocations ? 'Create a location first' : 'Upload a filled-in Audit CSV to reconcile system stock to a physical count'}
-              style={{ padding: '6px 12px', fontSize: 13 }}
-            >
-              🔄 Reconcile
-            </button>
-            <button
-              className="btn btn-ghost"
-              onClick={() => setShowSonarSheet(true)}
-              disabled={noLocations}
-              title={noLocations ? 'Create a location first' : 'Import a Sonar daily install report (issues consumed parts off crew trucks)'}
-              style={{ padding: '6px 12px', fontSize: 13 }}
-            >
-              ⚡ Sonar
-            </button>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* Desktop: all 4 secondary actions visible.
+                Mobile: collapsed behind a "⋯ More" button to keep the
+                header at one row even on a 360px viewport. */}
+            {isWide ? (
+              <>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => setShowImportSheet(true)}
+                  style={{ padding: '6px 12px', fontSize: 13 }}
+                >
+                  ⇪ Import CSV
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => setShowReceiveSheet(true)}
+                  disabled={noLocations}
+                  title={noLocations ? 'Create a destination location first' : 'Receive a vendor delivery / purchase order'}
+                  style={{ padding: '6px 12px', fontSize: 13 }}
+                >
+                  📥 Receive PO
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => setShowReconcileSheet(true)}
+                  disabled={noLocations}
+                  title={noLocations ? 'Create a location first' : 'Upload a filled-in Audit CSV to reconcile system stock to a physical count'}
+                  style={{ padding: '6px 12px', fontSize: 13 }}
+                >
+                  🔄 Reconcile
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => setShowSonarSheet(true)}
+                  disabled={noLocations}
+                  title={noLocations ? 'Create a location first' : 'Import a Sonar daily install report (issues consumed parts off crew trucks)'}
+                  style={{ padding: '6px 12px', fontSize: 13 }}
+                >
+                  ⚡ Sonar
+                </button>
+              </>
+            ) : (
+              <div ref={actionMenuRef} style={{ position: 'relative' }}>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => setActionMenuOpen(v => !v)}
+                  style={{ padding: '6px 12px', fontSize: 13 }}
+                  title="Import / Receive PO / Reconcile / Sonar"
+                >
+                  ⋯ More
+                </button>
+                {actionMenuOpen && (
+                  <div style={{
+                    position: 'absolute', top: 'calc(100% + 4px)', right: 0,
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--r-sm)',
+                    padding: 4, minWidth: 180, zIndex: 100,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  }}>
+                    {[
+                      { label: '⇪ Import CSV', onClick: () => setShowImportSheet(true), disabled: false },
+                      { label: '📥 Receive PO', onClick: () => setShowReceiveSheet(true), disabled: noLocations },
+                      { label: '🔄 Reconcile', onClick: () => setShowReconcileSheet(true), disabled: noLocations },
+                      { label: '⚡ Sonar', onClick: () => setShowSonarSheet(true), disabled: noLocations },
+                    ].map(item => (
+                      <button
+                        key={item.label}
+                        onClick={() => { item.onClick(); setActionMenuOpen(false) }}
+                        disabled={item.disabled}
+                        style={{
+                          display: 'block', width: '100%', textAlign: 'left',
+                          padding: '8px 12px', background: 'transparent', border: 'none',
+                          fontSize: 13, fontWeight: 600,
+                          color: item.disabled ? 'var(--hint)' : 'var(--text)',
+                          cursor: item.disabled ? 'not-allowed' : 'pointer',
+                          borderRadius: 'var(--r-xs)',
+                        }}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <button
               className="btn btn-primary"
               onClick={() => setShowRecordSheet(true)}
@@ -161,22 +241,43 @@ export default function InventoryView() {
             </button>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-          {SUBTABS.map(s => (
-            <button
-              key={s.id}
-              onClick={() => setTab(s.id)}
+        {/* Sub-tab nav: pills on desktop, native dropdown on phone.
+            6 pills wrap to 2 rows on a 360px viewport; dropdown is 1 row. */}
+        {isWide ? (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+            {SUBTABS.map(s => (
+              <button
+                key={s.id}
+                onClick={() => setTab(s.id)}
+                style={{
+                  padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                  background: tab === s.id ? 'var(--orange)' : 'var(--gray-lt)',
+                  color: tab === s.id ? 'white' : 'var(--muted)',
+                  border: 'none', cursor: 'pointer'
+                }}
+              >
+                {s.icon} {s.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div style={{ marginBottom: 12 }}>
+            <select
+              value={tab}
+              onChange={e => setTab(e.target.value)}
               style={{
-                padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-                background: tab === s.id ? 'var(--orange)' : 'var(--gray-lt)',
-                color: tab === s.id ? 'white' : 'var(--muted)',
-                border: 'none', cursor: 'pointer'
+                width: '100%', padding: '8px 12px', fontSize: 14, fontWeight: 700,
+                border: '1.5px solid var(--orange)',
+                borderRadius: 'var(--r-sm)',
+                background: 'var(--surface2)', color: 'var(--text)',
               }}
             >
-              {s.icon} {s.label}
-            </button>
-          ))}
-        </div>
+              {SUBTABS.map(s => (
+                <option key={s.id} value={s.id}>{s.icon} {s.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {noLocations && tab !== 'locations' && (
@@ -210,6 +311,7 @@ export default function InventoryView() {
             loading={locationsLoading}
             onChanged={handleLocationsChanged}
             onJumpToStock={jumpToStock}
+            onJumpToCount={jumpToCount}
             refreshKey={refreshKey}
           />
         )}

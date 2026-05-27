@@ -29,7 +29,7 @@ import { searchPartsCatalog } from '../../lib/supabase'
 //   • Tap "Submit bin" when done with the bin — server rejects if any
 //     expected line has no counted_qty entered
 //   • Tap "End run" when you're done — runs auto-reconcile, shows result
-export default function CountRunScreen({ run: initialRun, onExit }) {
+export default function CountRunScreen({ run: initialRun, onExit, initialBinId = null }) {
   const { currentUser, showToast } = useApp()
   const [run, setRun] = useState(initialRun)
   const [sessions, setSessions] = useState([])
@@ -66,6 +66,16 @@ export default function CountRunScreen({ run: initialRun, onExit }) {
   }, [])
 
   useEffect(() => { refreshSessions() }, [refreshSessions])
+
+  // If parent passed initialBinId (e.g. from the LocationDetailPanel's
+  // "Count this bin" jump), auto-open that bin's session on first render
+  // so the user lands directly in the counter instead of the run's empty
+  // state. Fires once per mount.
+  useEffect(() => {
+    if (!initialBinId) return
+    loadBin(initialBinId).catch(e => console.warn('Auto-load initial bin failed:', e))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Scan handler ─────────────────────────────────────────────────────
   async function handleScan(code) {
