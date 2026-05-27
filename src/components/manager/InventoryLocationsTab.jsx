@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import {
   createLocation, updateLocation, deactivateLocation, deactivateLocationWithRecovery,
@@ -435,17 +435,17 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                         )}
                         <span style={{ fontSize: 20 }}>{TYPE_ICONS[type]}</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, fontSize: 14 }}>
+                          <div style={{ fontWeight: 700, fontSize: 15 }}>
                             {loc.name}
                             {type === 'warehouse' && bins.length > 0 && (
                               <span style={{
-                                fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 10,
+                                fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
                                 background: 'var(--teal-lt)', color: 'var(--teal)',
                                 marginLeft: 8, verticalAlign: 'middle',
                               }}>{bins.length} bin{bins.length === 1 ? '' : 's'}</span>
                             )}
                           </div>
-                          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+                          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
                             {/* Truck assignment chip — clickable, jumps to
                                 the Edit sheet so you don't have to hunt for
                                 the Edit button. Amber for orphans (truck
@@ -489,8 +489,8 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                           onClick={stop(() => setDetailFor(loc))}
                           title="Open details panel — view stock, count, export, edit"
                           style={{
-                            fontSize: 11, color: 'var(--orange)', background: 'var(--orange-lt)',
-                            border: '1px solid var(--orange-dk)', borderRadius: 14, padding: '3px 10px',
+                            fontSize: 12, color: 'var(--orange)', background: 'var(--orange-lt)',
+                            border: '1px solid var(--orange-dk)', borderRadius: 14, padding: '4px 12px',
                             cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
                           }}
                         >📋 Details</button>
@@ -499,8 +499,8 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                             onClick={stop(() => onJumpToStock(loc.id))}
                             title="View stock at this location"
                             style={{
-                              fontSize: 11, color: 'var(--muted)', background: 'transparent',
-                              border: '1px solid var(--border2)', borderRadius: 14, padding: '3px 10px',
+                              fontSize: 12, color: 'var(--muted)', background: 'transparent',
+                              border: '1px solid var(--border2)', borderRadius: 14, padding: '4px 12px',
                               cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
                             }}
                           >📦 Stock</button>
@@ -509,8 +509,8 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                           <button
                             onClick={stop(() => setAddingBinFor(loc))}
                             style={{
-                              fontSize: 11, color: 'var(--teal)', background: 'var(--teal-lt)',
-                              border: '1px solid var(--teal)', borderRadius: 14, padding: '3px 10px',
+                              fontSize: 12, color: 'var(--teal)', background: 'var(--teal-lt)',
+                              border: '1px solid var(--teal)', borderRadius: 14, padding: '4px 12px',
                               cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
                             }}
                           >＋ Bin</button>
@@ -520,8 +520,8 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                             onClick={stop(() => setLabelsFor(loc))}
                             title="Print scannable BIN: QR labels for this warehouse"
                             style={{
-                              fontSize: 11, color: 'var(--purple)', background: 'var(--purple-lt)',
-                              border: '1px solid var(--purple)', borderRadius: 14, padding: '3px 10px',
+                              fontSize: 12, color: 'var(--purple)', background: 'var(--purple-lt)',
+                              border: '1px solid var(--purple)', borderRadius: 14, padding: '4px 12px',
                               cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
                             }}
                           >🏷 Bins</button>
@@ -531,20 +531,20 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                             onClick={stop(() => setAisleSignsFor(loc))}
                             title="Print full-page aisle signs for warehouse navigation"
                             style={{
-                              fontSize: 11, color: 'var(--blue)', background: 'var(--blue-lt)',
-                              border: '1px solid var(--blue)', borderRadius: 14, padding: '3px 10px',
+                              fontSize: 12, color: 'var(--blue)', background: 'var(--blue-lt)',
+                              border: '1px solid var(--blue)', borderRadius: 14, padding: '4px 12px',
                               cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
                             }}
                           >🏷 Aisles</button>
                         )}
                         <button
                           onClick={stop(() => setEditing(loc))}
-                          style={{ fontSize: 12, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                          style={{ fontSize: 13, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
                         >Edit</button>
                         {isOwner && (
                           <button
                             onClick={stop(() => handleDeactivate(loc))}
-                            style={{ fontSize: 12, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                            style={{ fontSize: 13, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
                           >Retire</button>
                         )}
                       </div>
@@ -588,13 +588,13 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                                     transform: isAisleExpanded ? 'rotate(90deg)' : 'none',
                                     transition: 'transform .15s', width: 10, textAlign: 'center',
                                   }}>›</span>
-                                  <span style={{ fontSize: 13, fontWeight: 700 }}>{group.label}</span>
+                                  <span style={{ fontSize: 14, fontWeight: 700 }}>{group.label}</span>
                                   <span style={{
-                                    fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10,
+                                    fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 10,
                                     background: 'var(--gray-lt)', color: 'var(--muted)',
                                   }}>{group.bins.length}</span>
                                   {aisleRollup.distinctParts > 0 && (
-                                    <span style={{ fontSize: 11, color: 'var(--hint)', marginLeft: 'auto' }}>
+                                    <span style={{ fontSize: 12, color: 'var(--hint)', marginLeft: 'auto' }}>
                                       {aisleRollup.distinctParts.toLocaleString()} part{aisleRollup.distinctParts === 1 ? '' : 's'} · {aisleRollup.totalUnits.toLocaleString()} units
                                     </span>
                                   )}
@@ -608,10 +608,10 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                                       padding: '6px 14px 6px 44px',
                                       borderTop: '1px solid var(--border)',
                                     }}>
-                                      <span style={{ fontSize: 13 }}>📥</span>
+                                      <span style={{ fontSize: 15 }}>📥</span>
                                       <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontWeight: 600, fontSize: 12 }}>{bin.name}</div>
-                                        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 1, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5 }}>
+                                        <div style={{ fontWeight: 600, fontSize: 14 }}>{bin.name}</div>
+                                        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5 }}>
                                           {bin.notes && <span>{bin.notes}</span>}
                                           {binCounts && binCounts.distinctParts > 0 && (
                                             <>
@@ -628,19 +628,19 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                                         onClick={() => setDetailFor(bin)}
                                         title="Open details — stock, count this bin, export"
                                         style={{
-                                          fontSize: 10, color: 'var(--orange)', background: 'var(--orange-lt)',
-                                          border: '1px solid var(--orange-dk)', borderRadius: 12, padding: '2px 8px',
+                                          fontSize: 12, color: 'var(--orange)', background: 'var(--orange-lt)',
+                                          border: '1px solid var(--orange-dk)', borderRadius: 12, padding: '3px 10px',
                                           cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
                                         }}
                                       >📋 Details</button>
                                       <button
                                         onClick={() => setEditing(bin)}
-                                        style={{ fontSize: 11, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                                        style={{ fontSize: 13, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
                                       >Edit</button>
                                       {isOwner && (
                                         <button
                                           onClick={() => handleDeactivate(bin)}
-                                          style={{ fontSize: 11, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                                          style={{ fontSize: 13, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
                                         >Retire</button>
                                       )}
                                     </div>
@@ -665,6 +665,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
         <BinFormSheet
           bin={editing}
           parentWarehouse={locations.find(l => l.id === editing.parent_location_id)}
+          existingBins={binsByWarehouse[editing.parent_location_id] || []}
           saving={saving}
           onCancel={() => setEditing(null)}
           onSave={(formData) => handleSaveBinEdit(formData, editing)}
@@ -684,6 +685,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
         <BinFormSheet
           bin={null}
           parentWarehouse={addingBinFor}
+          existingBins={binsByWarehouse[addingBinFor.id] || []}
           saving={saving}
           onCancel={() => setAddingBinFor(null)}
           onSave={(formData) => handleSaveBin(formData, addingBinFor)}
@@ -1004,14 +1006,60 @@ function LocationFormSheet({ location, usersWithoutTruck, saving, onCancel, onSa
 
 // ─── Form sheet for adding/editing a bin ─────────────────────────────────────
 
-function BinFormSheet({ bin, parentWarehouse, saving, onCancel, onSave }) {
+// Parse "Aisle <N>, <rest>" to pre-fill the picker when editing, OR to
+// extract the list of distinct aisles already in use under the parent
+// warehouse. Returns { aisle, rest } or null if the name doesn't fit
+// the convention.
+function parseBinName(name) {
+  const m = (name || '').match(/^Aisle\s+(\d+)\s*[,:]?\s*(.*)$/i)
+  if (!m) return null
+  return { aisle: m[1], rest: m[2].trim() }
+}
+
+function BinFormSheet({ bin, parentWarehouse, existingBins = [], saving, onCancel, onSave }) {
   const isEdit = !!bin
-  const [name, setName] = useState(bin?.name || '')
+
+  // Derive the list of existing aisles under this warehouse so the picker
+  // shows real options. Sorted numerically (1, 2, 10, not 1, 10, 2).
+  const existingAisles = useMemo(() => {
+    const set = new Set()
+    for (const b of existingBins) {
+      const p = parseBinName(b.name)
+      if (p) set.add(p.aisle)
+    }
+    return Array.from(set).sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+  }, [existingBins])
+
+  // If editing an existing bin, pre-fill aisle + rest from its name
+  const initialParsed = parseBinName(bin?.name || '')
+  const [aisle, setAisle] = useState(initialParsed?.aisle || '')
+  const [aisleMode, setAisleMode] = useState(() => {
+    if (initialParsed && existingAisles.includes(initialParsed.aisle)) return 'existing'
+    if (initialParsed) return 'custom'
+    return existingAisles.length > 0 ? 'existing' : 'custom'
+  })
+  const [customAisle, setCustomAisle] = useState(initialParsed?.aisle || '')
+  const [shelf, setShelf] = useState(initialParsed?.rest || (bin && !initialParsed ? bin.name : ''))
+  // Free-text fallback name when the user wants to skip the aisle convention
+  // entirely — e.g. "Loading dock area" that doesn't fit Aisle X / Shelf Y.
+  const [useFreeText, setUseFreeText] = useState(bin && !initialParsed)
+  const [freeName, setFreeName] = useState(bin && !initialParsed ? bin.name : '')
   const [notes, setNotes] = useState(bin?.notes || '')
 
+  // Compose the final name from the structured fields.
+  const composedName = useFreeText
+    ? freeName.trim()
+    : (() => {
+        const a = (aisleMode === 'existing' ? aisle : customAisle).trim()
+        const s = shelf.trim()
+        if (!a) return s  // no aisle → just the shelf text (will fall into "Other" group)
+        if (!s) return `Aisle ${a}`
+        return `Aisle ${a}, ${s}`
+      })()
+
   function handleSubmit() {
-    if (!name.trim()) return
-    onSave({ name: name.trim(), notes: notes.trim() || null })
+    if (!composedName) return
+    onSave({ name: composedName, notes: notes.trim() || null })
   }
 
   return (
@@ -1024,19 +1072,115 @@ function BinFormSheet({ bin, parentWarehouse, saving, onCancel, onSave }) {
           📥 Under <strong>{parentWarehouse?.name || 'warehouse'}</strong>
         </div>
 
-        <div className="field">
-          <label>Bin name</label>
-          <input
-            type="text"
-            value={name}
-            placeholder="e.g. Bay 12, Shelf A, Aisle 3-B"
-            onChange={e => setName(e.target.value)}
-            autoFocus
-          />
-          <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
-            Use whatever convention helps you find the spot in the warehouse.
-          </div>
-        </div>
+        {!useFreeText ? (
+          <>
+            {/* Aisle picker — existing dropdown OR custom new number. Keeps
+                bins grouped properly under the "Aisle N" headers in the tree. */}
+            <div className="field">
+              <label>Aisle</label>
+              {existingAisles.length > 0 && aisleMode === 'existing' ? (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <select
+                    value={aisle}
+                    onChange={e => setAisle(e.target.value)}
+                    style={{ flex: 1 }}
+                  >
+                    <option value="">— Pick an aisle —</option>
+                    {existingAisles.map(a => (
+                      <option key={a} value={a}>Aisle {a}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => { setAisleMode('custom'); setCustomAisle('') }}
+                    className="btn btn-ghost"
+                    style={{ padding: '6px 12px', fontSize: 12, whiteSpace: 'nowrap' }}
+                  >+ New aisle</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    type="text"
+                    value={customAisle}
+                    placeholder="e.g. 3"
+                    onChange={e => setCustomAisle(e.target.value.replace(/\D/g, ''))}
+                    style={{ flex: 1 }}
+                    inputMode="numeric"
+                    autoFocus
+                  />
+                  {existingAisles.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setAisleMode('existing')}
+                      className="btn btn-ghost"
+                      style={{ padding: '6px 12px', fontSize: 12, whiteSpace: 'nowrap' }}
+                    >← Pick existing</button>
+                  )}
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
+                Number only (1, 2, 3…). Aisles group bins together under "Aisle N" headers.
+              </div>
+            </div>
+
+            {/* Bay / shelf — free text inside the aisle */}
+            <div className="field">
+              <label>Bay / shelf <span style={{ color: 'var(--hint)', fontWeight: 400 }}>(optional)</span></label>
+              <input
+                type="text"
+                value={shelf}
+                placeholder="e.g. Bay A, Shelf 3, Bay 12"
+                onChange={e => setShelf(e.target.value)}
+              />
+            </div>
+
+            {/* Preview */}
+            <div style={{
+              marginBottom: 14, padding: '8px 12px',
+              background: 'var(--surface2)', border: '1px solid var(--border)',
+              borderRadius: 'var(--r-sm)',
+              fontSize: 13,
+            }}>
+              <span style={{ color: 'var(--muted)' }}>Bin will be named: </span>
+              <strong>{composedName || '—'}</strong>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => { setUseFreeText(true); setFreeName(composedName) }}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--muted)', fontSize: 11, textDecoration: 'underline',
+                padding: 0, marginBottom: 12,
+              }}
+            >Use custom name instead</button>
+          </>
+        ) : (
+          <>
+            <div className="field">
+              <label>Bin name</label>
+              <input
+                type="text"
+                value={freeName}
+                placeholder="e.g. Loading dock"
+                onChange={e => setFreeName(e.target.value)}
+                autoFocus
+              />
+              <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
+                ⚠️ Bins not starting with "Aisle N" will group under "Other" in the tree.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setUseFreeText(false)}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--muted)', fontSize: 11, textDecoration: 'underline',
+                padding: 0, marginBottom: 12,
+              }}
+            >← Back to aisle/shelf picker</button>
+          </>
+        )}
 
         <div className="field">
           <label>Notes (optional)</label>
@@ -1054,7 +1198,7 @@ function BinFormSheet({ bin, parentWarehouse, saving, onCancel, onSave }) {
             className="btn btn-primary"
             style={{ flex: 2 }}
             onClick={handleSubmit}
-            disabled={saving || !name.trim()}
+            disabled={saving || !composedName}
           >{saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Create bin')}</button>
         </div>
       </div>
