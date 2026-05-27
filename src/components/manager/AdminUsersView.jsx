@@ -7,6 +7,7 @@ import {
   CREW_OPERATIONS,
   getUserPermissions, setUserOperationPermission, clearUserOperationPermission,
 } from '../../lib/admin'
+import { getLocations, bulkAssignPullLocation } from '../../lib/inventory'
 
 const ROLE_OPTIONS = [
   { id: 'crew',       label: 'Crew',       desc: 'Field worker' },
@@ -21,7 +22,8 @@ const CREW_TYPE_OPTIONS = [
   { id: 'splice',         label: '🔌 Splice' },
   { id: 'drop',           label: '💧 Drop' },
   { id: 'locator',        label: '📍 Locator' },
-  { id: 'install',        label: '🏠 Install (field tech)' },
+  { id: 'install',        label: '🏠 Install' },
+  { id: 'fiber_tech',     label: '🧰 Fiber tech' },
   { id: 'infrastructure', label: '📡 Infrastructure (tower/site)' },
   { id: 'contractor',     label: '🛠️ Contractor' },
 ]
@@ -36,12 +38,19 @@ export default function AdminUsersView({ onBack }) {
   const [resettingPwFor, setResettingPwFor] = useState(null)
 
   const isOwner = currentUser?.role === 'owner'
+  // Truck-type locations for the per-user "Pull materials from" dropdown.
+  // Loaded once with the users; refreshed when a bulk-assign completes.
+  const [truckLocations, setTruckLocations] = useState([])
 
   async function load() {
     setLoading(true)
     try {
-      const all = await getAllUsers()
+      const [all, allLocs] = await Promise.all([
+        getAllUsers(),
+        getLocations(),
+      ])
       setUsers(all)
+      setTruckLocations((allLocs || []).filter(l => l.type === 'truck' && l.is_active))
     } catch (e) {
       showToast('Failed to load users: ' + e.message)
     } finally {
@@ -252,6 +261,7 @@ export default function AdminUsersView({ onBack }) {
           user={editing.mode === 'new' ? null : editing}
           isOwner={isOwner}
           existingUsers={users}
+          truckLocations={truckLocations}
           onCancel={() => setEditing(null)}
           onSubmit={async (payload) => {
             if (editing.mode === 'new') await handleCreate(payload)
@@ -302,7 +312,7 @@ function tinyBtn(variant, disabled) {
 
 // ─── User form sheet (add OR edit) ────────────────────────────────────────
 
-function UserFormSheet({ mode, user, isOwner, existingUsers, onCancel, onSubmit }) {
+function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = [], onCancel, onSubmit }) {
   const isNew = mode === 'new'
 
   // For new users, "username" is the user-facing field. For existing users
@@ -320,6 +330,11 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, onCancel, onSubmit 
   const [initials, setInitials] = useState(user?.initials || '')
   const [isActive, setIsActive] = useState(user?.is_active !== false)
   const [language, setLanguage] = useState(user?.language || 'en')
+  // Shared pull location override. NULL = use personal truck (default).
+  // When changed, we go through the RPC (not the plain users UPDATE) so
+  // stock migration + truck deactivation happen atomically.
+  const [pullLocationId, setPullLocationId] = useState(user?.default_pull_location_id || '')
+  const initialPullLocationId = user?.default_pull_location_id || ''
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -378,6 +393,17 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, onCancel, onSubmit 
           manager_id: managerId || null,
         })
       } else {
+        // Pull-location change goes through the RPC (handles stock migration
+        // + personal-truck deactivation atomically). Do this BEFORE the
+        // metadata save so failures don't leave inconsistent state.
+        const normalizedPull = pullLocationId || null
+        const normalizedInitial = initialPullLocationId || null
+        if (normalizedPull !== normalizedInitial) {
+          await bulkAssignPullLocation({
+            userIds: [user.id],
+            locationId: normalizedPull,  // null = clear assignment + reactivate personal truck
+          })
+        }
         await onSubmit({
           name: name.trim(),
           role,
@@ -523,6 +549,47 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, onCancel, onSubmit 
               For managers and owners this is informational. For crew it determines which assemblies they see.
             </div>
           </div>
+
+          {/* Pull materials from — only shown in edit mode. New users default
+              to personal truck (auto-created by trigger); admin can flip
+              them to a shared trailer afterwards.
+              Changes go through bulk_assign_pull_location RPC so stock from
+              the personal truck migrates atomically to the new location,
+              and the personal truck auto-deactivates. Clearing back to
+              "Personal truck" reactivates the personal truck (empty). */}
+          {!isNew && (
+            <div className="field">
+              <label>Pull materials from</label>
+              <select
+                value={pullLocationId}
+                onChange={e => setPullLocationId(e.target.value)}
+                style={{ width: '100%' }}
+                disabled={truckLocations.length === 0}
+              >
+                <option value="">— Personal truck (default) —</option>
+                {truckLocations
+                  .filter(l => !l.assigned_to || l.assigned_to === user?.id)
+                  .map(l => (
+                    <option key={l.id} value={l.id}>
+                      🚚 {l.name}{l.assigned_to === user?.id ? ' (their personal truck)' : ''}
+                    </option>
+                  ))}
+                {truckLocations
+                  .filter(l => l.assigned_to && l.assigned_to !== user?.id)
+                  .map(l => (
+                    <option key={l.id} value={l.id}>
+                      👥 {l.name} (shared)
+                    </option>
+                  ))}
+              </select>
+              <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
+                Set this to a shared trailer (e.g. Grady's Trailer) for crews who pull
+                from a pooled on-site location instead of their personal truck. Changing
+                this will move any stock on the user's personal truck to the new location
+                and deactivate the personal truck.
+              </div>
+            </div>
+          )}
 
           {/* Manager — who this user reports to. Drives the CrewStatus
               filter: managers see only their direct reports; owners see

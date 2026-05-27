@@ -81,7 +81,11 @@ export default function MyStockView({ onBack, onUserTap }) {
             <span style={{ color: 'var(--orange)' }}>Stock</span>
           </div>
           <div className="topbar-sub" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {truck ? truck.name : (loading ? 'Loading…' : 'No truck assigned')}
+            {truck
+              ? (truck._isShared
+                  ? <>{truck.name} <span style={{ color: 'var(--teal-mid)', fontWeight: 600 }}>· shared</span></>
+                  : truck.name)
+              : (loading ? 'Loading…' : 'No truck assigned')}
           </div>
         </div>
         {onUserTap && (
@@ -202,10 +206,11 @@ export default function MyStockView({ onBack, onUserTap }) {
           }}>
             <div style={{ fontSize: 36 }}>📭</div>
             <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
-              Your truck is empty
+              {truck._isShared ? `${truck.name} is empty` : 'Your truck is empty'}
             </div>
             <div style={{ fontSize: 13, maxWidth: 280 }}>
-              Tap <strong>Load</strong> to bring parts from a warehouse onto your truck.
+              Tap <strong>Load</strong> to bring parts from a warehouse
+              {truck._isShared ? ` onto ${truck.name}` : ' onto your truck'}.
             </div>
           </div>
         )}

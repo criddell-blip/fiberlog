@@ -422,22 +422,64 @@ export async function recordMovementsBatch(movements) {
 
 // ─── CREW SELF-SERVICE ──────────────────────────────────────────────────────
 
-// Resolve the caller's personal truck (the inventory_location auto-created
-// when the user was made a crew/contractor). Returns the row or null if
-// the caller has none — e.g. role isn't crew yet, or the trigger hasn't
-// fired (shouldn't happen post-backfill but defensive).
+// Resolve the caller's effective pull location — the place inventory
+// auto-deducts from on submission approval, and the destination for
+// Load / source for Return.
+//
+// Resolution order:
+//   1. users.default_pull_location_id  — explicit shared-trailer assignment
+//   2. The user's personal truck       — legacy default (auto-created)
+//
+// Returns the inventory_locations row plus a synthesized `_isShared` bool
+// so the UI can adapt copy ("What's on your truck" vs "What's at Grady's
+// Trailer · shared"). Returns null if the caller has neither.
 export async function getMyTruck() {
   const { data: { session } } = await db.auth.getSession()
   if (!session?.user?.id) return null
+  const userId = session.user.id
+
+  // Step 1: explicit pull-location assignment
+  const { data: userRow, error: userErr } = await db
+    .from('users')
+    .select('default_pull_location_id')
+    .eq('id', userId)
+    .maybeSingle()
+  if (userErr) throw userErr
+
+  if (userRow?.default_pull_location_id) {
+    const { data: loc, error: locErr } = await db
+      .from('inventory_locations')
+      .select('*')
+      .eq('id', userRow.default_pull_location_id)
+      .maybeSingle()
+    if (locErr) throw locErr
+    if (loc) return { ...loc, _isShared: loc.assigned_to !== userId }
+  }
+
+  // Step 2: fall back to personal truck
   const { data, error } = await db
     .from('inventory_locations')
     .select('*')
-    .eq('assigned_to', session.user.id)
+    .eq('assigned_to', userId)
     .eq('type', 'truck')
     .eq('is_active', true)
     .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle()
+  if (error) throw error
+  if (!data) return null
+  return { ...data, _isShared: false }
+}
+
+// Bulk-assign N users to a shared pull location. Atomic per-user:
+// transfers personal-truck stock to the new location, sets the assignment,
+// deactivates the personal truck. Returns { assigned, skipped, transfers }.
+// Used by AdminUsersView's bulk-assign action.
+export async function bulkAssignPullLocation({ userIds, locationId }) {
+  const { data, error } = await db.rpc('bulk_assign_pull_location', {
+    p_user_ids: userIds,
+    p_location_id: locationId,
+  })
   if (error) throw error
   return data
 }
