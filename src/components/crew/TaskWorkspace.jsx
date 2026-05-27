@@ -514,9 +514,15 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                 </div>
                 {asm.isFootage ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {/* Uses the shared .footage-input class for typography (22px, 700,
+                        center) but overrides flex+width so the input stays a compact
+                        box on the right side of the card instead of stretching, and
+                        keeps the orange tint as the visual cue that this is the
+                        editable numeric field. */}
                     <input type="number" value={count || ''} placeholder="0"
+                      className="footage-input"
                       onChange={e => setFootage(asm.id, e.target.value)}
-                      style={{ width: 72, padding: '6px 8px', fontSize: 16, fontWeight: 700, textAlign: 'center', border: '1.5px solid var(--border2)', borderRadius: 6, background: 'var(--bg)', color: 'var(--orange)' }} />
+                      style={{ flex: '0 0 auto', width: 96, color: 'var(--orange)' }} />
                     <span style={{ fontSize: 12, color: 'var(--muted)' }}>ft</span>
                   </div>
                 ) : (

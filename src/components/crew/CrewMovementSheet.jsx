@@ -258,15 +258,13 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <div className="part-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {pc?.name || pc?.id}
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--hint)' }}>
-                        {pc?.id}
-                      </div>
+                      <div className="part-id">{pc?.id}</div>
                     </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--orange)', flexShrink: 0 }}>
-                      {qty.toLocaleString()} <span style={{ color: 'var(--muted)', fontSize: 11, fontWeight: 400 }}>{pc?.unit || 'ea'}</span>
+                    <div className="part-qty" style={{ flexShrink: 0 }}>
+                      {qty.toLocaleString()} <span className="part-unit" style={{ fontWeight: 400 }}>{pc?.unit || 'ea'}</span>
                     </div>
                   </div>
                 )
