@@ -14,7 +14,7 @@ import {
   getSessionLines,
   discardCountRun,
 } from '../../lib/cycleCount'
-import { getBinsForWarehouse, getLocations } from '../../lib/inventory'
+import { getBinsForWarehouse, getLocations, createPart } from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
 
 // The active count run screen. Built around a persistent scan input at top
@@ -611,10 +611,16 @@ function BinPickerSheet({ bins, onPick, onClose }) {
 }
 
 // ─── Part picker ────────────────────────────────────────────────────────
+// Includes inline "+ Create" affordance for when a counter hits an unknown
+// SKU in the field. Counting will surface physical parts that never made it
+// into parts_catalog — opening Parts admin / Receive PO to add them mid-count
+// would mean exiting the run. Inline create keeps the counter on the bin.
 function PartPickerSheet({ onPick, onClose }) {
+  const { showToast } = useApp()
   const [q, setQ] = useState('')
   const [results, setResults] = useState([])
   const [searching, setSearching] = useState(false)
+  const [showCreate, setShowCreate] = useState(false)
 
   useEffect(() => {
     if (!q || q.length < 2) { setResults([]); return }
@@ -626,6 +632,22 @@ function PartPickerSheet({ onPick, onClose }) {
       .finally(() => { if (!cancelled) setSearching(false) })
     return () => { cancelled = true }
   }, [q])
+
+  if (showCreate) {
+    return (
+      <CreatePartPanel
+        initialQuery={q}
+        onCreated={(newPart) => {
+          showToast(`Created ${newPart.id}`)
+          onPick(newPart)
+        }}
+        onCancel={() => setShowCreate(false)}
+        onClose={onClose}
+      />
+    )
+  }
+
+  const canCreate = q.trim().length >= 2 && !searching
 
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -652,7 +674,9 @@ function PartPickerSheet({ onPick, onClose }) {
             <div style={{ padding: 14, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Searching…</div>
           )}
           {!searching && q.length >= 2 && results.length === 0 && (
-            <div style={{ padding: 14, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>No matches</div>
+            <div style={{ padding: 14, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>
+              No matches
+            </div>
           )}
           {results.map(p => (
             <button
@@ -671,8 +695,148 @@ function PartPickerSheet({ onPick, onClose }) {
               </div>
             </button>
           ))}
+          {canCreate && (
+            <button
+              onClick={() => setShowCreate(true)}
+              className="add-dashed add-accent"
+              style={{ width: '100%', marginTop: results.length > 0 ? 8 : 0 }}
+            >
+              + Create "{q.trim()}" as new part
+            </button>
+          )}
         </div>
         <button className="btn btn-ghost" style={{ width: '100%' }} onClick={onClose}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Inline create-part panel (opened from PartPickerSheet) ────────────
+// Minimal form — SKU, name, unit, optional department. is_active=true so
+// the part is immediately usable (not a draft). On success, the new part
+// is added to the active session's count via onCreated → onPick.
+function CreatePartPanel({ initialQuery, onCreated, onCancel, onClose }) {
+  const { showToast } = useApp()
+  const [sku, setSku] = useState(initialQuery.trim())
+  const [name, setName] = useState(initialQuery.trim())
+  const [unit, setUnit] = useState('ea')
+  const [department, setDepartment] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function handleCreate() {
+    setError(null)
+    if (!sku.trim()) { setError('SKU is required'); return }
+    if (!name.trim()) { setError('Name is required'); return }
+    setSubmitting(true)
+    try {
+      const newPart = await createPart({
+        id: sku.trim(),
+        name: name.trim(),
+        unit: unit.trim() || 'ea',
+        department: department.trim() || null,
+        is_active: true,
+      })
+      if (!newPart) throw new Error('Create returned no row')
+      onCreated(newPart)
+    } catch (e) {
+      console.error('Create part failed:', e)
+      const msg = e.code === '23505'
+        ? `SKU "${sku.trim()}" already exists — search for it instead`
+        : (e.message || 'Could not create part')
+      setError(msg)
+      showToast(msg)
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="overlay-sheet" style={{ maxWidth: 480 }}>
+        <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4 }}>
+          Create new part
+        </div>
+        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 14 }}>
+          Adds to the parts catalog and drops it straight into this bin's count.
+        </div>
+
+        <div className="field">
+          <label>SKU *</label>
+          <input
+            type="text"
+            value={sku}
+            onChange={e => setSku(e.target.value)}
+            disabled={submitting}
+            autoComplete="off"
+            name="new-part-sku"
+            style={{ fontFamily: '"DM Mono", monospace' }}
+          />
+        </div>
+
+        <div className="field">
+          <label>Name *</label>
+          <input
+            type="text"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            disabled={submitting}
+            autoFocus
+            autoComplete="off"
+            name="new-part-name"
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Unit</label>
+            <select value={unit} onChange={e => setUnit(e.target.value)} disabled={submitting}>
+              <option value="ea">ea</option>
+              <option value="ft">ft</option>
+              <option value="m">m</option>
+              <option value="box">box</option>
+              <option value="roll">roll</option>
+              <option value="pair">pair</option>
+              <option value="set">set</option>
+            </select>
+          </div>
+          <div className="field" style={{ flex: 2 }}>
+            <label>Department (optional)</label>
+            <input
+              type="text"
+              value={department}
+              onChange={e => setDepartment(e.target.value)}
+              disabled={submitting}
+              placeholder="e.g. Aerial"
+              autoComplete="off"
+              name="new-part-dept"
+            />
+          </div>
+        </div>
+
+        {error && (
+          <div style={{
+            background: 'var(--danger-bg)', color: 'var(--danger-fg)',
+            borderRadius: 'var(--r-sm)', padding: '8px 12px',
+            fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-semibold)',
+            marginBottom: 10,
+          }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel} disabled={submitting}>
+            Back
+          </button>
+          <button
+            className="btn btn-primary"
+            style={{ flex: 2 }}
+            onClick={handleCreate}
+            disabled={submitting}
+          >
+            {submitting ? 'Creating…' : 'Create + add to bin'}
+          </button>
+        </div>
       </div>
     </div>
   )
