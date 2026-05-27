@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { db } from '../../lib/supabase'
+import { useIsWide } from '../../lib/useIsWide'
 
 const SUPABASE_URL = 'https://attduslwidxecmjifsnl.supabase.co'
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0dGR1c2x3aWR4ZWNtamlmc25sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4MzkxMzcsImV4cCI6MjA5MTQxNTEzN30.Gg-W0XR2neAT9nVtPxnUiwk1HpHqsOi_PJjYVucdXkc'
@@ -85,6 +86,12 @@ export default function ReportsView() {
   const [stockMap, setStockMap] = useState({})
   const [stockLoading, setStockLoading] = useState(false)
   const [barcodeMap, setBarcodeMap] = useState({}) // 'part' | 'person' | 'project'
+  const isWide = useIsWide()
+  // Filters chrome was eating ~200px of vertical on phones — six rows of
+  // pills/inputs/buttons before the actual data started. Default to
+  // collapsed on narrow viewports; desktop keeps the old all-visible layout.
+  // After first render, user toggles freely; resize doesn't auto-reset.
+  const [showFilters, setShowFilters] = useState(() => isWide)
 
   useEffect(() => {
     db.from('users').select('id, name, initials, crew_type').eq('is_active', true).order('name')
@@ -559,135 +566,173 @@ export default function ReportsView() {
     URL.revokeObjectURL(url)
   }
 
+  // Filter summary line used when the filters panel is collapsed —
+  // condenses six rows of chrome into a single readable status string
+  // so the user knows what data they're looking at.
+  const presetLabel = preset
+    ? (PRESETS.find(p => p.id === preset)?.label || 'Custom')
+    : `${dateFrom} → ${dateTo}`
+  const projectLabel = selProject === 'all' ? 'All projects' : (projects.find(p => p.id === selProject)?.name || 'Project')
+  const userLabel = selUser === 'all' ? 'All crew' : (users.find(u => u.id === selUser)?.name || 'Crew')
+  const groupLabel = groupBy === 'part' ? 'parts' : groupBy === 'person' ? 'people' : 'projects'
+  const selProj = selProject !== 'all' ? projects.find(p => p.id === selProject) : null
+  const isInfraOnly = selProj && (!selProj.phases || selProj.phases.length === 0)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Header */}
-      <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+      {/* Slim header — always visible. Title + filter toggle + group-by +
+          primary actions. The bulky filter chrome moves into a collapsible
+          panel below so it doesn't eat the screen on phones. */}
+      <div style={{
+        padding: '12px 16px', flexShrink: 0,
+        borderBottom: '1px solid var(--border)', background: 'var(--surface)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
           <div style={{ fontWeight: 800, fontSize: 17, color: 'var(--text)' }}>Reports</div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button onClick={loadStock}
-              style={{ padding: '7px 14px', background: 'var(--surface2)',
-                color: stockLoading ? 'var(--muted)' : 'var(--teal-mid)',
-                border: '1.5px solid var(--teal)', borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-              {stockLoading ? 'Loading...' : '📦 Stock levels'}
-            </button>
-            {/* Progress PDF is fiber-only — it iterates over phases and
-                renders phase actuals vs targets. For infra projects (Gigwave,
-                Fixed Wireless, regional infra-only projects) there are zero
-                phases, so the PDF renders empty. Gate the button so the
-                owner doesn't generate a confusing blank report. Adding a
-                per-site equivalent is a future enhancement (backlog #4 area). */}
-            {(() => {
-              const selProj = selProject !== 'all' ? projects.find(p => p.id === selProject) : null
-              const isInfraOnly = selProj && (!selProj.phases || selProj.phases.length === 0)
-              return (
-                <button onClick={generateProjectReport}
-                  disabled={isInfraOnly}
-                  title={isInfraOnly ? 'Progress PDF is fiber-only (organized by phases). Infra projects don’t use phases yet.' : ''}
-                  style={{ padding: '7px 14px',
-                    background: isInfraOnly ? 'var(--gray-lt)' : 'var(--surface2)',
-                    color: isInfraOnly ? 'var(--hint)' : 'var(--orange)',
-                    border: `1.5px solid ${isInfraOnly ? 'var(--border)' : 'var(--orange)'}`,
-                    borderRadius: 20, fontSize: 13, fontWeight: 700,
-                    cursor: isInfraOnly ? 'not-allowed' : 'pointer' }}>
-                  📄 Progress PDF
-                </button>
-              )
-            })()}
-            <button onClick={exportCSV} disabled={rows.length === 0}
-              style={{ padding: '7px 14px', background: rows.length > 0 ? 'var(--orange)' : 'var(--gray-lt)',
-                color: rows.length > 0 ? 'white' : 'var(--hint)', border: 'none',
-                borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-              Export CSV
-            </button>
-          </div>
+          <button
+            onClick={() => setShowFilters(v => !v)}
+            className="btn btn-ghost"
+            style={{ padding: '5px 12px', fontSize: 12, fontWeight: 600 }}
+            title={showFilters ? 'Hide filter controls' : 'Show date range, project, crew filters'}
+          >
+            {showFilters ? '▴ Hide filters' : '▾ Filters'}
+          </button>
+          <div style={{ flex: 1 }} />
+          <button onClick={exportCSV} disabled={rows.length === 0}
+            style={{ padding: '5px 12px', background: rows.length > 0 ? 'var(--orange)' : 'var(--gray-lt)',
+              color: rows.length > 0 ? 'white' : 'var(--hint)', border: 'none',
+              borderRadius: 20, fontSize: 12, fontWeight: 700,
+              cursor: rows.length > 0 ? 'pointer' : 'not-allowed' }}>
+            ⇪ CSV
+          </button>
         </div>
 
-        {/* Preset buttons */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
-          {PRESETS.map(p => (
-            <button key={p.id} onClick={() => applyPreset(p.id)} style={{
-              padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-              background: preset === p.id ? 'var(--orange)' : 'var(--gray-lt)',
-              color: preset === p.id ? 'white' : 'var(--muted)',
-              border: 'none', cursor: 'pointer'
-            }}>{p.label}</button>
-          ))}
-        </div>
-
-        {/* Date range */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 120 }}>
-            <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 4 }}>From</div>
-            <input type="date" value={dateFrom}
-              onChange={e => { setDateFrom(e.target.value); setPreset('') }}
-              style={{ width: '100%', padding: '8px 10px', background: 'var(--surface2)',
-                border: '1.5px solid var(--border2)', borderRadius: 8, color: 'var(--text)', fontSize: 13 }} />
-          </div>
-          <div style={{ flex: 1, minWidth: 120 }}>
-            <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 4 }}>To</div>
-            <input type="date" value={dateTo}
-              onChange={e => { setDateTo(e.target.value); setPreset('') }}
-              style={{ width: '100%', padding: '8px 10px', background: 'var(--surface2)',
-                border: '1.5px solid var(--border2)', borderRadius: 8, color: 'var(--text)', fontSize: 13 }} />
-          </div>
-        </div>
-
-        {/* Filters */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-          <select value={selProject} onChange={e => setSelProject(e.target.value)}
-            style={{ flex: 1, minWidth: 120, padding: '8px 10px', background: 'var(--surface2)',
-              border: '1.5px solid var(--border2)', borderRadius: 8, color: 'var(--text)', fontSize: 13 }}>
-            <option value="all">All projects</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <select value={selUser} onChange={e => setSelUser(e.target.value)}
-            style={{ flex: 1, minWidth: 120, padding: '8px 10px', background: 'var(--surface2)',
-              border: '1.5px solid var(--border2)', borderRadius: 8, color: 'var(--text)', fontSize: 13 }}>
-            <option value="all">All crew</option>
-            {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-        </div>
-
-        {/* Group by toggle */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+        {/* Group-by stays one tap away — it changes what you're seeing,
+            not what you're filtering. Compact pill row. */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {[{ id: 'part', label: 'By part' }, { id: 'person', label: 'By person' }, { id: 'project', label: 'By project' }].map(g => (
             <button key={g.id} onClick={() => setGroupBy(g.id)} style={{
-              padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-              background: groupBy === g.id ? 'var(--surface2)' : 'transparent',
-              color: groupBy === g.id ? 'var(--text)' : 'var(--muted)',
+              padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+              background: groupBy === g.id ? 'var(--orange)' : 'transparent',
+              color: groupBy === g.id ? 'white' : 'var(--muted)',
               border: `1.5px solid ${groupBy === g.id ? 'var(--orange)' : 'var(--border)'}`,
               cursor: 'pointer'
             }}>{g.label}</button>
           ))}
         </div>
 
-        {/* Summary stats */}
-        {rows.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
-            {[
-              { label: 'Total parts', value: totalParts.toLocaleString() },
-              { label: 'Unique SKUs', value: uniqueSKUs },
-              { label: 'Crew members', value: uniquePeople },
-            ].map(s => (
-              <div key={s.label} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px', textAlign: 'center' }}>
-                <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--orange)' }}>{s.value}</div>
-                <div style={{ fontSize: 10, color: 'var(--muted)' }}>{s.label}</div>
+        {/* Status line — only when filters collapsed. Tells the user what's
+            being filtered so they don't have to expand to find out. */}
+        {!showFilters && (
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.4 }}>
+            📅 {presetLabel} · {projectLabel} · {userLabel}
+            {rows.length > 0 && (
+              <span style={{ marginLeft: 8, color: 'var(--text)', fontWeight: 600 }}>
+                · {totalParts.toLocaleString()} parts · {uniqueSKUs} SKUs · {uniquePeople} crew
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Expanded filter panel */}
+        {showFilters && (
+          <div style={{ marginTop: 12 }}>
+            {/* Preset buttons */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+              {PRESETS.map(p => (
+                <button key={p.id} onClick={() => applyPreset(p.id)} style={{
+                  padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                  background: preset === p.id ? 'var(--orange)' : 'var(--gray-lt)',
+                  color: preset === p.id ? 'white' : 'var(--muted)',
+                  border: 'none', cursor: 'pointer'
+                }}>{p.label}</button>
+              ))}
+            </div>
+
+            {/* Date range */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 120 }}>
+                <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 600, marginBottom: 3 }}>From</div>
+                <input type="date" value={dateFrom}
+                  onChange={e => { setDateFrom(e.target.value); setPreset('') }}
+                  style={{ width: '100%', padding: '7px 10px', background: 'var(--surface2)',
+                    border: '1.5px solid var(--border2)', borderRadius: 8, color: 'var(--text)', fontSize: 12 }} />
               </div>
-            ))}
+              <div style={{ flex: 1, minWidth: 120 }}>
+                <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 600, marginBottom: 3 }}>To</div>
+                <input type="date" value={dateTo}
+                  onChange={e => { setDateTo(e.target.value); setPreset('') }}
+                  style={{ width: '100%', padding: '7px 10px', background: 'var(--surface2)',
+                    border: '1.5px solid var(--border2)', borderRadius: 8, color: 'var(--text)', fontSize: 12 }} />
+              </div>
+            </div>
+
+            {/* Project + crew filters */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+              <select value={selProject} onChange={e => setSelProject(e.target.value)}
+                style={{ flex: 1, minWidth: 120, padding: '7px 10px', background: 'var(--surface2)',
+                  border: '1.5px solid var(--border2)', borderRadius: 8, color: 'var(--text)', fontSize: 12 }}>
+                <option value="all">All projects</option>
+                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <select value={selUser} onChange={e => setSelUser(e.target.value)}
+                style={{ flex: 1, minWidth: 120, padding: '7px 10px', background: 'var(--surface2)',
+                  border: '1.5px solid var(--border2)', borderRadius: 8, color: 'var(--text)', fontSize: 12 }}>
+                <option value="all">All crew</option>
+                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
+
+            {/* Secondary actions — less-used (per-session) buttons live in
+                the expanded panel so they don't crowd the always-visible row. */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button onClick={loadStock}
+                style={{ padding: '5px 12px', background: 'var(--surface2)',
+                  color: stockLoading ? 'var(--muted)' : 'var(--teal-mid)',
+                  border: '1.5px solid var(--teal)', borderRadius: 20, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                {stockLoading ? 'Loading…' : '📦 Stock levels'}
+              </button>
+              {/* Progress PDF is fiber-only — disabled for infra-only projects */}
+              <button onClick={generateProjectReport}
+                disabled={isInfraOnly}
+                title={isInfraOnly ? 'Progress PDF is fiber-only (organized by phases). Infra projects don’t use phases yet.' : ''}
+                style={{ padding: '5px 12px',
+                  background: isInfraOnly ? 'var(--gray-lt)' : 'var(--surface2)',
+                  color: isInfraOnly ? 'var(--hint)' : 'var(--orange)',
+                  border: `1.5px solid ${isInfraOnly ? 'var(--border)' : 'var(--orange)'}`,
+                  borderRadius: 20, fontSize: 11, fontWeight: 700,
+                  cursor: isInfraOnly ? 'not-allowed' : 'pointer' }}>
+                📄 Progress PDF
+              </button>
+            </div>
           </div>
         )}
       </div>
 
       {/* Results */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 20px' }}>
         {loading && <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Loading...</div>}
 
         {!loading && rows.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--hint)' }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
             <div>No approved submissions in this range</div>
+          </div>
+        )}
+
+        {/* Inline stats — slim row at top of data so totals are always
+            visible whether filters are expanded or collapsed. */}
+        {!loading && rows.length > 0 && showFilters && (
+          <div style={{
+            display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap',
+            padding: '8px 0', fontSize: 12, color: 'var(--muted)',
+            borderBottom: '1px solid var(--border)',
+          }}>
+            <span><strong style={{ color: 'var(--orange)' }}>{totalParts.toLocaleString()}</strong> parts</span>
+            <span>·</span>
+            <span><strong style={{ color: 'var(--orange)' }}>{uniqueSKUs}</strong> SKUs</span>
+            <span>·</span>
+            <span><strong style={{ color: 'var(--orange)' }}>{uniquePeople}</strong> crew</span>
           </div>
         )}
 
