@@ -197,11 +197,19 @@ export default function InventoryView() {
                 </button>
                 {actionMenuOpen && (
                   <div style={{
-                    position: 'absolute', top: 'calc(100% + 4px)', right: 0,
+                    // left:0 anchors the popover to the LEFT edge of the
+                    // button. On phone the action row wraps to its own line
+                    // and the More button ends up near the left of the
+                    // viewport, so right:0 was sending the popover off-screen.
+                    // (More button is mobile-only — desktop renders all 4
+                    // actions inline so this menu never opens there.)
+                    position: 'absolute', top: 'calc(100% + 4px)', left: 0,
                     background: 'var(--surface)',
                     border: '1px solid var(--border)',
                     borderRadius: 'var(--r-sm)',
-                    padding: 4, minWidth: 180, zIndex: 100,
+                    padding: 4, minWidth: 180,
+                    maxWidth: 'calc(100vw - 32px)',
+                    zIndex: 100,
                     boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
                   }}>
                     {[
