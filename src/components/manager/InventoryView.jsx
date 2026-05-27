@@ -6,6 +6,7 @@ import InventoryLocationsTab from './InventoryLocationsTab'
 import InventoryPartsTab from './InventoryPartsTab'
 import InventoryMovementsTab from './InventoryMovementsTab'
 import InventoryAuditTab from './InventoryAuditTab'
+import CountTab from '../cycleCount/CountTab'
 import RecordMovementSheet from './RecordMovementSheet'
 import ReceivePOSheet from './ReceivePOSheet'
 import ReconcileSheet from './ReconcileSheet'
@@ -18,6 +19,7 @@ const SUBTABS = [
   { id: 'parts',     label: 'Parts',     icon: '🔧' },
   { id: 'movements', label: 'Activity',  icon: '📜' },
   { id: 'audit',     label: 'Audit',     icon: '🔍' },
+  { id: 'count',     label: 'Count',     icon: '🔢' },
 ]
 
 export default function InventoryView() {
@@ -220,6 +222,7 @@ export default function InventoryView() {
             refreshKey={refreshKey}
           />
         )}
+        {tab === 'count' && <CountTab />}
       </div>
 
       {showRecordSheet && (
