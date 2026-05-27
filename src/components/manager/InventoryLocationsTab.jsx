@@ -4,6 +4,7 @@ import {
   createLocation, updateLocation, deactivateLocation, deactivateLocationWithRecovery,
   getBinsForWarehouse, getStockCountsByLocation, getStockByLocation,
 } from '../../lib/inventory'
+import BinLabelSheet from '../cycleCount/BinLabelSheet'
 
 const TYPE_LABELS = {
   warehouse: 'Warehouse',
@@ -34,6 +35,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   const isOwner = currentUser?.role === 'owner'
   const [editing, setEditing] = useState(null)        // location being edited (or 'new')
   const [addingBinFor, setAddingBinFor] = useState(null)  // warehouse object when adding a bin
+  const [labelsFor, setLabelsFor] = useState(null)    // warehouse object when printing bin labels
   const [saving, setSaving] = useState(false)
 
   // Bins per warehouse — fetched separately since bins aren't included in
@@ -499,6 +501,17 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                             }}
                           >＋ Bin</button>
                         )}
+                        {type === 'warehouse' && bins.length > 0 && (
+                          <button
+                            onClick={stop(() => setLabelsFor(loc))}
+                            title="Print scannable BIN: QR labels for this warehouse"
+                            style={{
+                              fontSize: 11, color: 'var(--purple)', background: 'var(--purple-lt)',
+                              border: '1px solid var(--purple)', borderRadius: 14, padding: '3px 10px',
+                              cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
+                            }}
+                          >🏷 Labels</button>
+                        )}
                         <button
                           onClick={stop(() => setEditing(loc))}
                           style={{ fontSize: 12, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
@@ -649,6 +662,14 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
           saving={saving}
           onCancel={() => setAddingBinFor(null)}
           onSave={(formData) => handleSaveBin(formData, addingBinFor)}
+        />
+      )}
+
+      {/* Bin label print sheet — generates QR labels for the warehouse's bins */}
+      {labelsFor && (
+        <BinLabelSheet
+          warehouse={labelsFor}
+          onClose={() => setLabelsFor(null)}
         />
       )}
 
