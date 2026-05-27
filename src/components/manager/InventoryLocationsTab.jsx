@@ -422,7 +422,8 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                           background: 'var(--surface)', border: '1px solid var(--border)',
                           borderRadius: isWhExpanded ? 'var(--r-sm) var(--r-sm) 0 0' : 'var(--r-sm)',
                           padding: '10px 14px',
-                          display: 'flex', alignItems: 'center', gap: 12,
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          flexWrap: 'wrap',
                           cursor: isWhExpandable ? 'pointer' : 'default',
                         }}>
                         {isWhExpandable && (
@@ -602,7 +603,8 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                                   const binCounts = stockCounts.get(bin.id)
                                   return (
                                     <div key={bin.id} style={{
-                                      display: 'flex', alignItems: 'center', gap: 10,
+                                      display: 'flex', alignItems: 'center', gap: 8,
+                                      flexWrap: 'wrap',
                                       padding: '6px 14px 6px 44px',
                                       borderTop: '1px solid var(--border)',
                                     }}>
