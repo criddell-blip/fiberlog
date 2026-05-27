@@ -193,16 +193,7 @@ export default function SpliceWorkspace({ task, sessionId, userId, onPartsChange
       )}
 
       {/* ── Extra Parts ── */}
-      <button
-        onClick={() => setShowPartSearch(true)}
-        style={{
-          width: '100%', padding: '13px', marginTop: 12,
-          background: 'var(--gray-lt)', border: '1.5px dashed var(--border2)',
-          borderRadius: 'var(--r-sm)', fontSize: 14, fontWeight: 600,
-          color: 'var(--muted)', display: 'flex', alignItems: 'center',
-          justifyContent: 'center', gap: 8
-        }}
-      >
+      <button onClick={() => setShowPartSearch(true)} className="add-dashed" style={{ marginTop: 12 }}>
         <span style={{ fontSize: 18 }}>＋</span>
         Add splice part not listed
       </button>

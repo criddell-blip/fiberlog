@@ -157,10 +157,9 @@ export default function TaskSummaryView({ project, phase, task, onBack, onUserTa
               {(task.notes || task.scope_notes) && (
                 <>
                   <div className="sec-label" style={{ marginBottom: 8 }}>Task notes</div>
-                  <div style={{
-                    background: 'var(--surface)', border: '1px solid var(--border)',
-                    borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 14,
-                    fontSize: 13, color: 'var(--text)', whiteSpace: 'pre-wrap',
+                  <div className="card" style={{
+                    padding: '10px 14px', marginBottom: 14,
+                    fontSize: 'var(--fs-base)', whiteSpace: 'pre-wrap',
                   }}>
                     {task.notes || task.scope_notes}
                   </div>
@@ -170,11 +169,7 @@ export default function TaskSummaryView({ project, phase, task, onBack, onUserTa
               {/* Hours + footage totals — only rendered when non-zero so
                   infra-style submissions (which mostly have just hours +
                   parts) don't fill the screen with empty fiber metrics. */}
-              <div style={{
-                background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 14,
-                display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
-              }}>
+              <div className="metric-row" style={{ marginBottom: 14, alignItems: 'center' }}>
                 <Stat label="Hours" value={(sub.hours_worked || 0).toLocaleString()} unit="hrs" emphasized />
                 {FOOTAGE_FIELDS.filter(f => (sub[f.key] || 0) > 0).map(f => (
                   <Stat key={f.key} label={f.label} value={(sub[f.key] || 0).toLocaleString()} unit={f.unit} />
@@ -199,22 +194,18 @@ export default function TaskSummaryView({ project, phase, task, onBack, onUserTa
                 <div style={{
                   background: 'var(--surface)', border: '1px solid var(--border)',
                   borderRadius: 'var(--r-sm)', marginBottom: 14, overflow: 'hidden',
+                  padding: '0 14px',
                 }}>
-                  {summary.parts.map((p, i) => (
-                    <div key={p.partId} style={{
-                      display: 'flex', alignItems: 'center', padding: '10px 14px',
-                      borderBottom: i < summary.parts.length - 1 ? '1px solid var(--border)' : 'none',
-                    }}>
+                  {summary.parts.map(p => (
+                    <div key={p.partId} className="parts-row">
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <div className="part-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {p.name}
                         </div>
-                        <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'monospace', marginTop: 2 }}>
-                          {p.partId}
-                        </div>
+                        <div className="part-id">{p.partId}</div>
                       </div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--orange)', flexShrink: 0, marginLeft: 10 }}>
-                        {p.qty.toLocaleString()} <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>{p.unit}</span>
+                      <div className="part-qty" style={{ flexShrink: 0, marginLeft: 10 }}>
+                        {p.qty.toLocaleString()} <span className="part-unit" style={{ fontWeight: 400 }}>{p.unit}</span>
                       </div>
                     </div>
                   ))}

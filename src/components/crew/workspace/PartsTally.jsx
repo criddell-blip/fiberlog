@@ -48,12 +48,8 @@ export default function PartsTally({ parts, onUpdate, onRemove }) {
             <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 16 }}>{p.unit || 'ea'}</span>
             <button
               onClick={() => onRemove && onRemove(p.id)}
-              style={{
-                width: 26, height: 26, borderRadius: '50%',
-                background: 'var(--red-lt)', color: 'var(--red)',
-                fontSize: 14, display: 'flex', alignItems: 'center',
-                justifyContent: 'center', flexShrink: 0
-              }}
+              className="tally-btn tally-sm"
+              style={{ background: 'var(--danger-bg)', color: 'var(--danger-fg)', fontSize: 14 }}
             >×</button>
           </div>
         </div>

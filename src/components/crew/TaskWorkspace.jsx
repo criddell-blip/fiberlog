@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useApp } from '../../AppContext'
-import { startSession, saveEntry, db, searchPartsCatalog } from '../../lib/supabase'
+import { startSession, saveEntry, db } from '../../lib/supabase'
 import { t } from '../../lib/i18n'
+import PartSearch from './workspace/PartSearch'
 
 // Tab list is now crew-type aware. Fiber crews see the 4-tab fiber build
 // strip (aerial / footage / splice / underground) — that's the original
@@ -59,8 +60,6 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
   const [partQtyOverrides, setPartQtyOverrides] = useState({})
   const [extraParts, setExtraParts] = useState([])
   const [showPartSearch, setShowPartSearch] = useState(false)
-  const [partSearchQuery, setPartSearchQuery] = useState('')
-  const [partSearchResults, setPartSearchResults] = useState([])
   const [conduitSizes, setConduitSizes] = useState({ 'bore-ft': '', 'plow-ft': '' })
 
   // Project-routing override. NULL = use task's natural project. If the
@@ -202,15 +201,6 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     }, 800)
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current) }
   }, [counts, partQtyOverrides, extraParts, conduitSizes, fiberCount, note, hoursWorked, projectIdOverride, task.id, currentUser?.id, draftLoaded])
-
-  async function handlePartSearch(q) {
-    setPartSearchQuery(q)
-    if (q.length < 2) { setPartSearchResults([]); return }
-    try {
-      const data = await searchPartsCatalog(q, { limit: 8 })
-      setPartSearchResults(data || [])
-    } catch(e) { console.warn('Search failed:', e) }
-  }
 
   function adjust(id, delta) {
     setCounts(prev => ({ ...prev, [id]: Math.max(0, (prev[id] || 0) + delta) }))
@@ -401,19 +391,15 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
           manager and is now back to 'open' awaiting resubmit. Surfaces the
           reason so the crew knows what to fix. */}
       {flagInfo && (
-        <div style={{
-          background: 'var(--red-lt)', borderBottom: '1px solid var(--border)',
-          padding: '8px 14px', display: 'flex', alignItems: 'flex-start',
-          gap: 8, flexShrink: 0
-        }}>
-          <span style={{ fontSize: 14, color: 'var(--red)', flexShrink: 0, lineHeight: 1.3 }}>⚠️</span>
-          <div style={{ fontSize: 11, color: 'var(--red)', flex: 1, minWidth: 0, lineHeight: 1.4 }}>
-            <span style={{ fontWeight: 700 }}>
+        <div className="banner banner-danger" style={{ alignItems: 'flex-start' }}>
+          <span className="banner-icon">⚠️</span>
+          <div className="banner-body" style={{ fontSize: 'var(--fs-xs)' }}>
+            <span style={{ fontWeight: 'var(--fw-bold)' }}>
               {lang === 'es' ? 'Marcado' : 'Flagged'}
               {flagInfo.managerName ? (lang === 'es' ? ` por ${flagInfo.managerName}` : ` by ${flagInfo.managerName}`) : ''}
             </span>
             {flagInfo.reason && (
-              <div style={{ marginTop: 2, fontWeight: 500 }}>{flagInfo.reason}</div>
+              <div style={{ marginTop: 2, fontWeight: 'var(--fw-medium)' }}>{flagInfo.reason}</div>
             )}
           </div>
         </div>
@@ -421,16 +407,13 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
 
       {/* "Continued from X" indicator — visible when picking up someone else's draft */}
       {lastWorkedInfo && (
-        <div style={{
-          background: 'var(--teal-lt)', borderBottom: '1px solid var(--border)',
-          padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0
-        }}>
-          <span style={{ fontSize: 11, color: 'var(--teal-dk)' }}>↻</span>
-          <span style={{ fontSize: 11, color: 'var(--teal-dk)', fontWeight: 600 }}>
+        <div className="banner banner-success" style={{ padding: '6px var(--space-4)' }}>
+          <span className="banner-icon" style={{ fontSize: 'var(--fs-xs)' }}>↻</span>
+          <span className="banner-body" style={{ fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-semibold)' }}>
             {lang === 'es' ? 'Continuando desde ' : 'Continuing from '}
             {lastWorkedInfo.name}
             {lastWorkedInfo.at && (
-              <span style={{ color: 'var(--muted)', fontWeight: 400, marginLeft: 4 }}>
+              <span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-medium)', marginLeft: 4 }}>
                 · {new Date(lastWorkedInfo.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
               </span>
             )}
@@ -444,14 +427,11 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
           changes; phase actuals + reports still belong to the task's
           actual phase. */}
       {projects && projects.length > 1 && (
-        <div style={{
-          background: projectIdOverride && projectIdOverride !== project?.id
-            ? 'var(--amber-lt)' : 'var(--surface2)',
-          borderBottom: '1px solid var(--border)',
-          padding: '6px 14px',
-          display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
-        }}>
-          <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>
+        <div
+          className={`banner ${projectIdOverride && projectIdOverride !== project?.id ? 'banner-warning' : 'banner-muted'}`}
+          style={{ padding: '6px var(--space-4)' }}
+        >
+          <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>
             {lang === 'es' ? 'Materiales asignados a:' : 'Routing materials to:'}
           </span>
           <select
@@ -462,7 +442,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
             }}
             style={{
               flex: 1, minWidth: 0,
-              padding: '3px 6px', fontSize: 12, fontWeight: 700,
+              padding: '3px 6px', fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-bold)',
               border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)',
               background: 'var(--surface)', color: 'var(--text)',
             }}
@@ -479,7 +459,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
               title={lang === 'es' ? 'Restablecer' : 'Reset to default'}
               style={{
                 fontSize: 10, color: 'var(--amber)', background: 'none',
-                border: 'none', cursor: 'pointer', fontWeight: 700,
+                border: 'none', cursor: 'pointer', fontWeight: 'var(--fw-bold)',
                 whiteSpace: 'nowrap', padding: '0 2px',
               }}
             >
@@ -490,28 +470,27 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       )}
 
       {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
+      <div className="workspace-tabs">
         {getTabs(currentUser?.crew_type, lang).map(tb => (
-          <button key={tb.id} onClick={() => setTab(tb.id)} style={{
-            flex: 1, padding: '8px 4px', fontSize: 10, fontWeight: 600,
-            background: 'none', border: 'none', cursor: 'pointer',
-            borderBottom: `2px solid ${tab === tb.id ? 'var(--orange)' : 'transparent'}`,
-            color: tab === tb.id ? 'var(--orange)' : 'var(--muted)',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2
-          }}>
-            <span style={{ fontSize: 18 }}>{tb.icon}</span>
+          <button
+            key={tb.id}
+            onClick={() => setTab(tb.id)}
+            className={`workspace-tab${tab === tb.id ? ' active' : ''}`}
+          >
+            <span className="workspace-tab-icon">{tb.icon}</span>
             {tb.label}
           </button>
         ))}
       </div>
 
-      {/* Footage totals bar */}
+      {/* Footage totals bar — accent-tinted banner that surfaces the running totals
+          above the assembly list so the crew can see the day's footage at a glance. */}
       {(summary.strandFt > 0 || summary.fiberFt > 0 || summary.boreFt > 0 || summary.plowFt > 0) && (
-        <div style={{ background: 'var(--orange-lt)', borderBottom: '1px solid var(--border)', padding: '8px 14px', display: 'flex', gap: 16, flexShrink: 0, flexWrap: 'wrap' }}>
-          {summary.strandFt > 0 && <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)', fontWeight: 600 }}>{t('strandLabel', lang)} </span><span style={{ fontWeight: 800, color: 'var(--orange)' }}>{summary.strandFt.toLocaleString()} ft</span></div>}
-          {summary.fiberFt > 0 && <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)', fontWeight: 600 }}>{t('fiberLabel', lang)} </span><span style={{ fontWeight: 800, color: 'var(--orange)' }}>{summary.fiberFt.toLocaleString()} ft {fiberCount}</span></div>}
-          {summary.boreFt > 0 && <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)', fontWeight: 600 }}>{t('boreLabel', lang)} </span><span style={{ fontWeight: 800, color: 'var(--orange)' }}>{summary.boreFt.toLocaleString()} ft</span></div>}
-          {summary.plowFt > 0 && <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)', fontWeight: 600 }}>{t('plowLabel', lang)} </span><span style={{ fontWeight: 800, color: 'var(--orange)' }}>{summary.plowFt.toLocaleString()} ft</span></div>}
+        <div className="banner banner-accent" style={{ gap: 16, flexWrap: 'wrap' }}>
+          {summary.strandFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('strandLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.strandFt.toLocaleString()} ft</span></div>}
+          {summary.fiberFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('fiberLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.fiberFt.toLocaleString()} ft {fiberCount}</span></div>}
+          {summary.boreFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('boreLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.boreFt.toLocaleString()} ft</span></div>}
+          {summary.plowFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('plowLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.plowFt.toLocaleString()} ft</span></div>}
         </div>
       )}
 
@@ -555,13 +534,13 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
               {asm.isConduit && count > 0 && (
                 <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
                   <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 6 }}>{t('conduitSize', lang)}</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  <div className="select-row" style={{ marginTop: 0 }}>
                     {['3/4"','1"','1-1/4"','1-1/2"','2"','3"'].map(sz => (
-                      <button key={sz} onClick={() => setConduitSizes(prev => ({ ...prev, [asm.id]: sz }))}
-                        style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                          border: `1.5px solid ${conduitSizes[asm.id] === sz ? 'var(--teal)' : 'var(--border2)'}`,
-                          background: conduitSizes[asm.id] === sz ? 'var(--teal-lt)' : 'var(--bg)',
-                          color: conduitSizes[asm.id] === sz ? 'var(--teal-dk)' : 'var(--muted)' }}>{sz}</button>
+                      <button
+                        key={sz}
+                        onClick={() => setConduitSizes(prev => ({ ...prev, [asm.id]: sz }))}
+                        className={`select-chip${conduitSizes[asm.id] === sz ? ' active' : ''}`}
+                      >{sz}</button>
                     ))}
                   </div>
                   {conduitSizes[asm.id] && (
@@ -576,13 +555,13 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
               {asm.isFiber && count > 0 && (
                 <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
                   <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 6 }}>{t('fiberCount', lang)}</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  <div className="select-row" style={{ marginTop: 0 }}>
                     {['12ct','24ct','48ct','72ct','144ct','288ct'].map(fc => (
-                      <button key={fc} onClick={() => setFiberCount(fc)}
-                        style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                          border: `1.5px solid ${fiberCount === fc ? 'var(--teal)' : 'var(--border2)'}`,
-                          background: fiberCount === fc ? 'var(--teal-lt)' : 'var(--bg)',
-                          color: fiberCount === fc ? 'var(--teal-dk)' : 'var(--muted)' }}>{fc}</button>
+                      <button
+                        key={fc}
+                        onClick={() => setFiberCount(fc)}
+                        className={`select-chip${fiberCount === fc ? ' active' : ''}`}
+                      >{fc}</button>
                     ))}
                   </div>
                 </div>
@@ -619,7 +598,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
               {currentUser?.name} · {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
+            <div className="metric-grid">
               {[
                 summary.strandFt > 0 && { label: t('strandLabel', lang), value: `${summary.strandFt.toLocaleString()} ft` },
                 summary.fiberFt > 0 && { label: t('fiberLabel', lang), value: `${summary.fiberFt.toLocaleString()} ft ${fiberCount}` },
@@ -631,77 +610,83 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                 summary.handholes > 0 && { label: 'Handholes', value: summary.handholes },
                 summary.vaults > 0 && { label: 'Vaults', value: summary.vaults },
               ].filter(Boolean).map(s => (
-                <div key={s.label} style={{ background: 'var(--bg)', borderRadius: 'var(--r-sm)', padding: 10, textAlign: 'center' }}>
-                  <div style={{ fontSize: 16, fontWeight: 800 }}>{s.value}</div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.label}</div>
+                <div key={s.label} className="metric">
+                  <div className="metric-value">{s.value}</div>
+                  <div className="metric-label">{s.label}</div>
                 </div>
               ))}
             </div>
 
             <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 6 }}>{t('partsAdjust', lang)}</div>
-            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', marginBottom: 10, maxHeight: 220, overflowY: 'auto' }}>
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', marginBottom: 10, maxHeight: 220, overflowY: 'auto', padding: '0 12px' }}>
               {allParts.length === 0 && (
                 <div style={{ padding: '14px', textAlign: 'center', fontSize: 12, color: 'var(--hint)' }}>{t('noPartsLogged', lang)}</div>
               )}
-              {allParts.map((p, i) => (
-                <div key={p.id} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: i < allParts.length - 1 ? '1px solid var(--border)' : 'none', gap: 8 }}>
+              {allParts.map(p => (
+                <div key={p.id} className="parts-row" style={{ gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                    <div style={{ fontSize: 10, color: 'var(--hint)' }}>{p.id}</div>
+                    <div className="part-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                    <div className="part-id">{p.id}</div>
                   </div>
-                  <button onClick={() => setPartQtyOverrides(prev => { const cur = prev[p.id] !== undefined ? prev[p.id] : p.qty; const next = Math.max(0, cur - 1); return next === 0 ? { ...prev, [p.id]: -1 } : { ...prev, [p.id]: next } })}
-                    style={{ width: 26, height: 26, borderRadius: '50%', border: '1px solid var(--border2)', background: 'var(--bg)', fontSize: 16, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}>−</button>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--orange)', minWidth: 28, textAlign: 'center' }}>
+                  <button
+                    className="tally-btn tally-sm tally-minus"
+                    onClick={() => setPartQtyOverrides(prev => { const cur = prev[p.id] !== undefined ? prev[p.id] : p.qty; const next = Math.max(0, cur - 1); return next === 0 ? { ...prev, [p.id]: -1 } : { ...prev, [p.id]: next } })}
+                  >−</button>
+                  <span className="part-qty" style={{ minWidth: 28, textAlign: 'center' }}>
                     {(partQtyOverrides[p.id] !== undefined ? partQtyOverrides[p.id] : p.qty).toLocaleString()}
                   </span>
-                  <button onClick={() => setPartQtyOverrides(prev => { const cur = prev[p.id] !== undefined ? prev[p.id] : p.qty; return { ...prev, [p.id]: cur + 1 } })}
-                    style={{ width: 26, height: 26, borderRadius: '50%', border: '1px solid var(--teal)', background: 'var(--orange-lt)', fontSize: 16, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--orange)' }}>+</button>
-                  <span style={{ fontSize: 10, color: 'var(--muted)', minWidth: 14 }}>{p.unit}</span>
+                  <button
+                    className="tally-btn tally-sm tally-plus"
+                    onClick={() => setPartQtyOverrides(prev => { const cur = prev[p.id] !== undefined ? prev[p.id] : p.qty; return { ...prev, [p.id]: cur + 1 } })}
+                  >+</button>
+                  <span className="part-unit" style={{ minWidth: 14 }}>{p.unit}</span>
                 </div>
               ))}
               {extraParts.map(p => (
-                <div key={'extra-'+p.id} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderTop: '1px solid var(--border)', gap: 8, background: 'var(--orange-lt)' }}>
+                <div
+                  key={'extra-'+p.id}
+                  className="parts-row"
+                  style={{ gap: 8, background: 'var(--accent-bg)', margin: '0 -12px', padding: '10px 12px' }}
+                >
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 12 }}>{p.name} <span style={{ fontSize: 10, color: 'var(--orange)' }}>added</span></div>
-                    <div style={{ fontSize: 10, color: 'var(--hint)' }}>{p.id}</div>
+                    <div className="part-name">
+                      {p.name} <span className="pill pill-accent pill-sm" style={{ marginLeft: 4 }}>added</span>
+                    </div>
+                    <div className="part-id">{p.id}</div>
                   </div>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--orange)', minWidth: 28, textAlign: 'center' }}>{p.qty}</span>
-                  <span style={{ fontSize: 10, color: 'var(--muted)' }}>{p.unit}</span>
-                  <button onClick={() => setExtraParts(prev => prev.filter(ep => ep.id !== p.id))}
-                    style={{ width: 24, height: 24, borderRadius: '50%', background: 'var(--red-lt)', color: 'var(--red)', border: 'none', cursor: 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+                  <span className="part-qty" style={{ minWidth: 28, textAlign: 'center' }}>{p.qty}</span>
+                  <span className="part-unit">{p.unit}</span>
+                  <button
+                    onClick={() => setExtraParts(prev => prev.filter(ep => ep.id !== p.id))}
+                    className="tally-btn tally-sm"
+                    style={{ background: 'var(--danger-bg)', color: 'var(--danger-fg)', fontSize: 14 }}
+                  >×</button>
                 </div>
               ))}
             </div>
 
-            {!showPartSearch ? (
-              <button onClick={() => setShowPartSearch(true)}
-                style={{ width: '100%', padding: '10px', marginBottom: 14, background: 'var(--gray-lt)', border: '1.5px dashed var(--border2)', borderRadius: 'var(--r-sm)', fontSize: 13, fontWeight: 600, color: 'var(--muted)', cursor: 'pointer' }}>
-                {t('addPartNotInList', lang)}
-              </button>
-            ) : (
-              <div style={{ marginBottom: 14 }}>
-                <input type="text" placeholder={t('searchPartPlaceholder', lang)} value={partSearchQuery}
-                  onChange={e => handlePartSearch(e.target.value)} autoFocus
-                  style={{ width: '100%', padding: '10px 12px', border: '1.5px solid var(--teal)', borderRadius: 'var(--r-sm)', fontSize: 14, background: 'var(--bg)', marginBottom: 6 }} />
-                {partSearchResults.map(p => (
-                  <div key={p.id} onClick={() => { setExtraParts(prev => [...prev, { id: p.id, name: p.name, unit: p.unit || 'ea', qty: 1 }]); setShowPartSearch(false); setPartSearchQuery(''); setPartSearchResults([]) }}
-                    style={{ padding: '10px 12px', background: 'var(--surface)', borderRadius: 6, marginBottom: 4, cursor: 'pointer', border: '1px solid var(--border)' }}>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--hint)' }}>{p.id}</div>
-                  </div>
-                ))}
-                <button onClick={() => { setShowPartSearch(false); setPartSearchQuery(''); setPartSearchResults([]) }}
-                  style={{ fontSize: 12, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', marginTop: 4 }}>
-                  {t('cancel', lang)}
-                </button>
-              </div>
+            <button
+              onClick={() => setShowPartSearch(true)}
+              className="add-dashed"
+              style={{ padding: 10, marginBottom: 14, fontSize: 'var(--fs-base)' }}
+            >
+              {t('addPartNotInList', lang)}
+            </button>
+            {showPartSearch && (
+              <PartSearch
+                onSelect={p => {
+                  setExtraParts(prev => [...prev, { id: p.id, name: p.name, unit: p.unit || 'ea', qty: 1 }])
+                  setShowPartSearch(false)
+                }}
+                onClose={() => setShowPartSearch(false)}
+              />
             )}
 
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>{t('hoursWorked', lang)}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <button className="tally-btn tally-minus" onClick={() => setHoursWorked(h => Math.max(0, Math.round((h-.5)*2)/2))}>−</button>
-                <div style={{ fontSize: 28, fontWeight: 800, flex: 1, textAlign: 'center' }}>{hoursWorked.toFixed(1)}</div>
+                <div style={{ fontSize: 'var(--fs-2xl)', fontWeight: 'var(--fw-black)', flex: 1, textAlign: 'center' }}>{hoursWorked.toFixed(1)}</div>
                 <button className="tally-btn tally-plus" onClick={() => setHoursWorked(h => Math.min(16, Math.round((h+.5)*2)/2))}>+</button>
                 <span style={{ color: 'var(--muted)' }}>hrs</span>
               </div>
