@@ -26,10 +26,15 @@ export function formatBinCode(binId) {
 
 // ─── RPCs ───────────────────────────────────────────────────────────────
 
-export async function startCountRun({ warehouseId = null, notes = null } = {}) {
+export async function startCountRun({
+  warehouseId = null,
+  notes = null,
+  isFirstBinning = false,
+} = {}) {
   const { data, error } = await db.rpc('start_count_run', {
     p_warehouse_id: warehouseId,
     p_notes: notes,
+    p_is_first_binning: isFirstBinning,
   })
   if (error) throw error
   return data

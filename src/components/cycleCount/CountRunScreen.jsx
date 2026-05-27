@@ -251,7 +251,9 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
       <div className="topbar" style={{ borderBottom: '1px solid var(--border)' }}>
         <button className="back-btn" onClick={onExit}>←</button>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="topbar-title">Cycle count</div>
+          <div className="topbar-title">
+            {run.is_first_binning ? '🏗️ First-time binning' : 'Cycle count'}
+          </div>
           <div className="topbar-sub" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {run.scope_warehouse?.name || 'Cross-warehouse'} ·
             {' '}{sessions.length} bin{sessions.length === 1 ? '' : 's'} counted
@@ -266,6 +268,20 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
           End run
         </button>
       </div>
+
+      {/* First-binning visible banner — orange to signal "different mode" */}
+      {run.is_first_binning && (
+        <div style={{
+          padding: '8px 14px', flexShrink: 0,
+          background: 'var(--orange-lt)',
+          borderBottom: '1px solid var(--orange)',
+          fontSize: 'var(--fs-xs)', color: 'var(--orange)', fontWeight: 'var(--fw-semibold)',
+        }}>
+          ⚠️ First-binning mode — counts at each bin will MOVE stock from{' '}
+          <strong>{run.scope_warehouse?.name}</strong> to the bin.
+          Not a discovery / variance.
+        </div>
+      )}
 
       {/* Persistent scan input */}
       <div style={{
@@ -470,16 +486,27 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
         />
       )}
 
-      {/* End run confirm */}
+      {/* End run confirm — copy adapts for first-binning mode */}
       {showEndConfirm && (
         <div className="overlay open" onClick={e => e.target === e.currentTarget && setShowEndConfirm(false)}>
           <div className="overlay-sheet" style={{ maxWidth: 420 }}>
             <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 6 }}>
-              End count run?
+              {run.is_first_binning ? 'Finish binning run?' : 'End count run?'}
             </div>
             <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 16 }}>
-              {sessions.filter(s => s.status === 'submitted').length} submitted bins will be auto-reconciled.
-              Variances that don't cancel out within a warehouse will land in the manager review queue.
+              {run.is_first_binning ? (
+                <>
+                  {sessions.filter(s => s.status === 'submitted').length} submitted bins.
+                  Each counted line becomes a <strong>transfer</strong> from{' '}
+                  <strong>{run.scope_warehouse?.name}</strong> to its bin. No review queue.
+                  This is a one-way operation — the movements are permanent.
+                </>
+              ) : (
+                <>
+                  {sessions.filter(s => s.status === 'submitted').length} submitted bins will be auto-reconciled.
+                  Variances that don't cancel out within a warehouse will land in the manager review queue.
+                </>
+              )}
               {activeSession && uncountedCount > 0 && (
                 <div style={{ color: 'var(--amber)', marginTop: 8, fontWeight: 'var(--fw-bold)' }}>
                   ⚠️ You still have an open bin with {uncountedCount} uncounted lines — finish it first.
@@ -496,7 +523,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
                 onClick={handleEndRun}
                 disabled={busy || (activeSession && uncountedCount > 0)}
               >
-                End + reconcile
+                {run.is_first_binning ? 'Finish + write transfers' : 'End + reconcile'}
               </button>
             </div>
           </div>
@@ -654,14 +681,19 @@ function PartPickerSheet({ onPick, onClose }) {
 // ─── End-result screen ─────────────────────────────────────────────────
 function EndResultScreen({ run, onDone }) {
   const isPending = run.status === 'pending_review'
+  const isBinning = run.is_first_binning
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
-      <div style={{ fontSize: 56, marginBottom: 12 }}>{isPending ? '⚠️' : '✅'}</div>
+      <div style={{ fontSize: 56, marginBottom: 12 }}>
+        {isBinning ? '🏗️' : (isPending ? '⚠️' : '✅')}
+      </div>
       <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 6 }}>
-        {isPending ? 'Reconciled — review needed' : 'Reconciled cleanly'}
+        {isBinning ? 'Binning complete' : (isPending ? 'Reconciled — review needed' : 'Reconciled cleanly')}
       </div>
       <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', maxWidth: 360, marginBottom: 24, lineHeight: 1.4 }}>
-        {isPending
+        {isBinning
+          ? <>Stock has been transferred from <strong>{run.scope_warehouse?.name}</strong> to each bin you counted. Check the Activity tab to see the transfers; the warehouse's leftover stock represents anything not yet binned.</>
+          : isPending
           ? 'Compensating variances within each warehouse were auto-reconciled as internal transfers. The leftovers need your review — open the Count Review queue.'
           : 'Every variance paired with an offsetting one within its warehouse. No manager review needed; all reconciliations are logged as internal transfers.'}
       </div>

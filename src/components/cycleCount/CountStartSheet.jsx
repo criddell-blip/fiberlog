@@ -21,6 +21,10 @@ export default function CountStartSheet({ onClose, onStarted }) {
   const [activeRun, setActiveRun] = useState(null)
   const [warehouseId, setWarehouseId] = useState('')
   const [notes, setNotes] = useState('')
+  // First-binning mode: one-time data migration. Counts at each bin
+  // become transfer movements (warehouse → bin) instead of variances.
+  // No reconciliation, no manager review queue — just a clean move.
+  const [isFirstBinning, setIsFirstBinning] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
 
@@ -55,6 +59,7 @@ export default function CountStartSheet({ onClose, onStarted }) {
       const run = await startCountRun({
         warehouseId: warehouseId || null,
         notes: notes.trim() || null,
+        isFirstBinning,
       })
       onStarted(run)
     } catch (e) {
@@ -121,21 +126,55 @@ export default function CountStartSheet({ onClose, onStarted }) {
             </div>
 
             <div className="field">
-              <label>Warehouse scope</label>
+              <label>Warehouse scope{isFirstBinning && <span style={{ color: 'var(--orange)' }}> *</span>}</label>
               <select
                 value={warehouseId}
                 onChange={e => setWarehouseId(e.target.value)}
                 disabled={submitting}
               >
-                <option value="">— Any warehouse (cross-warehouse) —</option>
+                <option value="">— {isFirstBinning ? 'Pick a warehouse (required)' : 'Any warehouse (cross-warehouse)'} —</option>
                 {warehouses.map(w => (
                   <option key={w.id} value={w.id}>{w.name}</option>
                 ))}
               </select>
               <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', marginTop: 4 }}>
-                Auto-reconcile only pairs variances within the same warehouse.
-                Pick one if you're focused on one location today.
+                {isFirstBinning
+                  ? 'First-binning needs a source warehouse — its stock moves to the bins as you count.'
+                  : 'Auto-reconcile only pairs variances within the same warehouse. Pick one if you\'re focused on one location today.'}
               </div>
+            </div>
+
+            {/* First-binning toggle — one-time mode for the warehouse →
+                bin data migration. Counts become transfer movements
+                instead of variances. Distinct visual treatment so it
+                doesn't get toggled by accident. */}
+            <div style={{
+              padding: '10px 12px',
+              background: isFirstBinning ? 'var(--orange-lt)' : 'var(--surface2)',
+              border: `1.5px solid ${isFirstBinning ? 'var(--orange)' : 'var(--border)'}`,
+              borderRadius: 'var(--r-sm)',
+              marginBottom: 'var(--space-4)',
+            }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={isFirstBinning}
+                  onChange={e => setIsFirstBinning(e.target.checked)}
+                  disabled={submitting}
+                  style={{ marginTop: 2, cursor: 'pointer' }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-sm)', color: isFirstBinning ? 'var(--orange)' : 'var(--text)' }}>
+                    🏗️ First-time binning mode
+                  </div>
+                  <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', marginTop: 4, lineHeight: 1.4 }}>
+                    Use this for the one-time warehouse → bin migration.
+                    Counts at each bin become <strong>transfer movements</strong>
+                    from the warehouse, not variances. Total stock is preserved.
+                    No manager review queue afterwards.
+                  </div>
+                </div>
+              </label>
             </div>
 
             <div className="field">
