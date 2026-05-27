@@ -234,7 +234,9 @@ export default function InventoryPartsTab({ refreshKey, onChanged }) {
 
   return (
     <div style={{ position: 'relative', paddingBottom: selectedCount > 0 ? 76 : 0 }}>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+      {/* Compact filter pills — only 3 options, stay visible. Reduced
+          padding from previous so they sit at ~28px row instead of 35px. */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
         <button onClick={() => setFilter('all')} style={pillStyle(filter === 'all')}>
           All ({counts.all})
         </button>
@@ -252,30 +254,29 @@ export default function InventoryPartsTab({ refreshKey, onChanged }) {
         onChange={e => setSearch(e.target.value)}
         placeholder="Search parts by name, SKU, or category…"
         style={{
-          width: '100%', padding: '10px 12px',
+          width: '100%', padding: '8px 12px',
           border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)',
-          fontSize: 14, background: 'var(--bg)', marginBottom: 10
+          fontSize: 13, background: 'var(--bg)', marginBottom: 6
         }}
       />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+      {/* Compressed stats row — single line, smaller font. Tip text moves
+          to the select-all button's title attribute so it doesn't eat a row. */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 }}>
+        <div style={{ fontSize: 11, color: 'var(--muted)' }}>
           {filtered.length.toLocaleString()} of {parts.length.toLocaleString()} parts
           {filter === 'draft' && counts.draft > 0 && (
-            <span style={{ color: 'var(--amber)', marginLeft: 6 }}>
-              · sorted by stock volume
-            </span>
+            <span style={{ color: 'var(--amber)', marginLeft: 6 }}>· sorted by stock</span>
           )}
-          <span style={{ color: 'var(--hint)', marginLeft: 6 }}>
-            · tip: shift-click to select a range
-          </span>
         </div>
         {filtered.length > 0 && (
           <button
             onClick={allVisibleSelected ? clearSelection : selectAllVisible}
+            title="Tip: shift-click a part to select a range"
             style={{
-              fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 'var(--r-sm)',
+              fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 'var(--r-sm)',
               border: '1.5px solid var(--border2)', background: 'var(--bg)', color: 'var(--muted)', cursor: 'pointer',
+              whiteSpace: 'nowrap',
             }}
           >
             {allVisibleSelected ? 'Deselect all' : `Select all ${filtered.length}`}

@@ -5,6 +5,7 @@ import {
   getBinsForWarehouse,
 } from '../../lib/inventory'
 import BulkMoveSheet from './BulkMoveSheet'
+import { useIsWide } from '../../lib/useIsWide'
 
 const TYPE_ICONS = {
   warehouse: '🏭',
@@ -256,12 +257,53 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
     return bin ? `📥 ${baseName} / ${bin.name}` : null
   }, [scope, scopedLoc, isWarehouseScope, binScope, bins])
 
+  // Collapsed scope summary for the slim header — shown when filters are hidden
+  // so the user knows what's filtered without expanding the panel. Mirrors the
+  // pattern from ReportsView + the Cycle Count tab fix.
+  const isWide = useIsWide()
+  const [showFilters, setShowFilters] = useState(() => isWide)
+  const slimScopeText = useMemo(() => {
+    if (scope === 'all') return typeFilter === 'all' ? 'All locations' : `${typeFilter} locations`
+    if (!scopedLoc) return 'All locations'
+    const baseName = scopedLoc.assigned_user?.name || scopedLoc.name
+    const icon = TYPE_ICONS[scopedLoc.type] || '📦'
+    if (!isWarehouseScope) return `${icon} ${baseName}`
+    if (binScope === SUBMODE_ROLLUP) return `${icon} ${baseName} (rollup)`
+    if (binScope === SUBMODE_UNBINNED) return `${icon} ${baseName} — unbinned`
+    const bin = bins.find(b => b.id === binScope)
+    return bin ? `${icon} ${baseName} / 📥 ${bin.name}` : `${icon} ${baseName}`
+  }, [scope, scopedLoc, isWarehouseScope, binScope, bins, typeFilter])
+
   return (
     <div style={{ position: 'relative', paddingBottom: selectedCount > 0 ? 76 : 0 }}>
-      {/* Type ribbon — primary filter. Click a type to scope the
-          secondary pills below. Counts per type help the owner spot
-          which bucket contains the location they're looking for. */}
-      {(() => {
+      {/* Slim filter toggle — always visible. Shows current scope as plain
+          text when collapsed so the user knows what's filtered without
+          expanding. Mobile-default-collapsed; desktop-default-open. The
+          full type+location+bin chrome lives in the expanded panel below. */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+        marginBottom: showFilters ? 10 : 8,
+      }}>
+        <button
+          onClick={() => setShowFilters(v => !v)}
+          className="btn btn-ghost"
+          style={{ padding: '4px 10px', fontSize: 11, fontWeight: 600 }}
+          title={showFilters ? 'Hide location filters' : 'Show location + bin filters'}
+        >
+          {showFilters ? '▴ Hide filters' : '▾ Filters'}
+        </button>
+        {!showFilters && (
+          <div style={{
+            fontSize: 12, color: 'var(--muted)', fontWeight: 600,
+            flex: 1, minWidth: 0, whiteSpace: 'nowrap',
+            overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {slimScopeText}
+          </div>
+        )}
+      </div>
+
+      {showFilters && (() => {
         const counts = locations.reduce((acc, l) => {
           acc[l.type] = (acc[l.type] || 0) + 1
           return acc
@@ -273,65 +315,66 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
           { id: 'job_site',  label: 'Project buckets', icon: '📍', count: counts.job_site  || 0 },
         ].filter(t => t.id === 'all' || t.count > 0)
         return (
-          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-            {typeOptions.map(t => (
-              <button key={t.id}
-                onClick={() => setTypeFilter(t.id)}
-                style={{
-                  ...pillStyle(typeFilter === t.id),
-                  fontWeight: 800,
-                }}>
-                {t.icon || '📦'} {t.label} <span style={{ fontWeight: 600, opacity: 0.8 }}>({t.count})</span>
-              </button>
-            ))}
-          </div>
+          <>
+            {/* Type ribbon — primary filter */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+              {typeOptions.map(t => (
+                <button key={t.id}
+                  onClick={() => setTypeFilter(t.id)}
+                  style={{
+                    ...pillStyle(typeFilter === t.id),
+                    fontWeight: 800,
+                  }}>
+                  {t.icon || '📦'} {t.label} <span style={{ fontWeight: 600, opacity: 0.8 }}>({t.count})</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Secondary location pills — filtered by the selected type. */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+              <button onClick={() => setScope('all')} style={pillStyle(scope === 'all')}>All locations</button>
+              {locations
+                .filter(loc => typeFilter === 'all' || loc.type === typeFilter)
+                .map(loc => (
+                  <button key={loc.id} onClick={() => setScope(loc.id)} style={pillStyle(scope === loc.id)}>
+                    {TYPE_ICONS[loc.type] || '📦'} {loc.assigned_user?.name || loc.name}
+                  </button>
+                ))}
+            </div>
+
+            {/* Bin sub-pills (only when a warehouse is scoped) */}
+            {isWarehouseScope && (
+              <div style={{
+                display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap',
+                paddingLeft: 16, borderLeft: '2px solid var(--orange)',
+              }}>
+                <button onClick={() => setBinScope(SUBMODE_ROLLUP)} style={subPillStyle(binScope === SUBMODE_ROLLUP)}>
+                  📦 All (rollup)
+                </button>
+                <button onClick={() => setBinScope(SUBMODE_UNBINNED)} style={subPillStyle(binScope === SUBMODE_UNBINNED)}>
+                  🏭 Unbinned
+                </button>
+                {bins.map(b => (
+                  <button key={b.id} onClick={() => setBinScope(b.id)} style={subPillStyle(binScope === b.id)}>
+                    📥 {b.name}
+                  </button>
+                ))}
+                {bins.length === 0 && (
+                  <span style={{ fontSize: 11, color: 'var(--hint)', alignSelf: 'center' }}>
+                    No bins yet. Add some on the Locations tab.
+                  </span>
+                )}
+              </div>
+            )}
+
+            {scopeLabel && (
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, fontWeight: 600 }}>
+                {scopeLabel}
+              </div>
+            )}
+          </>
         )
       })()}
-
-      {/* Secondary location pills — filtered by the selected type.
-          'All locations' stays as the no-scope option. When a type is
-          chosen, only matching locations show. */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-        <button onClick={() => setScope('all')} style={pillStyle(scope === 'all')}>All locations</button>
-        {locations
-          .filter(loc => typeFilter === 'all' || loc.type === typeFilter)
-          .map(loc => (
-            <button key={loc.id} onClick={() => setScope(loc.id)} style={pillStyle(scope === loc.id)}>
-              {TYPE_ICONS[loc.type] || '📦'} {loc.assigned_user?.name || loc.name}
-            </button>
-          ))}
-      </div>
-
-      {/* Bin sub-pills (only when a warehouse is scoped) */}
-      {isWarehouseScope && (
-        <div style={{
-          display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap',
-          paddingLeft: 16, borderLeft: '2px solid var(--orange)',
-        }}>
-          <button onClick={() => setBinScope(SUBMODE_ROLLUP)} style={subPillStyle(binScope === SUBMODE_ROLLUP)}>
-            📦 All (rollup)
-          </button>
-          <button onClick={() => setBinScope(SUBMODE_UNBINNED)} style={subPillStyle(binScope === SUBMODE_UNBINNED)}>
-            🏭 Unbinned
-          </button>
-          {bins.map(b => (
-            <button key={b.id} onClick={() => setBinScope(b.id)} style={subPillStyle(binScope === b.id)}>
-              📥 {b.name}
-            </button>
-          ))}
-          {bins.length === 0 && (
-            <span style={{ fontSize: 11, color: 'var(--hint)', alignSelf: 'center' }}>
-              No bins yet. Add some on the Locations tab.
-            </span>
-          )}
-        </div>
-      )}
-
-      {scopeLabel && (
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, fontWeight: 600 }}>
-          {scopeLabel}
-        </div>
-      )}
 
       <input
         type="text"
