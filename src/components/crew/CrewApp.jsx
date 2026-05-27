@@ -195,7 +195,23 @@ function CrewSidebar({
           return (
             <div key={p.id}>
               <div
-                onClick={() => setExpandedProject(isExpP ? null : p.id)}
+                onClick={() => {
+                  // Tap-to-collapse keeps the existing selection (so the right
+                  // panel doesn't suddenly switch). Tap-to-expand also navigates
+                  // — auto-selects the project's first phase so the right panel
+                  // immediately shows that project's TaskList. Without this,
+                  // tapping a different project just expanded its tree and the
+                  // right panel stayed on the previous project's work, which
+                  // read as "nothing happened".
+                  if (isExpP) {
+                    setExpandedProject(null)
+                  } else {
+                    setExpandedProject(p.id)
+                    if (p.phases && p.phases.length > 0) {
+                      onSelectPhase(p, p.phases[0])
+                    }
+                  }
+                }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '8px 14px', cursor: 'pointer',

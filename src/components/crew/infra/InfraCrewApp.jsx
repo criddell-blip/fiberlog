@@ -197,7 +197,20 @@ function InfraSidebar({
           return (
             <div key={p.id}>
               <div
-                onClick={() => setExpandedProject(isExpP ? null : p.id)}
+                onClick={() => {
+                  // Mirror CrewApp's behavior: tap-to-collapse keeps the
+                  // current selection, tap-to-expand also navigates to this
+                  // project's first site so the right panel updates instead
+                  // of feeling like nothing happened.
+                  if (isExpP) {
+                    setExpandedProject(null)
+                  } else {
+                    setExpandedProject(p.id)
+                    if (p.sites && p.sites.length > 0) {
+                      onSelectSite(p, p.sites[0])
+                    }
+                  }
+                }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '8px 14px', cursor: 'pointer',
