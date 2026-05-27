@@ -175,12 +175,8 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
             href={phase.permit_url}
             target="_blank"
             rel="noopener noreferrer"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '5px 10px', background: 'var(--orange)', color: 'white',
-              borderRadius: 20, fontSize: 11, fontWeight: 700,
-              textDecoration: 'none', flexShrink: 0,
-            }}
+            className="pill pill-solid-accent"
+            style={{ padding: '5px 10px', textDecoration: 'none', flexShrink: 0 }}
           >
             📄 Permit
           </a>
@@ -204,35 +200,32 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
           return (
             <div key={task.id} className="card card-tap" onClick={() => onSelect(task)}
                  style={isFlagged ? { borderColor: 'var(--red)' } : undefined}>
-              <div style={{
-                width: 40, height: 40, borderRadius: 10,
-                background: colors.bg, display: 'flex', alignItems: 'center',
-                justifyContent: 'center', fontSize: 20, flexShrink: 0
+              <div className="icon-pill" style={{
+                width: 40, height: 40, borderRadius: 'var(--r-sm)',
+                background: colors.bg, fontSize: 20
               }}>
                 {jt.icon}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700 }}>
-                  {task.name}
+                {/* Title is the title — no creator chip splitting it. Creator lives
+                    in the metadata row below alongside the job-type pill. */}
+                <div style={{ fontWeight: 700 }}>{task.name}</div>
+                {task.notes && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{task.notes}</div>}
+                <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <span className="pill" style={{ background: colors.bg, color: colors.text }}>
+                    {jt.label}
+                  </span>
                   {task.creator && (
-                    <span className="creator-chip" title={task.creator.name}>
+                    <span className="creator-chip" title={task.creator.name} style={{ marginLeft: 0 }}>
                       <span className="creator-initials">{task.creator.initials}</span>
                       <span className="creator-name">{task.creator.name}</span>
                     </span>
                   )}
-                </div>
-                {task.notes && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{task.notes}</div>}
-                <div style={{ marginTop: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: colors.bg, color: colors.text }}>
-                    {jt.label}
-                  </span>
-                  {isFlagged ? (
-                    <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--red-lt)', color: 'var(--red)' }}>
+                  {/* Default "open" state needs no pill — being in the Active Tasks
+                      section is the signal. Only render a pill for non-default states. */}
+                  {isFlagged && (
+                    <span className="pill pill-danger">
                       ⚠️ {lang === 'es' ? 'Marcado' : 'Flagged'}
-                    </span>
-                  ) : (
-                    <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--teal-lt)', color: 'var(--teal-dk)' }}>
-                      {lang === 'es' ? 'Abierto' : 'Open'}
                     </span>
                   )}
                 </div>
@@ -257,31 +250,27 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
               return (
                 <div key={task.id} className="card card-tap" onClick={() => onSelect(task)}
                      style={{ borderColor: 'var(--amber)' }}>
-                  <div style={{
-                    width: 40, height: 40, borderRadius: 10,
-                    background: colors.bg, display: 'flex', alignItems: 'center',
-                    justifyContent: 'center', fontSize: 20, flexShrink: 0
+                  <div className="icon-pill" style={{
+                    width: 40, height: 40, borderRadius: 'var(--r-sm)',
+                    background: colors.bg, fontSize: 20
                   }}>
                     {jt.icon}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700 }}>
-                      {task.name}
+                    <div style={{ fontWeight: 700 }}>{task.name}</div>
+                    {task.notes && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{task.notes}</div>}
+                    <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span className="pill" style={{ background: colors.bg, color: colors.text }}>
+                        {jt.label}
+                      </span>
                       {task.creator && (
-                        <span className="creator-chip" title={task.creator.name}>
+                        <span className="creator-chip" title={task.creator.name} style={{ marginLeft: 0 }}>
                           <span className="creator-initials">{task.creator.initials}</span>
                           <span className="creator-name">{task.creator.name}</span>
                         </span>
                       )}
-                    </div>
-                    {task.notes && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{task.notes}</div>}
-                    <div style={{ marginTop: 6 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: colors.bg, color: colors.text }}>
-                        {jt.label}
-                      </span>
-                      <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--amber-lt)', color: 'var(--amber)' }}>
-                        {lang === 'es' ? 'Enviado' : 'Submitted'}
-                      </span>
+                      {/* Amber card border + the "Submitted" section header already
+                          tell the crew this is pending — no redundant pill. */}
                     </div>
                   </div>
                   <div style={{ fontSize: 20, color: 'var(--border2)' }}>›</div>
@@ -344,9 +333,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
                       </div>
                     )}
                   </div>
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--teal-lt)', color: 'var(--teal-dk)', flexShrink: 0 }}>
-                    ✓
-                  </span>
+                  <span className="pill pill-success pill-sm" style={{ flexShrink: 0 }}>✓</span>
                   <span style={{ fontSize: 14, color: 'var(--hint)', flexShrink: 0 }}>›</span>
                 </div>
               )
@@ -357,13 +344,8 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
         {/* Add task button */}
         <button
           onClick={() => setShowNewTask(true)}
-          style={{
-            width: '100%', padding: '14px', marginTop: 8,
-            background: 'var(--surface)', border: '1.5px dashed var(--orange)',
-            borderRadius: 'var(--r)', fontSize: 15, fontWeight: 700,
-            color: 'var(--orange)', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', gap: 8
-          }}
+          className="add-dashed add-accent"
+          style={{ marginTop: 8 }}
         >
           <span style={{ fontSize: 20 }}>＋</span>
           {t('addTask', lang)}
