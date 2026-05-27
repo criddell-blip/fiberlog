@@ -270,11 +270,21 @@ export default function ManagerApp() {
         padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         flexShrink: 0, gap: 8
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
           <div style={{ width: 6, height: 28, background: 'var(--orange)', borderRadius: 3, flexShrink: 0 }} />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-0.3px', color: 'var(--text)' }}>FiberLog</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{
+              fontWeight: 800, fontSize: 16, letterSpacing: '-0.3px',
+              color: 'var(--text)', whiteSpace: 'nowrap',
+              overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>FiberLog</div>
+            {/* nowrap on the date — otherwise "Wed, May 27" wrapped per-word
+                when the left side got squeezed by the buttons on the right,
+                visually colliding with the Dark/Crew-mode pills. */}
+            <div style={{
+              fontSize: 11, color: 'var(--muted)',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
               {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
             </div>
           </div>
