@@ -358,6 +358,8 @@ npx supabase login                             # auth supabase CLI (first time)
 
 ## Backlog (rough priority order)
 
+0. **Rework ReportsView header chrome for mobile** — same problem we just fixed on the Inventory Count tab: the Reports tab's header bar (title + filters + tab pills + export controls) eats most of the vertical space on phone, leaving little room for the actual report data. Likely fix: collapse filters/controls behind a single "Filters" button or move them into an overflow menu; consider full-bleed body on narrow viewports. Touch [src/components/manager/ReportsView.jsx](src/components/manager/ReportsView.jsx).
+
 1. **Onboard infrastructure crew** — substantially shipped (May 2026). Sites table + 198-row import (all mapped to a project), InfraCrewApp shell, crew-aware TaskWorkspace tab strip, `TaskSummaryView` for read-only inspection of submitted tasks, `approve_submission` auto-deducts via `sites.project_id` fallback, project buckets backfilled for Wasatch Front + West Mountain, SubmissionsQueue + ReportsView coalesce phase/site, Sites admin (add / edit including move-to-project / decommission / search / task-count + per-site materials and tasks drilldowns) embedded in ProjectManager. Remaining: (a) author real infra kits in AssemblyEditor (Chris's call), (b) onboard more infra users beyond Chad. Stop dual-logging in Sonar for infrastructure work once switched over.
 
 2. **Task status redesign** (the `is_closed` model) — separately discussed. Decouple task lifecycle from submission approval:
