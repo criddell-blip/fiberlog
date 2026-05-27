@@ -22,24 +22,55 @@ export const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 // added latency is just the slower of the two, not a sum.
 //
 // `cols` lets callers tighten the projection for narrow dropdowns.
+// Searches parts_catalog across every text attribute that could plausibly
+// help a user find a part: SKU, name, barcode, BoxHero ID, department,
+// material group, item type, and the computed category. Skipped: `unit`
+// (matches "ea" / "ft" / "lb" too generically) and the numeric boxhero_item_id.
+//
+// Internally runs one ILIKE query per searchable column in parallel, then
+// merges + de-dupes by SKU. Order of priority for the de-dupe is the same
+// as the array below (name first, then SKU, then the metadata fields) so
+// the most "intentional" match for a given query lands at the top.
+//
+// Single OR-query would be 1 round trip vs 8, but parallel queries avoid
+// the PostgREST escaping hazard when the user's query contains commas
+// (real-world example: "Bolt, Thimble Eye 5/8").
 export async function searchPartsCatalog(query, { cols = 'id, name, unit', limit = 20 } = {}) {
   const q = String(query ?? '').trim()
   if (!q) return []
   const pattern = `%${q}%`
 
-  const [byName, byId] = await Promise.all([
-    db.from('parts_catalog').select(cols).ilike('name', pattern).order('name').limit(limit),
-    db.from('parts_catalog').select(cols).ilike('id',   pattern).order('id').limit(limit),
-  ])
-  if (byName.error) throw byName.error
-  if (byId.error)   throw byId.error
+  // Searched in priority order — first hit wins after de-dupe.
+  const searchedCols = [
+    'name',           // most common — part description
+    'id',             // SKU
+    'barcode',        // scanned UPC/EAN
+    'boxhero_id',     // legacy BoxHero text id (e.g. UB-12345)
+    'department',     // e.g. "Construction"
+    'material_group', // e.g. "Fiber"
+    'item_type',      // e.g. "Splice"
+    'category',       // computed "Department / Material Group"
+  ]
+
+  const results = await Promise.all(
+    searchedCols.map(col =>
+      db.from('parts_catalog').select(cols).ilike(col, pattern).order('name').limit(limit)
+    )
+  )
+
+  for (const r of results) {
+    if (r.error) throw r.error
+  }
 
   const seen = new Set()
   const out = []
-  for (const r of [...(byName.data || []), ...(byId.data || [])]) {
-    if (seen.has(r.id)) continue
-    seen.add(r.id)
-    out.push(r)
+  for (const r of results) {
+    for (const row of (r.data || [])) {
+      if (seen.has(row.id)) continue
+      seen.add(row.id)
+      out.push(row)
+      if (out.length >= limit) break
+    }
     if (out.length >= limit) break
   }
   return out
