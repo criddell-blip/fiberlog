@@ -40,10 +40,8 @@ export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
             onClick={onOpenMyStock}
             style={{ borderLeft: '3px solid var(--orange)' }}
           >
-            <div style={{
-              width: 48, height: 48, borderRadius: 12, flexShrink: 0,
-              background: 'var(--orange-lt)', border: '1.5px solid var(--orange-dk)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            <div className="icon-pill ip-orange" style={{
+              border: '1.5px solid var(--orange-dk)',
               fontSize: 24,
             }}>
               📦
@@ -77,10 +75,8 @@ export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
 
           return (
             <div key={p.id} className="card card-tap" onClick={() => onSelect(p)}>
-              <div style={{
-                width: 48, height: 48, borderRadius: 12, flexShrink: 0,
-                background: 'var(--orange-lt)', border: '1.5px solid var(--orange-dk)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              <div className="icon-pill ip-orange" style={{
+                border: '1.5px solid var(--orange-dk)',
                 fontWeight: 800, fontSize: 13, color: 'var(--orange)', letterSpacing: '-0.5px'
               }}>
                 {p.name.split(' ').map(w => w[0]).join('').slice(0, 3).toUpperCase()}

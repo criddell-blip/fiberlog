@@ -23,18 +23,8 @@ function BackToManagerButton({ exitCrewMode, compact = false }) {
     <button
       onClick={exitCrewMode}
       title="Return to the manager portal"
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-        padding: compact ? '4px 8px' : '6px 10px',
-        borderRadius: 999,
-        border: '1.5px solid var(--teal)',
-        background: 'var(--surface2)',
-        color: 'var(--teal-mid)',
-        cursor: 'pointer',
-        fontSize: compact ? 11 : 12,
-        fontWeight: 700,
-        flexShrink: 0,
-      }}>
+      className={`settings-pill mode${compact ? ' compact' : ''}`}
+    >
       <span style={{ fontSize: compact ? 12 : 14, lineHeight: 1 }}>⚙️</span>
       <span>Manager</span>
     </button>
@@ -49,18 +39,7 @@ function ThemeToggle({ darkMode, onToggle, compact = false }) {
     <button
       onClick={onToggle}
       title={`Switch to ${darkMode ? 'light' : 'dark'} mode`}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-        padding: compact ? '4px 8px' : '6px 10px',
-        borderRadius: 999,
-        border: '1.5px solid var(--border2)',
-        background: 'var(--surface2)',
-        color: 'var(--text)',
-        cursor: 'pointer',
-        fontSize: compact ? 11 : 12,
-        fontWeight: 700,
-        flexShrink: 0,
-      }}
+      className={`settings-pill${compact ? ' compact' : ''}`}
     >
       <span style={{ fontSize: compact ? 13 : 15, lineHeight: 1 }}>
         {darkMode ? '🌙' : '☀️'}
@@ -96,12 +75,7 @@ function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode, e
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onCancel()}>
       <div className="overlay-sheet" style={{ textAlign: 'center' }}>
-        <div style={{
-          width: 56, height: 56, borderRadius: '50%',
-          background: 'var(--orange)', margin: '0 auto 12px',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontWeight: 800, fontSize: 18, color: 'white',
-        }}>
+        <div className="avatar avatar-lg avatar-owner" style={{ margin: '0 auto 12px' }}>
           {currentUser?.initials}
         </div>
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>{currentUser?.name}</div>
@@ -158,14 +132,8 @@ function CrewSidebar({
        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button
           onClick={onUserTap}
-          style={{
-            width: 36, height: 36, borderRadius: '50%',
-            background: currentUser?.role === 'owner' ? 'var(--orange)' : 'var(--orange-lt)',
-            color: currentUser?.role === 'owner' ? 'white' : 'var(--orange)',
-            border: '1.5px solid var(--orange-dk)',
-            fontWeight: 800, fontSize: 12, flexShrink: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
-          }}
+          className={`avatar avatar-md${currentUser?.role === 'owner' ? ' avatar-owner' : ''}`}
+          style={{ cursor: 'pointer' }}
         >
           {currentUser?.initials || 'Me'}
         </button>
@@ -216,10 +184,7 @@ function CrewSidebar({
 
       {/* Project / phase / task tree */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 20px' }}>
-        <div style={{
-          fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-          letterSpacing: '.06em', color: 'var(--hint)', padding: '8px 14px 4px'
-        }}>Projects</div>
+        <div className="sec-label" style={{ padding: '8px 14px 4px', margin: 0 }}>Projects</div>
 
         {projects.map(p => {
           const isExpP = expandedProject === p.id
@@ -237,10 +202,9 @@ function CrewSidebar({
                   background: isExpP ? 'var(--surface2)' : 'transparent',
                 }}
               >
-                <div style={{
-                  width: 28, height: 28, borderRadius: 7, flexShrink: 0,
-                  background: 'var(--orange-lt)', border: '1.5px solid var(--orange-dk)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                <div className="icon-pill ip-orange" style={{
+                  width: 28, height: 28, borderRadius: 7,
+                  border: '1.5px solid var(--orange-dk)',
                   fontSize: 10, fontWeight: 800, color: 'var(--orange)', letterSpacing: '-0.5px'
                 }}>
                   {p.name.split(' ').map(w => w[0]).join('').slice(0, 3).toUpperCase()}
@@ -249,8 +213,8 @@ function CrewSidebar({
                   <div style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {p.name}
                   </div>
-                  <div style={{ height: 3, background: 'var(--border2)', borderRadius: 2, marginTop: 4, overflow: 'hidden' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: 'var(--orange)', borderRadius: 2 }} />
+                  <div className="prog-bar prog-bar-sm">
+                    <div className="prog-fill" style={{ width: `${pct}%` }} />
                   </div>
                 </div>
                 <span style={{
@@ -281,10 +245,7 @@ function CrewSidebar({
                         {ph.name}
                       </div>
                       {openTasks.length > 0 && (
-                        <span style={{
-                          fontSize: 10, fontWeight: 700, padding: '1px 6px',
-                          borderRadius: 20, background: 'var(--orange-lt)', color: 'var(--orange)', flexShrink: 0
-                        }}>{openTasks.length}</span>
+                        <span className="pill pill-accent pill-sm" style={{ flexShrink: 0 }}>{openTasks.length}</span>
                       )}
                       <span style={{
                         fontSize: 11, color: 'var(--hint)', flexShrink: 0,
@@ -319,11 +280,7 @@ function CrewSidebar({
                             }}>{t.name}</div>
                           </div>
                           {isPending && (
-                            <span style={{
-                              fontSize: 9, fontWeight: 700, padding: '1px 5px',
-                              borderRadius: 20, background: 'var(--amber-lt)',
-                              color: 'var(--amber)', flexShrink: 0
-                            }}>•</span>
+                            <span className="pill pill-warning pill-dot" style={{ flexShrink: 0 }} title="Submitted" />
                           )}
                         </div>
                       )

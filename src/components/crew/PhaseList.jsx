@@ -27,10 +27,9 @@ export default function PhaseList({ project, onSelect, onBack, onUserTap }) {
           const pct = total > 0 ? Math.round(done / total * 100) : 0
           return (
             <div key={ph.id} className="card card-tap" onClick={() => onSelect(ph)}>
-              <div style={{
-                width: 40, height: 40, borderRadius: 10, background: 'var(--orange-lt)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontWeight: 800, fontSize: 16, color: 'var(--orange)', flexShrink: 0
+              <div className="icon-pill ip-orange" style={{
+                width: 40, height: 40, borderRadius: 'var(--r-md)',
+                fontWeight: 800, fontSize: 16, color: 'var(--orange)'
               }}>
                 {i + 1}
               </div>
@@ -39,11 +38,19 @@ export default function PhaseList({ project, onSelect, onBack, onUserTap }) {
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
                   {done}/{total} {t('tasks', lang)} · {((ph.fiber_ft || 0) / 1000).toFixed(0)}k {t('fiberFt', lang)}
                 </div>
-                <div className="prog-bar" style={{ marginTop: 6 }}>
-                  <div className="prog-fill" style={{ width: `${pct}%` }} />
+                {/* Progress block matches ProjectList: %-complete + count above the bar,
+                    so the two screens read the same when stacked back to back. */}
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
+                    <span>{pct}% {t('pctComplete', lang)}</span>
+                    <span>{done}/{total} {t('tasksDone', lang)}</span>
+                  </div>
+                  <div className="prog-bar">
+                    <div className="prog-fill" style={{ width: `${pct}%` }} />
+                  </div>
                 </div>
               </div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--orange)', flexShrink: 0 }}>{pct}%</div>
+              <div style={{ fontSize: 20, color: 'var(--border2)', flexShrink: 0 }}>›</div>
             </div>
           )
         })}
