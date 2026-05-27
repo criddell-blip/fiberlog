@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import CountStartSheet from './CountStartSheet'
 import CountRunScreen from './CountRunScreen'
 import CountRunReviewSheet from './CountRunReviewSheet'
+import CountRunHistorySheet from './CountRunHistorySheet'
 import { getMyActiveRun, getPendingCountRuns } from '../../lib/cycleCount'
 
 // Lives inside InventoryView's "Count" sub-tab. InventoryView passes
@@ -21,6 +22,7 @@ export default function CountTab({ onExitTab }) {
   const [pendingRuns, setPendingRuns] = useState([])
   const [showStart, setShowStart] = useState(false)
   const [reviewRunId, setReviewRunId] = useState(null)
+  const [showHistory, setShowHistory] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const loadAll = useCallback(async () => {
@@ -148,6 +150,18 @@ export default function CountTab({ onExitTab }) {
               >
                 ＋ Start cycle count
               </button>
+              <div style={{ marginTop: 16 }}>
+                <button
+                  onClick={() => setShowHistory(true)}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--muted)', fontSize: 'var(--fs-sm)',
+                    textDecoration: 'underline', padding: 4,
+                  }}
+                >
+                  View past runs
+                </button>
+              </div>
             </div>
           </>
         )}
@@ -166,6 +180,10 @@ export default function CountTab({ onExitTab }) {
           onClose={() => setReviewRunId(null)}
           onChanged={loadAll}
         />
+      )}
+
+      {showHistory && (
+        <CountRunHistorySheet onClose={() => setShowHistory(false)} />
       )}
     </div>
   )

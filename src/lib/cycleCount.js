@@ -176,6 +176,22 @@ export async function getWarehousesForCount() {
   return data || []
 }
 
+// Closed + discarded runs for the history view. Newest first.
+export async function getCompletedCountRuns({ limit = 30 } = {}) {
+  const { data, error } = await db
+    .from('count_runs')
+    .select(`
+      *,
+      counter:started_by(id,name),
+      scope_warehouse:scope_warehouse_id(id,name)
+    `)
+    .in('status', ['closed', 'discarded'])
+    .order('completed_at', { ascending: false, nullsFirst: false })
+    .limit(limit)
+  if (error) throw error
+  return data || []
+}
+
 // Pending-review runs for the manager queue (Phase 3, prebuilt here for
 // when we get there).
 export async function getPendingCountRuns() {

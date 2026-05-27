@@ -595,6 +595,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                                               <span><strong style={{ color: 'var(--text)' }}>{binCounts.totalUnits.toLocaleString()}</strong> unit{binCounts.totalUnits === 1 ? '' : 's'}</span>
                                             </>
                                           )}
+                                          <LastCountedPill ts={bin.last_counted_at} />
                                         </div>
                                       </div>
                                       {onJumpToStock && binCounts && binCounts.distinctParts > 0 && (
@@ -1011,5 +1012,37 @@ function BinFormSheet({ bin, parentWarehouse, saving, onCancel, onSave }) {
         </div>
       </div>
     </div>
+  )
+}
+
+// ─── LastCountedPill ────────────────────────────────────────────────────
+// Compact age indicator surfaced on each bin row. Drives the "stale bins"
+// signal — green for fresh, amber for aging, red for very stale, muted
+// "never" for bins that haven't been cycle-counted yet.
+function LastCountedPill({ ts }) {
+  if (!ts) {
+    return (
+      <span style={{ color: 'var(--hint)' }} title="Bin has never been cycle-counted">
+        · never counted
+      </span>
+    )
+  }
+  const days = Math.floor((Date.now() - new Date(ts).getTime()) / 86400000)
+  const label =
+    days < 1  ? 'today'
+    : days < 30 ? `${days}d ago`
+    : days < 365 ? `${Math.floor(days / 30)}mo ago`
+    : `${Math.floor(days / 365)}y ago`
+  const cls =
+    days < 7   ? 'pill-success'
+    : days < 30 ? 'pill-warning'
+    : 'pill-danger'
+  return (
+    <span style={{ color: 'var(--hint)' }}>
+      ·{' '}
+      <span className={`pill ${cls} pill-sm`} title={`Last counted ${new Date(ts).toLocaleString()}`}>
+        counted {label}
+      </span>
+    </span>
   )
 }
