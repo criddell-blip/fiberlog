@@ -510,7 +510,11 @@ export default function InfraCrewApp() {
             <MyStockView onUserTap={() => setShowSignOut(true)} />
           ) : !selTask ? (
             selProject && selSite ? (
+              // key= forces remount when the site (or project) changes —
+              // otherwise SiteTaskList's local state lags behind the sidebar
+              // selection. Same pattern on TaskWorkspace + TaskSummaryView.
               <SiteTaskList
+                key={selSite.id}
                 project={selProject}
                 site={selSite}
                 onSelect={t => { setSelTaskId(t.id) }}
@@ -520,6 +524,7 @@ export default function InfraCrewApp() {
               />
             ) : selProject ? (
               <SitesList
+                key={selProject.id}
                 project={selProject}
                 onSelect={s => { setSelSiteId(s.id); setSelTaskId(null) }}
                 onBack={() => setSelProjectId(null)}
@@ -537,6 +542,7 @@ export default function InfraCrewApp() {
             )
           ) : isReadOnlyTask(selTask) ? (
             <TaskSummaryView
+              key={selTask.id}
               project={selProject}
               phase={workspacePhaseShim}
               task={selTask}
@@ -545,6 +551,7 @@ export default function InfraCrewApp() {
             />
           ) : (
             <TaskWorkspace
+              key={selTask.id}
               project={selProject}
               phase={workspacePhaseShim}
               task={selTask}
@@ -588,6 +595,7 @@ export default function InfraCrewApp() {
       )}
       {screen === 'sites' && selProject && (
         <SitesList
+          key={selProject.id}
           project={selProject}
           onSelect={s => { setSelSiteId(s.id); navTo('tasks') }}
           onBack={() => navTo('projects')}
@@ -596,6 +604,7 @@ export default function InfraCrewApp() {
       )}
       {screen === 'tasks' && selProject && selSite && (
         <SiteTaskList
+          key={selSite.id}
           project={selProject}
           site={selSite}
           onSelect={t => { setSelTaskId(t.id); navTo('workspace') }}
@@ -607,6 +616,7 @@ export default function InfraCrewApp() {
       {screen === 'workspace' && selTask && (
         isReadOnlyTask(selTask) ? (
           <TaskSummaryView
+            key={selTask.id}
             project={selProject}
             phase={workspacePhaseShim}
             task={selTask}
@@ -615,6 +625,7 @@ export default function InfraCrewApp() {
           />
         ) : (
           <TaskWorkspace
+            key={selTask.id}
             project={selProject}
             phase={workspacePhaseShim}
             task={selTask}

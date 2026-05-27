@@ -413,7 +413,14 @@ export default function CrewApp() {
             <MyStockView onUserTap={() => setShowSignOut(true)} />
           ) : !selTask ? (
             selProject && selPhase ? (
+              // key= forces a remount when the phase changes. TaskList caches
+              // phase.tasks in local useState on mount, so without the key the
+              // body would stay on the previous phase's tasks even after the
+              // sidebar switched projects. Same trick on TaskWorkspace +
+              // TaskSummaryView below — they all have stateful caches keyed
+              // on the entity they're rendering.
               <TaskList
+                key={selPhase.id}
                 project={selProject}
                 phase={selPhase}
                 onSelect={t => { setSelTaskId(t.id) }}
@@ -432,6 +439,7 @@ export default function CrewApp() {
             )
           ) : isReadOnlyTask(selTask) ? (
             <TaskSummaryView
+              key={selTask.id}
               project={selProject}
               phase={selPhase}
               task={selTask}
@@ -440,6 +448,7 @@ export default function CrewApp() {
             />
           ) : (
             <TaskWorkspace
+              key={selTask.id}
               project={selProject}
               phase={selPhase}
               task={selTask}
@@ -490,6 +499,7 @@ export default function CrewApp() {
       )}
       {screen === 'tasks' && selPhase && (
         <TaskList
+          key={selPhase.id}
           project={selProject}
           phase={selPhase}
           onSelect={t => { setSelTaskId(t.id); navTo('workspace') }}
@@ -500,6 +510,7 @@ export default function CrewApp() {
       {screen === 'workspace' && selTask && (
         isReadOnlyTask(selTask) ? (
           <TaskSummaryView
+            key={selTask.id}
             project={selProject}
             phase={selPhase}
             task={selTask}
@@ -508,6 +519,7 @@ export default function CrewApp() {
           />
         ) : (
           <TaskWorkspace
+            key={selTask.id}
             project={selProject}
             phase={selPhase}
             task={selTask}
