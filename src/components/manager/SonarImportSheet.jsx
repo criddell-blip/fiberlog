@@ -5,6 +5,8 @@ import {
   recordMovementsBatch,
   getSonarCityMap, setSonarCityBucket,
   setPartSonarRouting, SONAR_ROUTING_OPTIONS,
+  getPendingSonarImports, getPendingSonarImport,
+  markSonarPendingImportApplied, discardSonarPendingImport,
 } from '../../lib/inventory'
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
 
@@ -54,6 +56,24 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [csvRows, setCsvRows] = useState(null)
   const [error, setError] = useState('')
   const [parsing, setParsing] = useState(false)
+  // When the CSV came from a pending webhook delivery, remember its id so
+  // we can flip status='imported' on successful apply.
+  const [activePendingId, setActivePendingId] = useState(null)
+
+  // ── Pending webhook deliveries (Sonar's daily push) ─────────────────────
+  const [pendingImports, setPendingImports] = useState([])
+  const [pendingLoading, setPendingLoading] = useState(true)
+  const refreshPending = async () => {
+    try {
+      const rows = await getPendingSonarImports({ includeProcessed: false })
+      setPendingImports(rows)
+    } catch (e) {
+      console.warn('Pending Sonar imports load failed:', e)
+    } finally {
+      setPendingLoading(false)
+    }
+  }
+  useEffect(() => { refreshPending() }, [])
 
   // ── Per-import picks ────────────────────────────────────────────────────
   const [crewMap, setCrewMap] = useState({})          // sonarLoc → user_id
@@ -207,32 +227,81 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     if (!file) return
     setError(''); setParsing(true)
     setFileName(file.name)
+    setActivePendingId(null)  // manual upload wipes any prior pending-id linkage
     try {
       const text = await readFileAsText(file)
-      const { headers, rows } = parseCsv(text)
-      if (rows.length === 0) {
-        setError('CSV had no data rows')
-        setCsvRows([])
-        return
-      }
-      const missing = REQUIRED_COLS.filter(c => !headers.includes(c))
-      if (missing.length > 0) {
-        setError(`CSV is missing required Sonar columns: ${missing.join(', ')}`)
-        setCsvRows([])
-        return
-      }
-      setCsvRows(rows)
-      setExcluded(new Set())
-      setCrewMap({})
-      setPartMap({})
-      setPendingCityMap({})
-      setRowDest({})
+      loadCsvText(text)
     } catch (e) {
       console.error('Sonar parse failed:', e)
       setError(e.message || String(e))
       setCsvRows([])
     } finally {
       setParsing(false)
+    }
+  }
+
+  // Shared parse path — used by both file upload and pending-import load.
+  // Validates required columns + resets per-import picks.
+  function loadCsvText(text) {
+    const { headers, rows } = parseCsv(text)
+    if (rows.length === 0) {
+      setError('CSV had no data rows')
+      setCsvRows([])
+      return
+    }
+    const missing = REQUIRED_COLS.filter(c => !headers.includes(c))
+    if (missing.length > 0) {
+      setError(`CSV is missing required Sonar columns: ${missing.join(', ')}`)
+      setCsvRows([])
+      return
+    }
+    setCsvRows(rows)
+    setExcluded(new Set())
+    setCrewMap({})
+    setPartMap({})
+    setPendingCityMap({})
+    setRowDest({})
+  }
+
+  // Load a pending webhook delivery into the existing parse flow as if
+  // the manager had just uploaded its CSV manually. The activePendingId
+  // is held until apply (or until the user uploads a different file or
+  // discards the pending row).
+  async function loadPending(pending) {
+    setError(''); setParsing(true)
+    try {
+      const full = await getPendingSonarImport(pending.id)
+      setActivePendingId(pending.id)
+      const label = full.filename || `pending ${new Date(full.received_at).toLocaleString()}`
+      setFileName(`[webhook] ${label}`)
+      loadCsvText(full.raw_csv || '')
+    } catch (e) {
+      console.error('Load pending Sonar import failed:', e)
+      setError(`Could not load pending import: ${e.message || e}`)
+    } finally {
+      setParsing(false)
+    }
+  }
+
+  async function handleDiscardPending(pending) {
+    const reason = window.prompt(
+      `Discard this pending Sonar import (${pending.parsed_row_count} rows from ${new Date(pending.received_at).toLocaleString()})? It will stay in the audit log but not be importable.`,
+      'Test fire / duplicate / not needed'
+    )
+    if (reason === null) return  // cancelled
+    try {
+      await discardSonarPendingImport(pending.id, { reason: reason || 'Discarded', userId: currentUser?.id })
+      // If we're currently editing this one, clear the working state
+      if (activePendingId === pending.id) {
+        setActivePendingId(null)
+        setCsvRows(null)
+        setFileName('')
+      }
+      await refreshPending()
+      showToast('Pending import discarded')
+    } catch (e) {
+      console.error('Discard failed:', e)
+      setError(`Discard failed: ${e.message || e}`)
     }
   }
 
@@ -410,6 +479,19 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         return
       }
       await recordMovementsBatch(movements)
+      // If this CSV came from a webhook delivery, mark it imported so it
+      // drops out of the pending queue. Non-fatal if it fails (movements
+      // are already written) — just log so we can clean up manually.
+      if (activePendingId) {
+        try {
+          await markSonarPendingImportApplied(activePendingId, {
+            movementCount: movements.length,
+            userId: currentUser?.id,
+          })
+        } catch (e) {
+          console.warn('Mark pending imported failed (movements still applied):', e)
+        }
+      }
       onApplied(movements.length)
     } catch (e) {
       console.error('Sonar apply failed:', e)
@@ -452,6 +534,73 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             </div>
           )}
         </div>
+
+        {/* Pending webhook deliveries — Sonar's daily push lands here */}
+        {!pendingLoading && pendingImports.length > 0 && (
+          <div style={{
+            marginBottom: 12, padding: 10,
+            border: '1px solid var(--accent-border)',
+            background: 'var(--accent-bg)',
+            borderRadius: 'var(--r-sm)',
+          }}>
+            <div style={{
+              fontSize: 12, fontWeight: 800, color: 'var(--accent-fg)',
+              textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6,
+            }}>
+              📥 Auto-delivered from Sonar ({pendingImports.length})
+            </div>
+            {pendingImports.map(p => {
+              const isActive = activePendingId === p.id
+              return (
+                <div key={p.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 8px', marginBottom: 4,
+                  background: isActive ? 'var(--orange)' : 'var(--surface)',
+                  color: isActive ? '#fff' : 'var(--text)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--r-sm)',
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 13 }}>
+                      {new Date(p.received_at).toLocaleString()}
+                    </div>
+                    <div style={{ fontSize: 11, color: isActive ? 'rgba(255,255,255,0.85)' : 'var(--hint)' }}>
+                      {p.parsed_row_count} row{p.parsed_row_count === 1 ? '' : 's'}
+                      {p.filename ? ` · ${p.filename}` : ''}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => loadPending(p)}
+                    className="btn"
+                    style={{
+                      padding: '5px 10px', fontSize: 12,
+                      background: isActive ? '#fff' : 'var(--orange)',
+                      color: isActive ? 'var(--orange)' : '#fff',
+                      border: 'none', borderRadius: 'var(--r-xs)',
+                      fontWeight: 'var(--fw-semibold)', cursor: 'pointer',
+                    }}
+                    disabled={parsing || submitting}
+                  >
+                    {isActive ? 'Loaded' : 'Review'}
+                  </button>
+                  <button
+                    onClick={() => handleDiscardPending(p)}
+                    style={{
+                      padding: '5px 8px', fontSize: 11,
+                      background: 'transparent',
+                      color: isActive ? 'rgba(255,255,255,0.8)' : 'var(--muted)',
+                      border: 'none', cursor: 'pointer',
+                    }}
+                    title="Discard this delivery"
+                    disabled={parsing || submitting}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
 
         {parsing && <div style={{ padding: 16, color: 'var(--muted)', textAlign: 'center' }}>Parsing…</div>}
 

@@ -221,6 +221,72 @@ export async function clearSonarCityBucket(city) {
   if (error) throw error
 }
 
+// ─── Sonar pending-imports queue ──────────────────────────────────────────
+// Rows are inserted by the sonar-webhook edge function (daily Sonar push).
+// Manager reviews + applies them via SonarImportSheet — same UI as a
+// manual CSV upload, but with the CSV pre-loaded from the pending row.
+
+// List pending webhook deliveries, newest first. Includes status='discarded'
+// rows so the manager can see auto-discarded deliveries (e.g. unzip
+// failures) without digging in the DB.
+export async function getPendingSonarImports({ includeProcessed = false, limit = 30 } = {}) {
+  let q = db.from('sonar_pending_imports')
+    .select('id, received_at, filename, parsed_row_count, status, error_message, applied_at, applied_movement_count, discarded_at, discard_reason')
+    .order('received_at', { ascending: false })
+    .limit(limit)
+  if (!includeProcessed) q = q.eq('status', 'pending')
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+// Fetch a single pending import's full raw_csv. Separate from the list
+// query so we don't ship the CSV blob for every row in the queue.
+export async function getPendingSonarImport(id) {
+  const { data, error } = await db
+    .from('sonar_pending_imports')
+    .select('*')
+    .eq('id', id)
+    .single()
+  if (error) throw error
+  return data
+}
+
+// Mark a pending import as imported after the manager applies its
+// movements. movementCount is the actual number of transfers created
+// (may be less than parsed_row_count if rows were excluded/unmapped).
+export async function markSonarPendingImportApplied(id, { movementCount, userId }) {
+  if (!id) throw new Error('id required')
+  const { error } = await db
+    .from('sonar_pending_imports')
+    .update({
+      status: 'imported',
+      applied_at: new Date().toISOString(),
+      applied_by: userId || null,
+      applied_movement_count: movementCount || 0,
+    })
+    .eq('id', id)
+    .eq('status', 'pending')  // guard against double-applying via stale UI
+  if (error) throw error
+}
+
+// Soft-discard a pending import — manager judged it not worth importing
+// (test fire, duplicate, etc). Stays in the table for audit.
+export async function discardSonarPendingImport(id, { reason, userId }) {
+  if (!id) throw new Error('id required')
+  const { error } = await db
+    .from('sonar_pending_imports')
+    .update({
+      status: 'discarded',
+      discarded_at: new Date().toISOString(),
+      discarded_by: userId || null,
+      discard_reason: reason || 'Discarded by manager',
+    })
+    .eq('id', id)
+    .eq('status', 'pending')
+  if (error) throw error
+}
+
 // Cheap per-location summary: how many distinct parts and total units sit
 // at each location. One inventory_stock pull, aggregated client-side.
 // Returns Map<location_id, { distinctParts, totalUnits }>. Used by the
