@@ -215,24 +215,49 @@ async function detectAndExtract(
 
       if (typeof fileB64 === 'string' && fileB64.length > 0) {
         const decoded = base64ToBytes(fileB64)
-        // Zip extension OR PKZIP magic bytes
-        if (extHint === 'zip' || (decoded.length >= 4 && decoded[0] === 0x50 && decoded[1] === 0x4b)) {
-          const z = await extractZip(decoded, 'looker→json→zip')
-          return z
+        const filename = obj.scheduled_plan?.title ? `${obj.scheduled_plan.title}.csv` : null
+        // Diagnostic on what we actually got
+        const decodedDiag = `mimetype=${mimeHint || '(none)'} extension=${extHint || '(none)'} ` +
+          `decoded_len=${decoded.length} ` +
+          `first_bytes_hex=${bytesToHex(decoded.slice(0, 16))} ` +
+          `first_bytes_ascii="${bytesToPrintable(decoded.slice(0, 80))}"`
+
+        const looksLikeZip = decoded.length >= 4 && decoded[0] === 0x50 && decoded[1] === 0x4b
+        const looksLikeGzip = decoded.length >= 2 && decoded[0] === 0x1f && decoded[1] === 0x8b
+
+        // 1) PKZIP container (Looker "CSV zip file" format, real report)
+        if (looksLikeZip) {
+          const z = await extractZip(decoded, 'looker→zip')
+          if (z.csvText) return { ...z, filename: z.filename || filename }
+          // Fall through with the unzip error preserved if extraction yielded no CSV
         }
-        // Looker delivered CSV directly (Format=CSV instead of CSV zip)
-        if (extHint === 'csv' || mimeHint?.startsWith('text/csv')) {
-          return {
-            format: 'looker→json→csv',
-            csvText: new TextDecoder('utf-8').decode(decoded),
-            filename: obj.scheduled_plan?.title ? `${obj.scheduled_plan.title}.csv` : null,
-            error: null,
+
+        // 2) gzip-wrapped (some Looker tenants ship .csv.gz with extension='zip')
+        if (looksLikeGzip) {
+          try {
+            const ds = new DecompressionStream('gzip')
+            const stream = new Blob([decoded]).stream().pipeThrough(ds)
+            const ungzText = await new Response(stream).text()
+            if (ungzText) {
+              return { format: 'looker→gzip→csv', csvText: ungzText, filename, error: null }
+            }
+          } catch (e) {
+            // fall through
           }
         }
-        // Best-effort: try as CSV if it looks textual
+
+        // 3) Raw text — CSV directly. Looker's "CSV" format (no zip) lands here.
         const csvCandidate = new TextDecoder('utf-8').decode(decoded)
-        if (csvCandidate.includes(',') && csvCandidate.includes('\n')) {
-          return { format: 'json→base64→csv', csvText: csvCandidate, filename: obj.filename || null, error: null }
+        if (csvCandidate.includes(',') && (csvCandidate.includes('\n') || csvCandidate.length > 100)) {
+          return { format: 'looker→csv', csvText: csvCandidate, filename, error: null }
+        }
+
+        // 4) Test-fire / unknown payload — store diagnostic for triage
+        return {
+          format: 'looker→json→unknown',
+          csvText: '',
+          filename: null,
+          error: `Attachment data didn't match any known format. ${decodedDiag}`,
         }
       }
       // Maybe a download URL we need to fetch
