@@ -240,6 +240,20 @@ export async function getPendingSonarImports({ includeProcessed = false, limit =
   return data || []
 }
 
+// Recently processed (imported OR discarded) deliveries — the audit
+// trail behind the pending queue. Doesn't include the raw_csv to keep
+// the list lightweight; the table grows but each row is tiny without it.
+export async function getProcessedSonarImports({ limit = 30 } = {}) {
+  const { data, error } = await db
+    .from('sonar_pending_imports')
+    .select('id, received_at, filename, parsed_row_count, status, error_message, applied_at, applied_movement_count, discarded_at, discard_reason')
+    .in('status', ['imported', 'discarded'])
+    .order('received_at', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return data || []
+}
+
 // Fetch a single pending import's full raw_csv. Separate from the list
 // query so we don't ship the CSV blob for every row in the queue.
 export async function getPendingSonarImport(id) {

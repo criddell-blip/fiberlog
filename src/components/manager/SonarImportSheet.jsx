@@ -5,7 +5,7 @@ import {
   recordMovementsBatch,
   getSonarCityMap, setSonarCityBucket,
   setPartSonarRouting, SONAR_ROUTING_OPTIONS,
-  getPendingSonarImports, getPendingSonarImport,
+  getPendingSonarImports, getProcessedSonarImports, getPendingSonarImport,
   markSonarPendingImportApplied, discardSonarPendingImport,
 } from '../../lib/inventory'
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
@@ -74,6 +74,28 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     }
   }
   useEffect(() => { refreshPending() }, [])
+
+  // Processed (imported + discarded) — audit trail. Lazy-loaded on toggle
+  // so we don't pay the query for managers who only care about pending.
+  const [showProcessed, setShowProcessed] = useState(false)
+  const [processedImports, setProcessedImports] = useState(null)  // null = not loaded yet
+  const [processedLoading, setProcessedLoading] = useState(false)
+  async function toggleProcessed() {
+    const next = !showProcessed
+    setShowProcessed(next)
+    if (next && processedImports === null) {
+      setProcessedLoading(true)
+      try {
+        const rows = await getProcessedSonarImports({ limit: 30 })
+        setProcessedImports(rows)
+      } catch (e) {
+        console.warn('Processed Sonar imports load failed:', e)
+        setProcessedImports([])
+      } finally {
+        setProcessedLoading(false)
+      }
+    }
+  }
 
   // ── Per-import picks ────────────────────────────────────────────────────
   const [crewMap, setCrewMap] = useState({})          // sonarLoc → user_id
@@ -599,6 +621,79 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                 </div>
               )
             })}
+          </div>
+        )}
+
+        {/* Processed deliveries (imported + discarded) — audit panel.
+            Always-available toggle so the manager can audit even when
+            nothing's pending. */}
+        {!pendingLoading && (
+          <div style={{ marginBottom: 12 }}>
+            <button
+              onClick={toggleProcessed}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--muted)', fontSize: 12,
+                padding: '4px 0', textDecoration: 'underline',
+              }}
+            >
+              {showProcessed ? '▾ Hide' : '▸ Show'} recent webhook deliveries (audit)
+            </button>
+            {showProcessed && (
+              <div style={{
+                marginTop: 6, padding: 8,
+                background: 'var(--surface2)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--r-sm)',
+              }}>
+                {processedLoading && (
+                  <div style={{ padding: 12, textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
+                    Loading…
+                  </div>
+                )}
+                {!processedLoading && processedImports && processedImports.length === 0 && (
+                  <div style={{ padding: 12, textAlign: 'center', color: 'var(--hint)', fontSize: 12 }}>
+                    No processed deliveries yet. Once you import or discard a Sonar webhook delivery, it'll show up here.
+                  </div>
+                )}
+                {!processedLoading && processedImports && processedImports.length > 0 && (
+                  <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                    {processedImports.map(p => {
+                      const isImported = p.status === 'imported'
+                      const isAutoDiscard = p.discard_reason?.startsWith('Auto-discarded')
+                      return (
+                        <div key={p.id} style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '5px 6px', marginBottom: 2,
+                          fontSize: 11,
+                          borderBottom: '1px solid var(--border)',
+                        }}>
+                          <span
+                            className={isImported ? 'pill pill-success pill-sm' : isAutoDiscard ? 'pill pill-danger pill-sm' : 'pill pill-muted pill-sm'}
+                            style={{ flexShrink: 0 }}
+                          >
+                            {isImported ? '✓ imported' : isAutoDiscard ? '⚠ auto-discarded' : 'discarded'}
+                          </span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 'var(--fw-semibold)' }}>
+                              {new Date(p.received_at).toLocaleString()}
+                              <span style={{ color: 'var(--hint)', fontWeight: 'normal', marginLeft: 6 }}>
+                                · {p.parsed_row_count} row{p.parsed_row_count === 1 ? '' : 's'}
+                              </span>
+                            </div>
+                            <div style={{ color: 'var(--hint)', fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {isImported
+                                ? `applied ${p.applied_movement_count || 0} movement${p.applied_movement_count === 1 ? '' : 's'}${p.applied_at ? ` at ${new Date(p.applied_at).toLocaleString()}` : ''}`
+                                : (p.error_message || p.discard_reason || 'no reason given')}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
