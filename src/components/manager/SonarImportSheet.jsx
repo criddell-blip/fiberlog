@@ -4,6 +4,7 @@ import { db } from '../../lib/supabase'
 import {
   recordMovementsBatch,
   getSonarCityMap, setSonarCityBucket,
+  getSonarProjectMap, setSonarProjectBucket,
   setPartSonarRouting, SONAR_ROUTING_OPTIONS,
   getPendingSonarImports, getProcessedSonarImports, getPendingSonarImport,
   markSonarPendingImportApplied, discardSonarPendingImport,
@@ -27,18 +28,57 @@ import { parseCsv, readFileAsText } from '../../lib/csvImport'
 // Rows with policy='ask' OR routing='region' but city not yet mapped
 // fall to per-row picker in the transactions table.
 
+// Sonar's "Field tech asset Consumption" report (the daily install report
+// they wired to the webhook). Newer schema than the old manual export —
+// `Address | Full Address` instead of `Address | City`, and a new
+// `Project` column tagged at job-creation time. The `Inventory Item ID`
+// column is gone; we pull a stable item key out of `Model Field Data |
+// Value List` instead.
 const REQUIRED_COLS = [
-  'Inventory Item ID',
-  'Model | Display Name',
   'Previous Inventory Location',
+  'Model | Display Name',
   'Date Time',
   'Current Assignee',
-  'Address | City',
+  'Address | Full Address',
+  'Account | ID',
 ]
 
 function extractFirstName(sonarLoc) {
   const m = /\(([^)]+)\)/.exec(sonarLoc || '')
   return m ? m[1].trim() : null
+}
+
+// Parse city from a Sonar full-address string. Sonar's format is:
+//   "STREET, CITY, STATE ZIP"
+//   "STREET, (apt), CITY, STATE ZIP"
+// We find the trailing "STATE ZIP" segment (2 letters + 5 digits) and
+// take the comma-separated segment immediately before it.
+function parseCityFromFullAddress(full) {
+  if (!full || typeof full !== 'string') return ''
+  const parts = full.split(',').map(s => s.trim()).filter(Boolean)
+  // Find the segment matching "XX 12345" (state + zip)
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (/^[A-Z]{2}\s+\d{5}(?:-\d{4})?$/.test(parts[i])) {
+      // The city is the segment immediately before
+      if (i > 0) return parts[i - 1]
+    }
+  }
+  // Fallback: second-to-last segment
+  if (parts.length >= 2) return parts[parts.length - 2]
+  return ''
+}
+
+// Extract a stable item identifier from `Model Field Data | Value List`.
+// Values are pipe-separated and often duplicated. We take the first
+// numeric-looking value (which Sonar uses as the inventory item ID).
+// Falls back to an empty string if nothing usable is present.
+function extractItemIdFromValueList(valueList) {
+  if (!valueList || typeof valueList !== 'string') return ''
+  const tokens = valueList.split('|').map(s => s.trim()).filter(Boolean)
+  for (const t of tokens) {
+    if (/^\d{3,}$/.test(t)) return t  // 3+ digit number = item ID
+  }
+  return tokens[0] || ''
 }
 
 export default function SonarImportSheet({ onClose, onApplied }) {
@@ -50,6 +90,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [parts, setParts] = useState([])              // [{id, name, unit, sonar_routing}]
   const [buckets, setBuckets] = useState([])          // job_site locations (regions + Gigwave/None)
   const [persistedCityMap, setPersistedCityMap] = useState(() => new Map())  // city UPPER → bucket id
+  const [persistedProjectMap, setPersistedProjectMap] = useState(() => new Map())  // project UPPER → bucket id
 
   // ── CSV state ───────────────────────────────────────────────────────────
   const [fileName, setFileName] = useState('')
@@ -101,6 +142,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [crewMap, setCrewMap] = useState({})          // sonarLoc → user_id
   const [partMap, setPartMap] = useState({})          // sonarModel → part_id
   const [pendingCityMap, setPendingCityMap] = useState({})  // city UPPER → bucket id (manager picks this session)
+  const [pendingProjectMap, setPendingProjectMap] = useState({})  // project UPPER → bucket id (this session)
   const [pendingPartRouting, setPendingPartRouting] = useState({}) // part_id → policy
   const [rowDest, setRowDest] = useState({})          // row idx → bucket id (per-row override / ask-resolution)
   const [excluded, setExcluded] = useState(() => new Set())
@@ -112,7 +154,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     let cancelled = false
     ;(async () => {
       try {
-        const [usersRes, trucksRes, partsRes, bucketsRes, cityMap] = await Promise.all([
+        const [usersRes, trucksRes, partsRes, bucketsRes, cityMap, projectMap] = await Promise.all([
           db.from('users')
             .select('id, name, role, crew_type')
             .eq('is_active', true)
@@ -133,6 +175,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             .eq('is_active', true)
             .order('name'),
           getSonarCityMap(),
+          getSonarProjectMap(),
         ])
         if (cancelled) return
         if (usersRes.error)   throw usersRes.error
@@ -146,6 +189,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         setParts(partsRes.data || [])
         setBuckets(bucketsRes.data || [])
         setPersistedCityMap(cityMap)
+        setPersistedProjectMap(projectMap)
       } catch (e) {
         if (!cancelled) setError('Failed to load FiberLog lookups: ' + (e.message || e))
       }
@@ -164,7 +208,13 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   }, [csvRows])
   const uniqueCities = useMemo(() => {
     if (!csvRows) return []
-    return [...new Set(csvRows.map(r => (r['Address | City'] || '').trim()).filter(Boolean))]
+    return [...new Set(
+      csvRows.map(r => parseCityFromFullAddress(r['Address | Full Address'] || '')).filter(Boolean)
+    )]
+  }, [csvRows])
+  const uniqueProjects = useMemo(() => {
+    if (!csvRows) return []
+    return [...new Set(csvRows.map(r => (r['Project'] || '').trim()).filter(Boolean))]
   }, [csvRows])
 
   // ── Auto-match crew + part on CSV load ──────────────────────────────────
@@ -215,6 +265,31 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uniqueCities, buckets, persistedCityMap])
 
+  // Auto-seed Sonar project → bucket when names match. Most Sonar project
+  // names are sub-areas (Center Creek, Snyderville) that won't match
+  // FiberLog's regional buckets directly, but a few will (West Mountain
+  // Fiber → West Mountain, etc) — catch those automatically.
+  useEffect(() => {
+    if (!csvRows || buckets.length === 0) return
+    const auto = {}
+    for (const proj of uniqueProjects) {
+      const up = proj.toUpperCase()
+      if (persistedProjectMap.has(up) || pendingProjectMap[up]) continue
+      // Exact match first
+      let match = buckets.find(b => (b.name || '').toUpperCase() === up)
+      // Then contains-either-way (handles "West Mountain Fiber" ↔ "West Mountain")
+      if (!match) match = buckets.find(b => {
+        const bn = (b.name || '').toUpperCase()
+        return bn && (bn.includes(up) || up.includes(bn))
+      })
+      if (match) auto[up] = match.id
+    }
+    if (Object.keys(auto).length > 0) {
+      setPendingProjectMap(prev => ({ ...auto, ...prev }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uniqueProjects, buckets, persistedProjectMap])
+
   // ── Handlers for picker changes (some live-save to DB) ──────────────────
   async function handlePartRoutingChange(partId, newPolicy) {
     if (!partId) return
@@ -225,6 +300,22 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       setParts(prev => prev.map(p => p.id === partId ? { ...p, sonar_routing: newPolicy } : p))
     } catch (e) {
       setError(`Failed to save routing for ${partId}: ${e.message}`)
+    }
+  }
+
+  async function handleProjectBucketChange(project, bucketId) {
+    const up = project.toUpperCase()
+    setPendingProjectMap(prev => ({ ...prev, [up]: bucketId }))
+    if (!bucketId) return
+    try {
+      await setSonarProjectBucket(project, bucketId)
+      setPersistedProjectMap(prev => {
+        const next = new Map(prev)
+        next.set(up, bucketId)
+        return next
+      })
+    } catch (e) {
+      setError(`Failed to save project mapping for ${project}: ${e.message}`)
     }
   }
 
@@ -338,6 +429,15 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     return merged
   }, [persistedCityMap, pendingCityMap])
 
+  const effectiveProjectMap = useMemo(() => {
+    const merged = new Map(persistedProjectMap)
+    for (const [k, v] of Object.entries(pendingProjectMap)) {
+      if (v) merged.set(k, v)
+      else merged.delete(k)
+    }
+    return merged
+  }, [persistedProjectMap, pendingProjectMap])
+
   function getPartRouting(partId) {
     if (pendingPartRouting[partId]) return pendingPartRouting[partId]
     const p = parts.find(p => p.id === partId)
@@ -349,13 +449,20 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     return csvRows.map((row, idx) => {
       const sonarLoc = row['Previous Inventory Location'] || ''
       const sonarModel = row['Model | Display Name'] || ''
-      const city = (row['Address | City'] || '').trim()
+      const fullAddress = row['Address | Full Address'] || ''
+      const city = parseCityFromFullAddress(fullAddress)
+      const sonarProject = (row['Project'] || '').trim()
       const userId = crewMap[sonarLoc] || null
       const truckId = userId ? trucksByUser[userId] : null
       const partId = partMap[sonarModel] || null
       const userName = userId ? crewUsers.find(u => u.id === userId)?.name || '' : ''
       const partName = partId ? parts.find(p => p.id === partId)?.name || '' : ''
       const routing = partId ? getPartRouting(partId) : null
+      // Item ID for the dedup marker: first numeric value from the
+      // pipe-separated Value List, falling back to Account|ID + Date.
+      const itemFromValueList = extractItemIdFromValueList(row['Model Field Data | Value List'] || '')
+      const accountId = (row['Account | ID'] || '').trim()
+      const sonarItemId = itemFromValueList || (accountId && row['Date Time'] ? `${accountId}-${row['Date Time']}` : '')
 
       // Determine destination
       let destId = null
@@ -372,6 +479,17 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         status = 'no-truck'
       } else if (!partId) {
         status = 'no-part'
+      } else if (sonarProject) {
+        // Sonar tagged the project — that's authoritative. Skip part-level
+        // routing entirely. Only fall through to part routing if the
+        // project name is unmapped (manager needs to set it once).
+        const projBucketId = effectiveProjectMap.get(sonarProject.toUpperCase())
+        if (projBucketId) {
+          destId = projBucketId
+          destReason = `Sonar project: ${sonarProject}`
+        } else {
+          status = 'project-unmapped'
+        }
       } else {
         switch (routing) {
           case 'gigwave': {
@@ -409,8 +527,9 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         date: row['Date Time'] || '',
         customer: row['Current Assignee'] || '',
         city,
+        sonarProject,
         sonarLoc, sonarModel,
-        sonarItemId: row['Inventory Item ID'] || '',
+        sonarItemId,
         userId, truckId, userName,
         partId, partName,
         routing,
@@ -420,7 +539,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         status,
       }
     })
-  }, [csvRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, effectiveCityMap, rowDest, pendingPartRouting])
+  }, [csvRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, effectiveCityMap, effectiveProjectMap, rowDest, pendingPartRouting])
 
   const stats = useMemo(() => {
     if (resolved.length === 0) return null
@@ -450,6 +569,22 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       if (seen.has(uc)) continue
       seen.add(uc)
       result.push(r.city)
+    }
+    return result
+  }, [resolved, csvRows])
+
+  // Mirror for unmapped Sonar projects — manager picks bucket per project,
+  // mapping persists for future imports.
+  const projectsNeedingMap = useMemo(() => {
+    if (!csvRows) return []
+    const seen = new Set()
+    const result = []
+    for (const r of resolved) {
+      if (r.status !== 'project-unmapped') continue
+      const up = r.sonarProject.toUpperCase()
+      if (seen.has(up)) continue
+      seen.add(up)
+      result.push(r.sonarProject)
     }
     return result
   }, [resolved, csvRows])
@@ -528,7 +663,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       <div className="overlay-sheet" style={{ maxWidth: 1000, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 2 }}>⚡ Sonar daily install import</div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
-          Each install row becomes one <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>transfer</code> movement from the crew's truck → the right bucket (region for fiber, Gigwave/None for wireless). Buckets accumulate until Sage export drains them.
+          Each install row becomes one <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>transfer</code> movement from the crew's truck → a FiberLog bucket. Routing priority: <strong>Sonar Project column</strong> (when set, authoritative) → part-level policy (region/gigwave/none). Buckets accumulate until Sage export drains them.
         </div>
 
         {/* File picker */}
@@ -792,6 +927,37 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             </Section>
           )}
 
+          {/* Project mappings — Sonar's Project column → FiberLog bucket.
+              When set, this overrides part-level routing. Mappings persist
+              to sonar_project_bucket_map for future imports. */}
+          {projectsNeedingMap.length > 0 && (
+            <Section title="Sonar project mappings" accent="var(--purple)"
+              subtitle="Sonar tagged each row with a project — pick the FiberLog bucket once per project. Saved to sonar_project_bucket_map and used on every future import.">
+              {projectsNeedingMap.map(project => {
+                const up = project.toUpperCase()
+                const picked = effectiveProjectMap.get(up) || ''
+                const status = picked
+                  ? { tag: 'mapped', color: 'var(--purple)' }
+                  : { tag: 'needs mapping', color: 'var(--amber)' }
+                const n = resolved.filter(r => r.sonarProject.toUpperCase() === up).length
+                return (
+                  <MappingRow key={project} primary={project} secondary={`${n} row${n === 1 ? '' : 's'}`} status={status}>
+                    <select
+                      value={picked}
+                      onChange={e => handleProjectBucketChange(project, e.target.value)}
+                      style={selectStyle()}
+                    >
+                      <option value="">— pick bucket —</option>
+                      {buckets.map(b => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  </MappingRow>
+                )
+              })}
+            </Section>
+          )}
+
           {/* City mappings — only shown if any 'region'-routed rows have unmapped cities */}
           {citiesNeedingMap.length > 0 && (
             <Section title="City mappings" accent="var(--blue)"
@@ -854,7 +1020,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                     {resolved.map(r => {
                       const isExcluded = excluded.has(r.idx)
                       const isReady = r.status === 'ready'
-                      const needsPicker = r.status === 'ask' || r.status === 'city-unmapped' || r.status === 'unresolved'
+                      const needsPicker = r.status === 'ask' || r.status === 'city-unmapped' || r.status === 'project-unmapped' || r.status === 'unresolved'
                       return (
                         <tr key={r.idx} style={{
                           background: isExcluded
@@ -988,6 +1154,7 @@ function StatusBadge({ status }) {
     'ask':            { label: 'ask: pick dest',  color: 'var(--amber)',    bg: 'var(--amber-lt)' },
     'no-city':        { label: 'no city',         color: 'var(--red)',      bg: 'var(--red-lt)' },
     'city-unmapped':  { label: 'city unmapped',   color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+    'project-unmapped': { label: 'project unmapped', color: 'var(--amber)', bg: 'var(--amber-lt)' },
     'no-gigwave-bucket': { label: 'no Gigwave bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
     'no-none-bucket':    { label: 'no None bucket',    color: 'var(--red)', bg: 'var(--red-lt)' },
     'unresolved':     { label: 'unresolved',      color: 'var(--amber)',    bg: 'var(--amber-lt)' },

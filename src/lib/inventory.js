@@ -221,6 +221,43 @@ export async function clearSonarCityBucket(city) {
   if (error) throw error
 }
 
+// Sonar Project → bucket map. Newer Sonar install reports include a
+// `Project` column tagged at job-creation time; when set, it's
+// authoritative for routing (skips part-level region/gigwave/none logic).
+// Sonar project names are more granular than FiberLog buckets, so this
+// map persists the manager's first-time picks.
+export async function getSonarProjectMap() {
+  const { data, error } = await db
+    .from('sonar_project_bucket_map')
+    .select('project, location_id')
+  if (error) throw error
+  const m = new Map()
+  for (const row of data || []) {
+    if (row.project) m.set(row.project.toUpperCase(), row.location_id)
+  }
+  return m
+}
+
+export async function setSonarProjectBucket(project, locationId) {
+  if (!project || !locationId) throw new Error('project and locationId required')
+  const { error } = await db
+    .from('sonar_project_bucket_map')
+    .upsert(
+      { project: project.toUpperCase(), location_id: locationId },
+      { onConflict: 'project' }
+    )
+  if (error) throw error
+}
+
+export async function clearSonarProjectBucket(project) {
+  if (!project) return
+  const { error } = await db
+    .from('sonar_project_bucket_map')
+    .delete()
+    .eq('project', project.toUpperCase())
+  if (error) throw error
+}
+
 // ─── Sonar pending-imports queue ──────────────────────────────────────────
 // Rows are inserted by the sonar-webhook edge function (daily Sonar push).
 // Manager reviews + applies them via SonarImportSheet — same UI as a
