@@ -187,20 +187,49 @@ async function detectAndExtract(
     }
   }
 
-  // 3c. JSON wrapper? Sonar might send { url: "...", file: "<base64>" }
+  // 3c. JSON wrapper? Sonar's Webhook destination is Looker-powered —
+  // the payload follows Looker's "ScheduledPlan" webhook shape:
+  //   { type, scheduled_plan, attachment: { mimetype, extension, data }, ... }
+  // where attachment.data is base64-encoded (zip or csv, depending on
+  // the Schedule's Format setting).
   if (contentType.includes('application/json') || (bodyBytes.length > 0 && bodyBytes[0] === 0x7b /* { */)) {
     try {
       const text = new TextDecoder('utf-8').decode(bodyBytes)
       const obj = JSON.parse(text)
-      // Common keys to probe for embedded data
-      const fileB64 = obj.file || obj.attachment || obj.data || obj.content || obj.body
+
+      // Looker attachment is an object — drill into .data for the base64
+      let fileB64: string | null = null
+      let extHint: string | null = null
+      let mimeHint: string | null = null
+      if (obj.attachment && typeof obj.attachment === 'object') {
+        fileB64 = obj.attachment.data || null
+        extHint = obj.attachment.extension || null
+        mimeHint = obj.attachment.mimetype || null
+      }
+      // Fallbacks: some webhook providers put the base64 at top level
+      if (!fileB64 && typeof obj.file === 'string') fileB64 = obj.file
+      if (!fileB64 && typeof obj.attachment === 'string') fileB64 = obj.attachment
+      if (!fileB64 && typeof obj.data === 'string') fileB64 = obj.data
+      if (!fileB64 && typeof obj.content === 'string') fileB64 = obj.content
+      if (!fileB64 && typeof obj.body === 'string') fileB64 = obj.body
+
       if (typeof fileB64 === 'string' && fileB64.length > 0) {
         const decoded = base64ToBytes(fileB64)
-        if (decoded.length >= 4 && decoded[0] === 0x50 && decoded[1] === 0x4b) {
-          const z = await extractZip(decoded, 'json→base64→zip')
+        // Zip extension OR PKZIP magic bytes
+        if (extHint === 'zip' || (decoded.length >= 4 && decoded[0] === 0x50 && decoded[1] === 0x4b)) {
+          const z = await extractZip(decoded, 'looker→json→zip')
           return z
         }
-        // Maybe it's the CSV text base64'd
+        // Looker delivered CSV directly (Format=CSV instead of CSV zip)
+        if (extHint === 'csv' || mimeHint?.startsWith('text/csv')) {
+          return {
+            format: 'looker→json→csv',
+            csvText: new TextDecoder('utf-8').decode(decoded),
+            filename: obj.scheduled_plan?.title ? `${obj.scheduled_plan.title}.csv` : null,
+            error: null,
+          }
+        }
+        // Best-effort: try as CSV if it looks textual
         const csvCandidate = new TextDecoder('utf-8').decode(decoded)
         if (csvCandidate.includes(',') && csvCandidate.includes('\n')) {
           return { format: 'json→base64→csv', csvText: csvCandidate, filename: obj.filename || null, error: null }
