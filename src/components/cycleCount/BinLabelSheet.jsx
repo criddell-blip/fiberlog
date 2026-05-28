@@ -5,15 +5,74 @@ import { getBinsForWarehouse } from '../../lib/inventory'
 
 // Print bin labels for stuck-on-the-shelf scanning. Generates a QR code
 // encoding `BIN:<uuid>` per bin, plus the bin name in large readable type
-// and the parent warehouse name as a sub-line. Tiled 4-per-page on US
-// letter (good size for shelves; readable from a few feet away).
+// and the parent warehouse name as a sub-line.
 //
-// Print mode hides the rest of the app and laser-prints just the labels.
-// Worker cuts on the dashed borders and sticks them on.
+// Format picker mirrors SkuLabelSheet — two flavors:
+//   • Labels (letter_4up / letter_8up) — bigger, stick-on-shelf labels.
+//   • Scan sheets (scan_sheet_*) — dense reference page. Print one, clip
+//     to a board, scan from there instead of walking the floor.
 //
-// Used from InventoryLocationsTab — "Print labels" button on the bins
-// section of each warehouse expansion.
+// BIN:<uuid> payload is ~40 chars so QR size lower-bound is ~0.7in for
+// reliable camera scanning. Don't go below that without testing.
+//
+// Used from InventoryLocationsTab + LocationDetailPanel.
+const FORMAT_PRESETS = {
+  letter_4up: {
+    label: 'Label — US Letter, 4 per page',
+    description: 'Stick-on-shelf labels, ~3.5×4.5 in each. Readable from a few feet.',
+    pageMargin: '0.4in',
+    columns: 2,
+    rows: 2,
+    qrSize: '1.5in',
+    nameFontPx: 18,
+    subFontPx: 10,
+    idFontPx: 8,
+    minHeight: '4.5in',
+    showSub: true,
+  },
+  letter_8up: {
+    label: 'Label — US Letter, 8 per page',
+    description: 'Denser stick-on labels, ~3.5×2.2 in each. Good for narrow shelves.',
+    pageMargin: '0.4in',
+    columns: 2,
+    rows: 4,
+    qrSize: '1.1in',
+    nameFontPx: 13,
+    subFontPx: 9,
+    idFontPx: 6,
+    minHeight: '2.2in',
+    showSub: true,
+  },
+  scan_sheet_30: {
+    label: 'Scan sheet — 30 per page',
+    description: 'Reference sheet. Clip to a board, scan from anywhere. Bin name + warehouse.',
+    pageMargin: '0.35in',
+    columns: 5,
+    rows: 6,
+    qrSize: '1in',
+    nameFontPx: 9,
+    subFontPx: 7,
+    idFontPx: 0,
+    minHeight: '1.55in',
+    showSub: true,
+  },
+  scan_sheet_60: {
+    label: 'Scan sheet — 60 per page (densest)',
+    description: 'Maximum bin density. Short bin name + QR only. Print 1-2 pages, every bin in your warehouse covered.',
+    pageMargin: '0.3in',
+    columns: 6,
+    rows: 10,
+    qrSize: '0.75in',
+    nameFontPx: 7,
+    subFontPx: 0,
+    idFontPx: 0,
+    minHeight: '0.95in',
+    showSub: false,
+  },
+}
+
 export default function BinLabelSheet({ warehouse, onClose }) {
+  const [format, setFormat] = useState('letter_4up')
   const [bins, setBins] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -69,6 +128,7 @@ export default function BinLabelSheet({ warehouse, onClose }) {
     window.print()
   }
 
+  const preset = FORMAT_PRESETS[format]
   const labelsToPrint = bins.filter(b => selected.has(b.id))
 
   return (
@@ -88,7 +148,7 @@ export default function BinLabelSheet({ warehouse, onClose }) {
             background: white !important;
           }
           .no-print { display: none !important; }
-          @page { margin: 0.4in; }
+          @page { margin: ${preset.pageMargin}; }
         }
       `}</style>
 
@@ -102,8 +162,20 @@ export default function BinLabelSheet({ warehouse, onClose }) {
           </div>
           <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 14 }}>
             Each label has a QR encoding <code style={{ fontFamily: '"DM Mono", monospace', fontSize: 'var(--fs-xs)' }}>BIN:&lt;uuid&gt;</code>.
-            Cut on the dashed borders, stick on shelves. Both USB scanners and
-            the phone camera read these.
+            Both USB scanners and the phone camera read these.
+          </div>
+
+          {/* Format picker — labels for stick-on, scan sheets for clipboard reference */}
+          <div className="field">
+            <label>Format</label>
+            <select value={format} onChange={e => setFormat(e.target.value)} style={{ width: '100%' }}>
+              {Object.entries(FORMAT_PRESETS).map(([key, p]) => (
+                <option key={key} value={key}>{p.label}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', marginTop: 4 }}>
+              {preset.description}
+            </div>
           </div>
 
           {loading && (
@@ -189,7 +261,7 @@ export default function BinLabelSheet({ warehouse, onClose }) {
       <div className="print-labels" style={{ display: labelsToPrint.length === 0 ? 'none' : 'block' }}>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
+          gridTemplateColumns: `repeat(${preset.columns}, 1fr)`,
           gap: 0,
           width: '100%',
           color: 'black',
@@ -198,42 +270,50 @@ export default function BinLabelSheet({ warehouse, onClose }) {
           {labelsToPrint.map(bin => (
             <div key={bin.id} style={{
               border: '1px dashed #888',
-              padding: '0.3in',
+              padding: format === 'scan_sheet_60' ? '0.05in' : '0.15in',
               boxSizing: 'border-box',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              minHeight: '2.4in',
+              minHeight: preset.minHeight,
               textAlign: 'center',
               breakInside: 'avoid',
               pageBreakInside: 'avoid',
             }}>
               <div style={{
-                fontSize: 18, fontWeight: 800,
-                marginBottom: 4,
+                fontSize: preset.nameFontPx, fontWeight: 800,
+                lineHeight: 1.15,
+                marginBottom: 3,
                 wordBreak: 'break-word',
+                maxWidth: '100%',
               }}>
                 {bin.name}
               </div>
-              <div style={{ fontSize: 10, color: '#666', marginBottom: 8 }}>
-                {warehouse.name}
-              </div>
+              {preset.showSub && preset.subFontPx > 0 && (
+                <div style={{ fontSize: preset.subFontPx, color: '#666', marginBottom: 5 }}>
+                  {warehouse.name}
+                </div>
+              )}
               {qrCache[bin.id] && (
                 <img
                   src={qrCache[bin.id]}
                   alt={`QR for ${bin.name}`}
-                  style={{ width: '1.5in', height: '1.5in' }}
+                  style={{ width: preset.qrSize, height: preset.qrSize }}
                 />
               )}
-              <div style={{
-                fontSize: 8, color: '#888',
-                fontFamily: 'monospace',
-                marginTop: 6,
-                wordBreak: 'break-all',
-              }}>
-                BIN:{bin.id}
-              </div>
+              {preset.idFontPx > 0 && (
+                <div style={{
+                  fontSize: preset.idFontPx, color: '#888',
+                  fontFamily: 'monospace',
+                  marginTop: 4,
+                  wordBreak: 'break-all',
+                  maxWidth: '100%',
+                  lineHeight: 1.1,
+                }}>
+                  BIN:{bin.id}
+                </div>
+              )}
             </div>
           ))}
         </div>

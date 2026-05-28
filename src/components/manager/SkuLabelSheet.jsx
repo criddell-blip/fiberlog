@@ -17,9 +17,16 @@ import QRCode from 'qrcode'
 //
 // Same print-CSS trick as BinLabelSheet: @media print hides everything
 // except .print-labels, page margins via @page.
+// Two flavors of preset:
+//   • Labels (letter_4up / avery_*) — peel-and-stick or hand-cut, stuck on
+//     parts. Bigger QR, more whitespace.
+//   • Scan sheets (scan_sheet_*) — reference page for the warehouse; clip
+//     to a board and scan from there instead of walking to each part.
+//     Denser, smaller QR. Tested down to ~0.55in (camera scanning is
+//     comfortable to ~0.5in with errorCorrectionLevel='M').
 const FORMAT_PRESETS = {
   letter_4up: {
-    label: 'US Letter — 4 per page',
+    label: 'Label — US Letter, 4 per page',
     description: 'Plain paper, ~3.5×5 in per label, generous size.',
     pageMargin: '0.4in',
     columns: 2,
@@ -28,9 +35,10 @@ const FORMAT_PRESETS = {
     nameFontPx: 16,
     skuFontPx: 9,
     minHeight: '4.5in',
+    showName: true,
   },
   avery_5163: {
-    label: 'Avery 5163 — 10 per page (2×4 in)',
+    label: 'Label — Avery 5163, 10 per page (2×4 in)',
     description: 'Pre-cut adhesive labels, peel-and-stick.',
     pageMargin: '0.5in 0.155in',  // top/bottom 0.5in, left/right 0.155in
     columns: 2,
@@ -39,9 +47,10 @@ const FORMAT_PRESETS = {
     nameFontPx: 11,
     skuFontPx: 7,
     minHeight: '2in',
+    showName: true,
   },
   avery_5160: {
-    label: 'Avery 5160 — 30 per page (1×2 5/8 in)',
+    label: 'Label — Avery 5160, 30 per page (1×2 5/8 in)',
     description: 'Small address-label sized; tight fit, for small parts.',
     pageMargin: '0.5in 0.19in',
     columns: 3,
@@ -50,6 +59,31 @@ const FORMAT_PRESETS = {
     nameFontPx: 8,
     skuFontPx: 6,
     minHeight: '1in',
+    showName: true,
+  },
+  scan_sheet_60: {
+    label: 'Scan sheet — 60 per page',
+    description: 'Reference sheet for the warehouse. Clip to a board, scan from anywhere. Name + SKU shown.',
+    pageMargin: '0.3in',
+    columns: 6,
+    rows: 10,
+    qrSize: '0.85in',
+    nameFontPx: 7,
+    skuFontPx: 6,
+    minHeight: '0.95in',
+    showName: true,
+  },
+  scan_sheet_120: {
+    label: 'Scan sheet — 120 per page (densest)',
+    description: 'Maximum density. SKU + QR only, no part name. For when you want every SKU on one sheet.',
+    pageMargin: '0.25in',
+    columns: 8,
+    rows: 15,
+    qrSize: '0.6in',
+    nameFontPx: 0,
+    skuFontPx: 5,
+    minHeight: '0.65in',
+    showName: false,
   },
 }
 
@@ -226,7 +260,7 @@ export default function SkuLabelSheet({ parts, title = 'Print SKU labels', onClo
           {labelsToPrint.map(p => (
             <div key={p.id} style={{
               border: '1px dashed #999',
-              padding: format === 'avery_5160' ? '0.05in' : '0.15in',
+              padding: format === 'avery_5160' || format === 'scan_sheet_120' ? '0.04in' : '0.1in',
               boxSizing: 'border-box',
               display: 'flex',
               flexDirection: 'column',
@@ -237,16 +271,18 @@ export default function SkuLabelSheet({ parts, title = 'Print SKU labels', onClo
               breakInside: 'avoid',
               pageBreakInside: 'avoid',
             }}>
-              <div style={{
-                fontSize: preset.nameFontPx,
-                fontWeight: 700,
-                lineHeight: 1.15,
-                marginBottom: 4,
-                wordBreak: 'break-word',
-                maxWidth: '100%',
-              }}>
-                {p.name || p.id}
-              </div>
+              {preset.showName && (
+                <div style={{
+                  fontSize: preset.nameFontPx,
+                  fontWeight: 700,
+                  lineHeight: 1.15,
+                  marginBottom: 3,
+                  wordBreak: 'break-word',
+                  maxWidth: '100%',
+                }}>
+                  {p.name || p.id}
+                </div>
+              )}
               {qrCache[p.id] && (
                 <img
                   src={qrCache[p.id]}
@@ -258,9 +294,10 @@ export default function SkuLabelSheet({ parts, title = 'Print SKU labels', onClo
                 fontSize: preset.skuFontPx,
                 color: '#444',
                 fontFamily: 'monospace',
-                marginTop: 4,
+                marginTop: 3,
                 wordBreak: 'break-all',
                 maxWidth: '100%',
+                lineHeight: 1.1,
               }}>
                 {p.id}
               </div>
