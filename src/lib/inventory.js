@@ -221,41 +221,75 @@ export async function clearSonarCityBucket(city) {
   if (error) throw error
 }
 
-// Sonar Project → bucket map. Newer Sonar install reports include a
-// `Project` column tagged at job-creation time; when set, it's
-// authoritative for routing (skips part-level region/gigwave/none logic).
-// Sonar project names are more granular than FiberLog buckets, so this
-// map persists the manager's first-time picks.
+// Sonar Project → FiberLog phase map. Sonar's install report tags each
+// row with a project (Center Creek, Cold Springs, etc.); these are
+// sub-regions of the FiberLog regional projects. We map them to phases
+// under those regional projects so:
+//   • Materials still land in the regional inventory bucket (no bucket
+//     explosion in the picker)
+//   • Each movement carries phase_id for per-cost-center Sage export
+//
+// Bucket resolution happens at apply-time: phase.project_id → look up
+// the project's job_site bucket.
 export async function getSonarProjectMap() {
   const { data, error } = await db
-    .from('sonar_project_bucket_map')
-    .select('project, location_id')
+    .from('sonar_project_phase_map')
+    .select('project, phase_id')
   if (error) throw error
   const m = new Map()
   for (const row of data || []) {
-    if (row.project) m.set(row.project.toUpperCase(), row.location_id)
+    if (row.project) m.set(row.project.toUpperCase(), row.phase_id)
   }
   return m
 }
 
-export async function setSonarProjectBucket(project, locationId) {
-  if (!project || !locationId) throw new Error('project and locationId required')
+export async function setSonarProjectPhase(project, phaseId) {
+  if (!project || !phaseId) throw new Error('project and phaseId required')
   const { error } = await db
-    .from('sonar_project_bucket_map')
+    .from('sonar_project_phase_map')
     .upsert(
-      { project: project.toUpperCase(), location_id: locationId },
+      { project: project.toUpperCase(), phase_id: phaseId },
       { onConflict: 'project' }
     )
   if (error) throw error
 }
 
-export async function clearSonarProjectBucket(project) {
+export async function clearSonarProjectPhase(project) {
   if (!project) return
   const { error } = await db
-    .from('sonar_project_bucket_map')
+    .from('sonar_project_phase_map')
     .delete()
     .eq('project', project.toUpperCase())
   if (error) throw error
+}
+
+// Phases enriched with their parent project + the project's job_site
+// bucket — used by the SonarImportSheet picker (one dropdown for both
+// mapping AND bucket resolution).
+export async function getPhasesWithBuckets() {
+  const { data, error } = await db
+    .from('phases')
+    .select(`
+      id, name, project_id, status,
+      project:projects(id, name)
+    `)
+    .order('name')
+  if (error) throw error
+  // Fetch buckets per project in one shot
+  const { data: buckets, error: bErr } = await db
+    .from('inventory_locations')
+    .select('id, project_id')
+    .eq('type', 'job_site')
+    .eq('is_active', true)
+    .not('project_id', 'is', null)
+  if (bErr) throw bErr
+  const bucketByProject = new Map()
+  for (const b of buckets || []) bucketByProject.set(b.project_id, b.id)
+  return (data || []).map(ph => ({
+    ...ph,
+    project_name: ph.project?.name || '',
+    bucket_id: bucketByProject.get(ph.project_id) || null,
+  }))
 }
 
 // ─── Sonar pending-imports queue ──────────────────────────────────────────

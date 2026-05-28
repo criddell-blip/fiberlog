@@ -4,7 +4,7 @@ import { db } from '../../lib/supabase'
 import {
   recordMovementsBatch,
   getSonarCityMap, setSonarCityBucket,
-  getSonarProjectMap, setSonarProjectBucket,
+  getSonarProjectMap, setSonarProjectPhase, getPhasesWithBuckets,
   setPartSonarRouting, SONAR_ROUTING_OPTIONS,
   getPendingSonarImports, getProcessedSonarImports, getPendingSonarImport,
   markSonarPendingImportApplied, discardSonarPendingImport,
@@ -90,7 +90,8 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [parts, setParts] = useState([])              // [{id, name, unit, sonar_routing}]
   const [buckets, setBuckets] = useState([])          // job_site locations (regions + Gigwave/None)
   const [persistedCityMap, setPersistedCityMap] = useState(() => new Map())  // city UPPER → bucket id
-  const [persistedProjectMap, setPersistedProjectMap] = useState(() => new Map())  // project UPPER → bucket id
+  const [persistedProjectMap, setPersistedProjectMap] = useState(() => new Map())  // project UPPER → phase id
+  const [phases, setPhases] = useState([])  // [{id, name, project_id, project_name, bucket_id}] — picker source
 
   // ── CSV state ───────────────────────────────────────────────────────────
   const [fileName, setFileName] = useState('')
@@ -142,7 +143,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [crewMap, setCrewMap] = useState({})          // sonarLoc → user_id
   const [partMap, setPartMap] = useState({})          // sonarModel → part_id
   const [pendingCityMap, setPendingCityMap] = useState({})  // city UPPER → bucket id (manager picks this session)
-  const [pendingProjectMap, setPendingProjectMap] = useState({})  // project UPPER → bucket id (this session)
+  const [pendingProjectMap, setPendingProjectMap] = useState({})  // project UPPER → phase id (this session)
   const [pendingPartRouting, setPendingPartRouting] = useState({}) // part_id → policy
   const [rowDest, setRowDest] = useState({})          // row idx → bucket id (per-row override / ask-resolution)
   const [excluded, setExcluded] = useState(() => new Set())
@@ -154,7 +155,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     let cancelled = false
     ;(async () => {
       try {
-        const [usersRes, trucksRes, partsRes, bucketsRes, cityMap, projectMap] = await Promise.all([
+        const [usersRes, trucksRes, partsRes, bucketsRes, cityMap, projectMap, phasesData] = await Promise.all([
           db.from('users')
             .select('id, name, role, crew_type')
             .eq('is_active', true)
@@ -176,6 +177,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             .order('name'),
           getSonarCityMap(),
           getSonarProjectMap(),
+          getPhasesWithBuckets(),
         ])
         if (cancelled) return
         if (usersRes.error)   throw usersRes.error
@@ -190,6 +192,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         setBuckets(bucketsRes.data || [])
         setPersistedCityMap(cityMap)
         setPersistedProjectMap(projectMap)
+        setPhases(phasesData || [])
       } catch (e) {
         if (!cancelled) setError('Failed to load FiberLog lookups: ' + (e.message || e))
       }
@@ -265,22 +268,22 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uniqueCities, buckets, persistedCityMap])
 
-  // Auto-seed Sonar project → bucket when names match. Most Sonar project
-  // names are sub-areas (Center Creek, Snyderville) that won't match
-  // FiberLog's regional buckets directly, but a few will (West Mountain
-  // Fiber → West Mountain, etc) — catch those automatically.
+  // Auto-seed Sonar project → phase when names match. After you add
+  // Center Creek / Cold Springs / etc as phases under Heber / Park City,
+  // their names will match the Sonar Project values directly — this
+  // catches them on first import so the manager only confirms.
   useEffect(() => {
-    if (!csvRows || buckets.length === 0) return
+    if (!csvRows || phases.length === 0) return
     const auto = {}
     for (const proj of uniqueProjects) {
       const up = proj.toUpperCase()
       if (persistedProjectMap.has(up) || pendingProjectMap[up]) continue
-      // Exact match first
-      let match = buckets.find(b => (b.name || '').toUpperCase() === up)
+      // Exact match on phase name first
+      let match = phases.find(p => (p.name || '').toUpperCase() === up)
       // Then contains-either-way (handles "West Mountain Fiber" ↔ "West Mountain")
-      if (!match) match = buckets.find(b => {
-        const bn = (b.name || '').toUpperCase()
-        return bn && (bn.includes(up) || up.includes(bn))
+      if (!match) match = phases.find(p => {
+        const pn = (p.name || '').toUpperCase()
+        return pn && (pn.includes(up) || up.includes(pn))
       })
       if (match) auto[up] = match.id
     }
@@ -288,7 +291,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       setPendingProjectMap(prev => ({ ...auto, ...prev }))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uniqueProjects, buckets, persistedProjectMap])
+  }, [uniqueProjects, phases, persistedProjectMap])
 
   // ── Handlers for picker changes (some live-save to DB) ──────────────────
   async function handlePartRoutingChange(partId, newPolicy) {
@@ -303,15 +306,15 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     }
   }
 
-  async function handleProjectBucketChange(project, bucketId) {
+  async function handleProjectPhaseChange(project, phaseId) {
     const up = project.toUpperCase()
-    setPendingProjectMap(prev => ({ ...prev, [up]: bucketId }))
-    if (!bucketId) return
+    setPendingProjectMap(prev => ({ ...prev, [up]: phaseId }))
+    if (!phaseId) return
     try {
-      await setSonarProjectBucket(project, bucketId)
+      await setSonarProjectPhase(project, phaseId)
       setPersistedProjectMap(prev => {
         const next = new Map(prev)
-        next.set(up, bucketId)
+        next.set(up, phaseId)
         return next
       })
     } catch (e) {
@@ -480,13 +483,17 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       } else if (!partId) {
         status = 'no-part'
       } else if (sonarProject) {
-        // Sonar tagged the project — that's authoritative. Skip part-level
-        // routing entirely. Only fall through to part routing if the
-        // project name is unmapped (manager needs to set it once).
-        const projBucketId = effectiveProjectMap.get(sonarProject.toUpperCase())
-        if (projBucketId) {
-          destId = projBucketId
-          destReason = `Sonar project: ${sonarProject}`
+        // Sonar tagged the project → look up phase. Authoritative when
+        // mapped. Bucket is derived from the phase's parent project
+        // (so materials still land in the regional bucket, but each
+        // movement is tagged with phase_id for Sage cost-center rollups).
+        const phaseId = effectiveProjectMap.get(sonarProject.toUpperCase())
+        const phase = phaseId ? phases.find(p => p.id === phaseId) : null
+        if (phase && phase.bucket_id) {
+          destId = phase.bucket_id
+          destReason = `Sonar project: ${sonarProject} → ${phase.project_name} / ${phase.name}`
+        } else if (phase && !phase.bucket_id) {
+          status = 'no-project-bucket'  // phase's project has no job_site bucket yet
         } else {
           status = 'project-unmapped'
         }
@@ -522,6 +529,13 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       if (status === 'ready' && !destId) status = 'unresolved'
 
       const destBucket = destId ? buckets.find(b => b.id === destId) : null
+      // Phase tag follows the resolved phase (when project-routing path
+      // was taken); falls back to the phase mapped to the project the
+      // manual override picked, or NULL.
+      let phaseTagId = null
+      if (sonarProject) {
+        phaseTagId = effectiveProjectMap.get(sonarProject.toUpperCase()) || null
+      }
       return {
         idx,
         date: row['Date Time'] || '',
@@ -536,10 +550,11 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         destId,
         destName: destBucket?.name || null,
         destReason,
+        phaseTagId,
         status,
       }
     })
-  }, [csvRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, effectiveCityMap, effectiveProjectMap, rowDest, pendingPartRouting])
+  }, [csvRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, phases, effectiveCityMap, effectiveProjectMap, rowDest, pendingPartRouting])
 
   const stats = useMemo(() => {
     if (resolved.length === 0) return null
@@ -629,6 +644,8 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             to_location_id: r.destId,
             notes: noteParts.join(' · '),
             created_by: currentUser?.id,
+            phase_id: r.phaseTagId || null,
+            consumed_by_user_id: r.userId || null,
           }
         })
       if (movements.length === 0) {
@@ -927,29 +944,37 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             </Section>
           )}
 
-          {/* Project mappings — Sonar's Project column → FiberLog bucket.
-              When set, this overrides part-level routing. Mappings persist
-              to sonar_project_bucket_map for future imports. */}
+          {/* Project mappings — Sonar's Project column → FiberLog phase.
+              The phase determines both the destination bucket (via its
+              parent project) AND the phase_id tag stamped on the movement
+              for Sage cost-center grouping. Mappings persist to
+              sonar_project_phase_map for future imports. */}
           {projectsNeedingMap.length > 0 && (
             <Section title="Sonar project mappings" accent="var(--purple)"
-              subtitle="Sonar tagged each row with a project — pick the FiberLog bucket once per project. Saved to sonar_project_bucket_map and used on every future import.">
+              subtitle="Pick a phase under the appropriate region once per Sonar project. The phase determines both the destination bucket AND the cost-center tag for Sage export. Saved for every future import.">
               {projectsNeedingMap.map(project => {
                 const up = project.toUpperCase()
                 const picked = effectiveProjectMap.get(up) || ''
+                const pickedPhase = picked ? phases.find(p => p.id === picked) : null
                 const status = picked
-                  ? { tag: 'mapped', color: 'var(--purple)' }
+                  ? pickedPhase?.bucket_id
+                    ? { tag: 'mapped', color: 'var(--purple)' }
+                    : { tag: 'phase has no bucket', color: 'var(--red)' }
                   : { tag: 'needs mapping', color: 'var(--amber)' }
                 const n = resolved.filter(r => r.sonarProject.toUpperCase() === up).length
                 return (
                   <MappingRow key={project} primary={project} secondary={`${n} row${n === 1 ? '' : 's'}`} status={status}>
                     <select
                       value={picked}
-                      onChange={e => handleProjectBucketChange(project, e.target.value)}
+                      onChange={e => handleProjectPhaseChange(project, e.target.value)}
                       style={selectStyle()}
                     >
-                      <option value="">— pick bucket —</option>
-                      {buckets.map(b => (
-                        <option key={b.id} value={b.id}>{b.name}</option>
+                      <option value="">— pick phase —</option>
+                      {phases.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.project_name} / {p.name}
+                          {!p.bucket_id ? ' (no bucket)' : ''}
+                        </option>
                       ))}
                     </select>
                   </MappingRow>
@@ -1155,6 +1180,7 @@ function StatusBadge({ status }) {
     'no-city':        { label: 'no city',         color: 'var(--red)',      bg: 'var(--red-lt)' },
     'city-unmapped':  { label: 'city unmapped',   color: 'var(--amber)',    bg: 'var(--amber-lt)' },
     'project-unmapped': { label: 'project unmapped', color: 'var(--amber)', bg: 'var(--amber-lt)' },
+    'no-project-bucket': { label: 'phase has no bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
     'no-gigwave-bucket': { label: 'no Gigwave bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
     'no-none-bucket':    { label: 'no None bucket',    color: 'var(--red)', bg: 'var(--red-lt)' },
     'unresolved':     { label: 'unresolved',      color: 'var(--amber)',    bg: 'var(--amber-lt)' },
