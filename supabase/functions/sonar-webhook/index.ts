@@ -218,6 +218,7 @@ async function detectAndExtract(
         const filename = obj.scheduled_plan?.title ? `${obj.scheduled_plan.title}.csv` : null
         // Diagnostic on what we actually got
         const decodedDiag = `mimetype=${mimeHint || '(none)'} extension=${extHint || '(none)'} ` +
+          `b64_len=${fileB64.length} ` +
           `decoded_len=${decoded.length} ` +
           `first_bytes_hex=${bytesToHex(decoded.slice(0, 16))} ` +
           `first_bytes_ascii="${bytesToPrintable(decoded.slice(0, 80))}"`
@@ -365,15 +366,18 @@ function bytesToPrintable(bytes: Uint8Array): string {
 }
 
 function base64ToBytes(s: string): Uint8Array {
-  // Tolerate URL-safe base64 + missing padding
-  let normalized = s.replace(/-/g, '+').replace(/_/g, '/')
+  // Strip whitespace first — Looker line-breaks long base64 every 76 chars,
+  // and atob() rejects whitespace. Then tolerate URL-safe variants and
+  // pad to a multiple of 4.
+  let normalized = s.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/')
   while (normalized.length % 4 !== 0) normalized += '='
   try {
     const bin = atob(normalized)
     const out = new Uint8Array(bin.length)
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
     return out
-  } catch {
+  } catch (e) {
+    console.warn('base64 decode failed; input length=' + s.length + ' normalized length=' + normalized.length + ' err=' + (e instanceof Error ? e.message : String(e)))
     return new Uint8Array(0)
   }
 }
