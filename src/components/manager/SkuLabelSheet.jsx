@@ -247,16 +247,20 @@ export default function SkuLabelSheet({ parts, title = 'Print SKU labels', onClo
           output flows naturally instead of getting clipped. */}
       {labelsToPrint.length > 0 && createPortal(
         <div className="print-labels-portal">
+          {/* Flex-wrap instead of CSS grid — Chrome's print engine
+              doesn't paginate display:grid past one page. Flex-wrap
+              with explicit cell widths flows naturally. */}
           <div style={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(${preset.columns}, 1fr)`,
-            gap: 0,
+            display: 'flex',
+            flexWrap: 'wrap',
             width: '100%',
             color: 'black',
             background: 'white',
           }}>
             {labelsToPrint.map(p => (
               <div key={p.id} style={{
+                flex: `0 0 calc(100% / ${preset.columns})`,
+                maxWidth: `calc(100% / ${preset.columns})`,
                 border: '1px dashed #999',
                 padding: format === 'avery_5160' || format === 'scan_sheet_120' ? '0.04in' : '0.1in',
                 boxSizing: 'border-box',

@@ -262,16 +262,22 @@ export default function BinLabelSheet({ warehouse, onClose }) {
           .print-labels-portal default; revealed in @media print. */}
       {labelsToPrint.length > 0 && createPortal(
         <div className="print-labels-portal">
+          {/* Flex-wrap instead of CSS grid: Chrome's print engine has a
+              long-standing pagination bug with display:grid (the grid
+              container won't split across pages, content past page 1
+              gets clipped). Flex-wrap with explicit cell widths
+              paginates cleanly across any browser. */}
           <div style={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(${preset.columns}, 1fr)`,
-            gap: 0,
+            display: 'flex',
+            flexWrap: 'wrap',
             width: '100%',
             color: 'black',
             background: 'white',
           }}>
             {labelsToPrint.map(bin => (
               <div key={bin.id} style={{
+                flex: `0 0 calc(100% / ${preset.columns})`,
+                maxWidth: `calc(100% / ${preset.columns})`,
                 border: '1px dashed #888',
                 padding: format === 'scan_sheet_60' ? '0.04in' : '0.15in',
                 boxSizing: 'border-box',
