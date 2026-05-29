@@ -447,6 +447,8 @@ npx supabase login                             # auth supabase CLI (first time)
 
     Migrations applied: `tighten_rls_policies`, `harden_views_functions_execute_grants`, `users_staff_update_policy`.
 
+13. **Scan mode in CrewMovementSheet (Load + Return)** — opt-in `📷 Scan mode` pill at the top of the crew load/return sheet. Toggle on → scan bin QR to set source, scan part QRs to add lines (each scan = +1 qty for that part; long-press or "edit qty" tap to override). Reuses `ScanInput` from cycle counting (handles both USB scanners + phone camera via ZXing). Bigger payoff than it looks: morning loadouts of 8-15 parts collapse from ~3 min of scrolling/typing to ~30 sec of scanning. Adjacent wins for free: same toggle in Return flow + a "📷 Verify" mode on `MyStockView` that scans truck stock against system state. Gating concern: until label coverage is broad (Receive PO already prints QR; legacy stock needs scan-sheet posting), only a fraction of stock is scannable — toggle stays opt-in so the existing picker remains the default.
+
 ---
 
 ## Gotchas worth knowing
