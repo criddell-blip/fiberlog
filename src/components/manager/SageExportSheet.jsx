@@ -18,7 +18,7 @@ import { downloadTextAsFile } from '../../lib/csvImport'
 // mappings (warehouse name → Sage warehouse code, etc) once the actual
 // values are known.
 export default function SageExportSheet({ onClose }) {
-  const { showToast } = useApp()
+  const { showToast, currentUser } = useApp()
 
   // Default range: last 7 days (Sat night → Fri night kind of window)
   const defaultUntil = useMemo(() => isoLocalDate(new Date()), [])
@@ -77,14 +77,17 @@ export default function SageExportSheet({ onClose }) {
     setSubmitting(true)
     setError('')
     try {
-      const csv = buildSageCsv(movements)  // includes the filter internally
-      const batchId = crypto.randomUUID()
-      const filename = `sage_export_${since}_to_${until}_${batchId.slice(0, 8)}.csv`
-      downloadTextAsFile(filename, csv)
-      // Mark only the rows that actually made it into the CSV
+      const csv = buildSageCsv(movements)  // applies the filter internally
       const includedIds = exportable.map(m => m.id)
-      await markMovementsExported(includedIds, batchId)
-      setLastBatch({ batchId, count: includedIds.length, filename })
+      // Stamp the batch first — markMovementsExported creates the parent
+      // batch row + sets exported_at/export_batch_id on every movement.
+      const batch = await markMovementsExported(includedIds, {
+        userId: currentUser?.id,
+        notes: `Sage export · ${since} → ${until}`,
+      })
+      const filename = `sage_export_${since}_to_${until}_${batch.id.slice(0, 8)}.csv`
+      downloadTextAsFile(filename, csv)
+      setLastBatch({ batchId: batch.id, count: includedIds.length, filename })
       showToast(`Exported ${includedIds.length} movement${includedIds.length === 1 ? '' : 's'}`)
       // Reload so the preview reflects the new exported_at stamps
       await load()

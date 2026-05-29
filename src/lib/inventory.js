@@ -1175,14 +1175,18 @@ const SAGE_TRANSACTION_TYPE = {
 // export-time (see buildSageCsv) — they're FiberLog-internal staging,
 // not Sage-relevant.
 export async function getMovementsForSageExport({ since, until, includeExported = false } = {}) {
+  // FK constraints must be referenced by full constraint name (matches
+  // the rest of the codebase's PostgREST embed pattern). The column-name
+  // shorthand silently broke this query in the first cut — looked like
+  // "no movements" because the preflight was rejecting the join.
   let q = db.from('inventory_movements')
     .select(`
       id, movement_type, quantity, unit, unit_cost, notes, created_at,
       exported_at, export_batch_id, submission_id, task_id, vendor_invoice,
       part:parts_catalog(id, name, unit, department, material_group, category),
-      from_location:inventory_locations!from_location_id(id, name, type, parent_location_id, project_id),
-      to_location:inventory_locations!to_location_id(id, name, type, parent_location_id, project_id),
-      phase:phase_id(id, name, project_id, project:projects(id, name))
+      from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type, parent_location_id, project_id),
+      to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type, parent_location_id, project_id),
+      phase:phases!inventory_movements_phase_id_fkey(id, name, project_id, project:projects(id, name))
     `)
     .order('created_at', { ascending: true })
   if (since) q = q.gte('created_at', since)
@@ -1295,16 +1299,33 @@ function escapeSageCsvField(v) {
   return s
 }
 
-// Stamp a batch of movements as exported. The batch_id groups them so
-// we can audit / re-issue a specific batch later.
-export async function markMovementsExported(movementIds, batchId) {
-  if (!Array.isArray(movementIds) || movementIds.length === 0) return
-  const { error } = await db
+// Stamp a batch of movements as exported. Two writes:
+//   1. INSERT a row in inventory_export_batches (parent of the FK from
+//      inventory_movements.export_batch_id — must exist before referencing)
+//   2. UPDATE each movement's exported_at + export_batch_id
+// Returns the inserted batch row so the UI can show batchId + the
+// canonical exported_at timestamp.
+export async function markMovementsExported(movementIds, { userId = null, notes = null } = {}) {
+  if (!Array.isArray(movementIds) || movementIds.length === 0) return null
+  const { data: batch, error: bErr } = await db
+    .from('inventory_export_batches')
+    .insert({
+      exported_by: userId,
+      movement_count: movementIds.length,
+      notes: notes || 'Sage Intacct export',
+    })
+    .select('id, exported_at, movement_count')
+    .single()
+  if (bErr) throw bErr
+
+  const { error: uErr } = await db
     .from('inventory_movements')
     .update({
-      exported_at: new Date().toISOString(),
-      export_batch_id: batchId,
+      exported_at: batch.exported_at,  // align with the batch's canonical timestamp
+      export_batch_id: batch.id,
     })
     .in('id', movementIds)
-  if (error) throw error
+  if (uErr) throw uErr
+
+  return batch
 }
