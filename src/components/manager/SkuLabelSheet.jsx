@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
 
 // Printable labels for parts. Each label = name + SKU + QR encoding the SKU
@@ -64,25 +65,25 @@ const FORMAT_PRESETS = {
   scan_sheet_60: {
     label: 'Scan sheet — 60 per page',
     description: 'Reference sheet for the warehouse. Clip to a board, scan from anywhere. Name + SKU shown.',
-    pageMargin: '0.3in',
+    pageMargin: '0.25in',
     columns: 6,
     rows: 10,
-    qrSize: '0.85in',
+    qrSize: '0.78in',
     nameFontPx: 7,
     skuFontPx: 6,
-    minHeight: '0.95in',
+    minHeight: '0.85in',
     showName: true,
   },
   scan_sheet_120: {
     label: 'Scan sheet — 120 per page (densest)',
     description: 'Maximum density. SKU + QR only, no part name. For when you want every SKU on one sheet.',
-    pageMargin: '0.25in',
+    pageMargin: '0.2in',
     columns: 8,
     rows: 15,
-    qrSize: '0.6in',
+    qrSize: '0.55in',
     nameFontPx: 0,
     skuFontPx: 5,
-    minHeight: '0.65in',
+    minHeight: '0.6in',
     showName: false,
   },
 }
@@ -134,19 +135,14 @@ export default function SkuLabelSheet({ parts, title = 'Print SKU labels', onClo
 
   return (
     <>
+      {/* Print-labels rendered to body via Portal so multi-page output
+          flows naturally instead of getting clipped by position:absolute. */}
       <style>{`
+        .print-labels-portal { display: none; }
         @media print {
-          body * { visibility: hidden !important; }
-          .print-labels, .print-labels * { visibility: visible !important; }
-          .print-labels {
-            position: absolute !important;
-            left: 0 !important; top: 0 !important;
-            width: 100% !important;
-            margin: 0 !important; padding: 0 !important;
-            background: white !important;
-          }
-          .no-print { display: none !important; }
-          @page { margin: ${preset.pageMargin}; }
+          body > *:not(.print-labels-portal) { display: none !important; }
+          .print-labels-portal { display: block !important; }
+          @page { size: letter; margin: ${preset.pageMargin}; }
         }
       `}</style>
 
@@ -247,64 +243,68 @@ export default function SkuLabelSheet({ parts, title = 'Print SKU labels', onClo
         </div>
       </div>
 
-      {/* Printable layout — visible only during window.print() */}
-      <div className="print-labels" style={{ display: labelsToPrint.length === 0 ? 'none' : 'block' }}>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: `repeat(${preset.columns}, 1fr)`,
-          gap: 0,
-          width: '100%',
-          color: 'black',
-          background: 'white',
-        }}>
-          {labelsToPrint.map(p => (
-            <div key={p.id} style={{
-              border: '1px dashed #999',
-              padding: format === 'avery_5160' || format === 'scan_sheet_120' ? '0.04in' : '0.1in',
-              boxSizing: 'border-box',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minHeight: preset.minHeight,
-              textAlign: 'center',
-              breakInside: 'avoid',
-              pageBreakInside: 'avoid',
-            }}>
-              {preset.showName && (
-                <div style={{
-                  fontSize: preset.nameFontPx,
-                  fontWeight: 700,
-                  lineHeight: 1.15,
-                  marginBottom: 3,
-                  wordBreak: 'break-word',
-                  maxWidth: '100%',
-                }}>
-                  {p.name || p.id}
-                </div>
-              )}
-              {qrCache[p.id] && (
-                <img
-                  src={qrCache[p.id]}
-                  alt={`QR for ${p.id}`}
-                  style={{ width: preset.qrSize, height: preset.qrSize }}
-                />
-              )}
-              <div style={{
-                fontSize: preset.skuFontPx,
-                color: '#444',
-                fontFamily: 'monospace',
-                marginTop: 3,
-                wordBreak: 'break-all',
-                maxWidth: '100%',
-                lineHeight: 1.1,
+      {/* Printable layout — rendered to body via Portal so multi-page
+          output flows naturally instead of getting clipped. */}
+      {labelsToPrint.length > 0 && createPortal(
+        <div className="print-labels-portal">
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${preset.columns}, 1fr)`,
+            gap: 0,
+            width: '100%',
+            color: 'black',
+            background: 'white',
+          }}>
+            {labelsToPrint.map(p => (
+              <div key={p.id} style={{
+                border: '1px dashed #999',
+                padding: format === 'avery_5160' || format === 'scan_sheet_120' ? '0.04in' : '0.1in',
+                boxSizing: 'border-box',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: preset.minHeight,
+                textAlign: 'center',
+                breakInside: 'avoid',
+                pageBreakInside: 'avoid',
               }}>
-                {p.id}
+                {preset.showName && (
+                  <div style={{
+                    fontSize: preset.nameFontPx,
+                    fontWeight: 700,
+                    lineHeight: 1.15,
+                    marginBottom: 3,
+                    wordBreak: 'break-word',
+                    maxWidth: '100%',
+                  }}>
+                    {p.name || p.id}
+                  </div>
+                )}
+                {qrCache[p.id] && (
+                  <img
+                    src={qrCache[p.id]}
+                    alt={`QR for ${p.id}`}
+                    style={{ width: preset.qrSize, height: preset.qrSize }}
+                  />
+                )}
+                <div style={{
+                  fontSize: preset.skuFontPx,
+                  color: '#444',
+                  fontFamily: 'monospace',
+                  marginTop: 3,
+                  wordBreak: 'break-all',
+                  maxWidth: '100%',
+                  lineHeight: 1.1,
+                }}>
+                  {p.id}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </div>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   )
 }

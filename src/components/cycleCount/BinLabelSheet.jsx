@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
 import { formatBinCode } from '../../lib/cycleCount'
 import { getBinsForWarehouse } from '../../lib/inventory'
@@ -59,14 +60,17 @@ const FORMAT_PRESETS = {
   scan_sheet_60: {
     label: 'Scan sheet — 60 per page (densest)',
     description: 'Maximum bin density. Short bin name + QR only. Print 1-2 pages, every bin in your warehouse covered.',
-    pageMargin: '0.3in',
+    pageMargin: '0.25in',
     columns: 6,
     rows: 10,
-    qrSize: '0.75in',
+    qrSize: '0.7in',
     nameFontPx: 7,
     subFontPx: 0,
     idFontPx: 0,
-    minHeight: '0.95in',
+    // Tight: 10 rows × 0.85in = 8.5in. Leaves ~2in for browser headers
+    // /footers, which Chrome adds by default and the user can't always
+    // turn off without "More settings" → uncheck.
+    minHeight: '0.85in',
     showSub: false,
   },
 }
@@ -133,22 +137,18 @@ export default function BinLabelSheet({ warehouse, onClose }) {
 
   return (
     <>
-      {/* Print-only stylesheet — hides everything except .print-labels when printing */}
+      {/* Print-only stylesheet. The print-labels element is rendered to
+          body via Portal so it's a direct child of body. In print mode we
+          hide every direct child of body EXCEPT the portal — that way the
+          labels flow naturally across pages instead of getting clipped
+          by position:absolute (the old approach broke pagination past
+          the first page). */}
       <style>{`
+        .print-labels-portal { display: none; }
         @media print {
-          body * { visibility: hidden !important; }
-          .print-labels, .print-labels * { visibility: visible !important; }
-          .print-labels {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            background: white !important;
-          }
-          .no-print { display: none !important; }
-          @page { margin: ${preset.pageMargin}; }
+          body > *:not(.print-labels-portal) { display: none !important; }
+          .print-labels-portal { display: block !important; }
+          @page { size: letter; margin: ${preset.pageMargin}; }
         }
       `}</style>
 
@@ -257,67 +257,72 @@ export default function BinLabelSheet({ warehouse, onClose }) {
         </div>
       </div>
 
-      {/* Printable layout — visible only when window.print() fires */}
-      <div className="print-labels" style={{ display: labelsToPrint.length === 0 ? 'none' : 'block' }}>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: `repeat(${preset.columns}, 1fr)`,
-          gap: 0,
-          width: '100%',
-          color: 'black',
-          background: 'white',
-        }}>
-          {labelsToPrint.map(bin => (
-            <div key={bin.id} style={{
-              border: '1px dashed #888',
-              padding: format === 'scan_sheet_60' ? '0.05in' : '0.15in',
-              boxSizing: 'border-box',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minHeight: preset.minHeight,
-              textAlign: 'center',
-              breakInside: 'avoid',
-              pageBreakInside: 'avoid',
-            }}>
-              <div style={{
-                fontSize: preset.nameFontPx, fontWeight: 800,
-                lineHeight: 1.15,
-                marginBottom: 3,
-                wordBreak: 'break-word',
-                maxWidth: '100%',
+      {/* Printable layout — rendered to body via Portal so it flows
+          naturally across pages in print mode. Hidden on screen by the
+          .print-labels-portal default; revealed in @media print. */}
+      {labelsToPrint.length > 0 && createPortal(
+        <div className="print-labels-portal">
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${preset.columns}, 1fr)`,
+            gap: 0,
+            width: '100%',
+            color: 'black',
+            background: 'white',
+          }}>
+            {labelsToPrint.map(bin => (
+              <div key={bin.id} style={{
+                border: '1px dashed #888',
+                padding: format === 'scan_sheet_60' ? '0.04in' : '0.15in',
+                boxSizing: 'border-box',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: preset.minHeight,
+                textAlign: 'center',
+                breakInside: 'avoid',
+                pageBreakInside: 'avoid',
               }}>
-                {bin.name}
-              </div>
-              {preset.showSub && preset.subFontPx > 0 && (
-                <div style={{ fontSize: preset.subFontPx, color: '#666', marginBottom: 5 }}>
-                  {warehouse.name}
-                </div>
-              )}
-              {qrCache[bin.id] && (
-                <img
-                  src={qrCache[bin.id]}
-                  alt={`QR for ${bin.name}`}
-                  style={{ width: preset.qrSize, height: preset.qrSize }}
-                />
-              )}
-              {preset.idFontPx > 0 && (
                 <div style={{
-                  fontSize: preset.idFontPx, color: '#888',
-                  fontFamily: 'monospace',
-                  marginTop: 4,
-                  wordBreak: 'break-all',
+                  fontSize: preset.nameFontPx, fontWeight: 800,
+                  lineHeight: 1.15,
+                  marginBottom: 3,
+                  wordBreak: 'break-word',
                   maxWidth: '100%',
-                  lineHeight: 1.1,
                 }}>
-                  BIN:{bin.id}
+                  {bin.name}
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+                {preset.showSub && preset.subFontPx > 0 && (
+                  <div style={{ fontSize: preset.subFontPx, color: '#666', marginBottom: 5 }}>
+                    {warehouse.name}
+                  </div>
+                )}
+                {qrCache[bin.id] && (
+                  <img
+                    src={qrCache[bin.id]}
+                    alt={`QR for ${bin.name}`}
+                    style={{ width: preset.qrSize, height: preset.qrSize }}
+                  />
+                )}
+                {preset.idFontPx > 0 && (
+                  <div style={{
+                    fontSize: preset.idFontPx, color: '#888',
+                    fontFamily: 'monospace',
+                    marginTop: 4,
+                    wordBreak: 'break-all',
+                    maxWidth: '100%',
+                    lineHeight: 1.1,
+                  }}>
+                    BIN:{bin.id}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   )
 }
