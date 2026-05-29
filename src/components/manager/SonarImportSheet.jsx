@@ -10,6 +10,7 @@ import {
   markSonarPendingImportApplied, discardSonarPendingImport,
 } from '../../lib/inventory'
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
+import BulkSonarProjectsSheet from './BulkSonarProjectsSheet'
 
 // Sonar daily-install-report importer (backlog #3).
 //
@@ -149,6 +150,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [excluded, setExcluded] = useState(() => new Set())
 
   const [submitting, setSubmitting] = useState(false)
+  const [showBulkProjects, setShowBulkProjects] = useState(false)
 
   // Fetch lookups on mount
   useEffect(() => {
@@ -707,6 +709,15 @@ export default function SonarImportSheet({ onClose, onApplied }) {
               {fileName}
             </div>
           )}
+          {!fileName && <div style={{ flex: 1 }} />}
+          <button
+            onClick={() => setShowBulkProjects(true)}
+            className="btn btn-ghost"
+            style={{ padding: '6px 12px', fontSize: 12, flexShrink: 0 }}
+            title="Bulk-add Sonar projects as phases under FiberLog regions"
+          >
+            📦 Bulk-add projects
+          </button>
         </div>
 
         {/* Pending webhook deliveries — Sonar's daily push lands here */}
@@ -1131,6 +1142,26 @@ export default function SonarImportSheet({ onClose, onApplied }) {
           </button>
         </div>
       </div>
+
+      {showBulkProjects && (
+        <BulkSonarProjectsSheet
+          onClose={() => setShowBulkProjects(false)}
+          onDone={async () => {
+            // Refresh phases + project map after bulk-create so the rest
+            // of this sheet's project mapping section picks them up.
+            try {
+              const [phasesData, projectMap] = await Promise.all([
+                getPhasesWithBuckets(),
+                getSonarProjectMap(),
+              ])
+              setPhases(phasesData || [])
+              setPersistedProjectMap(projectMap)
+            } catch (e) {
+              console.warn('Refresh after bulk-add failed:', e)
+            }
+          }}
+        />
+      )}
     </div>
   )
 }

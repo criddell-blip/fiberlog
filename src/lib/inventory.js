@@ -263,6 +263,71 @@ export async function clearSonarProjectPhase(project) {
   if (error) throw error
 }
 
+// Bulk-create phases and seed the Sonar project map in one pass. Each
+// item: { sonarProject: string, projectId: uuid, phaseName: string }.
+// For each, creates a phase under projectId (auto-incrementing
+// sequence_order against existing phases) and upserts sonar_project_phase_map.
+// Returns { created: number, skipped: number, errors: [{sonarProject, message}] }.
+export async function bulkCreateSonarPhases(items) {
+  if (!Array.isArray(items) || items.length === 0) return { created: 0, skipped: 0, errors: [] }
+  // Fetch current max sequence_order per project once, in bulk
+  const projectIds = [...new Set(items.map(i => i.projectId).filter(Boolean))]
+  const seqByProject = new Map()
+  for (const pid of projectIds) {
+    const { data } = await db
+      .from('phases')
+      .select('sequence_order')
+      .eq('project_id', pid)
+      .order('sequence_order', { ascending: false })
+      .limit(1)
+    seqByProject.set(pid, (data?.[0]?.sequence_order || 0))
+  }
+
+  let created = 0
+  let skipped = 0
+  const errors = []
+  for (const item of items) {
+    if (!item.projectId || !item.phaseName) { skipped++; continue }
+    // Skip if a phase with the same name already exists under that project
+    const { data: existing } = await db
+      .from('phases')
+      .select('id')
+      .eq('project_id', item.projectId)
+      .ilike('name', item.phaseName.trim())
+      .maybeSingle()
+    let phaseId = existing?.id || null
+    if (!phaseId) {
+      const nextSeq = (seqByProject.get(item.projectId) || 0) + 1
+      seqByProject.set(item.projectId, nextSeq)
+      const { data, error } = await db
+        .from('phases')
+        .insert({
+          project_id: item.projectId,
+          name: item.phaseName.trim(),
+          sequence_order: nextSeq,
+        })
+        .select('id')
+        .single()
+      if (error) { errors.push({ sonarProject: item.sonarProject, message: error.message }); continue }
+      phaseId = data.id
+      created++
+    } else {
+      skipped++
+    }
+    // Always set/refresh the map entry
+    if (item.sonarProject && phaseId) {
+      const { error: mapErr } = await db
+        .from('sonar_project_phase_map')
+        .upsert(
+          { project: item.sonarProject.toUpperCase(), phase_id: phaseId },
+          { onConflict: 'project' }
+        )
+      if (mapErr) errors.push({ sonarProject: item.sonarProject, message: 'phase created but map upsert failed: ' + mapErr.message })
+    }
+  }
+  return { created, skipped, errors }
+}
+
 // Phases enriched with their parent project + the project's job_site
 // bucket — used by the SonarImportSheet picker (one dropdown for both
 // mapping AND bucket resolution).
