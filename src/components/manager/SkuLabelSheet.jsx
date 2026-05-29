@@ -140,6 +140,12 @@ export default function SkuLabelSheet({ parts, title = 'Print SKU labels', onClo
       <style>{`
         .print-labels-portal { display: none; }
         @media print {
+          /* Override global.css's html/body/#root overflow:hidden +
+             height:100% — that combo silently kills print past page 1. */
+          html, body, #root {
+            height: auto !important;
+            overflow: visible !important;
+          }
           body > *:not(.print-labels-portal) { display: none !important; }
           .print-labels-portal { display: block !important; }
           @page { size: letter; margin: ${preset.pageMargin}; }

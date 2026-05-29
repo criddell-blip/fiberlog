@@ -146,6 +146,15 @@ export default function BinLabelSheet({ warehouse, onClose }) {
       <style>{`
         .print-labels-portal { display: none; }
         @media print {
+          /* CRITICAL: global.css locks html/body/#root to height:100%
+             + overflow:hidden so the app fits in one viewport without
+             a body scrollbar. That same rule kills print past page 1
+             because the document never extends beyond one viewport.
+             Override here so multi-page output actually flows. */
+          html, body, #root {
+            height: auto !important;
+            overflow: visible !important;
+          }
           body > *:not(.print-labels-portal) { display: none !important; }
           .print-labels-portal { display: block !important; }
           @page { size: letter; margin: ${preset.pageMargin}; }
