@@ -151,6 +151,10 @@ export default function SonarImportSheet({ onClose, onApplied }) {
 
   const [submitting, setSubmitting] = useState(false)
   const [showBulkProjects, setShowBulkProjects] = useState(false)
+  // Set of sonar item IDs already imported in past movements — populated
+  // by a query when the CSV loads, used to skip re-imports. Covers the
+  // "Looker daily report uses a rolling window" case.
+  const [alreadyImportedItemIds, setAlreadyImportedItemIds] = useState(() => new Set())
 
   // Fetch lookups on mount
   useEffect(() => {
@@ -202,25 +206,104 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     return () => { cancelled = true }
   }, [])
 
-  // ── Unique values extracted from the CSV ────────────────────────────────
+  // ── Intra-delivery dedup ────────────────────────────────────────────────
+  // Looker reports often emit the same install at multiple aggregation
+  // levels — same item ID, address, customer, model, time; the only
+  // difference is the count of duplicates in the Value List column.
+  // Group by sonar item ID and pick the canonical row:
+  //   • Prefer non-Warehouse Previous Location (truck → install is the
+  //     real consumption event; Warehouse → install is internal stock
+  //     movement Looker is just echoing)
+  //   • Among same-source-type rows, prefer the longest Value List
+  //     (most complete data)
+  // Composite key when no item ID is available.
+  const dedupedRows = useMemo(() => {
+    if (!csvRows) return null
+    const groups = new Map()
+    csvRows.forEach((row, originalIdx) => {
+      const itemId = extractItemIdFromValueList(row['Model Field Data | Value List'] || '')
+      const key = itemId
+        ? `item:${itemId}`
+        : `composite:${row['Account | ID'] || ''}|${row['Date Time'] || ''}|${row['Model | Display Name'] || ''}|${row['Address | Full Address'] || ''}`
+      const valueListLen = (row['Model Field Data | Value List'] || '').length
+      const prevLoc = (row['Previous Inventory Location'] || '').toUpperCase()
+      const isWarehouse = prevLoc === 'WAREHOUSE'
+      const entry = { row, originalIdx, valueListLen, isWarehouse, sonarItemId: itemId }
+      const existing = groups.get(key)
+      if (!existing) {
+        groups.set(key, { canonical: entry, dupCount: 1 })
+      } else {
+        existing.dupCount += 1
+        // Replace canonical if this row is "more authoritative":
+        //   - non-warehouse beats warehouse (real consumption event)
+        //   - longer value list beats shorter (more complete record)
+        const isBetter = (!entry.isWarehouse && existing.canonical.isWarehouse) ||
+                         (entry.isWarehouse === existing.canonical.isWarehouse && entry.valueListLen > existing.canonical.valueListLen)
+        if (isBetter) existing.canonical = entry
+      }
+    })
+    return Array.from(groups.values()).map(g => ({
+      row: g.canonical.row,
+      originalIdx: g.canonical.originalIdx,
+      sonarItemId: g.canonical.sonarItemId,
+      dupCount: g.dupCount,
+    }))
+  }, [csvRows])
+
+  // Query past movements for already-imported sonar item IDs whenever
+  // CSV rows change. Last 90 days is a generous re-import window — keeps
+  // the query cheap while covering any realistic rolling-report scenario.
+  useEffect(() => {
+    if (!dedupedRows || dedupedRows.length === 0) {
+      setAlreadyImportedItemIds(new Set())
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const cutoff = new Date(Date.now() - 90 * 86400 * 1000).toISOString()
+        const { data, error } = await db
+          .from('inventory_movements')
+          .select('notes')
+          .like('notes', '%[sonar:%')
+          .gte('created_at', cutoff)
+        if (error) throw error
+        if (cancelled) return
+        const set = new Set()
+        const re = /\[sonar:([^\]]+)\]/g
+        for (const m of data || []) {
+          let match
+          while ((match = re.exec(m.notes || '')) !== null) {
+            set.add(match[1].trim())
+          }
+        }
+        setAlreadyImportedItemIds(set)
+      } catch (e) {
+        console.warn('Sonar already-imported lookup failed:', e)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [dedupedRows])
+
+  // ── Unique values extracted from the CSV (over deduped rows) ───────────
   const uniqueSonarLocs = useMemo(() => {
-    if (!csvRows) return []
-    return [...new Set(csvRows.map(r => r['Previous Inventory Location'] || '').filter(Boolean))]
-  }, [csvRows])
+    if (!dedupedRows) return []
+    return [...new Set(dedupedRows.map(d => d.row['Previous Inventory Location'] || '').filter(Boolean))]
+  }, [dedupedRows])
   const uniqueSonarModels = useMemo(() => {
-    if (!csvRows) return []
-    return [...new Set(csvRows.map(r => r['Model | Display Name'] || '').filter(Boolean))]
-  }, [csvRows])
+    if (!dedupedRows) return []
+    return [...new Set(dedupedRows.map(d => d.row['Model | Display Name'] || '').filter(Boolean))]
+  }, [dedupedRows])
   const uniqueCities = useMemo(() => {
-    if (!csvRows) return []
+    if (!dedupedRows) return []
     return [...new Set(
-      csvRows.map(r => parseCityFromFullAddress(r['Address | Full Address'] || '')).filter(Boolean)
+      dedupedRows.map(d => parseCityFromFullAddress(d.row['Address | Full Address'] || '')).filter(Boolean)
     )]
-  }, [csvRows])
+  }, [dedupedRows])
   const uniqueProjects = useMemo(() => {
-    if (!csvRows) return []
-    return [...new Set(csvRows.map(r => (r['Project'] || '').trim()).filter(Boolean))]
-  }, [csvRows])
+    if (!dedupedRows) return []
+    return [...new Set(dedupedRows.map(d => (d.row['Project'] || '').trim()).filter(Boolean))]
+  }, [dedupedRows])
 
   // ── Auto-match crew + part on CSV load ──────────────────────────────────
   useEffect(() => {
@@ -450,8 +533,9 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   }
 
   const resolved = useMemo(() => {
-    if (!csvRows) return []
-    return csvRows.map((row, idx) => {
+    if (!dedupedRows) return []
+    return dedupedRows.map((entry, idx) => {
+      const row = entry.row
       const sonarLoc = row['Previous Inventory Location'] || ''
       const sonarModel = row['Model | Display Name'] || ''
       const fullAddress = row['Address | Full Address'] || ''
@@ -465,17 +549,24 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       const routing = partId ? getPartRouting(partId) : null
       // Item ID for the dedup marker: first numeric value from the
       // pipe-separated Value List, falling back to Account|ID + Date.
-      const itemFromValueList = extractItemIdFromValueList(row['Model Field Data | Value List'] || '')
+      const itemFromValueList = entry.sonarItemId  // already extracted during dedup
       const accountId = (row['Account | ID'] || '').trim()
       const sonarItemId = itemFromValueList || (accountId && row['Date Time'] ? `${accountId}-${row['Date Time']}` : '')
+      const isAlreadyImported = itemFromValueList && alreadyImportedItemIds.has(itemFromValueList)
 
       // Determine destination
       let destId = null
       let destReason = null  // human-readable explanation
       let status = 'ready'
 
+      // Already imported in a prior delivery — skip by default. Manager
+      // can still re-include via the per-row pick if there's a reason
+      // (e.g., the prior import was for a different reason).
+      if (isAlreadyImported) {
+        status = 'already-imported'
+      }
       // Per-row override always wins
-      if (rowDest[idx]) {
+      else if (rowDest[idx]) {
         destId = rowDest[idx]
         destReason = 'manual pick'
       } else if (!userId) {
@@ -553,25 +644,30 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         destName: destBucket?.name || null,
         destReason,
         phaseTagId,
+        dupCount: entry.dupCount,
+        isAlreadyImported,
         status,
       }
     })
-  }, [csvRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, phases, effectiveCityMap, effectiveProjectMap, rowDest, pendingPartRouting])
+  }, [dedupedRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, phases, effectiveCityMap, effectiveProjectMap, rowDest, pendingPartRouting, alreadyImportedItemIds])
 
   const stats = useMemo(() => {
     if (resolved.length === 0) return null
-    let ready = 0, blocked = 0, excludedCount = 0
+    let ready = 0, blocked = 0, excludedCount = 0, alreadyImported = 0
     const blockReasons = {}
     for (const r of resolved) {
       if (excluded.has(r.idx)) { excludedCount++; continue }
+      if (r.status === 'already-imported') { alreadyImported++; continue }
       if (r.status === 'ready') ready++
       else {
         blocked++
         blockReasons[r.status] = (blockReasons[r.status] || 0) + 1
       }
     }
-    return { total: resolved.length, ready, blocked, blockReasons, excludedCount }
-  }, [resolved, excluded])
+    const csvRowCount = csvRows?.length || 0
+    const dedupCollapsed = csvRowCount - resolved.length
+    return { total: resolved.length, ready, blocked, blockReasons, excludedCount, alreadyImported, csvRowCount, dedupCollapsed }
+  }, [resolved, excluded, csvRows])
 
   // Which cities surface in the City mapping section: any city that:
   //   - is referenced by a row whose part routes 'region', AND
@@ -1034,7 +1130,12 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                 <span>Transactions</span>
                 {stats && (
                   <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: 'var(--hint)' }}>
-                    {stats.ready} ready · {stats.blocked} blocked · {stats.excludedCount} excluded
+                    {stats.dedupCollapsed > 0 && (
+                      <>{stats.csvRowCount} CSV rows → {stats.total} unique installs · </>
+                    )}
+                    {stats.ready} ready · {stats.blocked} blocked
+                    {stats.alreadyImported > 0 && <> · {stats.alreadyImported} already imported</>}
+                    {stats.excludedCount > 0 && <> · {stats.excludedCount} excluded</>}
                   </span>
                 )}
               </div>
@@ -1075,7 +1176,18 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                           </td>
                           <td style={tdStyle()}>{String(r.date).slice(0, 16)}</td>
                           <td style={tdStyle()}>
-                            <div style={{ fontWeight: 600 }}>{r.customer}</div>
+                            <div style={{ fontWeight: 600 }}>
+                              {r.customer}
+                              {r.dupCount > 1 && (
+                                <span style={{
+                                  marginLeft: 6, fontSize: 10, color: 'var(--muted)',
+                                  background: 'var(--gray-lt)', padding: '1px 5px',
+                                  borderRadius: 'var(--r-xs)', fontWeight: 'var(--fw-semibold)',
+                                }} title={`Collapsed ${r.dupCount} duplicate rows`}>
+                                  × {r.dupCount}
+                                </span>
+                              )}
+                            </div>
                             <div style={{ fontSize: 10, color: 'var(--hint)' }}>{r.city}</div>
                           </td>
                           <td style={tdStyle()}>
@@ -1212,6 +1324,7 @@ function StatusBadge({ status }) {
     'city-unmapped':  { label: 'city unmapped',   color: 'var(--amber)',    bg: 'var(--amber-lt)' },
     'project-unmapped': { label: 'project unmapped', color: 'var(--amber)', bg: 'var(--amber-lt)' },
     'no-project-bucket': { label: 'phase has no bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
+    'already-imported': { label: 'already imported', color: 'var(--muted)', bg: 'var(--gray-lt)' },
     'no-gigwave-bucket': { label: 'no Gigwave bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
     'no-none-bucket':    { label: 'no None bucket',    color: 'var(--red)', bg: 'var(--red-lt)' },
     'unresolved':     { label: 'unresolved',      color: 'var(--amber)',    bg: 'var(--amber-lt)' },
