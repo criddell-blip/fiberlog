@@ -1144,3 +1144,167 @@ export async function getPartsCatalogTaxonomy() {
     materialGroups: [...matGroups].sort(),
   }
 }
+
+// ─── SAGE INTACCT EXPORT ─────────────────────────────────────────────────
+//
+// Build a CSV of movements in Sage Intacct's Inventory Transactions
+// import format. Prototype: starts with Intacct defaults for transaction
+// type names + uses FiberLog names directly as warehouse/project codes.
+// We'll layer in a code mapping table once the actual Sage column codes
+// are known.
+//
+// Three-step lifecycle:
+//   1. getMovementsForSageExport(...) — fetch movements ready to export
+//   2. buildSageCsv(movements) — generate the CSV text
+//   3. markMovementsExported(ids, batchId) — stamp exported_at + batch_id
+//      so the next export skips them
+
+// Movement type → Sage Intacct transaction type. Defaults; customize per
+// company in Sage Settings if these names don't match.
+const SAGE_TRANSACTION_TYPE = {
+  receive: 'Inventory Receipt',
+  transfer: 'Inventory Transfer',
+  return: 'Inventory Transfer',
+  issue: 'Inventory Issue',
+  scrap: 'Inventory Adjustment',
+  adjust: 'Inventory Adjustment',
+}
+
+// Fetch movements that haven't been exported yet, joined with everything
+// we need to populate the Sage columns. Personal trucks are filtered at
+// export-time (see buildSageCsv) — they're FiberLog-internal staging,
+// not Sage-relevant.
+export async function getMovementsForSageExport({ since, until, includeExported = false } = {}) {
+  let q = db.from('inventory_movements')
+    .select(`
+      id, movement_type, quantity, unit, unit_cost, notes, created_at,
+      exported_at, export_batch_id, submission_id, task_id, vendor_invoice,
+      part:parts_catalog(id, name, unit, department, material_group, category),
+      from_location:inventory_locations!from_location_id(id, name, type, parent_location_id, project_id),
+      to_location:inventory_locations!to_location_id(id, name, type, parent_location_id, project_id),
+      phase:phase_id(id, name, project_id, project:projects(id, name))
+    `)
+    .order('created_at', { ascending: true })
+  if (since) q = q.gte('created_at', since)
+  if (until) q = q.lte('created_at', until)
+  if (!includeExported) q = q.is('exported_at', null)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+// Decide whether a movement should be included in the export.
+// Currently filters out: truck → truck (internal crew handoffs).
+// Truck → bucket (consumption) and warehouse → truck (load-out) are kept.
+export function isExportableMovement(m) {
+  const fromType = m.from_location?.type
+  const toType = m.to_location?.type
+  // Skip pure truck-to-truck (internal staging; no Sage relevance yet)
+  if (fromType === 'truck' && toType === 'truck') return false
+  return true
+}
+
+// Build CSV text in Sage Intacct Inventory Transactions format.
+// One row per movement. Quote anything with commas/newlines.
+export function buildSageCsv(movements) {
+  const headers = [
+    'TRANSACTIONTYPE',
+    'DATE',
+    'REFERENCENO',
+    'LINE',
+    'ITEMID',
+    'ITEMDESC',
+    'QUANTITY',
+    'UNIT',
+    'PRICE',
+    'FROM_WAREHOUSE',
+    'TO_WAREHOUSE',
+    'TO_BIN',
+    'PROJECTID',
+    'CLASSID',
+    'DEPARTMENTID',
+    'VENDORID',
+    'MEMO',
+    'FIBERLOG_MOVEMENT_ID',
+  ]
+  const lines = [headers.join(',')]
+  let lineIdx = 0
+  for (const m of movements) {
+    if (!isExportableMovement(m)) continue
+    lineIdx++
+
+    const date = m.created_at ? String(m.created_at).slice(0, 10) : ''
+    const txnType = SAGE_TRANSACTION_TYPE[m.movement_type] || 'Inventory Adjustment'
+    const referenceNo = m.submission_id
+      ? `SUB-${String(m.submission_id).slice(0, 8)}`
+      : `MV-${String(m.id).slice(0, 8)}`
+
+    // Warehouse columns: bin-aware. If destination is a bin, the
+    // warehouse code is the parent warehouse's name, and BIN holds
+    // the bin name. Source is treated the same way.
+    const fromName = m.from_location?.type === 'bin'
+      ? '' // bin source: parent warehouse name not joined; leave blank for now
+      : (m.from_location?.name || '')
+    const toName = m.to_location?.type === 'bin'
+      ? '' // see above
+      : (m.to_location?.name || '')
+    const toBin = m.to_location?.type === 'bin' ? m.to_location.name : ''
+
+    // PROJECTID + CLASSID — phase tag drives both when present.
+    // Phase's parent project becomes PROJECTID; phase name → CLASSID.
+    // Fallback: destination bucket's project_id resolves to project name.
+    const projectId = m.phase?.project?.name
+      || (m.to_location?.type === 'job_site' ? (m.to_location.name || '') : '')
+    const classId = m.phase?.name || ''
+
+    // Vendor parsed from receive notes "Vendor: X" pattern (best-effort)
+    let vendorId = ''
+    if (m.movement_type === 'receive' && m.notes) {
+      const vm = /Vendor:\s*([^|·\n]+)/i.exec(m.notes)
+      if (vm) vendorId = vm[1].trim()
+    }
+
+    const row = [
+      txnType,
+      date,
+      referenceNo,
+      lineIdx,
+      m.part?.id || '',
+      m.part?.name || '',
+      m.quantity,
+      m.unit || m.part?.unit || 'ea',
+      m.unit_cost ?? '',
+      fromName,
+      toName,
+      toBin,
+      projectId,
+      classId,
+      m.part?.department || '',
+      vendorId,
+      m.notes || '',
+      m.id,
+    ]
+    lines.push(row.map(escapeSageCsvField).join(','))
+  }
+  return lines.join('\n')
+}
+
+function escapeSageCsvField(v) {
+  const s = String(v == null ? '' : v)
+  if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"'
+  return s
+}
+
+// Stamp a batch of movements as exported. The batch_id groups them so
+// we can audit / re-issue a specific batch later.
+export async function markMovementsExported(movementIds, batchId) {
+  if (!Array.isArray(movementIds) || movementIds.length === 0) return
+  const { error } = await db
+    .from('inventory_movements')
+    .update({
+      exported_at: new Date().toISOString(),
+      export_batch_id: batchId,
+    })
+    .in('id', movementIds)
+  if (error) throw error
+}

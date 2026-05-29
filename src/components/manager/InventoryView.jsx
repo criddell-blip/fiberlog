@@ -13,6 +13,7 @@ import ReceivePOSheet from './ReceivePOSheet'
 import ReconcileSheet from './ReconcileSheet'
 import SonarImportSheet from './SonarImportSheet'
 import InventoryImportSheet from './InventoryImportSheet'
+import SageExportSheet from './SageExportSheet'
 
 const SUBTABS = [
   { id: 'stock',     label: 'Stock',     icon: '📦' },
@@ -50,6 +51,7 @@ export default function InventoryView() {
   const [showReconcileSheet, setShowReconcileSheet] = useState(false)
   const [showSonarSheet, setShowSonarSheet] = useState(false)
   const [showImportSheet, setShowImportSheet] = useState(false)
+  const [showSageSheet, setShowSageSheet] = useState(false)
   // Bumped after a movement is recorded or part is updated, so child tabs
   // re-fetch their data
   const [refreshKey, setRefreshKey] = useState(0)
@@ -184,6 +186,14 @@ export default function InventoryView() {
                 >
                   ⚡ Sonar
                 </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => setShowSageSheet(true)}
+                  title="Export movements to Sage Intacct Inventory Transactions CSV"
+                  style={{ padding: '6px 12px', fontSize: 13 }}
+                >
+                  🧾 Sage
+                </button>
               </>
             ) : (
               <div ref={actionMenuRef} style={{ position: 'relative' }}>
@@ -217,6 +227,7 @@ export default function InventoryView() {
                       { label: '📥 Receive PO', onClick: () => setShowReceiveSheet(true), disabled: noLocations },
                       { label: '🔄 Reconcile', onClick: () => setShowReconcileSheet(true), disabled: noLocations },
                       { label: '⚡ Sonar', onClick: () => setShowSonarSheet(true), disabled: noLocations },
+                      { label: '🧾 Sage export', onClick: () => setShowSageSheet(true), disabled: false },
                     ].map(item => (
                       <button
                         key={item.label}
@@ -374,6 +385,10 @@ export default function InventoryView() {
           onClose={() => setShowSonarSheet(false)}
           onApplied={handleSonarApplied}
         />
+      )}
+
+      {showSageSheet && (
+        <SageExportSheet onClose={() => setShowSageSheet(false)} />
       )}
 
       {showImportSheet && (

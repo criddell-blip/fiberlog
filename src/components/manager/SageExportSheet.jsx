@@ -1,0 +1,274 @@
+import { useState, useEffect, useMemo } from 'react'
+import { useApp } from '../../AppContext'
+import {
+  getMovementsForSageExport,
+  isExportableMovement,
+  buildSageCsv,
+  markMovementsExported,
+} from '../../lib/inventory'
+import { downloadTextAsFile } from '../../lib/csvImport'
+
+// Prototype Sage Intacct export. Pick a date range, preview what would
+// export, download the CSV, and stamp every included row's exported_at
+// so the next export skips them. Toggle to include already-exported
+// rows for re-issuing a corrected batch.
+//
+// Defaults are Sage Intacct standard transaction-type names + FiberLog
+// location/project names used directly as codes. We'll layer code
+// mappings (warehouse name → Sage warehouse code, etc) once the actual
+// values are known.
+export default function SageExportSheet({ onClose }) {
+  const { showToast } = useApp()
+
+  // Default range: last 7 days (Sat night → Fri night kind of window)
+  const defaultUntil = useMemo(() => isoLocalDate(new Date()), [])
+  const defaultSince = useMemo(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 7)
+    return isoLocalDate(d)
+  }, [])
+
+  const [since, setSince] = useState(defaultSince)
+  const [until, setUntil] = useState(defaultUntil)
+  const [includeExported, setIncludeExported] = useState(false)
+  const [movements, setMovements] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [lastBatch, setLastBatch] = useState(null)
+
+  async function load() {
+    setLoading(true)
+    setError('')
+    try {
+      const ms = await getMovementsForSageExport({
+        // Convert local dates to UTC ISO bounds. Inclusive of both endpoints.
+        since: since ? new Date(since + 'T00:00:00').toISOString() : null,
+        until: until ? new Date(until + 'T23:59:59.999').toISOString() : null,
+        includeExported,
+      })
+      setMovements(ms)
+    } catch (e) {
+      console.error('Sage export load failed:', e)
+      setError(e.message || String(e))
+      setMovements([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Load on open + whenever filters change
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [since, until, includeExported])
+
+  // Filter to exportable + count by type
+  const exportable = useMemo(() => movements.filter(isExportableMovement), [movements])
+  const skippedInternal = movements.length - exportable.length
+  const typeCounts = useMemo(() => {
+    const c = {}
+    for (const m of exportable) c[m.movement_type] = (c[m.movement_type] || 0) + 1
+    return c
+  }, [exportable])
+
+  async function handleDownload() {
+    if (exportable.length === 0) {
+      setError('Nothing to export in this range')
+      return
+    }
+    setSubmitting(true)
+    setError('')
+    try {
+      const csv = buildSageCsv(movements)  // includes the filter internally
+      const batchId = crypto.randomUUID()
+      const filename = `sage_export_${since}_to_${until}_${batchId.slice(0, 8)}.csv`
+      downloadTextAsFile(filename, csv)
+      // Mark only the rows that actually made it into the CSV
+      const includedIds = exportable.map(m => m.id)
+      await markMovementsExported(includedIds, batchId)
+      setLastBatch({ batchId, count: includedIds.length, filename })
+      showToast(`Exported ${includedIds.length} movement${includedIds.length === 1 ? '' : 's'}`)
+      // Reload so the preview reflects the new exported_at stamps
+      await load()
+    } catch (e) {
+      console.error('Sage export failed:', e)
+      setError(e.message || String(e))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="overlay open" onClick={e => e.target === e.currentTarget && !submitting && onClose()}>
+      <div className="overlay-sheet" style={{ maxWidth: 1000, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4 }}>
+          🧾 Sage Intacct export <span style={{ fontSize: 12, color: 'var(--orange)', marginLeft: 6 }}>prototype</span>
+        </div>
+        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 14 }}>
+          Builds a Sage Inventory Transactions CSV from FiberLog movements in the picked range.
+          Truck → truck rows are filtered (internal staging). Downloaded movements get marked
+          exported so the next batch skips them. Toggle "include exported" to re-issue.
+        </div>
+
+        {/* Filter row */}
+        <div style={{
+          display: 'flex', alignItems: 'flex-end', gap: 12,
+          padding: '10px 12px', marginBottom: 12,
+          background: 'var(--surface2)', borderRadius: 'var(--r-sm)',
+          flexShrink: 0, flexWrap: 'wrap',
+        }}>
+          <div className="field" style={{ flex: '1 1 140px', marginBottom: 0 }}>
+            <label>From</label>
+            <input type="date" value={since} onChange={e => setSince(e.target.value)} disabled={submitting} />
+          </div>
+          <div className="field" style={{ flex: '1 1 140px', marginBottom: 0 }}>
+            <label>To</label>
+            <input type="date" value={until} onChange={e => setUntil(e.target.value)} disabled={submitting} />
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={includeExported}
+              onChange={e => setIncludeExported(e.target.checked)}
+              disabled={submitting}
+            />
+            Include already exported
+          </label>
+          <button onClick={load} className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12 }} disabled={loading || submitting}>
+            {loading ? 'Loading…' : 'Refresh'}
+          </button>
+        </div>
+
+        {error && (
+          <div style={{
+            background: 'var(--danger-bg)', color: 'var(--danger-fg)',
+            padding: '8px 12px', borderRadius: 'var(--r-sm)',
+            fontSize: 'var(--fs-sm)', marginBottom: 10,
+          }}>
+            {error}
+          </div>
+        )}
+
+        {lastBatch && (
+          <div style={{
+            background: 'var(--success-bg)', color: 'var(--success-fg)',
+            padding: '10px 14px', borderRadius: 'var(--r-sm)',
+            fontSize: 'var(--fs-sm)', marginBottom: 10,
+          }}>
+            <strong>Exported {lastBatch.count} movements.</strong>{' '}
+            File: <code style={{ fontSize: 11 }}>{lastBatch.filename}</code><br />
+            Batch ID: <code style={{ fontSize: 11 }}>{lastBatch.batchId}</code>
+          </div>
+        )}
+
+        {/* Stats */}
+        {!loading && (
+          <div style={{
+            display: 'flex', gap: 16, fontSize: 12,
+            padding: '8px 0', marginBottom: 8,
+            color: 'var(--muted)', flexWrap: 'wrap',
+          }}>
+            <span><strong style={{ color: 'var(--text)' }}>{exportable.length}</strong> ready to export</span>
+            {skippedInternal > 0 && <span style={{ color: 'var(--hint)' }}>{skippedInternal} skipped (truck→truck)</span>}
+            {Object.entries(typeCounts).map(([type, count]) => (
+              <span key={type}><strong style={{ color: 'var(--text)' }}>{count}</strong> {type}</span>
+            ))}
+          </div>
+        )}
+
+        {/* Preview table */}
+        <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, border: '1px solid var(--border)', borderRadius: 'var(--r-sm)' }}>
+          {loading && (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--muted)' }}>Loading…</div>
+          )}
+          {!loading && exportable.length === 0 && (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>
+              No movements in this range. Try widening the date filter or enabling "Include already exported".
+            </div>
+          )}
+          {!loading && exportable.length > 0 && (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <thead style={{ background: 'var(--surface2)', position: 'sticky', top: 0 }}>
+                <tr>
+                  <th style={thStyle}>Date</th>
+                  <th style={thStyle}>Type</th>
+                  <th style={thStyle}>Item</th>
+                  <th style={thStyle}>Qty</th>
+                  <th style={thStyle}>From</th>
+                  <th style={thStyle}>To</th>
+                  <th style={thStyle}>Project / Phase</th>
+                  <th style={thStyle}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {exportable.slice(0, 200).map(m => (
+                  <tr key={m.id} style={{ background: m.exported_at ? 'var(--gray-lt)' : 'transparent', opacity: m.exported_at ? 0.6 : 1 }}>
+                    <td style={tdStyle}>{(m.created_at || '').slice(0, 10)}</td>
+                    <td style={tdStyle}>{m.movement_type}</td>
+                    <td style={tdStyle}>
+                      <div style={{ fontWeight: 600 }}>{m.part?.name || m.part?.id || '—'}</div>
+                      <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'monospace' }}>{m.part?.id || ''}</div>
+                    </td>
+                    <td style={tdStyle}>{m.quantity} {m.unit || m.part?.unit || ''}</td>
+                    <td style={tdStyle}>{m.from_location?.name || <span style={{ color: 'var(--hint)' }}>—</span>}</td>
+                    <td style={tdStyle}>{m.to_location?.name || <span style={{ color: 'var(--hint)' }}>—</span>}</td>
+                    <td style={tdStyle}>
+                      <div>{m.phase?.project?.name || m.to_location?.name || ''}</div>
+                      {m.phase?.name && <div style={{ fontSize: 10, color: 'var(--hint)' }}>{m.phase.name}</div>}
+                    </td>
+                    <td style={tdStyle}>
+                      {m.exported_at
+                        ? <span className="pill pill-muted pill-sm">re-export</span>
+                        : <span className="pill pill-success pill-sm">new</span>}
+                    </td>
+                  </tr>
+                ))}
+                {exportable.length > 200 && (
+                  <tr><td colSpan={8} style={{ padding: 10, textAlign: 'center', color: 'var(--hint)', fontSize: 11 }}>
+                    Showing first 200 of {exportable.length}. All will be in the export.
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Action bar */}
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexShrink: 0 }}>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose} disabled={submitting}>
+            Close
+          </button>
+          <button
+            className="btn btn-primary"
+            style={{ flex: 2 }}
+            onClick={handleDownload}
+            disabled={submitting || exportable.length === 0}
+          >
+            {submitting
+              ? 'Exporting…'
+              : `🧾 Download CSV + mark ${exportable.length} exported`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Format a Date as YYYY-MM-DD in local time (not UTC) so the input[type=date]
+// shows what the user expects.
+function isoLocalDate(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+const thStyle = {
+  padding: '6px 10px', textAlign: 'left',
+  fontSize: 10, fontWeight: 700, color: 'var(--muted)',
+  textTransform: 'uppercase', letterSpacing: '.04em',
+  borderBottom: '1px solid var(--border)',
+}
+const tdStyle = {
+  padding: '6px 10px',
+  borderBottom: '1px solid var(--border)',
+  verticalAlign: 'top',
+}
