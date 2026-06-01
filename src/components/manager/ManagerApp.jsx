@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
 import SubmissionsQueue from './SubmissionsQueue'
@@ -207,11 +207,24 @@ export default function ManagerApp() {
   // local component state — that way it survives reloads and stays in sync
   // across the crew app too.
   const { projects, loading, error, reload, currentUser, selectUser, darkMode, toggleDarkMode, enterCrewMode } = useApp()
-  const [tab, setTab] = useState('submissions')
   const isWide = useIsWide()
   const isOwner = currentUser?.role === 'owner'
+  // Warehouse-only managers — flag on public.users. They keep full manager
+  // DB permissions (is_staff() still true so RLS/RPCs work) but the UI
+  // only renders the Inventory tab, with no way to navigate to others.
+  const isRestrictedToInventory = currentUser?.restricted_to_inventory === true
 
-  const nav = isOwner ? [...NAV_ITEMS, { id: 'admin', label: 'Admin', icon: '⚙️' }] : NAV_ITEMS
+  const nav = isRestrictedToInventory
+    ? NAV_ITEMS.filter(n => n.id === 'inventory')
+    : (isOwner ? [...NAV_ITEMS, { id: 'admin', label: 'Admin', icon: '⚙️' }] : NAV_ITEMS)
+
+  const [tab, setTab] = useState(isRestrictedToInventory ? 'inventory' : 'submissions')
+  // Defensive: if a restricted user somehow lands on a non-allowed tab
+  // (stale state from a role-flip or direct URL hack), bounce back to
+  // inventory. Cheap belt-and-suspenders for a UI-only restriction.
+  useEffect(() => {
+    if (isRestrictedToInventory && tab !== 'inventory') setTab('inventory')
+  }, [isRestrictedToInventory, tab])
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 12 }}>

@@ -386,6 +386,9 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
   // stock migration + truck deactivation happen atomically.
   const [pullLocationId, setPullLocationId] = useState(user?.default_pull_location_id || '')
   const initialPullLocationId = user?.default_pull_location_id || ''
+  // Warehouse-only manager scoping. Only meaningful when role='manager';
+  // hidden + reset to false for other roles.
+  const [restrictedToInventory, setRestrictedToInventory] = useState(user?.restricted_to_inventory === true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -442,6 +445,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
           language,
           is_active: isActive,
           manager_id: managerId || null,
+          restricted_to_inventory: role === 'manager' ? restrictedToInventory : false,
         })
       } else {
         // Pull-location change goes through the RPC (handles stock migration
@@ -463,6 +467,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
           language,
           is_active: isActive,
           manager_id: managerId || null,
+          restricted_to_inventory: role === 'manager' ? restrictedToInventory : false,
         })
       }
     } catch (e) {
@@ -582,6 +587,30 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
               })}
             </div>
           </div>
+
+          {/* Warehouse-only manager toggle. Only relevant when role='manager'. */}
+          {role === 'manager' && (
+            <div className="field">
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={restrictedToInventory}
+                  onChange={e => setRestrictedToInventory(e.target.checked)}
+                  style={{ marginTop: 2, cursor: 'pointer' }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 13 }}>
+                    📦 Warehouse-only manager
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 2, lineHeight: 1.4 }}>
+                    Hides every tab except <strong>Inventory</strong>. They keep full inventory
+                    write access (receive POs, reconcile, record movements, Sage export) but
+                    don't see Approvals, Crew, Projects, Reports, or Assemblies.
+                  </div>
+                </div>
+              </label>
+            </div>
+          )}
 
           {/* Crew type */}
           <div className="field">

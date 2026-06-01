@@ -480,7 +480,7 @@ export async function getPartsByCategory(materialGroup) {
 export async function getUsers() {
   const { data, error } = await db
     .from('users')
-    .select('id, name, initials, role, crew_type, is_contractor, is_active, language, email, manager_id')
+    .select('id, name, initials, role, crew_type, is_contractor, is_active, language, email, manager_id, restricted_to_inventory')
     .eq('is_active', true)
     .order('name')
   if (error) throw error

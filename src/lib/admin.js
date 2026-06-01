@@ -32,6 +32,7 @@ export function generateInitials(name) {
 export async function createUser({
   name, username, role, crew_type, password,
   initials, language, is_active,
+  restricted_to_inventory,
 }) {
   const { data: { session } } = await db.auth.getSession()
   if (!session) throw new Error('Not signed in')
@@ -52,6 +53,18 @@ export async function createUser({
   )
   const result = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`)
+
+  // The edge function doesn't accept restricted_to_inventory (would need
+  // a redeploy to add). When the flag is true, follow up with a direct
+  // metadata update — RLS on users.update allows staff writes.
+  if (restricted_to_inventory && result?.user_id) {
+    try {
+      await updateUserMetadata(result.user_id, { restricted_to_inventory: true })
+    } catch (e) {
+      // Non-fatal: user was created OK, just flip the toggle by hand
+      console.warn('Created user but failed to set restricted_to_inventory:', e)
+    }
+  }
   return result
 }
 
@@ -60,7 +73,7 @@ export async function createUser({
 // row. Password resets go through the existing admin-set-password function.
 export async function updateUserMetadata(userId, updates) {
   const allowed = {}
-  for (const key of ['name', 'initials', 'role', 'crew_type', 'language', 'is_active', 'manager_id']) {
+  for (const key of ['name', 'initials', 'role', 'crew_type', 'language', 'is_active', 'manager_id', 'restricted_to_inventory']) {
     if (key in updates) allowed[key] = updates[key]
   }
   const { data, error } = await db
