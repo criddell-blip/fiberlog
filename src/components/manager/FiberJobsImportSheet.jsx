@@ -109,7 +109,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       try {
         const [usersRes, trucksRes, partsRes, phasesData, projectMap, valMap] = await Promise.all([
           db.from('users')
-            .select('id, name, username, role, crew_type')
+            .select('id, name, email, role, crew_type')
             .eq('is_active', true)
             .order('name'),
           db.from('inventory_locations')
@@ -126,9 +126,11 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
           getFiberValueMap(),
         ])
         if (cancelled) return
-        if (usersRes.error) throw usersRes.error
-        if (trucksRes.error) throw trucksRes.error
-        if (partsRes.error) throw partsRes.error
+        // Surface each individual error so a single broken query
+        // doesn't silently kill the whole load.
+        if (usersRes.error) throw new Error('users query: ' + usersRes.error.message)
+        if (trucksRes.error) throw new Error('trucks query: ' + trucksRes.error.message)
+        if (partsRes.error) throw new Error('parts query: ' + partsRes.error.message)
         setCrewUsers(usersRes.data || [])
         const tbu = {}
         for (const t of trucksRes.data || []) tbu[t.assigned_to] = t.id
@@ -230,13 +232,14 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     return [...new Set(csvRows.map(r => (r['Project'] || '').trim()).filter(Boolean))]
   }, [csvRows])
 
-  // Auto-match crew by username
+  // Auto-match crew by username. Sonar's "User | Username" is the email's
+  // local part (e.g. "jespinoza" matches "jespinoza@fiberlog....").
   useEffect(() => {
     if (!csvRows || crewUsers.length === 0) return
     const auto = {}
     for (const uname of uniqueUsernames) {
-      const u = crewUsers.find(u => (u.username || '').toLowerCase() === uname.toLowerCase())
-        || crewUsers.find(u => (u.email || '').toLowerCase().startsWith(uname.toLowerCase() + '@'))
+      const target = uname.toLowerCase()
+      const u = crewUsers.find(u => (u.email || '').toLowerCase().startsWith(target + '@'))
       if (u) auto[uname] = u.id
     }
     setCrewMap(prev => ({ ...auto, ...prev }))
