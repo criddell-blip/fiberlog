@@ -118,6 +118,12 @@ export default function InventoryView() {
     showToast(`Issued ${count} Sonar transaction${count === 1 ? '' : 's'}`)
   }
 
+  function handleFiberJobsApplied(count) {
+    setShowFiberJobsSheet(false)
+    setRefreshKey(k => k + 1)
+    showToast(`Imported ${count} fiber-job movement${count === 1 ? '' : 's'}`)
+  }
+
   function handleLocationsChanged() {
     loadLocations()
     setRefreshKey(k => k + 1)
@@ -402,10 +408,7 @@ export default function InventoryView() {
       {showFiberJobsSheet && (
         <FiberJobsImportSheet
           onClose={() => setShowFiberJobsSheet(false)}
-          onApplied={(n) => {
-            setRefreshKey(k => k + 1)
-            showToast(`Imported ${n} fiber-job movement${n === 1 ? '' : 's'}`)
-          }}
+          onApplied={handleFiberJobsApplied}
         />
       )}
 

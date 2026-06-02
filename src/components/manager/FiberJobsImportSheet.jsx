@@ -483,8 +483,17 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
           console.warn('Mark pending imported failed (movements still applied):', e)
         }
       }
+      // Clear local state so the apply button can't re-fire against the
+      // same dataset even if the parent's close callback misbehaves.
+      setCsvRows(null)
+      setCsvHeaders([])
+      setFileName('')
+      setActivePendingId(null)
+      setCrewMap({})
+      setPendingProjectMap({})
+      setExcluded(new Set())
+      setRowMaterialOverride({})
       if (onApplied) onApplied(movements.length)
-      showToast(`Applied ${movements.length} fiber-job movement${movements.length === 1 ? '' : 's'}`)
     } catch (e) {
       console.error('Apply failed:', e)
       setError(e.message || String(e))
