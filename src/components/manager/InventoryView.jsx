@@ -12,6 +12,7 @@ import RecordMovementSheet from './RecordMovementSheet'
 import ReceivePOSheet from './ReceivePOSheet'
 import ReconcileSheet from './ReconcileSheet'
 import SonarImportSheet from './SonarImportSheet'
+import FiberJobsImportSheet from './FiberJobsImportSheet'
 import InventoryImportSheet from './InventoryImportSheet'
 import SageExportSheet from './SageExportSheet'
 
@@ -50,6 +51,7 @@ export default function InventoryView() {
   const [showReceiveSheet, setShowReceiveSheet] = useState(false)
   const [showReconcileSheet, setShowReconcileSheet] = useState(false)
   const [showSonarSheet, setShowSonarSheet] = useState(false)
+  const [showFiberJobsSheet, setShowFiberJobsSheet] = useState(false)
   const [showImportSheet, setShowImportSheet] = useState(false)
   const [showSageSheet, setShowSageSheet] = useState(false)
   // Bumped after a movement is recorded or part is updated, so child tabs
@@ -181,10 +183,19 @@ export default function InventoryView() {
                   className="btn btn-ghost"
                   onClick={() => setShowSonarSheet(true)}
                   disabled={noLocations}
-                  title={noLocations ? 'Create a location first' : 'Import a Sonar daily install report (issues consumed parts off crew trucks)'}
+                  title={noLocations ? 'Create a location first' : 'Import the Sonar asset-tagged consumption report'}
                   style={{ padding: '6px 12px', fontSize: 13 }}
                 >
                   ⚡ Sonar
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => setShowFiberJobsSheet(true)}
+                  disabled={noLocations}
+                  title={noLocations ? 'Create a location first' : 'Import the Sonar fiber-jobs report (pushable cable, drops, ONT boxes, etc.)'}
+                  style={{ padding: '6px 12px', fontSize: 13 }}
+                >
+                  🧵 Fiber jobs
                 </button>
                 <button
                   className="btn btn-ghost"
@@ -226,7 +237,8 @@ export default function InventoryView() {
                       { label: '⇪ Import CSV', onClick: () => setShowImportSheet(true), disabled: false },
                       { label: '📥 Receive PO', onClick: () => setShowReceiveSheet(true), disabled: noLocations },
                       { label: '🔄 Reconcile', onClick: () => setShowReconcileSheet(true), disabled: noLocations },
-                      { label: '⚡ Sonar', onClick: () => setShowSonarSheet(true), disabled: noLocations },
+                      { label: '⚡ Sonar (assets)', onClick: () => setShowSonarSheet(true), disabled: noLocations },
+                      { label: '🧵 Sonar (fiber jobs)', onClick: () => setShowFiberJobsSheet(true), disabled: noLocations },
                       { label: '🧾 Sage export', onClick: () => setShowSageSheet(true), disabled: false },
                     ].map(item => (
                       <button
@@ -384,6 +396,16 @@ export default function InventoryView() {
         <SonarImportSheet
           onClose={() => setShowSonarSheet(false)}
           onApplied={handleSonarApplied}
+        />
+      )}
+
+      {showFiberJobsSheet && (
+        <FiberJobsImportSheet
+          onClose={() => setShowFiberJobsSheet(false)}
+          onApplied={(n) => {
+            setRefreshKey(k => k + 1)
+            showToast(`Imported ${n} fiber-job movement${n === 1 ? '' : 's'}`)
+          }}
         />
       )}
 

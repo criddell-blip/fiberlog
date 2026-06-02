@@ -85,14 +85,28 @@ Deno.serve(async (req) => {
       body_head_ascii: bytesToPrintable(bodyBytes.slice(0, 128)),
     }
 
+    // Decide which report this is from the Looker schedule title.
+    // Asset-consumption report's title includes "asset" (e.g.,
+    // "Field tech asset Consumption"). Jobs report includes "fiber"
+    // or "jobs" ("All fiber all jobs"). Default to asset_consumption
+    // for backward-compat.
+    const titleLower = (detection.scheduledTitle || '').toLowerCase()
+    let reportType = 'asset_consumption'
+    if (titleLower.includes('fiber') && (titleLower.includes('job') || titleLower.includes('drop'))) {
+      reportType = 'fiber_jobs'
+    } else if (titleLower.includes('asset')) {
+      reportType = 'asset_consumption'
+    }
+
     const insertPayload: Record<string, unknown> = {
       source: 'webhook',
+      report_type: reportType,
       filename: detection.filename,
       raw_csv: detection.csvText || '',
       parsed_row_count: parsedRowCount,
       status: ok ? 'pending' : 'discarded',
       error_message: detection.error,
-      notes: JSON.stringify(diag),
+      notes: JSON.stringify({ ...diag, scheduled_title: detection.scheduledTitle || null, report_type: reportType }),
     }
     if (!ok) {
       insertPayload.discarded_at = new Date().toISOString()
@@ -132,6 +146,10 @@ type Detection = {
   csvText: string
   filename: string | null
   error: string | null
+  // Looker scheduled_plan.title when available. Used to pick which report
+  // type this is ('asset_consumption' vs 'fiber_jobs') so the right
+  // import sheet picks it up.
+  scheduledTitle?: string | null
 }
 
 async function detectAndExtract(
@@ -213,9 +231,10 @@ async function detectAndExtract(
       if (!fileB64 && typeof obj.content === 'string') fileB64 = obj.content
       if (!fileB64 && typeof obj.body === 'string') fileB64 = obj.body
 
+      const scheduledTitle = obj.scheduled_plan?.title || null
       if (typeof fileB64 === 'string' && fileB64.length > 0) {
         const decoded = base64ToBytes(fileB64)
-        const filename = obj.scheduled_plan?.title ? `${obj.scheduled_plan.title}.csv` : null
+        const filename = scheduledTitle ? `${scheduledTitle}.csv` : null
         // Diagnostic on what we actually got
         const decodedDiag = `mimetype=${mimeHint || '(none)'} extension=${extHint || '(none)'} ` +
           `b64_len=${fileB64.length} ` +
@@ -229,7 +248,7 @@ async function detectAndExtract(
         // 1) PKZIP container (Looker "CSV zip file" format, real report)
         if (looksLikeZip) {
           const z = await extractZip(decoded, 'looker→zip')
-          if (z.csvText) return { ...z, filename: z.filename || filename }
+          if (z.csvText) return { ...z, filename: z.filename || filename, scheduledTitle }
           // Fall through with the unzip error preserved if extraction yielded no CSV
         }
 
@@ -240,7 +259,7 @@ async function detectAndExtract(
             const stream = new Blob([decoded]).stream().pipeThrough(ds)
             const ungzText = await new Response(stream).text()
             if (ungzText) {
-              return { format: 'looker→gzip→csv', csvText: ungzText, filename, error: null }
+              return { format: 'looker→gzip→csv', csvText: ungzText, filename, error: null, scheduledTitle }
             }
           } catch (e) {
             // fall through
@@ -250,7 +269,7 @@ async function detectAndExtract(
         // 3) Raw text — CSV directly. Looker's "CSV" format (no zip) lands here.
         const csvCandidate = new TextDecoder('utf-8').decode(decoded)
         if (csvCandidate.includes(',') && (csvCandidate.includes('\n') || csvCandidate.length > 100)) {
-          return { format: 'looker→csv', csvText: csvCandidate, filename, error: null }
+          return { format: 'looker→csv', csvText: csvCandidate, filename, error: null, scheduledTitle }
         }
 
         // 4) Test-fire / unknown payload — store diagnostic for triage

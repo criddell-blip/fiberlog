@@ -364,13 +364,15 @@ export async function getPhasesWithBuckets() {
 
 // List pending webhook deliveries, newest first. Includes status='discarded'
 // rows so the manager can see auto-discarded deliveries (e.g. unzip
-// failures) without digging in the DB.
-export async function getPendingSonarImports({ includeProcessed = false, limit = 30 } = {}) {
+// failures) without digging in the DB. Filter by report_type to scope
+// to one report ('asset_consumption' or 'fiber_jobs').
+export async function getPendingSonarImports({ includeProcessed = false, limit = 30, reportType = null } = {}) {
   let q = db.from('sonar_pending_imports')
-    .select('id, received_at, filename, parsed_row_count, status, error_message, applied_at, applied_movement_count, discarded_at, discard_reason')
+    .select('id, received_at, filename, parsed_row_count, status, error_message, applied_at, applied_movement_count, discarded_at, discard_reason, report_type')
     .order('received_at', { ascending: false })
     .limit(limit)
   if (!includeProcessed) q = q.eq('status', 'pending')
+  if (reportType) q = q.eq('report_type', reportType)
   const { data, error } = await q
   if (error) throw error
   return data || []
@@ -379,13 +381,14 @@ export async function getPendingSonarImports({ includeProcessed = false, limit =
 // Recently processed (imported OR discarded) deliveries — the audit
 // trail behind the pending queue. Doesn't include the raw_csv to keep
 // the list lightweight; the table grows but each row is tiny without it.
-export async function getProcessedSonarImports({ limit = 30 } = {}) {
-  const { data, error } = await db
-    .from('sonar_pending_imports')
-    .select('id, received_at, filename, parsed_row_count, status, error_message, applied_at, applied_movement_count, discarded_at, discard_reason')
+export async function getProcessedSonarImports({ limit = 30, reportType = null } = {}) {
+  let q = db.from('sonar_pending_imports')
+    .select('id, received_at, filename, parsed_row_count, status, error_message, applied_at, applied_movement_count, discarded_at, discard_reason, report_type')
     .in('status', ['imported', 'discarded'])
     .order('received_at', { ascending: false })
     .limit(limit)
+  if (reportType) q = q.eq('report_type', reportType)
+  const { data, error } = await q
   if (error) throw error
   return data || []
 }
@@ -1144,6 +1147,162 @@ export async function getPartsCatalogTaxonomy() {
     materialGroups: [...matGroups].sort(),
   }
 }
+
+// ─── SONAR FIBER-JOBS REPORT ────────────────────────────────────────────
+//
+// Second Sonar report shape: "All fiber all jobs". Each row is a customer
+// job (install / drop / fix) and the consumed materials are buried in
+// free-text columns (box used, Drop type/length, Pushable fiber, etc.).
+// One row → 0–N transfer movements, parsed via sonar_fiber_value_map.
+//
+// Parse modes for the mapping table:
+//   • fixed_unit         — value present → 1 unit of mapped SKU
+//   • length_from_text   — extract first number → qty in unit (typically ft)
+//   • pair_with_column   — qty comes from another column in same row
+//   • ignore             — skip silently (N/A, na, none, blank)
+//   • manual             — surface as 'ask' in per-row preview; no SKU yet
+
+export const FIBER_QTY_MODE_OPTIONS = [
+  { id: 'fixed_unit',       label: 'Fixed 1 unit' },
+  { id: 'length_from_text', label: 'Length from text (ft)' },
+  { id: 'pair_with_column', label: 'Qty from paired column' },
+  { id: 'ignore',           label: 'Ignore (no movement)' },
+  { id: 'manual',           label: 'Ask per row (manual qty)' },
+]
+
+// Values that always mean "nothing was used" — never generate a movement.
+const FIBER_NA_VALUES = new Set(['', 'n/a', 'na', 'n/a.', 'none', 'no', '-', '--'])
+
+export function isFiberValueIgnored(v) {
+  return FIBER_NA_VALUES.has((v || '').trim().toLowerCase())
+}
+
+export async function getFiberValueMap() {
+  const { data, error } = await db
+    .from('sonar_fiber_value_map')
+    .select('column_name, value_text, sku, qty_mode, pair_column, default_qty')
+  if (error) throw error
+  // Keyed by `${column_name}::${value_text}` (case-insensitive on value)
+  const m = new Map()
+  for (const row of data || []) {
+    const key = `${row.column_name}::${(row.value_text || '').toLowerCase()}`
+    m.set(key, row)
+  }
+  return m
+}
+
+export async function setFiberValueMap({ columnName, valueText, sku, qtyMode, pairColumn = null, defaultQty = 1 }) {
+  if (!columnName || !valueText) throw new Error('columnName and valueText required')
+  if (!['fixed_unit', 'length_from_text', 'pair_with_column', 'ignore', 'manual'].includes(qtyMode)) {
+    throw new Error(`Invalid qty_mode: ${qtyMode}`)
+  }
+  if (qtyMode === 'pair_with_column' && !pairColumn) {
+    throw new Error('pair_column required for pair_with_column mode')
+  }
+  const { error } = await db
+    .from('sonar_fiber_value_map')
+    .upsert(
+      {
+        column_name: columnName,
+        value_text: valueText,
+        sku: qtyMode === 'ignore' ? null : sku,
+        qty_mode: qtyMode,
+        pair_column: qtyMode === 'pair_with_column' ? pairColumn : null,
+        default_qty: defaultQty || 1,
+      },
+      { onConflict: 'column_name,value_text' }
+    )
+  if (error) throw error
+}
+
+export async function clearFiberValueMap({ columnName, valueText }) {
+  if (!columnName || !valueText) return
+  const { error } = await db
+    .from('sonar_fiber_value_map')
+    .delete()
+    .eq('column_name', columnName)
+    .eq('value_text', valueText)
+  if (error) throw error
+}
+
+// Extract first numeric value from a text. "Pre-termed Drop - 150'" → 150.
+// "Pushable Bullet Fiber Cable 75 ft" → 75. Falls back to null.
+export function extractFirstNumber(text) {
+  if (!text) return null
+  const m = /(-?\d+(?:\.\d+)?)/.exec(String(text))
+  return m ? parseFloat(m[1]) : null
+}
+
+// Parse one fiber-jobs row into 0–N material lines based on the map.
+// `row` is a parsed CSV record (object keyed by column name).
+// `columnsConsidered` is the set of columns we'll inspect — defaults to
+// all keys of the row.
+// Returns an array of:
+//   { columnName, valueText, sku, qty, qtyMode, status, reason }
+// where status is 'ready' | 'ignore' | 'unmapped' | 'manual' | 'pair-missing'.
+export function parseFiberRow(row, fiberValueMap, columnsConsidered = null) {
+  const cols = columnsConsidered || Object.keys(row || {})
+  const out = []
+  for (const col of cols) {
+    const raw = (row[col] != null ? String(row[col]) : '').trim()
+    if (isFiberValueIgnored(raw)) {
+      out.push({ columnName: col, valueText: raw, sku: null, qty: 0, qtyMode: 'ignore', status: 'ignore', reason: 'N/A or blank' })
+      continue
+    }
+    const key = `${col}::${raw.toLowerCase()}`
+    const map = fiberValueMap?.get(key)
+    if (!map) {
+      out.push({ columnName: col, valueText: raw, sku: null, qty: 0, qtyMode: null, status: 'unmapped', reason: 'No mapping' })
+      continue
+    }
+    if (map.qty_mode === 'ignore') {
+      out.push({ columnName: col, valueText: raw, sku: null, qty: 0, qtyMode: 'ignore', status: 'ignore', reason: 'Mapped to ignore' })
+      continue
+    }
+    let qty = map.default_qty || 1
+    if (map.qty_mode === 'fixed_unit') {
+      qty = 1
+    } else if (map.qty_mode === 'length_from_text') {
+      const n = extractFirstNumber(raw)
+      if (n == null) {
+        out.push({ columnName: col, valueText: raw, sku: map.sku, qty: 0, qtyMode: map.qty_mode, status: 'manual', reason: 'No number in value — enter qty' })
+        continue
+      }
+      qty = n
+    } else if (map.qty_mode === 'pair_with_column') {
+      const pairRaw = (row[map.pair_column] != null ? String(row[map.pair_column]) : '').trim()
+      const n = extractFirstNumber(pairRaw)
+      if (n == null) {
+        out.push({ columnName: col, valueText: raw, sku: map.sku, qty: 0, qtyMode: map.qty_mode, status: 'pair-missing', reason: `Paired column "${map.pair_column}" had no number` })
+        continue
+      }
+      qty = n
+    } else if (map.qty_mode === 'manual') {
+      out.push({ columnName: col, valueText: raw, sku: map.sku, qty: 0, qtyMode: map.qty_mode, status: 'manual', reason: 'Manual qty required' })
+      continue
+    }
+    if (qty > 0 && map.sku) {
+      out.push({ columnName: col, valueText: raw, sku: map.sku, qty, qtyMode: map.qty_mode, status: 'ready' })
+    } else {
+      out.push({ columnName: col, valueText: raw, sku: map.sku || null, qty, qtyMode: map.qty_mode, status: 'manual', reason: qty <= 0 ? 'Qty is zero — enter qty' : 'No SKU configured' })
+    }
+  }
+  return out
+}
+
+// Columns we know NEVER carry a material (no point checking them).
+// Includes the report's identity columns + the "length of flat used"
+// column which is only a paired qty source (never its own SKU).
+export const FIBER_NON_MATERIAL_COLUMNS = new Set([
+  'Job | Address on Completion',
+  'Job Type | Name',
+  'Job | Completion Notes',
+  'Account | ID',
+  'User | Username',
+  'Job | Completion Date time',
+  'Project',
+  'length of flat used',  // referenced by Drop type/length pair_with_column
+])
 
 // ─── SAGE INTACCT EXPORT ─────────────────────────────────────────────────
 //

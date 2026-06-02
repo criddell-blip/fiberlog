@@ -108,7 +108,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [pendingLoading, setPendingLoading] = useState(true)
   const refreshPending = async () => {
     try {
-      const rows = await getPendingSonarImports({ includeProcessed: false })
+      const rows = await getPendingSonarImports({ includeProcessed: false, reportType: 'asset_consumption' })
       setPendingImports(rows)
     } catch (e) {
       console.warn('Pending Sonar imports load failed:', e)
@@ -129,7 +129,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     if (next && processedImports === null) {
       setProcessedLoading(true)
       try {
-        const rows = await getProcessedSonarImports({ limit: 30 })
+        const rows = await getProcessedSonarImports({ limit: 30, reportType: 'asset_consumption' })
         setProcessedImports(rows)
       } catch (e) {
         console.warn('Processed Sonar imports load failed:', e)
