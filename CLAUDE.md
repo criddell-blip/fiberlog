@@ -5,6 +5,8 @@ A field logging + inventory management app for Utah Broadband (FIF Utah LLC). Us
 Deployed at https://criddell-blip.github.io/fiberlog/ via GitHub Pages.
 
 > **Need the full end-to-end inventory walk-through?** See [docs/INVENTORY_FLOW.md](docs/INVENTORY_FLOW.md) — covers every crew workflow, every manager entry point, and the Sage export at the end of the line.
+>
+> **Need a deep dive on the Inventory tab specifically?** See [docs/INVENTORY_TAB.md](docs/INVENTORY_TAB.md) — every sub-tab, every action sheet, and how they fit into the daily/weekly/monthly cadence.
 
 ---
 
