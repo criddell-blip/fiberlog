@@ -137,10 +137,21 @@ function escapeCsvField(v) {
   return s
 }
 
-// Trigger a browser download of arbitrary text content. Used for the
-// unmatched-SKU CSV export from the importer.
+// Trigger a browser download of arbitrary text content. Used for every
+// CSV export in the app (reports, audit, Sage, etc.).
+//
+// Excel + Numbers default to guessing the encoding of CSVs they open,
+// and they almost always guess Windows-1252 instead of UTF-8 — so a
+// phase name like "West Mountain — phase 4" (with a real em dash)
+// renders as "West Mountain â€" phase 4". Prepending a UTF-8 BOM
+// (﻿) tells the spreadsheet to use UTF-8 and the dashes / accents
+// / em dashes render correctly. Already-BOMed content is left alone.
 export function downloadTextAsFile(filename, content, mime = 'text/csv;charset=utf-8;') {
-  const blob = new Blob([content], { type: mime })
+  let payload = content
+  if (mime.startsWith('text/csv') && typeof payload === 'string' && payload.charCodeAt(0) !== 0xFEFF) {
+    payload = '﻿' + payload
+  }
+  const blob = new Blob([payload], { type: mime })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
