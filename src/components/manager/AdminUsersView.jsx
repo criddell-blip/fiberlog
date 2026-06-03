@@ -32,19 +32,27 @@ const CREW_TYPE_OPTIONS = [
 // keywords. Used only for the "Assign anyway?" amber warning on the per-user
 // dropdown — does NOT block assignment, just nudges. Returns null if no
 // keyword matches.
-function crewTypeFromName(lower) {
-  if (lower.includes('aerial'))         return 'aerial'
-  if (lower.includes('underground') || lower.includes(' ug '))
-                                        return 'underground'
-  if (lower.includes('splice'))         return 'splice'
-  if (lower.includes('drop'))           return 'drop'
-  if (lower.includes('locator'))        return 'locator'
-  if (lower.includes('install'))        return 'install'
+// Returns ALL crew_types whose keyword appears in the trailer name —
+// shared trailers commonly span multiple crew types ("Aerial &
+// Underground Shared", "UG/Splice trailer"), so a single-type lookup
+// would fire false-positive cross-crew warnings against any user not
+// matching the FIRST keyword in the name. Returning every match lets
+// the warning logic say "user is in the set" instead of "user matches
+// the only inferred type."
+function crewTypesFromName(lower) {
+  const types = []
+  if (lower.includes('aerial'))         types.push('aerial')
+  if (lower.includes('underground') || /\bug\b/.test(lower) || lower.includes('/ug') || lower.includes('ug/'))
+                                        types.push('underground')
+  if (lower.includes('splice'))         types.push('splice')
+  if (lower.includes('drop'))           types.push('drop')
+  if (lower.includes('locator'))        types.push('locator')
+  if (lower.includes('install'))        types.push('install')
   if (lower.includes('fiber tech') || lower.includes('ftech'))
-                                        return 'fiber_tech'
+                                        types.push('fiber_tech')
   if (lower.includes('infra') || lower.includes('tower'))
-                                        return 'infrastructure'
-  return null
+                                        types.push('infrastructure')
+  return types
 }
 
 export default function AdminUsersView({ onBack }) {
@@ -705,14 +713,16 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
               </div>
               {(() => {
                 // Cross-crew soft warning. If the picked trailer's name suggests
-                // a different crew_type than the user's, render an amber note —
-                // doesn't block, just confirms intent.
+                // crew types that DON'T include this user's crew_type, render
+                // an amber note — doesn't block, just confirms intent. Shared
+                // trailers ("Aerial & Underground") return multiple inferred
+                // types; user passing any of them suppresses the warning.
                 if (!pullLocationId || !crewType) return null
                 const loc = truckLocations.find(l => l.id === pullLocationId)
                 if (!loc) return null
                 const lowerName = (loc.name || '').toLowerCase()
-                const trailerKw = crewTypeFromName(lowerName)
-                if (!trailerKw || trailerKw === crewType) return null
+                const trailerTypes = crewTypesFromName(lowerName)
+                if (trailerTypes.length === 0 || trailerTypes.includes(crewType)) return null
                 return (
                   <div style={{
                     marginTop: 6, padding: '6px 10px',
@@ -720,7 +730,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
                     border: '1px solid var(--amber)', borderRadius: 'var(--r-xs)',
                     fontSize: 11, fontWeight: 600,
                   }}>
-                    ⚠️ <strong>{loc.name}</strong> sounds like a <strong>{trailerKw}</strong> trailer,
+                    ⚠️ <strong>{loc.name}</strong> sounds like a <strong>{trailerTypes.join(' / ')}</strong> trailer,
                     but this user's crew type is <strong>{crewType}</strong>. Assign anyway?
                   </div>
                 )
