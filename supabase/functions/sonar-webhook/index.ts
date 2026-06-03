@@ -85,16 +85,20 @@ Deno.serve(async (req) => {
       body_head_ascii: bytesToPrintable(bodyBytes.slice(0, 128)),
     }
 
-    // Decide which report this is from the Looker schedule title.
-    // Asset-consumption report's title includes "asset" (e.g.,
-    // "Field tech asset Consumption"). Jobs report includes "fiber"
-    // or "jobs" ("All fiber all jobs"). Default to asset_consumption
-    // for backward-compat.
+    // Decide which report this is. The Looker schedule title is set by
+    // the dashboard name (e.g. "Fiber Equipment Consumption" for the
+    // jobs report) and doesn't always carry the disambiguating keyword,
+    // so we also check the filename — Looker writes a filename derived
+    // from the underlying Look slug ("all_fiber_all_jobs.csv" for the
+    // jobs report, "field_tech_asset_consumption.csv" for the asset
+    // report). Either source can match.
     const titleLower = (detection.scheduledTitle || '').toLowerCase()
+    const filenameLower = (detection.filename || '').toLowerCase()
+    const combined = titleLower + ' ' + filenameLower
     let reportType = 'asset_consumption'
-    if (titleLower.includes('fiber') && (titleLower.includes('job') || titleLower.includes('drop'))) {
+    if (combined.includes('fiber') && (combined.includes('job') || combined.includes('drop'))) {
       reportType = 'fiber_jobs'
-    } else if (titleLower.includes('asset')) {
+    } else if (combined.includes('asset')) {
       reportType = 'asset_consumption'
     }
 
