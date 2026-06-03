@@ -262,6 +262,22 @@ export function AppProvider({ children }) {
     }))
   }
 
+  // Refresh just the users list without toggling the global loading state.
+  // Use this after a user CRUD action — full reload() flips loading=true,
+  // which unmounts the manager portal tree and resets nav state (e.g.
+  // AdminPanel's view='users' falls back to 'projects' on remount).
+  async function refreshUsers() {
+    try {
+      const list = await getUsers()
+      setUsers(list)
+      // Keep currentUser in sync if their own row changed
+      const me = currentUser?.id ? list.find(u => u.id === currentUser.id) : null
+      if (me) setCurrentUser(me)
+    } catch (e) {
+      console.warn('refreshUsers failed:', e)
+    }
+  }
+
   return (
     <AppContext.Provider value={{
       projects, setProjects,
@@ -275,6 +291,7 @@ export function AppProvider({ children }) {
       toast, showToast,
       setTaskLocal,
       reload: loadAll,
+      refreshUsers,
       // Theme
       darkMode, setDarkMode, toggleDarkMode,
       // View mode (manager↔crew toggle for working managers)

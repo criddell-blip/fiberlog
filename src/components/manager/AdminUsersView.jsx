@@ -48,7 +48,7 @@ function crewTypeFromName(lower) {
 }
 
 export default function AdminUsersView({ onBack }) {
-  const { showToast, currentUser, reload } = useApp()
+  const { showToast, currentUser, refreshUsers } = useApp()
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('active')   // 'all' | 'active' | 'inactive'
@@ -108,7 +108,7 @@ export default function AdminUsersView({ onBack }) {
       await createUser(payload)
       setEditing(null)
       await load()
-      reload()   // refresh AppContext.users so the new person can sign in immediately
+      refreshUsers()   // refresh AppContext.users so the new person can sign in immediately
       showToast(`Created ${payload.name}`)
     } catch (e) {
       showToast('Create failed: ' + e.message)
@@ -122,7 +122,7 @@ export default function AdminUsersView({ onBack }) {
       await updateUserMetadata(userId, updates)
       setEditing(null)
       await load()
-      reload()
+      refreshUsers()
       showToast('Saved')
     } catch (e) {
       showToast('Save failed: ' + e.message)
@@ -141,7 +141,7 @@ export default function AdminUsersView({ onBack }) {
       if (user.is_active) await deactivateUser(user.id)
       else                await reactivateUser(user.id)
       await load()
-      reload()
+      refreshUsers()
       showToast(`${verb}d ${user.name}`)
     } catch (e) {
       showToast(verb + ' failed: ' + e.message)
@@ -389,6 +389,19 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
   // Warehouse-only manager scoping. Only meaningful when role='manager';
   // hidden + reset to false for other roles.
   const [restrictedToInventory, setRestrictedToInventory] = useState(user?.restricted_to_inventory === true)
+  // Manager-side direct reports. Multi-select that flips each crew's
+  // manager_id when saved. Only meaningful for owners + managers; hidden
+  // for crew/contractor. Initialized from existingUsers where manager_id
+  // matches this user. New users skip this section (we need an id to
+  // assign reports to).
+  const initialDirectReportIds = useMemo(() => {
+    if (!user?.id) return new Set()
+    return new Set(
+      (existingUsers || []).filter(u => u.manager_id === user.id).map(u => u.id)
+    )
+  }, [user?.id, existingUsers])
+  const [directReportIds, setDirectReportIds] = useState(initialDirectReportIds)
+  const [reportsSearch, setReportsSearch] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -469,6 +482,28 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
           manager_id: managerId || null,
           restricted_to_inventory: role === 'manager' ? restrictedToInventory : false,
         })
+        // Direct-reports diff — only for owner/manager edits. Add: set
+        // manager_id = this user's id on newly-checked crews. Remove: clear
+        // manager_id on newly-unchecked crews (set NULL). Errors here are
+        // non-fatal (the main user save already succeeded) — surfaced but
+        // don't roll back.
+        if (role === 'manager' || role === 'owner') {
+          const adds = [...directReportIds].filter(id => !initialDirectReportIds.has(id))
+          const removes = [...initialDirectReportIds].filter(id => !directReportIds.has(id))
+          const reportErrors = []
+          for (const id of adds) {
+            try { await updateUserMetadata(id, { manager_id: user.id }) }
+            catch (e) { reportErrors.push(`add ${id}: ${e.message}`) }
+          }
+          for (const id of removes) {
+            try { await updateUserMetadata(id, { manager_id: null }) }
+            catch (e) { reportErrors.push(`remove ${id}: ${e.message}`) }
+          }
+          if (reportErrors.length > 0) {
+            setError(`User saved but ${reportErrors.length} direct-report change(s) failed: ${reportErrors.slice(0, 3).join('; ')}`)
+            return
+          }
+        }
       }
     } catch (e) {
       setError(e.message || 'Failed')
@@ -718,6 +753,20 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
             </div>
           </div>
 
+          {/* Direct reports — multi-select that flips each crew's manager_id
+              on save. Visible for owner/manager edits only; new users skip
+              it (we need the id to assign reports to). */}
+          {!isNew && (role === 'manager' || role === 'owner') && (
+            <DirectReportsPicker
+              user={user}
+              existingUsers={existingUsers}
+              search={reportsSearch}
+              setSearch={setReportsSearch}
+              selectedIds={directReportIds}
+              setSelectedIds={setDirectReportIds}
+            />
+          )}
+
           {/* Password — new users only */}
           {isNew && (
             <div className="field">
@@ -818,6 +867,110 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
             {submitting ? 'Saving…' : (isNew ? 'Create user' : 'Save changes')}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Direct reports picker ────────────────────────────────────────────────
+// Multi-select of crews assigned to this manager/owner. On save, the
+// parent diffs selectedIds vs the initial set and flips manager_id on
+// each affected crew. Search filter narrows the list when there are
+// many active users.
+function DirectReportsPicker({ user, existingUsers, search, setSearch, selectedIds, setSelectedIds }) {
+  // Pool of users we can assign: active crew + contractor, never the
+  // user themselves. Sorted by name for stable rendering.
+  const pool = useMemo(() => {
+    return (existingUsers || [])
+      .filter(u => u.is_active && u.id !== user?.id && (u.role === 'crew' || u.role === 'contractor'))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+  }, [existingUsers, user?.id])
+  // Filtered by search across name + crew_type + email
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return pool
+    return pool.filter(u =>
+      (u.name || '').toLowerCase().includes(q) ||
+      (u.crew_type || '').toLowerCase().includes(q) ||
+      (u.email || '').toLowerCase().includes(q)
+    )
+  }, [pool, search])
+  function toggle(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  function selectAllFiltered() {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      for (const u of filtered) next.add(u.id)
+      return next
+    })
+  }
+  function clearAllFiltered() {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      for (const u of filtered) next.delete(u.id)
+      return next
+    })
+  }
+  return (
+    <div className="field">
+      <label>Direct reports ({selectedIds.size} selected)</label>
+      <div style={{ fontSize: 11, color: 'var(--hint)', marginBottom: 6 }}>
+        Crews assigned here will see this user as their manager. Checking a crew already managed by someone else
+        will move them under this manager on save.
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+        <input
+          type="text"
+          placeholder="Search by name, crew type, email…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          autoComplete="off"
+          name="reports-search"
+          style={{ flex: 1, padding: '6px 10px', fontSize: 13, border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--surface2)' }}
+        />
+        <button type="button" onClick={selectAllFiltered} className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 11 }}>
+          All
+        </button>
+        <button type="button" onClick={clearAllFiltered} className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 11 }}>
+          None
+        </button>
+      </div>
+      <div style={{
+        maxHeight: 240, overflowY: 'auto',
+        border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+        background: 'var(--surface)',
+      }}>
+        {filtered.length === 0 && (
+          <div style={{ padding: 12, textAlign: 'center', color: 'var(--hint)', fontSize: 12 }}>
+            {pool.length === 0 ? 'No active crew users to assign.' : 'No matches for that search.'}
+          </div>
+        )}
+        {filtered.map(u => {
+          const checked = selectedIds.has(u.id)
+          const isMovingFromAnother = u.manager_id && u.manager_id !== user?.id && checked
+          return (
+            <label key={u.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '6px 10px', cursor: 'pointer',
+              borderBottom: '1px solid var(--border)',
+              background: checked ? 'var(--orange-lt)' : 'transparent',
+            }}>
+              <input type="checkbox" checked={checked} onChange={() => toggle(u.id)} style={{ cursor: 'pointer' }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 'var(--fw-semibold)' }}>{u.name}</div>
+                <div style={{ fontSize: 10, color: 'var(--hint)' }}>
+                  {u.role}{u.crew_type ? ` · ${u.crew_type}` : ''}
+                  {isMovingFromAnother && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>· will move from current manager</span>}
+                </div>
+              </div>
+            </label>
+          )
+        })}
       </div>
     </div>
   )
