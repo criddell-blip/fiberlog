@@ -40,21 +40,24 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   const isReturn = mode === 'return'
 
   // Pull the location list once. For 'load' we want anything that can hold
-  // stock and isn't a crew truck (warehouses + the legacy crew-type rollup
-  // buckets, which still hold most of the imported stock). For 'return'
-  // we restrict to warehouses only.
+  // stock and isn't a crew truck — warehouses + bins under warehouses +
+  // the legacy crew-type rollup buckets, which still hold most of the
+  // imported stock. For 'return' we restrict to warehouses + their bins.
+  // includeBins is required so binned stock is reachable; default
+  // getLocations() excludes them.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       setLoadingLocations(true)
       try {
-        const all = await getLocations()
+        const all = await getLocations({ includeBins: true })
         if (cancelled) return
         const filtered = all.filter(l => {
           if (l.id === myTruck?.id) return false  // can't move to/from yourself
-          if (isReturn) return l.type === 'warehouse'
-          // Load: warehouses + rollup buckets (truck type without assigned_to)
+          if (isReturn) return l.type === 'warehouse' || l.type === 'bin'
+          // Load: warehouses + bins + rollup buckets (truck without assigned_to)
           if (l.type === 'warehouse') return true
+          if (l.type === 'bin') return true
           if (l.type === 'truck' && !l.assigned_to) return true
           return false
         })
@@ -117,6 +120,36 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
           || (pc?.id || '').toLowerCase().includes(q)
     })
   }, [isLoad, otherStock, myStock, partSearch])
+
+  // Sort + label locations so bins cluster under their parent warehouse
+  // alphabetically. Each bin's display label shows "Warehouse · Bin" so
+  // the crew can tell which warehouse the bin belongs to without losing
+  // selection accuracy.
+  const sortedLocations = useMemo(() => {
+    const byId = new Map(otherLocations.map(l => [l.id, l]))
+    const groupName = l => {
+      if (l.parent_location_id) {
+        const parent = byId.get(l.parent_location_id)
+        if (parent) return parent.name || l.name
+      }
+      return l.name || ''
+    }
+    return otherLocations.slice().sort((a, b) => {
+      const gcmp = groupName(a).localeCompare(groupName(b))
+      if (gcmp !== 0) return gcmp
+      // Same group: parent first, then bins by name
+      if ((a.parent_location_id || null) !== (b.parent_location_id || null)) {
+        return a.parent_location_id ? 1 : -1
+      }
+      return (a.name || '').localeCompare(b.name || '')
+    }).map(l => {
+      const parent = l.parent_location_id ? byId.get(l.parent_location_id) : null
+      return {
+        ...l,
+        displayLabel: parent ? `${parent.name} · ${l.name}` : l.name,
+      }
+    })
+  }, [otherLocations])
 
   // Available quantity for the picked part (so we can show a max + validate).
   const selectedPart = useMemo(() => {
@@ -193,9 +226,9 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                     ? `No ${isLoad ? 'sources' : 'warehouses'} available`
                     : `— pick ${isLoad ? 'source' : 'warehouse'} —`)}
             </option>
-            {otherLocations.map(l => (
+            {sortedLocations.map(l => (
               <option key={l.id} value={l.id}>
-                {locationIcon(l.type, !!l.assigned_to)} {l.name}
+                {locationIcon(l.type, !!l.assigned_to)} {l.displayLabel}
               </option>
             ))}
           </select>
@@ -344,6 +377,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
 
 function locationIcon(type, hasOwner) {
   if (type === 'warehouse') return '🏭'
+  if (type === 'bin') return '🗂'
   if (type === 'truck' && !hasOwner) return '📦'  // rollup bucket
   if (type === 'truck') return '🚚'
   return ''
