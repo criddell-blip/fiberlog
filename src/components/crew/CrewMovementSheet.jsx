@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useApp } from '../../AppContext'
-import { getLocations, getStockByLocation, recordCrewMovement } from '../../lib/inventory'
+import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement } from '../../lib/inventory'
 
 // Unified sheet for crew-initiated movements. Modes covered today:
 //   'load'    — warehouse/bucket → my truck     (pick source, then part)
@@ -39,6 +39,16 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   const isLoad = mode === 'load'
   const isReturn = mode === 'return'
 
+  // Load mode supports two views: by-location (pick warehouse/bin, see parts
+  // there) and by-part (search a part, see all locations stocking it). Part
+  // is the default — task-driven loadouts are the common case. Return mode
+  // skips the toggle (destination is always a warehouse/bin, not stock).
+  const [viewMode, setViewMode] = useState(isLoad ? 'by-part' : 'by-location')
+  // Stock grouped by part across all source-eligible locations. Loaded once
+  // when by-part view is first opened; filtered client-side via partSearch.
+  const [partGroups, setPartGroups] = useState(null)
+  const [loadingPartGroups, setLoadingPartGroups] = useState(false)
+
   // Pull the location list once. For 'load' we want anything that can hold
   // stock and isn't a crew truck — warehouses + bins under warehouses +
   // the legacy crew-type rollup buckets, which still hold most of the
@@ -73,6 +83,31 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
     })()
     return () => { cancelled = true }
   }, [isReturn, myTruck?.id])
+
+  // Lazily fetch the all-stock-grouped index when the user first opens
+  // by-part view. Cached for the sheet's lifetime — search filters happen
+  // client-side. Excludes the caller's truck so they don't see it as a
+  // possible source.
+  useEffect(() => {
+    if (!isLoad || viewMode !== 'by-part') return
+    if (partGroups !== null || loadingPartGroups) return
+    let cancelled = false
+    ;(async () => {
+      setLoadingPartGroups(true)
+      try {
+        const groups = await getAllStockGrouped({ excludeLocationId: myTruck?.id })
+        if (!cancelled) setPartGroups(groups)
+      } catch (e) {
+        if (!cancelled) {
+          console.error('Stock index load failed:', e)
+          setError('Could not load stock: ' + e.message)
+        }
+      } finally {
+        if (!cancelled) setLoadingPartGroups(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [isLoad, viewMode, partGroups, loadingPartGroups, myTruck?.id])
 
   // For 'load' mode, fetch stock at the picked source. For 'return',
   // the source is the truck and we already have myStock from the parent.
@@ -151,6 +186,40 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
     })
   }, [otherLocations])
 
+  // Filter partGroups by the same search input as the by-location flow.
+  // Matches name, SKU, material group, department.
+  const filteredGroups = useMemo(() => {
+    if (!partGroups) return []
+    const q = partSearch.trim().toLowerCase()
+    if (!q) return partGroups
+    return partGroups.filter(p =>
+      (p.name || '').toLowerCase().includes(q) ||
+      (p.partId || '').toLowerCase().includes(q) ||
+      (p.material_group || '').toLowerCase().includes(q) ||
+      (p.department || '').toLowerCase().includes(q)
+    )
+  }, [partGroups, partSearch])
+
+  // Tap a (part, location) row in by-part view: set both states at once.
+  // Pre-seeds otherStock with the single row so availableQty resolves
+  // immediately — the otherLocationId effect then refreshes otherStock
+  // with the full location list in the background (no flicker since the
+  // selected part is already present in the pre-seed).
+  function pickPartAtLocation(group, loc) {
+    setOtherLocationId(loc.locationId)
+    setSelectedPartId(group.partId)
+    setOtherStock([{
+      quantity: loc.qty,
+      parts_catalog: {
+        id: group.partId,
+        name: group.name,
+        unit: group.unit,
+        category: group.category,
+        material_group: group.material_group,
+      },
+    }])
+  }
+
   // Available quantity for the picked part (so we can show a max + validate).
   const selectedPart = useMemo(() => {
     if (!selectedPartId) return null
@@ -209,33 +278,135 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
           </div>
         </div>
 
-        {/* Step 1: pick location */}
-        <div className="field">
-          <label>{isLoad ? 'Source' : 'Destination'}</label>
-          <select
-            value={otherLocationId}
-            onChange={e => setOtherLocationId(e.target.value)}
-            disabled={loadingLocations}
-            autoComplete="off"
-            name="crew-movement-other-location"
-          >
-            <option value="">
-              {loadingLocations
-                ? 'Loading…'
-                : (otherLocations.length === 0
-                    ? `No ${isLoad ? 'sources' : 'warehouses'} available`
-                    : `— pick ${isLoad ? 'source' : 'warehouse'} —`)}
-            </option>
-            {sortedLocations.map(l => (
-              <option key={l.id} value={l.id}>
-                {locationIcon(l.type, !!l.assigned_to)} {l.displayLabel}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Mode toggle — Load only. Return mode always picks a warehouse first. */}
+        {isLoad && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            <button
+              type="button"
+              onClick={() => setViewMode('by-part')}
+              style={modeBtnStyle(viewMode === 'by-part')}
+            >
+              🔍 Find a part
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('by-location')}
+              style={modeBtnStyle(viewMode === 'by-location')}
+            >
+              📍 Pick a location
+            </button>
+          </div>
+        )}
 
-        {/* Step 2: pick part (once location chosen) */}
-        {otherLocationId && (
+        {/* ── By-part view (Load only) ──────────────────────────────────── */}
+        {isLoad && viewMode === 'by-part' && (
+          <div style={{ marginBottom: 14 }}>
+            <input
+              type="text"
+              placeholder="Search parts by name, SKU, group, department…"
+              value={partSearch}
+              onChange={e => setPartSearch(e.target.value)}
+              autoFocus
+              autoComplete="off"
+              name="crew-movement-part-search"
+              style={{
+                width: '100%', padding: '8px 12px',
+                border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)',
+                background: 'var(--bg)', fontSize: 14, marginBottom: 6,
+              }}
+            />
+            {loadingPartGroups && (
+              <div style={{ padding: 16, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+                Loading stock index…
+              </div>
+            )}
+            {!loadingPartGroups && partGroups && filteredGroups.length === 0 && (
+              <div style={{ padding: 16, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>
+                {partSearch
+                  ? `No parts matching "${partSearch}"`
+                  : 'No stock in the system. Receive a PO or import inventory first.'}
+              </div>
+            )}
+            <div style={{
+              maxHeight: 320, overflowY: 'auto',
+              border: filteredGroups.length > 0 ? '1px solid var(--border)' : 'none',
+              borderRadius: 'var(--r-sm)',
+              background: 'var(--surface)',
+            }}>
+              {filteredGroups.map(group => (
+                <div key={group.partId} style={{ borderBottom: '1px solid var(--border)' }}>
+                  {/* Part header */}
+                  <div style={{
+                    padding: '6px 12px', background: 'var(--surface2)',
+                    borderBottom: '1px solid var(--border)',
+                  }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {group.name}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: '"DM Mono", monospace' }}>
+                      {group.partId} · {group.totalQty.toLocaleString()} {group.unit || 'ea'} across {group.locations.length} location{group.locations.length === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                  {/* Per-location rows */}
+                  {group.locations.map(loc => {
+                    const isSel = group.partId === selectedPartId && loc.locationId === otherLocationId
+                    return (
+                      <div
+                        key={loc.locationId}
+                        onClick={() => pickPartAtLocation(group, loc)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '8px 12px',
+                          background: isSel ? 'var(--orange-lt)' : 'transparent',
+                          borderLeft: isSel ? '3px solid var(--orange)' : '3px solid transparent',
+                          cursor: 'pointer',
+                          fontSize: 12,
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {locationIcon(loc.type, loc.hasOwner)} {loc.displayLabel}
+                        </div>
+                        <div style={{ flexShrink: 0, fontWeight: 700 }}>
+                          {loc.qty.toLocaleString()} <span style={{ fontWeight: 400, color: 'var(--muted)' }}>{group.unit || 'ea'}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── By-location view (Load + Return) ──────────────────────────── */}
+        {viewMode === 'by-location' && (
+          <div className="field">
+            <label>{isLoad ? 'Source' : 'Destination'}</label>
+            <select
+              value={otherLocationId}
+              onChange={e => setOtherLocationId(e.target.value)}
+              disabled={loadingLocations}
+              autoComplete="off"
+              name="crew-movement-other-location"
+            >
+              <option value="">
+                {loadingLocations
+                  ? 'Loading…'
+                  : (otherLocations.length === 0
+                      ? `No ${isLoad ? 'sources' : 'warehouses'} available`
+                      : `— pick ${isLoad ? 'source' : 'warehouse'} —`)}
+              </option>
+              {sortedLocations.map(l => (
+                <option key={l.id} value={l.id}>
+                  {locationIcon(l.type, !!l.assigned_to)} {l.displayLabel}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Step 2 (by-location only): pick part. by-part already set the part on tap. */}
+        {viewMode === 'by-location' && otherLocationId && (
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>
               Part
@@ -246,27 +417,24 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
               value={partSearch}
               onChange={e => setPartSearch(e.target.value)}
               autoComplete="off"
-              name="crew-movement-part-search"
+              name="crew-movement-part-search-by-loc"
               style={{
                 width: '100%', padding: '8px 12px',
                 border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)',
                 background: 'var(--bg)', fontSize: 14, marginBottom: 6,
               }}
             />
-
             {(isLoad && loadingOtherStock) && (
               <div style={{ padding: 16, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
                 Loading stock…
               </div>
             )}
-
             {!loadingOtherStock && partList.length === 0 && (
               <div style={{ padding: 16, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>
                 {isLoad ? 'No stock at this location' : 'Nothing on your truck yet'}
                 {partSearch && ` matching "${partSearch}"`}
               </div>
             )}
-
             <div style={{
               maxHeight: 240, overflowY: 'auto',
               border: partList.length > 0 ? '1px solid var(--border)' : 'none',
@@ -381,4 +549,16 @@ function locationIcon(type, hasOwner) {
   if (type === 'truck' && !hasOwner) return '📦'  // rollup bucket
   if (type === 'truck') return '🚚'
   return ''
+}
+
+function modeBtnStyle(isActive) {
+  return {
+    flex: 1, padding: '8px 10px', fontSize: 13,
+    border: `1.5px solid ${isActive ? 'var(--orange)' : 'var(--border2)'}`,
+    borderRadius: 'var(--r-sm)',
+    background: isActive ? 'var(--orange-lt)' : 'var(--surface)',
+    color: isActive ? 'var(--orange-dk)' : 'var(--text)',
+    fontWeight: isActive ? 700 : 500,
+    cursor: 'pointer',
+  }
 }

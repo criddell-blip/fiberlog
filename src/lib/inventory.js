@@ -130,6 +130,71 @@ export async function getStockByPart(partId) {
   return (data || []).filter(r => Number(r.quantity) !== 0)
 }
 
+// Returns ALL active stock grouped by part. Used by the crew "Find a
+// part" Load mode so the user can search for a part name/SKU and see
+// every location that has it. Joins parts_catalog + inventory_locations
+// (with parent_location_id so the UI can render "Warehouse · Bin").
+// Filters: active parts only, non-zero qty only. excludeLocationId
+// drops the caller's truck (or whatever pull location they're loading
+// INTO) so they don't see it as a possible source.
+export async function getAllStockGrouped({ excludeLocationId = null } = {}) {
+  const { data, error } = await db
+    .from('inventory_stock')
+    .select(`
+      quantity, last_movement_at,
+      part:parts_catalog(id, name, unit, category, material_group, department, is_active),
+      location:inventory_locations(id, name, type, parent_location_id, assigned_to, is_active)
+    `)
+  if (error) throw error
+  const byPart = new Map()
+  // Build a parent-name lookup so the UI can render "Warehouse · Bin"
+  // labels. Two-pass: collect, then enrich.
+  const parentNameById = new Map()
+  for (const r of data || []) {
+    const loc = r.location
+    if (loc && loc.type === 'warehouse') parentNameById.set(loc.id, loc.name)
+  }
+  for (const r of data || []) {
+    const qty = Number(r.quantity || 0)
+    if (qty <= 0) continue
+    const part = r.part
+    const loc = r.location
+    if (!part || !part.is_active) continue
+    if (!loc || loc.is_active === false) continue
+    if (excludeLocationId && loc.id === excludeLocationId) continue
+    if (!byPart.has(part.id)) {
+      byPart.set(part.id, {
+        partId: part.id,
+        name: part.name,
+        unit: part.unit,
+        category: part.category,
+        material_group: part.material_group,
+        department: part.department,
+        locations: [],
+        totalQty: 0,
+      })
+    }
+    const entry = byPart.get(part.id)
+    const parentName = loc.parent_location_id ? parentNameById.get(loc.parent_location_id) : null
+    entry.locations.push({
+      locationId: loc.id,
+      name: loc.name,
+      type: loc.type,
+      hasOwner: !!loc.assigned_to,
+      parentName,
+      displayLabel: parentName ? `${parentName} · ${loc.name}` : loc.name,
+      qty,
+    })
+    entry.totalQty += qty
+  }
+  // Per-part: sort locations by qty desc so the most-stocked appears first
+  for (const e of byPart.values()) {
+    e.locations.sort((a, b) => b.qty - a.qty)
+  }
+  // Return alphabetically by part name
+  return Array.from(byPart.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+}
+
 export async function getStockSummary() {
   const { data, error } = await db
     .from('inventory_stock')
