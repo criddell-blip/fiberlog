@@ -5,62 +5,16 @@ import AdminUsersView from './AdminUsersView'
 import CrewTypePermissionsView from './CrewTypePermissionsView'
 
 export default function AdminPanel() {
-  const { projects, setProjects, users, showToast, reload } = useApp()
+  const { projects, setProjects, showToast, reload } = useApp()
   const [selProject, setSelProject] = useState(null)
   const [loading, setLoading] = useState(false)
   const [confirm, setConfirm] = useState(null)
-  const [view, setView] = useState('projects') // 'projects' | 'crew' | 'users' | 'crewperms'
-
-  // Password editing
-  const [editingPassword, setEditingPassword] = useState(null)
-  const [newPassword, setNewPassword] = useState('')
-  const [pwSaving, setPwSaving] = useState(false)
+  const [view, setView] = useState('projects') // 'projects' | 'users' | 'crewperms'
 
   // Editing state
   const [editingName, setEditingName] = useState(null)
   const [editVal, setEditVal] = useState('')
   const [saving, setSaving] = useState(false)
-
-  async function savePassword(user) {
-    const pwd = newPassword.trim()
-    if (!pwd) {
-      showToast('Password cannot be empty')
-      return
-    }
-    if (pwd.length < 8) {
-      showToast('Password must be at least 8 characters')
-      return
-    }
-    setPwSaving(true)
-    try {
-      const { data: { session } } = await db.auth.getSession()
-      if (!session) throw new Error('Not signed in')
-
-      const res = await fetch(
-        `${db.supabaseUrl}/functions/v1/admin-set-password`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ userId: user.id, newPassword: pwd }),
-        }
-      )
-
-      const result = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`)
-
-      setEditingPassword(null)
-      setNewPassword('')
-      showToast(`Password updated for ${user.name}`)
-      reload()
-    } catch(e) {
-      showToast('Failed: ' + e.message)
-    } finally {
-      setPwSaving(false)
-    }
-  }
 
   async function saveProjectName(project) {
     if (!editVal.trim()) return
@@ -212,95 +166,6 @@ export default function AdminPanel() {
     return <CrewTypePermissionsView onBack={() => setView('projects')} />
   }
 
-  // ── Crew / password view ────────────────────────────────────────────────────
-  if (view === 'crew') {
-    const crewMembers = users.filter(u => u.role !== 'owner')
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ padding: '16px 20px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button onClick={() => setView('projects')} style={{ fontSize: 20, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer' }}>←</button>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 17 }}>Crew Passwords</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Set or clear login passwords</div>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
-          {crewMembers.map(u => (
-            <div key={u.id} style={{
-              background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 8
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{
-                  width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
-                  background: u.role === 'manager' ? 'var(--orange-lt)' : 'var(--surface2)',
-                  border: u.role === 'manager' ? '1.5px solid var(--orange-dk)' : '1px solid var(--border2)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontWeight: 700, fontSize: 13,
-                  color: u.role === 'manager' ? 'var(--orange)' : 'var(--muted)',
-                }}>
-                  {u.initials}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{u.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
-                    {u.role} · {u.crew_type || '—'}
-                  </div>
-                </div>
-                <button
-                  onClick={() => { setEditingPassword(u); setNewPassword('') }}
-                  style={{ fontSize: 12, color: 'var(--orange)', fontWeight: 700, background: 'none', border: '1px solid var(--orange)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', flexShrink: 0 }}>
-                  Reset password
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Password edit overlay */}
-        {editingPassword && (
-          <div className="overlay open" onClick={e => e.target === e.currentTarget && (setEditingPassword(null), setNewPassword(''))}>
-            <div className="overlay-sheet">
-              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>
-                Reset password
-              </div>
-              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
-                {editingPassword.name}
-              </div>
-              <div className="field">
-                <label>New password</label>
-                <input
-                  type="text"
-                  placeholder="At least 8 characters"
-                  value={newPassword}
-                  onChange={e => setNewPassword(e.target.value)}
-                  autoFocus
-                  onKeyDown={e => e.key === 'Enter' && savePassword(editingPassword)}
-                />
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--hint)', marginBottom: 16 }}>
-                Communicate the new password to the crew member directly.
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-ghost" style={{ flex: 1 }}
-                  onClick={() => { setEditingPassword(null); setNewPassword('') }}>
-                  Cancel
-                </button>
-                <button className="btn btn-primary" style={{ flex: 2 }}
-                  onClick={() => savePassword(editingPassword)} disabled={pwSaving}>
-                  {pwSaving ? 'Saving...' : 'Save password'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
-
   // ── Phase detail ────────────────────────────────────────────────────────────
   if (selProject) {
     return (
@@ -383,17 +248,6 @@ export default function AdminPanel() {
             <div style={{ fontWeight: 700, fontSize: 14 }}>👤 Manage users</div>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
               Add new users, edit roles & permissions, deactivate accounts
-            </div>
-          </div>
-          <span style={{ fontSize: 16, color: 'var(--muted)' }}>›</span>
-        </div>
-        <div
-          onClick={() => setView('crew')}
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 16, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>🔒 Reset passwords</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-              Quick password resets for crew and managers
             </div>
           </div>
           <span style={{ fontSize: 16, color: 'var(--muted)' }}>›</span>
