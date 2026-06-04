@@ -435,7 +435,7 @@ export default function CrewApp() {
               }}>
                 <div style={{ fontSize: 40 }}>👈</div>
                 <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>Pick a project from the sidebar</div>
-                <div style={{ fontSize: 13 }}>Expand a project → phase → task to start logging</div>
+                <div style={{ fontSize: 13 }}>Expand a project → phase/site → task to start logging</div>
 
                 {/* Brief day-flow card so new crews get oriented without
                     having to ask. Sits below the picker prompt; experienced
@@ -462,7 +462,7 @@ export default function CrewApp() {
                     <div style={{ display: 'flex', gap: 10 }}>
                       <span style={{ fontWeight: 800, color: 'var(--orange)' }}>2.</span>
                       <span>
-                        🏗️ <strong>Work the task</strong> — pick a project → phase → task, tally parts and footage as you go.
+                        🏗️ <strong>Work the task</strong> — pick a project → phase/site → task, tally parts and footage as you go.
                       </span>
                     </div>
                     <div style={{ display: 'flex', gap: 10 }}>
