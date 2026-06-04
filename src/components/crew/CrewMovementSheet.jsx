@@ -88,12 +88,20 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   // by-part view. Cached for the sheet's lifetime — search filters happen
   // client-side. Excludes the caller's truck so they don't see it as a
   // possible source.
+  //
+  // Important: always clear loadingPartGroups in finally REGARDLESS of
+  // cancelled. If the effect re-runs while the query is in flight (e.g.
+  // myTruck?.id resolves from undefined → defined), the cleanup sets
+  // cancelled=true; gating the finally on !cancelled would leave the
+  // loading flag stuck true forever. Cancelled only matters for the
+  // setPartGroups/setError state updates so a stale response doesn't
+  // overwrite a fresher one — not for cosmetics like the spinner.
   useEffect(() => {
     if (!isLoad || viewMode !== 'by-part') return
-    if (partGroups !== null || loadingPartGroups) return
+    if (partGroups !== null) return
     let cancelled = false
+    setLoadingPartGroups(true)
     ;(async () => {
-      setLoadingPartGroups(true)
       try {
         const groups = await getAllStockGrouped({ excludeLocationId: myTruck?.id })
         if (!cancelled) setPartGroups(groups)
@@ -103,11 +111,11 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
           setError('Could not load stock: ' + e.message)
         }
       } finally {
-        if (!cancelled) setLoadingPartGroups(false)
+        setLoadingPartGroups(false)
       }
     })()
     return () => { cancelled = true }
-  }, [isLoad, viewMode, partGroups, loadingPartGroups, myTruck?.id])
+  }, [isLoad, viewMode, partGroups, myTruck?.id])
 
   // For 'load' mode, fetch stock at the picked source. For 'return',
   // the source is the truck and we already have myStock from the parent.
