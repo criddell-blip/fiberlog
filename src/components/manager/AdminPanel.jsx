@@ -9,57 +9,7 @@ export default function AdminPanel() {
   const [selProject, setSelProject] = useState(null)
   const [loading, setLoading] = useState(false)
   const [confirm, setConfirm] = useState(null)
-  const [view, setView] = useState('projects') // 'projects' | 'crew' | 'boxhero' | 'users' | 'crewperms'
-
-  // BoxHero sync
-  const [syncing, setSyncing] = useState(false)
-  const [syncResult, setSyncResult] = useState(null)
-
-  const SUPABASE_URL = 'https://attduslwidxecmjifsnl.supabase.co'
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0dGR1c2x3aWR4ZWNtamlmc25sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4MzkxMzcsImV4cCI6MjA5MTQxNTEzN30.Gg-W0XR2neAT9nVtPxnUiwk1HpHqsOi_PJjYVucdXkc'
-
-  async function handleBoxHeroSync() {
-    setSyncing(true)
-    setSyncResult(null)
-    try {
-      // 1. Fetch stock from BoxHero via edge function
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/dynamic-worker`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'apikey': SUPABASE_ANON_KEY,
-        }
-      })
-      if (!res.ok) throw new Error('BoxHero fetch failed: ' + res.status)
-      const json = await res.json()
-      const stock = json.stock || {}
-      const skus = Object.keys(stock)
-      if (skus.length === 0) throw new Error('No stock data returned')
-
-      // 2. Update parts_catalog stock_qty for each SKU
-      let updated = 0
-      let notFound = 0
-      for (const sku of skus) {
-        const qty = stock[sku] || 0
-        const { data, error } = await db
-          .from('parts_catalog')
-          .update({ stock_qty: qty })
-          .eq('id', sku)
-          .select('id')
-        if (error) console.warn('Update failed for', sku, error)
-        else if (data && data.length > 0) updated++
-        else notFound++
-      }
-
-      setSyncResult({ updated, notFound, total: skus.length, time: new Date().toLocaleTimeString() })
-      showToast(`BoxHero sync complete — ${updated} parts updated`)
-    } catch(e) {
-      showToast('Sync failed: ' + e.message)
-      console.error('BoxHero sync error:', e)
-    } finally {
-      setSyncing(false)
-    }
-  }
+  const [view, setView] = useState('projects') // 'projects' | 'crew' | 'users' | 'crewperms'
 
   // Password editing
   const [editingPassword, setEditingPassword] = useState(null)
@@ -249,84 +199,6 @@ export default function AdminPanel() {
           style={{ fontSize: 11, color: 'var(--orange)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
           ✎ rename
         </button>
-      </div>
-    )
-  }
-
-  // ── BoxHero sync view ─────────────────────────────────────────────────────
-  if (view === 'boxhero') {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ padding: '16px 20px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button onClick={() => { setView('projects'); setSyncResult(null) }} style={{ fontSize: 20, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer' }}>←</button>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 17 }}>BoxHero Stock Sync</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Updates stock_qty in parts catalog</div>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
-
-          {/* Sync button */}
-          <button
-            onClick={handleBoxHeroSync}
-            disabled={syncing}
-            style={{
-              width: '100%', padding: '16px', marginBottom: 20,
-              background: syncing ? 'var(--gray-lt)' : 'var(--orange)',
-              color: syncing ? 'var(--muted)' : 'white',
-              border: 'none', borderRadius: 'var(--r)', fontSize: 16,
-              fontWeight: 800, cursor: syncing ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10
-            }}
-          >
-            {syncing ? (
-              <>
-                <div style={{ width: 18, height: 18, border: '2px solid var(--muted)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
-                Syncing...
-                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-              </>
-            ) : (
-              <> 📦 Sync BoxHero Stock Now </>
-            )}
-          </button>
-
-          {/* Result card */}
-          {syncResult && (
-            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: 20 }}>
-              <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 16, color: 'var(--teal-mid)' }}>✓ Sync complete — {syncResult.time}</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
-                <div style={{ background: 'var(--bg)', borderRadius: 'var(--r-sm)', padding: 14, textAlign: 'center' }}>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--orange)' }}>{syncResult.total}</div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>SKUs from BoxHero</div>
-                </div>
-                <div style={{ background: 'var(--bg)', borderRadius: 'var(--r-sm)', padding: 14, textAlign: 'center' }}>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--teal-mid)' }}>{syncResult.updated}</div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>Parts updated</div>
-                </div>
-                <div style={{ background: 'var(--bg)', borderRadius: 'var(--r-sm)', padding: 14, textAlign: 'center' }}>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: syncResult.notFound > 0 ? 'var(--amber)' : 'var(--hint)' }}>{syncResult.notFound}</div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>Not in catalog</div>
-                </div>
-              </div>
-              {syncResult.notFound > 0 && (
-                <div style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-lt)', borderRadius: 'var(--r-sm)', padding: '10px 14px' }}>
-                  ⚠️ {syncResult.notFound} BoxHero SKUs weren't found in your parts catalog. They may need to be added manually.
-                </div>
-              )}
-            </div>
-          )}
-
-          {!syncResult && !syncing && (
-            <div style={{ textAlign: 'center', padding: '30px 20px', color: 'var(--hint)', fontSize: 13 }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>📦</div>
-              <div style={{ fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>Tap to sync stock levels</div>
-              <div>Pulls current quantities from BoxHero and updates your parts catalog. Run this whenever stock changes.</div>
-            </div>
-          )}
-        </div>
       </div>
     )
   }
@@ -527,17 +399,8 @@ export default function AdminPanel() {
           <span style={{ fontSize: 16, color: 'var(--muted)' }}>›</span>
         </div>
 
-        {/* BoxHero sync section */}
+        {/* Inventory section */}
         <div className="sec-label">Inventory</div>
-        <div
-          onClick={() => setView('boxhero')}
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 8, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>📦 BoxHero stock sync</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Pull latest stock levels from BoxHero</div>
-          </div>
-          <span style={{ fontSize: 16, color: 'var(--muted)' }}>›</span>
-        </div>
         <div
           onClick={() => setView('crewperms')}
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 16, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
