@@ -5,9 +5,12 @@ import { createClient } from '@supabase/supabase-js'
 // (RLS is the access boundary), so embedding it in the bundle is intended.
 // To point local dev at a different Supabase project, drop overrides into
 // .env.local (gitignored).
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+// Exported so other modules (e.g. ReportsView calling an edge function)
+// can avoid re-declaring the constants. Both are intentionally public —
+// the anon key is RLS-gated and intended to ship in the bundle.
+export const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
   || 'https://attduslwidxecmjifsnl.supabase.co'
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
   || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0dGR1c2x3aWR4ZWNtamlmc25sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4MzkxMzcsImV4cCI6MjA5MTQxNTEzN30.Gg-W0XR2neAT9nVtPxnUiwk1HpHqsOi_PJjYVucdXkc'
 
 export const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)

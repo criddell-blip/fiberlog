@@ -1,10 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
-import { db } from '../../lib/supabase'
+import { db, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabase'
 import { useIsWide } from '../../lib/useIsWide'
-
-const SUPABASE_URL = 'https://attduslwidxecmjifsnl.supabase.co'
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0dGR1c2x3aWR4ZWNtamlmc25sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4MzkxMzcsImV4cCI6MjA5MTQxNTEzN30.Gg-W0XR2neAT9nVtPxnUiwk1HpHqsOi_PJjYVucdXkc'
 
 async function fetchBoxHeroStock() {
   try {
