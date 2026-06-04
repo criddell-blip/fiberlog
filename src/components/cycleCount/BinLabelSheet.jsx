@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
 import { formatBinCode } from '../../lib/cycleCount'

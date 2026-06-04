@@ -35,7 +35,6 @@ export function AppProvider({ children }) {
   const [assemblies, setAssemblies] = useState({})
   const [users, setUsers] = useState([])
   const [currentUser, setCurrentUser] = useState(null)
-  const [currentSession, setCurrentSession] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [toast, setToast] = useState(null)
@@ -286,7 +285,6 @@ export function AppProvider({ children }) {
       currentUser, selectUser,
       login, logout,
       lang: currentUser?.language || 'en',
-      currentSession, setCurrentSession,
       loading, error,
       toast, showToast,
       setTaskLocal,

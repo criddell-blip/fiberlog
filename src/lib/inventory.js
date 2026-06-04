@@ -121,15 +121,6 @@ export async function getStockByLocation(locationId) {
     .sort((a, b) => (a.parts_catalog?.name || '').localeCompare(b.parts_catalog?.name || ''))
 }
 
-export async function getStockByPart(partId) {
-  const { data, error } = await db
-    .from('inventory_stock')
-    .select('quantity, last_movement_at, location:inventory_locations(id, name, type, assigned_to)')
-    .eq('part_id', partId)
-  if (error) throw error
-  return (data || []).filter(r => Number(r.quantity) !== 0)
-}
-
 // Returns ALL active stock grouped by part. Used by the crew "Find a
 // part" Load mode. Three parallel flat queries instead of one embedded
 // join — PostgREST's nested select() is convenient but joins per row
