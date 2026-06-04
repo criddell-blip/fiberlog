@@ -430,11 +430,56 @@ export default function CrewApp() {
             ) : (
               <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                height: '100%', flexDirection: 'column', gap: 12, color: 'var(--muted)'
+                height: '100%', flexDirection: 'column', gap: 12, color: 'var(--muted)',
+                padding: 20,
               }}>
                 <div style={{ fontSize: 40 }}>👈</div>
                 <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>Pick a project from the sidebar</div>
                 <div style={{ fontSize: 13 }}>Expand a project → phase → task to start logging</div>
+
+                {/* Brief day-flow card so new crews get oriented without
+                    having to ask. Sits below the picker prompt; experienced
+                    crews ignore it (they're clicking their project anyway). */}
+                <div style={{
+                  marginTop: 24, padding: '16px 20px',
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--r-sm)', maxWidth: 420, width: '100%',
+                  textAlign: 'left',
+                }}>
+                  <div style={{
+                    fontSize: 11, fontWeight: 700, color: 'var(--muted)',
+                    textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 10,
+                  }}>
+                    Your day in 3 steps
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13, color: 'var(--text)' }}>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <span style={{ fontWeight: 800, color: 'var(--orange)' }}>1.</span>
+                      <span>
+                        📦 <strong>Load up</strong> — tap <strong>My Stock</strong> at the top of the sidebar and load parts onto your truck before heading out.
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <span style={{ fontWeight: 800, color: 'var(--orange)' }}>2.</span>
+                      <span>
+                        🏗️ <strong>Work the task</strong> — pick a project → phase → task, tally parts and footage as you go.
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <span style={{ fontWeight: 800, color: 'var(--orange)' }}>3.</span>
+                      <span>
+                        ✅ <strong>Submit passdown</strong> when the task is done. Your manager reviews it; auto-deduct moves the materials off your truck to the project bucket.
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{
+                    marginTop: 12, paddingTop: 10,
+                    borderTop: '1px solid var(--border)',
+                    fontSize: 11, color: 'var(--hint)', fontStyle: 'italic',
+                  }}>
+                    End of day, drop back to My Stock to return anything you didn't use.
+                  </div>
+                </div>
               </div>
             )
           ) : isReadOnlyTask(selTask) ? (
