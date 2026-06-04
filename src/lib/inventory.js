@@ -142,7 +142,7 @@ export async function getAllStockGrouped({ excludeLocationId = null } = {}) {
     .from('inventory_stock')
     .select(`
       quantity, last_movement_at,
-      part:parts_catalog(id, name, unit, category, material_group, department, is_active),
+      part:parts_catalog(id, name, nickname, attributes, unit, category, material_group, department, is_active),
       location:inventory_locations(id, name, type, parent_location_id, assigned_to, is_active)
     `)
   if (error) throw error
@@ -166,6 +166,8 @@ export async function getAllStockGrouped({ excludeLocationId = null } = {}) {
       byPart.set(part.id, {
         partId: part.id,
         name: part.name,
+        nickname: part.nickname || null,
+        attributes: part.attributes || {},
         unit: part.unit,
         category: part.category,
         material_group: part.material_group,
@@ -1125,7 +1127,7 @@ export async function createDraftParts(drafts) {
 export async function searchInventoryParts(query) {
   if (!query || query.length < 2) return []
   return searchPartsCatalog(query, {
-    cols: 'id, name, unit, category, material_group, is_active',
+    cols: 'id, name, nickname, unit, category, material_group, is_active',
     limit: 20,
   })
 }

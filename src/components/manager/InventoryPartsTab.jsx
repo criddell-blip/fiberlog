@@ -326,6 +326,11 @@ export default function InventoryPartsTab({ refreshKey, onChanged }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {p.name}
+                    {p.nickname && (
+                      <span style={{ fontWeight: 400, color: 'var(--orange)', marginLeft: 6, fontStyle: 'italic', fontSize: 12 }}>
+                        aka {p.nickname}
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--hint)' }}>
                     {p.id} · {p.unit || 'ea'} · {p.category || 'Uncategorized'}
@@ -444,6 +449,27 @@ function bulkActionBtn(variant) {
 
 function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
   const [name, setName] = useState(part.name || '')
+  const [nickname, setNickname] = useState(part.nickname || '')
+
+  // Open-ended attribute bag. Stored as an array of {key, value} for
+  // stable rendering during editing; serialized to a plain object on
+  // submit. New keys added at the bottom; deleting clears the row.
+  const [attrRows, setAttrRows] = useState(() => {
+    const obj = part.attributes && typeof part.attributes === 'object' ? part.attributes : {}
+    return Object.entries(obj).map(([key, value]) => ({
+      key,
+      value: value == null ? '' : String(value),
+    }))
+  })
+  function addAttrRow() {
+    setAttrRows(prev => [...prev, { key: '', value: '' }])
+  }
+  function setAttrRow(idx, patch) {
+    setAttrRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r))
+  }
+  function removeAttrRow(idx) {
+    setAttrRows(prev => prev.filter((_, i) => i !== idx))
+  }
 
   const [unit, setUnit] = useState(part.unit || 'ea')
   const [unitCustom, setUnitCustom] = useState(!COMMON_UNITS.includes(part.unit || 'ea'))
@@ -480,8 +506,18 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
     if (!name.trim()) return
     setSaving(true)
     try {
+      // Collapse attribute rows back to a plain object. Skip empty keys;
+      // dedupe by key (last write wins for a given key).
+      const attributes = {}
+      for (const r of attrRows) {
+        const k = (r.key || '').trim()
+        if (!k) continue
+        attributes[k] = (r.value || '').trim()
+      }
       await onSave({
         name: name.trim(),
+        nickname: nickname.trim() || null,
+        attributes,
         unit: unit.trim() || 'ea',
         department: department.trim() || null,
         item_type: itemType.trim() || null,
@@ -509,6 +545,21 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
           <div className="field">
             <label>Name</label>
             <input type="text" value={name} onChange={e => setName(e.target.value)} autoFocus />
+          </div>
+
+          <div className="field">
+            <label>Nickname <span style={{ fontWeight: 400, color: 'var(--hint)' }}>— crew-facing alias</span></label>
+            <input
+              type="text"
+              value={nickname}
+              onChange={e => setNickname(e.target.value)}
+              placeholder='e.g. "house box" for a Calix NID'
+              autoComplete="off"
+              name="part-nickname"
+            />
+            <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
+              Searched alongside name and SKU. Shows up next to the part name as <em>aka nickname</em>.
+            </div>
           </div>
 
           <FieldWithCustom label="Unit" value={unit} onChange={setUnit}
@@ -557,6 +608,56 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
             <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
               {SONAR_ROUTING_OPTIONS.find(o => o.id === sonarRouting)?.desc}
             </div>
+          </div>
+
+          {/* Open-ended attributes — extensible without migrations. Anything
+              you add here gets searched alongside the named fields in the
+              crew Find-a-part view. */}
+          <div className="field">
+            <label>Custom attributes <span style={{ fontWeight: 400, color: 'var(--hint)' }}>— optional</span></label>
+            {attrRows.length === 0 && (
+              <div style={{ fontSize: 11, color: 'var(--hint)', marginBottom: 6 }}>
+                No custom attributes yet. Add things like supplier code, alternate SKU, color — any key/value.
+              </div>
+            )}
+            {attrRows.map((row, idx) => (
+              <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                <input
+                  type="text"
+                  value={row.key}
+                  onChange={e => setAttrRow(idx, { key: e.target.value })}
+                  placeholder="key (e.g. supplier_code)"
+                  autoComplete="off"
+                  name={`attr-key-${idx}`}
+                  style={{ flex: 1, padding: '6px 10px', fontSize: 12, border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', background: 'var(--surface2)' }}
+                />
+                <input
+                  type="text"
+                  value={row.value}
+                  onChange={e => setAttrRow(idx, { value: e.target.value })}
+                  placeholder="value"
+                  autoComplete="off"
+                  name={`attr-val-${idx}`}
+                  style={{ flex: 2, padding: '6px 10px', fontSize: 12, border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', background: 'var(--surface2)' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeAttrRow(idx)}
+                  style={{ padding: '4px 10px', fontSize: 12, background: 'transparent', border: '1px solid var(--border)', borderRadius: 'var(--r-xs)', cursor: 'pointer', color: 'var(--muted)' }}
+                  title="Remove this attribute"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={addAttrRow}
+              className="add-dashed"
+              style={{ padding: '8px', fontSize: 12 }}
+            >
+              + Add attribute
+            </button>
           </div>
 
           <label style={{

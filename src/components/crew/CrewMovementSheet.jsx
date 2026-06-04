@@ -187,17 +187,28 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   }, [otherLocations])
 
   // Filter partGroups by the same search input as the by-location flow.
-  // Matches name, SKU, material group, department.
+  // Matches name, nickname, SKU, material group, department, and ANY
+  // string value in the open attributes JSON — so adding a new attribute
+  // ("supplier_code": "...") makes it instantly searchable without
+  // touching this function.
   const filteredGroups = useMemo(() => {
     if (!partGroups) return []
     const q = partSearch.trim().toLowerCase()
     if (!q) return partGroups
-    return partGroups.filter(p =>
-      (p.name || '').toLowerCase().includes(q) ||
-      (p.partId || '').toLowerCase().includes(q) ||
-      (p.material_group || '').toLowerCase().includes(q) ||
-      (p.department || '').toLowerCase().includes(q)
-    )
+    return partGroups.filter(p => {
+      if ((p.name || '').toLowerCase().includes(q)) return true
+      if ((p.nickname || '').toLowerCase().includes(q)) return true
+      if ((p.partId || '').toLowerCase().includes(q)) return true
+      if ((p.material_group || '').toLowerCase().includes(q)) return true
+      if ((p.department || '').toLowerCase().includes(q)) return true
+      // Search across attribute values (string-typed only — numbers/booleans skipped)
+      if (p.attributes && typeof p.attributes === 'object') {
+        for (const v of Object.values(p.attributes)) {
+          if (typeof v === 'string' && v.toLowerCase().includes(q)) return true
+        }
+      }
+      return false
+    })
   }, [partGroups, partSearch])
 
   // Tap a (part, location) row in by-part view: set both states at once.
@@ -342,6 +353,11 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                   }}>
                     <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {group.name}
+                      {group.nickname && (
+                        <span style={{ fontWeight: 400, color: 'var(--orange)', marginLeft: 6, fontStyle: 'italic' }}>
+                          aka {group.nickname}
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: '"DM Mono", monospace' }}>
                       {group.partId} · {group.totalQty.toLocaleString()} {group.unit || 'ea'} across {group.locations.length} location{group.locations.length === 1 ? '' : 's'}

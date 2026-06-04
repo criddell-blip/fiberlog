@@ -35,14 +35,15 @@ export const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 // Single OR-query would be 1 round trip vs 8, but parallel queries avoid
 // the PostgREST escaping hazard when the user's query contains commas
 // (real-world example: "Bolt, Thimble Eye 5/8").
-export async function searchPartsCatalog(query, { cols = 'id, name, unit', limit = 20 } = {}) {
+export async function searchPartsCatalog(query, { cols = 'id, name, nickname, unit', limit = 20 } = {}) {
   const q = String(query ?? '').trim()
   if (!q) return []
   const pattern = `%${q}%`
 
   // Searched in priority order — first hit wins after de-dupe.
   const searchedCols = [
-    'name',           // most common — part description
+    'nickname',       // crew-facing alias ("house box" → Calix NID)
+    'name',           // part description
     'id',             // SKU
     'barcode',        // scanned UPC/EAN
     'boxhero_id',     // legacy BoxHero text id (e.g. UB-12345)
@@ -461,7 +462,7 @@ export async function deleteAssembly(id) {
 
 export async function searchParts(query) {
   return searchPartsCatalog(query, {
-    cols: 'id, name, unit, category, department, material_group',
+    cols: 'id, name, nickname, unit, category, department, material_group',
     limit: 20,
   })
 }
