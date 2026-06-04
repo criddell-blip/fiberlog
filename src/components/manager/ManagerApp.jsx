@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { VALID_FIELD_CREW_TYPES } from '../../lib/crewTypes'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
 import SubmissionsQueue from './SubmissionsQueue'
@@ -50,10 +51,8 @@ function ThemeToggle({ darkMode, onToggle, compact = false }) {
   )
 }
 
-// Same field crew_types the App.jsx router uses to decide whether a staff
-// user can flip to crew mode. Keep these in sync — if you add a new
-// crew_type with its own shell, list it in both places.
-const VALID_FIELD_CREW_TYPES = ['aerial', 'underground', 'splice', 'drop', 'locator', 'install', 'infrastructure']
+// VALID_FIELD_CREW_TYPES lives in lib/crewTypes.js so App.jsx + ManagerApp
+// can share one source of truth.
 
 // "Switch to crew mode" button for working managers. Disabled with a
 // tooltip when the staff user doesn't have a real field crew_type set

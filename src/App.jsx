@@ -3,12 +3,8 @@ import CrewApp from './components/crew/CrewApp'
 import InfraCrewApp from './components/crew/infra/InfraCrewApp'
 import ManagerApp from './components/manager/ManagerApp'
 import Login from './Login'
+import { VALID_FIELD_CREW_TYPES } from './lib/crewTypes'
 import './styles/global.css'
-
-// Field crew types that have a meaningful crew shell. A staff user with
-// crew_type in this set can flip into "crew mode" and log work as one of
-// these. We exclude 'contractor' (no real shell wired) and anything NULL.
-const VALID_FIELD_CREW_TYPES = ['aerial', 'underground', 'splice', 'drop', 'locator', 'install', 'infrastructure']
 
 function RootRouter() {
   const { currentUser, loading, error, reload, viewMode } = useApp()
