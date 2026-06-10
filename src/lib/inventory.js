@@ -325,6 +325,44 @@ export async function clearSonarProjectPhase(project) {
   if (error) throw error
 }
 
+// Sonar source → FiberLog location map. Used for Previous Inventory
+// Location values that aren't crew members — most commonly "Warehouse" —
+// so when a tech grabs equipment without first logging the truck loadout
+// in Sonar, the resulting install row still routes correctly (warehouse →
+// project bucket) instead of silently failing as 'no-crew'. Picks persist
+// so the manager configures once per source string, forever.
+export async function getSonarSourceLocationMap() {
+  const { data, error } = await db
+    .from('sonar_source_location_map')
+    .select('sonar_source, location_id')
+  if (error) throw error
+  const m = new Map()
+  for (const row of data || []) {
+    if (row.sonar_source) m.set(row.sonar_source.toUpperCase(), row.location_id)
+  }
+  return m
+}
+
+export async function setSonarSourceLocation(sonarSource, locationId) {
+  if (!sonarSource || !locationId) throw new Error('sonarSource and locationId required')
+  const { error } = await db
+    .from('sonar_source_location_map')
+    .upsert(
+      { sonar_source: sonarSource.toUpperCase(), location_id: locationId },
+      { onConflict: 'sonar_source' }
+    )
+  if (error) throw error
+}
+
+export async function clearSonarSourceLocation(sonarSource) {
+  if (!sonarSource) return
+  const { error } = await db
+    .from('sonar_source_location_map')
+    .delete()
+    .eq('sonar_source', sonarSource.toUpperCase())
+  if (error) throw error
+}
+
 // Bulk-create phases and seed the Sonar project map in one pass. Each
 // item: { sonarProject: string, projectId: uuid, phaseName: string }.
 // For each, creates a phase under projectId (auto-incrementing

@@ -5,6 +5,8 @@ import {
   recordMovementsBatch,
   getSonarCityMap, setSonarCityBucket,
   getSonarProjectMap, setSonarProjectPhase, getPhasesWithBuckets,
+  getSonarSourceLocationMap, setSonarSourceLocation,
+  getLocations,
   setPartSonarRouting, SONAR_ROUTING_OPTIONS,
   getPendingSonarImports, getProcessedSonarImports, getPendingSonarImport,
   markSonarPendingImportApplied, discardSonarPendingImport,
@@ -92,7 +94,9 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [buckets, setBuckets] = useState([])          // job_site locations (regions + Gigwave/None)
   const [persistedCityMap, setPersistedCityMap] = useState(() => new Map())  // city UPPER → bucket id
   const [persistedProjectMap, setPersistedProjectMap] = useState(() => new Map())  // project UPPER → phase id
+  const [persistedSourceMap, setPersistedSourceMap] = useState(() => new Map())  // sonar_source UPPER → location id (warehouse-type sources only)
   const [phases, setPhases] = useState([])  // [{id, name, project_id, project_name, bucket_id}] — picker source
+  const [warehouses, setWarehouses] = useState([])  // warehouse + bin locations for the "map source to warehouse" picker
 
   // ── CSV state ───────────────────────────────────────────────────────────
   const [fileName, setFileName] = useState('')
@@ -145,6 +149,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [partMap, setPartMap] = useState({})          // sonarModel → part_id
   const [pendingCityMap, setPendingCityMap] = useState({})  // city UPPER → bucket id (manager picks this session)
   const [pendingProjectMap, setPendingProjectMap] = useState({})  // project UPPER → phase id (this session)
+  const [pendingSourceMap, setPendingSourceMap] = useState({})    // sonar_source UPPER → location id (this session, mirrors persistedSourceMap)
   const [pendingPartRouting, setPendingPartRouting] = useState({}) // part_id → policy
   const [rowDest, setRowDest] = useState({})          // row idx → bucket id (per-row override / ask-resolution)
   const [excluded, setExcluded] = useState(() => new Set())
@@ -161,7 +166,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     let cancelled = false
     ;(async () => {
       try {
-        const [usersRes, trucksRes, partsRes, bucketsRes, cityMap, projectMap, phasesData] = await Promise.all([
+        const [usersRes, trucksRes, partsRes, bucketsRes, cityMap, projectMap, phasesData, sourceMap, allLocations] = await Promise.all([
           db.from('users')
             .select('id, name, role, crew_type')
             .eq('is_active', true)
@@ -184,6 +189,8 @@ export default function SonarImportSheet({ onClose, onApplied }) {
           getSonarCityMap(),
           getSonarProjectMap(),
           getPhasesWithBuckets(),
+          getSonarSourceLocationMap(),
+          getLocations({ includeBins: true }),
         ])
         if (cancelled) return
         if (usersRes.error)   throw usersRes.error
@@ -199,6 +206,13 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         setPersistedCityMap(cityMap)
         setPersistedProjectMap(projectMap)
         setPhases(phasesData || [])
+        setPersistedSourceMap(sourceMap)
+        // Warehouses + bins are the eligible targets for source-mapping a
+        // non-crew Sonar source. Trucks/job_sites/scrap are excluded —
+        // they're handled by other flows (crew picker, project bucket).
+        setWarehouses(
+          (allLocations || []).filter(l => l.type === 'warehouse' || l.type === 'bin')
+        )
       } catch (e) {
         if (!cancelled) setError('Failed to load FiberLog lookups: ' + (e.message || e))
       }
@@ -407,6 +421,33 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     }
   }
 
+  // When the manager picks a warehouse for a non-crew Sonar source string
+  // ("Warehouse" → Main Warehouse), persist the mapping AND clear the crew
+  // pick for that source — the row's source is no longer a person, so we
+  // shouldn't try to look up a truck for it.
+  async function handleSourceLocationChange(sonarSource, locationId) {
+    const up = sonarSource.toUpperCase()
+    setPendingSourceMap(prev => ({ ...prev, [up]: locationId }))
+    // Clear the crew pick for this source so the resolver doesn't see a
+    // ghost user mapping fighting the warehouse one.
+    setCrewMap(prev => {
+      const next = { ...prev }
+      delete next[sonarSource]
+      return next
+    })
+    if (!locationId) return
+    try {
+      await setSonarSourceLocation(sonarSource, locationId)
+      setPersistedSourceMap(prev => {
+        const next = new Map(prev)
+        next.set(up, locationId)
+        return next
+      })
+    } catch (e) {
+      setError(`Failed to save source mapping for ${sonarSource}: ${e.message}`)
+    }
+  }
+
   async function handleCityBucketChange(city, bucketId) {
     const uc = city.toUpperCase()
     setPendingCityMap(prev => ({ ...prev, [uc]: bucketId }))
@@ -526,6 +567,18 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     return merged
   }, [persistedProjectMap, pendingProjectMap])
 
+  // Sonar source string → FiberLog location id (warehouse/bin). When a
+  // source has a mapping here, the resolver uses that location as the
+  // from_location_id and skips the crew/truck lookup entirely.
+  const effectiveSourceMap = useMemo(() => {
+    const merged = new Map(persistedSourceMap)
+    for (const [k, v] of Object.entries(pendingSourceMap)) {
+      if (v) merged.set(k, v)
+      else merged.delete(k)
+    }
+    return merged
+  }, [persistedSourceMap, pendingSourceMap])
+
   function getPartRouting(partId) {
     if (pendingPartRouting[partId]) return pendingPartRouting[partId]
     const p = parts.find(p => p.id === partId)
@@ -541,8 +594,16 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       const fullAddress = row['Address | Full Address'] || ''
       const city = parseCityFromFullAddress(fullAddress)
       const sonarProject = (row['Project'] || '').trim()
-      const userId = crewMap[sonarLoc] || null
+      // Resolve the source. Priority 1: warehouse-source map (covers
+      // "Warehouse" and friends). Priority 2: crew → truck. When the
+      // warehouse path wins, userId stays null (consumed_by_user_id
+      // becomes NULL on the resulting movement — accurate "we don't
+      // know which crew did the pull").
+      const sourceLocationId = effectiveSourceMap.get(sonarLoc.toUpperCase()) || null
+      const sourceIsWarehouse = !!sourceLocationId
+      const userId = sourceIsWarehouse ? null : (crewMap[sonarLoc] || null)
       const truckId = userId ? trucksByUser[userId] : null
+      const fromLocationId = sourceLocationId || truckId || null
       const partId = partMap[sonarModel] || null
       const userName = userId ? crewUsers.find(u => u.id === userId)?.name || '' : ''
       const partName = partId ? parts.find(p => p.id === partId)?.name || '' : ''
@@ -569,9 +630,13 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       else if (rowDest[idx]) {
         destId = rowDest[idx]
         destReason = 'manual pick'
-      } else if (!userId) {
-        status = 'no-crew'
-      } else if (!truckId) {
+      } else if (!fromLocationId) {
+        // No source identified — either an unmatched crew name OR an
+        // unfamiliar non-crew source string (e.g. "Receiving") that
+        // hasn't been mapped to a warehouse yet.
+        status = sourceIsWarehouse ? 'no-source-location' : 'no-crew'
+      } else if (!sourceIsWarehouse && !truckId) {
+        // Crew was matched but they have no truck assigned.
         status = 'no-truck'
       } else if (!partId) {
         status = 'no-part'
@@ -638,6 +703,9 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         sonarLoc, sonarModel,
         sonarItemId,
         userId, truckId, userName,
+        sourceLocationId,
+        sourceIsWarehouse,
+        fromLocationId,
         partId, partName,
         routing,
         destId,
@@ -649,7 +717,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         status,
       }
     })
-  }, [dedupedRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, phases, effectiveCityMap, effectiveProjectMap, rowDest, pendingPartRouting, alreadyImportedItemIds])
+  }, [dedupedRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, phases, effectiveCityMap, effectiveProjectMap, effectiveSourceMap, rowDest, pendingPartRouting, alreadyImportedItemIds])
 
   const stats = useMemo(() => {
     if (resolved.length === 0) return null
@@ -722,7 +790,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     setSubmitting(true)
     try {
       const movements = resolved
-        .filter(r => !excluded.has(r.idx) && r.status === 'ready' && r.destId && r.truckId)
+        .filter(r => !excluded.has(r.idx) && r.status === 'ready' && r.destId && r.fromLocationId)
         .map(r => {
           const dateStr = String(r.date).slice(0, 16)
           const noteParts = [
@@ -730,6 +798,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             dateStr,
             r.customer,
             r.city,
+            r.sourceIsWarehouse && `source: ${r.sonarLoc}`,
             r.destReason,
             r.sonarItemId && `[sonar:${r.sonarItemId}]`,
           ].filter(Boolean)
@@ -738,11 +807,12 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             part_id: r.partId,
             quantity: 1,
             unit: 'ea',
-            from_location_id: r.truckId,
+            from_location_id: r.fromLocationId,
             to_location_id: r.destId,
             notes: noteParts.join(' · '),
             created_by: currentUser?.id,
             phase_id: r.phaseTagId || null,
+            // NULL for warehouse-source rows — no crew to attribute the pull to.
             consumed_by_user_id: r.userId || null,
           }
         })
@@ -968,12 +1038,18 @@ export default function SonarImportSheet({ onClose, onApplied }) {
 
           {/* Crew mappings */}
           {uniqueSonarLocs.length > 0 && (
-            <Section title="Crew mappings" accent="var(--teal)"
-              subtitle="One pick per Sonar source. Auto-matched by the name in parens; override if wrong.">
+            <Section title="Source mappings" accent="var(--teal)"
+              subtitle="One pick per Sonar source. Crews auto-match by name in parens. Non-crew sources (e.g. 'Warehouse') map to a FiberLog warehouse — that pick persists across imports.">
               {uniqueSonarLocs.map(loc => {
-                const userId = crewMap[loc]
+                const sourceLocId = effectiveSourceMap.get(loc.toUpperCase())
+                const sourceLocName = sourceLocId
+                  ? (warehouses.find(w => w.id === sourceLocId)?.name || null)
+                  : null
+                const userId = sourceLocId ? null : crewMap[loc]
                 const hasTruck = userId ? !!trucksByUser[userId] : false
-                const status = !userId ? { tag: 'unmatched', color: 'var(--amber)' }
+                const status = sourceLocId
+                  ? { tag: `warehouse${sourceLocName ? `: ${sourceLocName}` : ''}`, color: 'var(--teal-dk)' }
+                  : !userId ? { tag: 'unmatched', color: 'var(--amber)' }
                   : !hasTruck ? { tag: 'no truck', color: 'var(--red)' }
                   : { tag: 'matched', color: 'var(--teal-dk)' }
                 const n = resolved.filter(r => r.sonarLoc === loc).length
@@ -983,18 +1059,40 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                     secondary={`${n} row${n === 1 ? '' : 's'}`}
                     status={status}
                   >
-                    <select
-                      value={userId || ''}
-                      onChange={e => setCrewMap(prev => ({ ...prev, [loc]: e.target.value }))}
-                      style={selectStyle()}
-                    >
-                      <option value="">— pick crew —</option>
-                      {crewUsers.map(u => (
-                        <option key={u.id} value={u.id}>
-                          {u.name}{u.crew_type ? ` (${u.crew_type})` : ''}{trucksByUser[u.id] ? '' : ' — no truck!'}
-                        </option>
-                      ))}
-                    </select>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <select
+                        value={userId || ''}
+                        onChange={e => {
+                          // Crew pick clears the warehouse mapping for this
+                          // source (mutually exclusive — a source is EITHER
+                          // a crew OR a warehouse, not both).
+                          const v = e.target.value
+                          setCrewMap(prev => ({ ...prev, [loc]: v }))
+                          if (v) handleSourceLocationChange(loc, null)
+                        }}
+                        style={selectStyle()}
+                        disabled={!!sourceLocId}
+                      >
+                        <option value="">— pick crew —</option>
+                        {crewUsers.map(u => (
+                          <option key={u.id} value={u.id}>
+                            {u.name}{u.crew_type ? ` (${u.crew_type})` : ''}{trucksByUser[u.id] ? '' : ' — no truck!'}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={sourceLocId || ''}
+                        onChange={e => handleSourceLocationChange(loc, e.target.value || null)}
+                        style={{ ...selectStyle(), fontSize: 11, color: 'var(--muted)' }}
+                      >
+                        <option value="">…or map to a warehouse (persists)</option>
+                        {warehouses.map(w => (
+                          <option key={w.id} value={w.id}>
+                            🏭 {w.name}{w.type === 'bin' ? ' (bin)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </MappingRow>
                 )
               })}
@@ -1199,7 +1297,12 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                             )}
                           </td>
                           <td style={tdStyle()}>
-                            <div style={{ fontWeight: 600 }}>{r.userName || <em style={{ color: 'var(--amber)' }}>{r.sonarLoc}</em>}</div>
+                            <div style={{ fontWeight: 600 }}>
+                              {r.sourceIsWarehouse
+                                ? <span style={{ color: 'var(--teal-mid)' }}>🏭 {r.sonarLoc}</span>
+                                : (r.userName || <em style={{ color: 'var(--amber)' }}>{r.sonarLoc}</em>)
+                              }
+                            </div>
                           </td>
                           <td style={tdStyle()}>
                             {needsPicker ? (
@@ -1324,6 +1427,7 @@ function StatusBadge({ status }) {
     'city-unmapped':  { label: 'city unmapped',   color: 'var(--amber)',    bg: 'var(--amber-lt)' },
     'project-unmapped': { label: 'project unmapped', color: 'var(--amber)', bg: 'var(--amber-lt)' },
     'no-project-bucket': { label: 'phase has no bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
+    'no-source-location': { label: 'no source location', color: 'var(--amber)', bg: 'var(--amber-lt)' },
     'already-imported': { label: 'already imported', color: 'var(--muted)', bg: 'var(--gray-lt)' },
     'no-gigwave-bucket': { label: 'no Gigwave bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
     'no-none-bucket':    { label: 'no None bucket',    color: 'var(--red)', bg: 'var(--red-lt)' },
