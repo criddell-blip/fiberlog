@@ -78,7 +78,26 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
       ) : (
         <div>
           {movements.map(m => {
-            const colors = TYPE_COLORS[m.movement_type] || TYPE_COLORS.adjust
+            const baseColors = TYPE_COLORS[m.movement_type] || TYPE_COLORS.adjust
+            // Adjust has TWO directions: positive (to_location only, adds
+            // stock) and negative (from_location only, removes stock).
+            // Surface that visually so the manager doesn't have to read
+            // the From/To prefix to know which way it went.
+            const isAdjust     = m.movement_type === 'adjust'
+            const isAdjustUp   = isAdjust && !m.from_location_id && !!m.to_location_id
+            const isAdjustDown = isAdjust && !!m.from_location_id && !m.to_location_id
+            const colors = isAdjustUp
+              ? { bg: 'var(--teal-lt)', text: 'var(--teal-dk)', icon: '＋' }
+              : isAdjustDown
+              ? { bg: 'var(--red-lt)',  text: 'var(--red)',     icon: '−' }
+              : baseColors
+            const label = isAdjustUp   ? 'Adjust up'
+                       : isAdjustDown ? 'Adjust down'
+                       : TYPE_LABELS[m.movement_type]
+            const qtyColor = isAdjustUp ? 'var(--teal-dk)'
+                          : isAdjustDown ? 'var(--red)'
+                          : 'var(--orange)'
+            const qtyPrefix = isAdjustUp ? '+' : isAdjustDown ? '−' : ''
             const fromName = m.from_location?.name || (m.movement_type === 'receive' ? 'Vendor' : null)
             const toName   = m.to_location?.name   || (m.movement_type === 'issue' || m.movement_type === 'scrap' ? 'Consumed' : null)
             return (
@@ -91,12 +110,12 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
                   <span style={{
                     fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
                     background: colors.bg, color: colors.text
-                  }}>{colors.icon} {TYPE_LABELS[m.movement_type]}</span>
+                  }}>{colors.icon} {label}</span>
                   <div style={{ flex: 1, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {m.part?.name || m.part_id}
                   </div>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--orange)' }}>
-                    {Number(m.quantity).toLocaleString()} <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>{m.unit || m.part?.unit || 'ea'}</span>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: qtyColor }}>
+                    {qtyPrefix}{Number(m.quantity).toLocaleString()} <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>{m.unit || m.part?.unit || 'ea'}</span>
                   </div>
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
