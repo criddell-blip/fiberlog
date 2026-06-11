@@ -8,6 +8,7 @@ import {
   getSonarSourceLocationMap, setSonarSourceLocation,
   getLocations,
   setPartSonarRouting, SONAR_ROUTING_OPTIONS,
+  createPart,
   getPendingSonarImports, getProcessedSonarImports, getPendingSonarImport,
   markSonarPendingImportApplied, discardSonarPendingImport,
 } from '../../lib/inventory'
@@ -150,6 +151,10 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [pendingCityMap, setPendingCityMap] = useState({})  // city UPPER → bucket id (manager picks this session)
   const [pendingProjectMap, setPendingProjectMap] = useState({})  // project UPPER → phase id (this session)
   const [pendingSourceMap, setPendingSourceMap] = useState({})    // sonar_source UPPER → location id (this session, mirrors persistedSourceMap)
+  // When set, the Part mappings row for this Sonar model renders the
+  // inline "create draft" form instead of (well, alongside) the SKU
+  // picker. One row at a time — null means none open.
+  const [creatingForModel, setCreatingForModel] = useState(null)
   const [pendingPartRouting, setPendingPartRouting] = useState({}) // part_id → policy
   const [rowDest, setRowDest] = useState({})          // row idx → bucket id (per-row override / ask-resolution)
   const [excluded, setExcluded] = useState(() => new Set())
@@ -1102,47 +1107,90 @@ export default function SonarImportSheet({ onClose, onApplied }) {
           {/* Part mappings — with routing policy picker per part */}
           {uniqueSonarModels.length > 0 && (
             <Section title="Part mappings + routing" accent="var(--orange)"
-              subtitle="Pick the FiberLog SKU AND a routing policy per Sonar model. Policy is saved per part and used on every future import.">
+              subtitle="Pick the FiberLog SKU AND a routing policy per Sonar model. No matching SKU? Create a draft inline — manager polishes metadata later.">
               {uniqueSonarModels.map(model => {
                 const partId = partMap[model]
                 const routing = partId ? getPartRouting(partId) : null
                 const n = resolved.filter(r => r.sonarModel === model).length
+                // When the mapped SKU is a draft (is_active=false), surface
+                // it on the status pill so the manager remembers to clean
+                // up metadata in Parts admin afterward.
+                const pickedPart = partId ? parts.find(p => p.id === partId) : null
+                const isDraft = pickedPart && pickedPart.is_active === false
                 const status = !partId ? { tag: 'unmatched', color: 'var(--amber)' }
-                  : routing === 'ask' ? { tag: 'asks per row', color: 'var(--amber)' }
-                  : { tag: routing, color: 'var(--orange-dk)' }
+                  : routing === 'ask' ? { tag: `asks per row${isDraft ? ' (draft)' : ''}`, color: 'var(--amber)' }
+                  : { tag: `${routing}${isDraft ? ' (draft)' : ''}`, color: 'var(--orange-dk)' }
+                const isOpen = creatingForModel === model
                 return (
                   <div key={model} style={{
-                    display: 'grid', gridTemplateColumns: '2fr 2fr 2fr auto', gap: 6,
                     marginBottom: 4, padding: '4px 6px',
-                    background: 'var(--surface2)', borderRadius: 6, alignItems: 'center',
+                    background: 'var(--surface2)', borderRadius: 6,
                   }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{model}</div>
-                      <div style={{ fontSize: 10, color: 'var(--hint)' }}>{n} row{n === 1 ? '' : 's'}</div>
+                    <div style={{
+                      display: 'grid', gridTemplateColumns: '2fr 2fr 2fr auto', gap: 6,
+                      alignItems: 'center',
+                    }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{model}</div>
+                        <div style={{ fontSize: 10, color: 'var(--hint)' }}>{n} row{n === 1 ? '' : 's'}</div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <select
+                          value={partId || ''}
+                          onChange={e => setPartMap(prev => ({ ...prev, [model]: e.target.value }))}
+                          style={selectStyle()}
+                        >
+                          <option value="">— pick part —</option>
+                          {parts.map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} ({p.id}){p.is_active === false ? ' — draft' : ''}
+                            </option>
+                          ))}
+                        </select>
+                        {!partId && !isOpen && (
+                          <button
+                            type="button"
+                            onClick={() => setCreatingForModel(model)}
+                            style={{
+                              fontSize: 10, padding: '2px 6px', background: 'transparent',
+                              color: 'var(--orange)', border: '1px dashed var(--orange-dk)',
+                              borderRadius: 4, cursor: 'pointer', alignSelf: 'flex-start',
+                            }}
+                            title="Create a draft FiberLog SKU for this Sonar model. Manager cleans up metadata in Parts admin afterward."
+                          >
+                            + Create draft
+                          </button>
+                        )}
+                      </div>
+                      <select
+                        value={routing || ''}
+                        onChange={e => handlePartRoutingChange(partId, e.target.value)}
+                        disabled={!partId}
+                        title={partId ? 'Routing policy for this part (saved to parts_catalog)' : 'Pick a part first'}
+                        style={selectStyle()}
+                      >
+                        <option value="">— policy —</option>
+                        {SONAR_ROUTING_OPTIONS.map(o => (
+                          <option key={o.id} value={o.id}>{o.label}</option>
+                        ))}
+                      </select>
+                      <div style={statusBadgeStyle(status.color)}>{status.tag}</div>
                     </div>
-                    <select
-                      value={partId || ''}
-                      onChange={e => setPartMap(prev => ({ ...prev, [model]: e.target.value }))}
-                      style={selectStyle()}
-                    >
-                      <option value="">— pick part —</option>
-                      {parts.map(p => (
-                        <option key={p.id} value={p.id}>{p.name} ({p.id})</option>
-                      ))}
-                    </select>
-                    <select
-                      value={routing || ''}
-                      onChange={e => handlePartRoutingChange(partId, e.target.value)}
-                      disabled={!partId}
-                      title={partId ? 'Routing policy for this part (saved to parts_catalog)' : 'Pick a part first'}
-                      style={selectStyle()}
-                    >
-                      <option value="">— policy —</option>
-                      {SONAR_ROUTING_OPTIONS.map(o => (
-                        <option key={o.id} value={o.id}>{o.label}</option>
-                      ))}
-                    </select>
-                    <div style={statusBadgeStyle(status.color)}>{status.tag}</div>
+                    {isOpen && (
+                      <CreatePartPanel
+                        sonarModel={model}
+                        onCancel={() => setCreatingForModel(null)}
+                        onCreated={(newPart) => {
+                          // Append + auto-pick. Local-only; the next sheet
+                          // open will fetch fresh from the catalog.
+                          setParts(prev => [...prev, newPart].sort((a, b) =>
+                            (a.name || '').localeCompare(b.name || '')))
+                          setPartMap(prev => ({ ...prev, [model]: newPart.id }))
+                          setCreatingForModel(null)
+                          showToast(`Draft part created: ${newPart.name} (${newPart.id})`)
+                        }}
+                      />
+                    )}
                   </div>
                 )
               })}
@@ -1472,3 +1520,157 @@ const tdStyle = (extra = {}) => ({
   verticalAlign: 'top',
   ...extra,
 })
+
+// Inline form rendered inside a Part mappings row when the manager clicks
+// "+ Create draft" for an unmapped Sonar model. Form state lives here
+// (not in the parent) so reopening for a different model gets a fresh
+// pre-fill without leaking the previous attempt.
+//
+// SKU + name pre-fill with the Sonar model string verbatim — manager can
+// override SKU if there's a real internal SKU known, or just accept it
+// and clean up later in Parts admin (same workflow as BoxHero drafts).
+function CreatePartPanel({ sonarModel, onCancel, onCreated }) {
+  const [sku, setSku] = useState(sonarModel)
+  const [name, setName] = useState(sonarModel)
+  const [unit, setUnit] = useState('ea')
+  const [department, setDepartment] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState(null)
+
+  async function handleSave() {
+    const trimmedSku = sku.trim()
+    const trimmedName = name.trim()
+    if (!trimmedSku) { setErr('SKU is required'); return }
+    if (!trimmedName) { setErr('Name is required'); return }
+    setSaving(true)
+    setErr(null)
+    try {
+      const newPart = await createPart({
+        id: trimmedSku,
+        name: trimmedName,
+        unit: unit.trim() || 'ea',
+        department: department.trim() || null,
+        is_active: false,
+      })
+      if (!newPart) {
+        // Insert returned no data — shouldn't normally happen.
+        setErr('Could not create. Try again, or pick an existing SKU from the dropdown.')
+        return
+      }
+      onCreated(newPart)
+    } catch (e) {
+      // PK violation on parts_catalog.id (23505) means the SKU already
+      // exists in the catalog. Common when the manager types a real SKU
+      // that's hidden as a draft (BoxHero imports auto-create drafts).
+      if (e?.code === '23505' || /duplicate key|already exists/i.test(e?.message || '')) {
+        setErr(`SKU "${sku.trim()}" already exists in the catalog. Pick it from the dropdown — it may be marked as a draft.`)
+      } else {
+        setErr(e.message || String(e))
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{
+      marginTop: 6, padding: '8px 10px',
+      background: 'var(--bg)',
+      border: '1px dashed var(--orange-dk)',
+      borderRadius: 6,
+    }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
+        Creating a draft for Sonar model <strong style={{ color: 'var(--orange)' }}>{sonarModel}</strong>.
+        The draft is hidden from regular pickers (<code>is_active=false</code>) until you activate it in Parts admin.
+      </div>
+      <div style={{
+        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6,
+      }}>
+        <label style={{ fontSize: 10, color: 'var(--muted)' }}>
+          SKU *
+          <input
+            type="text"
+            value={sku}
+            onChange={e => setSku(e.target.value)}
+            placeholder="e.g. U6.3 or your internal code"
+            autoComplete="off"
+            name="draft-sku"
+            style={{ ...selectStyle(), marginTop: 2 }}
+          />
+        </label>
+        <label style={{ fontSize: 10, color: 'var(--muted)' }}>
+          Name *
+          <input
+            type="text"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="Display name"
+            autoComplete="off"
+            name="draft-name"
+            style={{ ...selectStyle(), marginTop: 2 }}
+          />
+        </label>
+        <label style={{ fontSize: 10, color: 'var(--muted)' }}>
+          Unit
+          <input
+            type="text"
+            value={unit}
+            onChange={e => setUnit(e.target.value)}
+            placeholder="ea"
+            autoComplete="off"
+            name="draft-unit"
+            style={{ ...selectStyle(), marginTop: 2 }}
+          />
+        </label>
+        <label style={{ fontSize: 10, color: 'var(--muted)' }}>
+          Department (optional)
+          <input
+            type="text"
+            value={department}
+            onChange={e => setDepartment(e.target.value)}
+            placeholder="e.g. Customer Premises Equipment"
+            autoComplete="off"
+            name="draft-department"
+            style={{ ...selectStyle(), marginTop: 2 }}
+          />
+        </label>
+      </div>
+      {err && (
+        <div style={{
+          fontSize: 10, color: 'var(--red)',
+          background: 'var(--red-lt)',
+          padding: '4px 6px', borderRadius: 4, marginBottom: 6,
+        }}>
+          {err}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          style={{
+            fontSize: 11, padding: '4px 10px',
+            background: 'transparent', color: 'var(--muted)',
+            border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          style={{
+            fontSize: 11, padding: '4px 10px',
+            background: 'var(--orange)', color: 'white',
+            border: '1px solid var(--orange-dk)', borderRadius: 4, cursor: 'pointer',
+            opacity: saving ? 0.6 : 1,
+          }}
+        >
+          {saving ? 'Creating…' : 'Create draft'}
+        </button>
+      </div>
+    </div>
+  )
+}
