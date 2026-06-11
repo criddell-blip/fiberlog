@@ -8,6 +8,7 @@ import {
   getPartBySku,
   startOrResumeCountSession,
   recordCountLine,
+  removeCountLine,
   submitCountSession,
   endCountRunAndReconcile,
   getRunSessions,
@@ -40,6 +41,11 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
   const [showPartPicker, setShowPartPicker] = useState(false)
   const [showEndConfirm, setShowEndConfirm] = useState(false)
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false)
+  // Pre-submit confirm for a single bin. Opens a modal showing the
+  // counted lines + variances so the counter has one last look before
+  // locking the bin. Bin lock is non-trivial to reverse (manager has to
+  // reopen the run), so the extra tap is worth it.
+  const [confirmSubmitBin, setConfirmSubmitBin] = useState(false)
   const [endResult, setEndResult] = useState(null)
   const [busy, setBusy] = useState(false)
 
@@ -170,6 +176,28 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
       showToast(e.message || 'Submit failed')
     } finally {
       setBusy(false)
+    }
+  }
+
+  // Remove an UNEXPECTED line (one added ad-hoc by scan/pick during
+  // this count, identified by expected_qty === 0). Counter scanned the
+  // wrong shelf / wrong barcode / wrong bin and wants to undo cleanly
+  // — entering 0 isn't "undo," it's a real "I counted zero" data point
+  // that decrements stock at end of run.
+  //
+  // Optimistic: drop locally first, RPC second. If the RPC errors,
+  // refetch lines from the source of truth and toast the error.
+  async function handleRemoveLine(line) {
+    if (!line || Number(line.expected_qty) !== 0) return
+    const snapshot = lines
+    setLines(prev => prev.filter(l => l.id !== line.id))
+    try {
+      await removeCountLine(line.id)
+      showToast(`Removed ${line.part?.name || line.part_id}`)
+    } catch (e) {
+      console.error('Remove line failed:', e)
+      setLines(snapshot)
+      showToast(e.message || 'Remove failed')
     }
   }
 
@@ -372,11 +400,11 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
                 </div>
               </div>
               <button
-                onClick={handleSubmitBin}
+                onClick={() => setConfirmSubmitBin(true)}
                 className="btn btn-primary"
                 style={{ padding: '8px 14px', fontSize: 'var(--fs-sm)' }}
                 disabled={busy || uncountedCount > 0}
-                title={uncountedCount > 0 ? `${uncountedCount} parts not yet counted` : 'Submit this bin'}
+                title={uncountedCount > 0 ? `${uncountedCount} parts not yet counted` : 'Review counts and submit'}
               >
                 Submit bin
               </button>
@@ -444,6 +472,34 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
                   <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', minWidth: 18 }}>
                     {part.unit || 'ea'}
                   </span>
+                  {/* Remove × — only for unexpected (ad-hoc) lines.
+                      Expected lines must stay required-to-count so the
+                      audit covers every system-known part. */}
+                  {isUnexpected && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveLine(line)}
+                      title="Remove — scanned this by mistake"
+                      style={{
+                        width: 28, height: 28, padding: 0,
+                        background: 'transparent', color: 'var(--muted)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--r-xs)',
+                        fontSize: 16, lineHeight: 1, cursor: 'pointer',
+                        flexShrink: 0,
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.color = 'var(--amber)'
+                        e.currentTarget.style.borderColor = 'var(--amber)'
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.color = 'var(--muted)'
+                        e.currentTarget.style.borderColor = 'var(--border)'
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
               )
             })}
@@ -524,6 +580,115 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
                 disabled={busy || (activeSession && uncountedCount > 0)}
               >
                 {run.is_first_binning ? 'Finish + write transfers' : 'End + reconcile'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pre-submit bin confirm — one last look before locking the bin's
+          counts. Lists every line with counted qty + variance pill so
+          the counter can scan anomalies before commit. Variances first,
+          matches last. The bin's submit is non-trivial to reverse (a
+          manager has to reopen the run), so this extra tap is cheap
+          insurance against a fat-finger. */}
+      {confirmSubmitBin && activeSession && (
+        <div className="overlay open" onClick={e => e.target === e.currentTarget && setConfirmSubmitBin(false)}>
+          <div className="overlay-sheet" style={{ maxWidth: 520 }}>
+            <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 6 }}>
+              Submit bin "{activeSession.location?.name}"?
+            </div>
+            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 12 }}>
+              You're locking in these counts. This bin can't be edited after submit unless the run is reopened.
+              Variances reconcile at end-of-run — no stock changes happen yet.
+            </div>
+
+            {/* Counted lines list — variances first, matches last */}
+            <div style={{
+              maxHeight: '40vh', overflowY: 'auto',
+              border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+              padding: '4px 0', marginBottom: 12,
+            }}>
+              {(() => {
+                const enriched = lines.map(l => {
+                  const counted = l.counted_qty ?? 0
+                  const expected = Number(l.expected_qty)
+                  return { line: l, counted, expected, variance: counted - expected }
+                })
+                // Variances first, sorted by |variance| desc; matches last.
+                enriched.sort((a, b) => {
+                  const am = Math.abs(a.variance), bm = Math.abs(b.variance)
+                  if (am === 0 && bm === 0) return 0
+                  if (am === 0) return 1
+                  if (bm === 0) return -1
+                  return bm - am
+                })
+                return enriched.map(({ line, counted, expected, variance }) => {
+                  const part = line.part || {}
+                  const isMatch = variance === 0
+                  const pillColor = isMatch ? 'var(--muted)'
+                    : variance > 0 ? 'var(--success-fg)'
+                    : 'var(--danger-fg)'
+                  const pillBg = isMatch ? 'var(--surface2)'
+                    : variance > 0 ? 'var(--success-bg, var(--surface2))'
+                    : 'var(--danger-bg, var(--surface2))'
+                  const isUnexpected = expected === 0
+                  return (
+                    <div key={line.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '6px 10px',
+                      borderBottom: '1px solid var(--border)',
+                      fontSize: 'var(--fs-sm)',
+                    }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontWeight: 'var(--fw-semibold)',
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        }}>
+                          {part.name || line.part_id}
+                          {isUnexpected && <span style={{ marginLeft: 6, fontSize: 'var(--fs-xs)', color: 'var(--accent-fg, var(--muted))' }}>(found)</span>}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', minWidth: 92, textAlign: 'right' }}>
+                        counted {counted} {part.unit || 'ea'}
+                      </div>
+                      <div style={{
+                        minWidth: 64, textAlign: 'center',
+                        fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-bold)',
+                        padding: '2px 8px', borderRadius: 10,
+                        color: pillColor, background: pillBg,
+                        border: `1px solid ${pillColor}`,
+                      }}>
+                        {isMatch ? 'match' : `${variance > 0 ? '+' : ''}${variance}`}
+                      </div>
+                    </div>
+                  )
+                })
+              })()}
+            </div>
+
+            {/* Footer summary */}
+            <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', marginBottom: 12 }}>
+              {lines.length} part{lines.length === 1 ? '' : 's'} · {lines.filter(l => (l.counted_qty ?? 0) - Number(l.expected_qty) !== 0).length} variance{lines.filter(l => (l.counted_qty ?? 0) - Number(l.expected_qty) !== 0).length === 1 ? '' : 's'}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setConfirmSubmitBin(false)} disabled={busy}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 2 }}
+                disabled={busy}
+                onClick={async () => {
+                  try {
+                    await handleSubmitBin()
+                  } finally {
+                    setConfirmSubmitBin(false)
+                  }
+                }}
+              >
+                Submit bin
               </button>
             </div>
           </div>

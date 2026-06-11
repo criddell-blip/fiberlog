@@ -192,6 +192,56 @@ export async function getAllStockGrouped({ excludeLocationId = null } = {}) {
   return Array.from(byPart.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''))
 }
 
+// Per-part location breakdown. Returns where a given SKU has been
+// logged (any qty > 0), each row labeled "Warehouse · Bin" when the
+// location is a bin, or just the location name otherwise. Matches the
+// formatting used by getAllStockGrouped (line 184) so labels are
+// consistent across surfaces.
+//
+// Used by the Parts tab "📍 Locations" drill-in. Cheap enough to
+// re-fetch on every overlay open — bypasses caching to keep the
+// payload fresh after recent movements.
+export async function getPartLocations(partId) {
+  if (!partId) return { totalQty: 0, locations: [] }
+  const [stockRes, locsRes] = await Promise.all([
+    db.from('inventory_stock')
+      .select('location_id, quantity')
+      .eq('part_id', partId),
+    db.from('inventory_locations')
+      .select('id, name, type, parent_location_id, assigned_to, is_active'),
+  ])
+  if (stockRes.error) throw stockRes.error
+  if (locsRes.error) throw locsRes.error
+
+  const locById = new Map((locsRes.data || []).map(l => [l.id, l]))
+  const parentNameById = new Map(
+    (locsRes.data || []).filter(l => l.type === 'warehouse').map(l => [l.id, l.name])
+  )
+
+  let totalQty = 0
+  const locations = []
+  for (const r of stockRes.data || []) {
+    const qty = Number(r.quantity || 0)
+    if (qty <= 0) continue  // Surface only places it's actually located
+    const loc = locById.get(r.location_id)
+    if (!loc) continue
+    const parentName = loc.parent_location_id ? parentNameById.get(loc.parent_location_id) : null
+    locations.push({
+      locationId: loc.id,
+      name: loc.name,
+      type: loc.type,
+      hasOwner: !!loc.assigned_to,
+      isActive: !!loc.is_active,
+      parentName,
+      displayLabel: parentName ? `${parentName} · ${loc.name}` : loc.name,
+      qty,
+    })
+    totalQty += qty
+  }
+  locations.sort((a, b) => b.qty - a.qty)
+  return { totalQty, locations }
+}
+
 export async function getStockSummary() {
   const { data, error } = await db
     .from('inventory_stock')

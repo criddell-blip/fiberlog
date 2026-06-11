@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../AppContext'
-import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, SONAR_ROUTING_OPTIONS } from '../../lib/inventory'
+import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, getPartLocations, SONAR_ROUTING_OPTIONS } from '../../lib/inventory'
 import SkuLabelSheet from './SkuLabelSheet'
 
 const COMMON_UNITS = ['ea', 'ft', 'm', 'in', 'lb', 'kg', 'box', 'roll', 'spool', 'pair', 'pack', 'kit']
@@ -19,6 +19,8 @@ export default function InventoryPartsTab({ refreshKey, onChanged }) {
   const [editing, setEditing] = useState(null)
   const [bulkEditing, setBulkEditing] = useState(false)
   const [showLabelSheet, setShowLabelSheet] = useState(false)
+  // The part whose location-breakdown overlay is open. NULL = closed.
+  const [viewingLocationsFor, setViewingLocationsFor] = useState(null)
 
   // Selection: a Set of part ids checked for bulk operations
   const [selectedIds, setSelectedIds] = useState(() => new Set())
@@ -350,6 +352,13 @@ export default function InventoryPartsTab({ refreshKey, onChanged }) {
                   ) : (
                     <button onClick={() => handleQuickDeactivate(p)} style={quickBtnStyle('amber')}>Retire</button>
                   )}
+                  <button
+                    onClick={() => setViewingLocationsFor(p)}
+                    style={quickBtnStyle('default')}
+                    title="See which locations have logged stock of this part"
+                  >
+                    📍 Locations
+                  </button>
                   <button onClick={() => setEditing(p)} style={quickBtnStyle('default')}>Edit</button>
                 </div>
               </div>
@@ -402,6 +411,134 @@ export default function InventoryPartsTab({ refreshKey, onChanged }) {
           onSave={handleBulkEdit}
         />
       )}
+
+      {viewingLocationsFor && (
+        <PartLocationsPanel
+          part={viewingLocationsFor}
+          onClose={() => setViewingLocationsFor(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// Where-is-this-part overlay. Lists every location with logged stock
+// of the chosen part, qty-desc, with the same "Warehouse · Bin" label
+// format used elsewhere. Re-fetches on every open so the data is fresh.
+//
+// Disclaimer reminds the user this is FiberLog's logged view, not
+// authoritative — Sage owns the verified counts (per the transactional-
+// only positioning).
+function PartLocationsPanel({ part, onClose }) {
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState(null)
+  const [data, setData] = useState({ totalQty: 0, locations: [] })
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setErr(null)
+    getPartLocations(part.id)
+      .then(r => { if (!cancelled) setData(r) })
+      .catch(e => { if (!cancelled) setErr(e.message || String(e)) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [part.id])
+
+  return (
+    <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="overlay-sheet" style={{ maxWidth: 560 }}>
+        <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 2 }}>
+          {part.name}
+        </div>
+        <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: '"DM Mono", monospace', marginBottom: 12 }}>
+          {part.id}{part.unit ? ` · ${part.unit}` : ''}
+        </div>
+
+        {loading && (
+          <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted)', fontSize: 'var(--fs-sm)' }}>
+            Loading locations…
+          </div>
+        )}
+        {err && (
+          <div style={{
+            padding: '8px 12px', background: 'var(--red-lt)', color: 'var(--red)',
+            borderRadius: 'var(--r-sm)', fontSize: 13, marginBottom: 12,
+          }}>
+            {err}
+          </div>
+        )}
+        {!loading && !err && (
+          <>
+            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 8 }}>
+              Logged at <strong>{data.locations.length}</strong> location{data.locations.length === 1 ? '' : 's'} ·{' '}
+              <strong>{data.totalQty.toLocaleString()}</strong> {part.unit || 'ea'} total
+            </div>
+
+            {data.locations.length === 0 && (
+              <div style={{
+                padding: 20, textAlign: 'center', color: 'var(--hint)',
+                fontSize: 'var(--fs-sm)',
+                border: '1px dashed var(--border)', borderRadius: 'var(--r-sm)',
+                marginBottom: 12,
+              }}>
+                No logged stock at any location for this part.
+              </div>
+            )}
+
+            {data.locations.length > 0 && (
+              <div style={{
+                maxHeight: '50vh', overflowY: 'auto',
+                border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+                marginBottom: 12,
+              }}>
+                {data.locations.map(l => (
+                  <div key={l.locationId} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 12px',
+                    borderBottom: '1px solid var(--border)',
+                    fontSize: 'var(--fs-sm)',
+                  }}>
+                    <div style={{
+                      fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-bold)',
+                      color: 'var(--muted)', minWidth: 56,
+                      padding: '2px 6px', borderRadius: 6,
+                      background: 'var(--surface2)',
+                      textTransform: 'uppercase',
+                    }}>
+                      {l.type === 'bin' ? 'bin' : l.type}
+                    </div>
+                    <div style={{ flex: 1, fontWeight: 'var(--fw-semibold)' }}>
+                      {l.displayLabel}
+                    </div>
+                    <div style={{
+                      minWidth: 60, textAlign: 'right',
+                      fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-md)',
+                      color: 'var(--orange)',
+                    }}>
+                      {l.qty.toLocaleString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{
+              fontSize: 'var(--fs-xs)', color: 'var(--hint)',
+              fontStyle: 'italic', marginBottom: 12, lineHeight: 1.4,
+            }}>
+              Based on logged movements in FiberLog. Sage is authoritative for physical counts —
+              these numbers may drift from reality until reconciled there.
+            </div>
+          </>
+        )}
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

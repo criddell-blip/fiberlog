@@ -67,6 +67,22 @@ export async function submitCountSession(sessionId) {
   return data
 }
 
+// Hard-delete an unexpected (expected_qty=0) count line from an
+// in_progress session. Used when a counter scans/picks a part by
+// mistake during a count — the only previous "undo" was to clear
+// counted_qty back to NULL, which left a phantom line in the session
+// (and risked a fat-finger 0 turning into a real adjust at end of run).
+//
+// The RPC guards: expected lines (expected_qty != 0) cannot be removed
+// — they must remain require-count for the audit. Submitted sessions
+// cannot be edited.
+export async function removeCountLine(lineId) {
+  const { error } = await db.rpc('delete_count_line', {
+    p_line_id: lineId,
+  })
+  if (error) throw error
+}
+
 export async function endCountRunAndReconcile(runId) {
   const { data, error } = await db.rpc('end_count_run_and_reconcile', {
     p_run_id: runId,
