@@ -35,28 +35,14 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
 
   // Handles the in-place jump case (StockTab already mounted, parent
   // signals a new jump). The `n` counter ensures repeat jumps to the
-  // same location still re-fire the effect.
+  // same location still re-fire the effect. Note: setSearch + the
+  // highlight effect live further down, after their state is declared
+  // (would otherwise be a temporal-dead-zone error).
   useEffect(() => {
     if (jumpToScope?.locationId) setScope(jumpToScope.locationId)
-    // Clear search so the focused row isn't filtered out.
-    if (jumpToScope?.partId) setSearch('')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jumpToScope?.n])
 
-  // Highlight the focused part row once rows are loaded (the row's ref
-  // is only attached after the load resolves). Deferred via setTimeout
-  // so the layout has settled before scrollIntoView fires.
-  useEffect(() => {
-    if (!jumpToScope?.partId || loading) return
-    const t = setTimeout(() => {
-      const el = stockRowRefs.current[jumpToScope.partId]
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      setHighlightedPartId(jumpToScope.partId)
-    }, 60)
-    const clear = setTimeout(() => setHighlightedPartId(null), 2200)
-    return () => { clearTimeout(t); clearTimeout(clear) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jumpToScope?.n, loading, rows.length])
   const [binScope, setBinScope] = useState(SUBMODE_ROLLUP)
   const [bins, setBins] = useState([])
   const [rows, setRows] = useState([])
@@ -85,6 +71,29 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
   // part_id; only the row matching the focused part lights up briefly.
   const stockRowRefs = useRef({})
   const [highlightedPartId, setHighlightedPartId] = useState(null)
+
+  // Clear search on a part-jump so the focused row isn't filtered out
+  // by a stale search term. Has to live here (not in the early
+  // jumpToScope effect above) because `setSearch` is declared between
+  // those two — moving this up would TDZ-error.
+  useEffect(() => {
+    if (jumpToScope?.partId) setSearch('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpToScope?.n])
+
+  // Highlight the focused part row once rows are loaded. Deferred via
+  // setTimeout so layout has settled before scrollIntoView fires.
+  useEffect(() => {
+    if (!jumpToScope?.partId || loading) return
+    const t = setTimeout(() => {
+      const el = stockRowRefs.current[jumpToScope.partId]
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setHighlightedPartId(jumpToScope.partId)
+    }, 60)
+    const clear = setTimeout(() => setHighlightedPartId(null), 2200)
+    return () => { clearTimeout(t); clearTimeout(clear) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpToScope?.n, loading, rows.length])
 
   // Load bins whenever the warehouse scope changes. Resets binScope to
   // rollup so we always start at the highest-level view when changing
