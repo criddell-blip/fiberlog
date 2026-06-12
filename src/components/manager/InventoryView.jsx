@@ -7,7 +7,6 @@ import InventoryLocationsTab from './InventoryLocationsTab'
 import InventoryPartsTab from './InventoryPartsTab'
 import InventoryMovementsTab from './InventoryMovementsTab'
 import InventoryAuditTab from './InventoryAuditTab'
-import InventoryLauncher from './InventoryLauncher'
 import CountTab from '../cycleCount/CountTab'
 import RecordMovementSheet from './RecordMovementSheet'
 import ReceivePOSheet from './ReceivePOSheet'
@@ -96,11 +95,6 @@ export default function InventoryView() {
   function jumpToLocation(locationId) {
     setLocationsJump(prev => ({ locationId, n: prev.n + 1 }))
     setTab('locations')
-  }
-
-  function jumpToStockPair({ partId, locationId }) {
-    setStockJump(prev => ({ locationId, partId, n: prev.n + 1 }))
-    setTab('stock')
   }
 
   async function loadLocations() {
@@ -302,12 +296,6 @@ export default function InventoryView() {
             </button>
           </div>
         </div>
-        {/* Unified launcher: one entry point for "find anything inventory." */}
-        <InventoryLauncher
-          onJumpToPart={jumpToPart}
-          onJumpToLocation={jumpToLocation}
-          onJumpToStockPair={jumpToStockPair}
-        />
         {/* Sub-tab nav: pills on desktop, native dropdown on phone.
             6 pills wrap to 2 rows on a 360px viewport; dropdown is 1 row. */}
         {isWide ? (
