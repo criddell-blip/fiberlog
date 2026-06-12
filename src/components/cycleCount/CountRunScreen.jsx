@@ -164,13 +164,19 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
 
   async function handleSubmitBin() {
     if (!activeSession) return
+    const justSubmittedName = activeSession.location.name
     setBusy(true)
     try {
       await submitCountSession(activeSession.id)
-      showToast(`Submitted ${activeSession.location.name}`)
+      // Clear local state BEFORE the refetch so the empty state renders
+      // immediately — counter doesn't see a stale "this bin is active" header.
       setActiveSession(null)
       setLines([])
       await refreshSessions()
+      // Directive toast so counter knows the natural next step. ScanInput
+      // auto-refocuses on blur; with the activeSession gone the empty
+      // state's "+ Pick a bin" button is also one tap away.
+      showToast(`Submitted ${justSubmittedName} — scan or pick the next bin`)
     } catch (e) {
       console.error('Submit bin failed:', e)
       showToast(e.message || 'Submit failed')
@@ -236,6 +242,12 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
     try {
       await discardCountRun({ runId: run.id, reason: 'Discarded by counter' })
       showToast('Run discarded')
+      // Null local state BEFORE onExit so any momentary re-render between
+      // the discard and the parent unmount doesn't flash the bin or session
+      // list. Counter sees a clean transition back to the Count tab.
+      setActiveSession(null)
+      setLines([])
+      setSessions([])
       onExit()
     } catch (e) {
       console.error('Discard failed:', e)
@@ -349,35 +361,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
             </div>
 
             {sessions.length > 0 && (
-              <>
-                <div className="sec-label" style={{ marginTop: 28, marginBottom: 10, textAlign: 'left' }}>
-                  Bins counted in this run
-                </div>
-                <div style={{ textAlign: 'left' }}>
-                  {sessions.map(s => (
-                    <div key={s.id} style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '10px 12px', marginBottom: 6,
-                      background: 'var(--surface)', border: '1px solid var(--border)',
-                      borderRadius: 'var(--r-sm)',
-                    }}>
-                      <span className={`pill pill-sm ${s.status === 'submitted' ? 'pill-success' : 'pill-warning'}`}>
-                        {s.status === 'submitted' ? '✓' : '…'}
-                      </span>
-                      <div style={{ flex: 1, fontSize: 'var(--fs-base)' }}>{s.location?.name || s.location_id}</div>
-                      {s.status === 'in_progress' && (
-                        <button
-                          onClick={() => loadBin(s.location_id)}
-                          className="btn btn-ghost"
-                          style={{ padding: '4px 10px', fontSize: 'var(--fs-xs)' }}
-                        >
-                          Resume
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </>
+              <BinsCountedList sessions={sessions} onResume={(locId) => loadBin(locId)} />
             )}
           </div>
         )}
@@ -529,6 +513,14 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
       {showBinPicker && (
         <BinPickerSheet
           bins={showBinPicker.bins}
+          // Per-bin status from this run's sessions: 'submitted' (already
+          // counted — picker disables it), 'in_progress' (resumable —
+          // picker tags with a Resume pill), undefined (fresh — normal).
+          statusByBinId={(() => {
+            const m = {}
+            for (const s of sessions) m[s.location_id] = s.status
+            return m
+          })()}
           onPick={async (b) => { setShowBinPicker(false); await loadBin(b.id) }}
           onClose={() => setShowBinPicker(false)}
         />
@@ -722,11 +714,102 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
 }
 
 // ─── Bin picker ─────────────────────────────────────────────────────────
-function BinPickerSheet({ bins, onPick, onClose }) {
+// Split the post-submit bin list into two visual groups so In progress bins
+// (still need attention, resumable) stand apart from Submitted bins
+// (locked / done). Submitted group auto-collapses past 3 entries so the
+// screen stays tight as the run grows.
+function BinsCountedList({ sessions, onResume }) {
+  const inProgress = sessions.filter(s => s.status === 'in_progress')
+  const submitted = sessions.filter(s => s.status === 'submitted')
+  const [showAllSubmitted, setShowAllSubmitted] = useState(false)
+  const visibleSubmitted = showAllSubmitted ? submitted : submitted.slice(0, 3)
+  const hiddenCount = submitted.length - visibleSubmitted.length
+
+  return (
+    <div style={{ textAlign: 'left', marginTop: 28 }}>
+      {inProgress.length > 0 && (
+        <>
+          <div className="sec-label" style={{ marginBottom: 10 }}>
+            In progress ({inProgress.length})
+          </div>
+          {inProgress.map(s => (
+            <div key={s.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 12px', marginBottom: 6,
+              background: 'var(--surface)',
+              border: '1px solid var(--amber)',
+              borderRadius: 'var(--r-sm)',
+            }}>
+              <span className="pill pill-sm pill-warning">…</span>
+              <div style={{ flex: 1, fontSize: 'var(--fs-base)' }}>{s.location?.name || s.location_id}</div>
+              <button
+                onClick={() => onResume(s.location_id)}
+                className="btn btn-ghost"
+                style={{ padding: '4px 10px', fontSize: 'var(--fs-xs)' }}
+              >
+                Resume
+              </button>
+            </div>
+          ))}
+        </>
+      )}
+
+      {submitted.length > 0 && (
+        <>
+          <div className="sec-label" style={{ marginTop: inProgress.length > 0 ? 18 : 0, marginBottom: 10 }}>
+            Submitted ({submitted.length})
+          </div>
+          {visibleSubmitted.map(s => (
+            <div key={s.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '8px 12px', marginBottom: 4,
+              background: 'var(--surface2)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--r-sm)',
+              opacity: 0.85,
+            }}>
+              <span className="pill pill-sm pill-success">✓</span>
+              <div style={{ flex: 1, fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
+                {s.location?.name || s.location_id}
+              </div>
+            </div>
+          ))}
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAllSubmitted(true)}
+              style={{
+                width: '100%', padding: '6px 12px',
+                background: 'transparent', border: '1px dashed var(--border)',
+                borderRadius: 'var(--r-sm)',
+                color: 'var(--muted)', fontSize: 'var(--fs-xs)',
+                cursor: 'pointer',
+              }}
+            >
+              Show {hiddenCount} more submitted bin{hiddenCount === 1 ? '' : 's'}
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function BinPickerSheet({ bins, statusByBinId = {}, onPick, onClose }) {
   const [q, setQ] = useState('')
   const filtered = q.trim()
     ? bins.filter(b => b.name.toLowerCase().includes(q.trim().toLowerCase()))
     : bins
+  // Sort: fresh bins first, in-progress next, already-submitted last. Keeps
+  // the actionable rows at the top so the counter doesn't have to scroll
+  // past 80 already-counted bins to find the next one.
+  const sorted = [...filtered].sort((a, b) => {
+    const order = { undefined: 0, in_progress: 1, submitted: 2 }
+    const oa = order[statusByBinId[a.id]] ?? 0
+    const ob = order[statusByBinId[b.id]] ?? 0
+    if (oa !== ob) return oa - ob
+    return (a.name || '').localeCompare(b.name || '')
+  })
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="overlay-sheet" style={{ maxWidth: 480 }}>
@@ -748,26 +831,44 @@ function BinPickerSheet({ bins, onPick, onClose }) {
           }}
         />
         <div style={{ maxHeight: '60vh', overflowY: 'auto', marginBottom: 12 }}>
-          {filtered.length === 0 && (
+          {sorted.length === 0 && (
             <div style={{ padding: 24, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>
               No matching bins
             </div>
           )}
-          {filtered.map(b => (
-            <button
-              key={b.id}
-              onClick={() => onPick(b)}
-              style={{
-                display: 'block', width: '100%', textAlign: 'left',
-                padding: '10px 12px', marginBottom: 4,
-                background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 'var(--r-sm)', cursor: 'pointer',
-                fontSize: 'var(--fs-base)', color: 'var(--text)',
-              }}
-            >
-              {b.name}
-            </button>
-          ))}
+          {sorted.map(b => {
+            const status = statusByBinId[b.id]
+            const isSubmitted = status === 'submitted'
+            const isInProgress = status === 'in_progress'
+            return (
+              <button
+                key={b.id}
+                onClick={() => { if (!isSubmitted) onPick(b) }}
+                disabled={isSubmitted}
+                title={isSubmitted ? 'Already submitted in this run' : ''}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  width: '100%', textAlign: 'left',
+                  padding: '10px 12px', marginBottom: 4,
+                  background: isSubmitted ? 'var(--surface2)' : 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--r-sm)',
+                  cursor: isSubmitted ? 'not-allowed' : 'pointer',
+                  fontSize: 'var(--fs-base)',
+                  color: isSubmitted ? 'var(--hint)' : 'var(--text)',
+                  opacity: isSubmitted ? 0.6 : 1,
+                }}
+              >
+                <span style={{ flex: 1 }}>{b.name}</span>
+                {isSubmitted && (
+                  <span className="pill pill-sm pill-success">✓ counted</span>
+                )}
+                {isInProgress && (
+                  <span className="pill pill-sm pill-warning">… in progress</span>
+                )}
+              </button>
+            )
+          })}
         </div>
         <button className="btn btn-ghost" style={{ width: '100%' }} onClick={onClose}>Cancel</button>
       </div>
