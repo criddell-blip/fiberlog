@@ -280,7 +280,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
         <button className="back-btn" onClick={onExit}>←</button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="topbar-title">
-            {run.is_first_binning ? '🏗️ First-time binning' : 'Cycle count'}
+            {run.is_first_binning ? '📦 Bin distribution' : 'Cycle count'}
           </div>
           <div className="topbar-sub" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {run.scope_warehouse?.name || 'Cross-warehouse'} ·
@@ -297,7 +297,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
         </button>
       </div>
 
-      {/* First-binning visible banner — orange to signal "different mode" */}
+      {/* Bin-distribution visible banner — orange to signal "different mode" */}
       {run.is_first_binning && (
         <div style={{
           padding: '8px 14px', flexShrink: 0,
@@ -305,7 +305,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
           borderBottom: '1px solid var(--orange)',
           fontSize: 'var(--fs-xs)', color: 'var(--orange)', fontWeight: 'var(--fw-semibold)',
         }}>
-          ⚠️ First-binning mode — counts at each bin will MOVE stock from{' '}
+          ⚠️ Bin distribution — counts at each bin will MOVE stock from{' '}
           <strong>{run.scope_warehouse?.name}</strong> to the bin.
           Not a discovery / variance.
         </div>
@@ -542,12 +542,12 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
         />
       )}
 
-      {/* End run confirm — copy adapts for first-binning mode */}
+      {/* End run confirm — copy adapts for bin-distribution mode */}
       {showEndConfirm && (
         <div className="overlay open" onClick={e => e.target === e.currentTarget && setShowEndConfirm(false)}>
           <div className="overlay-sheet" style={{ maxWidth: 420 }}>
             <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 6 }}>
-              {run.is_first_binning ? 'Finish binning run?' : 'End count run?'}
+              {run.is_first_binning ? 'Finish bin distribution?' : 'End count run?'}
             </div>
             <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 16 }}>
               {run.is_first_binning ? (
@@ -555,7 +555,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
                   {sessions.filter(s => s.status === 'submitted').length} submitted bins.
                   Each counted line becomes a <strong>transfer</strong> from{' '}
                   <strong>{run.scope_warehouse?.name}</strong> to its bin. No review queue.
-                  This is a one-way operation — the movements are permanent.
+                  Movements are permanent; re-run later if more stock arrives.
                 </>
               ) : (
                 <>
@@ -1014,14 +1014,14 @@ function EndResultScreen({ run, onDone }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
       <div style={{ fontSize: 56, marginBottom: 12 }}>
-        {isBinning ? '🏗️' : (isPending ? '⚠️' : '✅')}
+        {isBinning ? '📦' : (isPending ? '⚠️' : '✅')}
       </div>
       <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 6 }}>
-        {isBinning ? 'Binning complete' : (isPending ? 'Reconciled — review needed' : 'Reconciled cleanly')}
+        {isBinning ? 'Bin distribution complete' : (isPending ? 'Reconciled — review needed' : 'Reconciled cleanly')}
       </div>
       <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', maxWidth: 360, marginBottom: 24, lineHeight: 1.4 }}>
         {isBinning
-          ? <>Stock has been transferred from <strong>{run.scope_warehouse?.name}</strong> to each bin you counted. Check the Activity tab to see the transfers; the warehouse's leftover stock represents anything not yet binned.</>
+          ? <>Stock has been transferred from <strong>{run.scope_warehouse?.name}</strong> to each bin you counted. Check the Activity tab to see the transfers; the warehouse's leftover stock is anything not yet distributed.</>
           : isPending
           ? 'Compensating variances within each warehouse were auto-reconciled as internal transfers. The leftovers need your review — open the Count Review queue.'
           : 'Every variance paired with an offsetting one within its warehouse. No manager review needed; all reconciliations are logged as internal transfers.'}

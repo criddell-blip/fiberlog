@@ -141,7 +141,7 @@ Source: [CountTab.jsx](../src/components/cycleCount/CountTab.jsx)
 
 **What you see**:
 - **Start a new run** button + list of pending-review runs + completed history
-- A run scopes the count to a single warehouse (or cross-warehouse) and an optional "First-binning mode" for the one-time warehouse → bin stock migration
+- A run scopes the count to a single warehouse (or cross-warehouse) and an optional "Bin distribution mode" for moving warehouse-level stock into specific bins
 
 **Workflow**:
 1. Counter starts a run → opens [CountRunScreen](../src/components/cycleCount/CountRunScreen.jsx)
@@ -152,7 +152,7 @@ Source: [CountTab.jsx](../src/components/cycleCount/CountTab.jsx)
    - Pairs offsetting variances within the warehouse as internal `transfer` movements
    - Leftovers go to `count_resolutions` for manager review
 
-**First-binning mode**: special flag for the initial migration. Counts become direct warehouse → bin transfers instead of variance reconciliation. One-time, no review queue.
+**Bin distribution mode** (DB flag `is_first_binning`): a freely re-runnable mode where counts become direct warehouse → bin transfers instead of variance reconciliation. Use it for the initial distribution AND any time a new shipment lands at warehouse-level and needs to be sorted into bins. No review queue.
 
 **Gotcha**: cycle count writes `inventory_movements` with `count_run_id` set, which links those movements back to the originating run. If you delete a count run, you must clear `count_resolutions` first (FK chain).
 

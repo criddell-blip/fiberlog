@@ -188,7 +188,7 @@ Bin-level rolling count without taking the warehouse offline:
    - **Pairs offsetting variances within the same warehouse** as internal `transfer` movements (e.g., 5 extra of SKU-X in bin A + 5 short in bin B = transfer from B to A)
    - **Leftovers** go to manager review queue (`count_resolutions` table); manager approves each as a `transfer` to a "found" pseudo-location or discards
 
-**First-binning mode**: special flag for the initial warehouse → bin migration. Counts become direct `transfer` movements (warehouse stock → bin stock) instead of variance reconciliation. One-time operation; no review queue.
+**Bin distribution mode** (DB flag `is_first_binning`): a freely re-runnable mode where counts become direct `transfer` movements (warehouse-level stock → bin stock) instead of variance reconciliation. Use it for the initial warehouse → bin distribution AND any time a new shipment arrives that needs to be sorted into bins. No review queue.
 
 ### Sonar import (daily install report)
 

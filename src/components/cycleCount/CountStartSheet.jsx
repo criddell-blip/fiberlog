@@ -21,9 +21,11 @@ export default function CountStartSheet({ onClose, onStarted }) {
   const [activeRun, setActiveRun] = useState(null)
   const [warehouseId, setWarehouseId] = useState('')
   const [notes, setNotes] = useState('')
-  // First-binning mode: one-time data migration. Counts at each bin
-  // become transfer movements (warehouse → bin) instead of variances.
+  // Bin-distribution mode (DB flag `is_first_binning`): counts at each
+  // bin become transfer movements (warehouse → bin) instead of variances.
   // No reconciliation, no manager review queue — just a clean move.
+  // Despite the flag name, this is freely re-runnable: use any time new
+  // warehouse-level stock arrives that needs to be distributed into bins.
   const [isFirstBinning, setIsFirstBinning] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -139,14 +141,14 @@ export default function CountStartSheet({ onClose, onStarted }) {
               </select>
               <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', marginTop: 4 }}>
                 {isFirstBinning
-                  ? 'First-binning needs a source warehouse — its stock moves to the bins as you count.'
+                  ? 'Bin distribution needs a source warehouse — its stock moves to the bins as you count.'
                   : 'Auto-reconcile only pairs variances within the same warehouse. Pick one if you\'re focused on one location today.'}
               </div>
             </div>
 
-            {/* First-binning toggle — one-time mode for the warehouse →
-                bin data migration. Counts become transfer movements
-                instead of variances. Distinct visual treatment so it
+            {/* Bin-distribution toggle (DB flag is_first_binning). Counts
+                become transfer movements (warehouse → bin) instead of
+                variances. Freely re-runnable. Distinct visual treatment so it
                 doesn't get toggled by accident. */}
             <div style={{
               padding: '10px 12px',
@@ -165,13 +167,14 @@ export default function CountStartSheet({ onClose, onStarted }) {
                 />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-sm)', color: isFirstBinning ? 'var(--orange)' : 'var(--text)' }}>
-                    🏗️ First-time binning mode
+                    📦 Bin distribution mode
                   </div>
                   <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', marginTop: 4, lineHeight: 1.4 }}>
-                    Use this for the one-time warehouse → bin migration.
                     Counts at each bin become <strong>transfer movements</strong>
-                    from the warehouse, not variances. Total stock is preserved.
-                    No manager review queue afterwards.
+                    from warehouse-level stock to the bin, not variances. Total
+                    stock is preserved; no manager review queue. Use this for
+                    the initial warehouse&nbsp;→&nbsp;bin distribution and re-run
+                    any time new shipments arrive that need to be distributed.
                   </div>
                 </div>
               </label>
