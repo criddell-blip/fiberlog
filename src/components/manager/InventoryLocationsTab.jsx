@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../AppContext'
 import {
   createLocation, updateLocation, deactivateLocation, deactivateLocationWithRecovery,
@@ -26,7 +26,7 @@ const TYPE_ICONS = {
   bin:       '📥',
 }
 
-export default function InventoryLocationsTab({ locations, loading, onChanged, onJumpToStock, onJumpToCount, refreshKey }) {
+export default function InventoryLocationsTab({ locations, loading, onChanged, onJumpToStock, onJumpToCount, onJumpToPart, focusJump, refreshKey }) {
   const { users, showToast, currentUser } = useApp()
   // Retire (deactivate) is owner-only. Managers can do everything else
   // — edit attrs, add bins, jump to stock — but retiring a location is
@@ -122,6 +122,20 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
       .catch(e => console.warn('Stock counts failed:', e))
     return () => { cancelled = true }
   }, [locations, refreshKey])
+
+  // Launcher / cross-link focus. When the user picks a location in the
+  // launcher, open its detail panel — that's the natural "look at this
+  // location" view (parts inside, actions, etc.) and avoids the row-
+  // scroll-in-hierarchy problem when bins are nested inside collapsed
+  // aisle groups. Resolves bins via the per-warehouse bin map since
+  // bins aren't in the top-level `locations` prop.
+  useEffect(() => {
+    if (!focusJump || !focusJump.locationId) return
+    const target = locations.find(l => l.id === focusJump.locationId)
+      || Object.values(binsByWarehouse).flat().find(l => l.id === focusJump.locationId)
+    if (target) setDetailFor(target)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusJump?.n])
 
   // Refresh bin lists whenever the locations prop changes — covers both
   // warehouse adds/removes and our own bin operations
@@ -718,6 +732,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
           onClose={() => setDetailFor(null)}
           onJumpToStock={onJumpToStock}
           onJumpToCount={onJumpToCount}
+          onJumpToPart={onJumpToPart}
           onEdit={(loc) => setEditing(loc)}
           onRetire={(loc) => handleDeactivate(loc)}
         />

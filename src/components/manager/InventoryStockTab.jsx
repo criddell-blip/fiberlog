@@ -24,7 +24,7 @@ const TYPE_ICONS = {
 const SUBMODE_ROLLUP = 'rollup'
 const SUBMODE_UNBINNED = 'unbinned'
 
-export default function InventoryStockTab({ locations, locationsLoading, refreshKey, jumpToScope }) {
+export default function InventoryStockTab({ locations, locationsLoading, refreshKey, jumpToScope, onJumpToPart, onJumpToLocation }) {
   const { showToast, currentUser } = useApp()
   // Initialize scope from jumpToScope so the very first load fires with
   // the right scope — avoids the race where the parent flipped tabs +
@@ -38,8 +38,25 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
   // same location still re-fire the effect.
   useEffect(() => {
     if (jumpToScope?.locationId) setScope(jumpToScope.locationId)
+    // Clear search so the focused row isn't filtered out.
+    if (jumpToScope?.partId) setSearch('')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jumpToScope?.n])
+
+  // Highlight the focused part row once rows are loaded (the row's ref
+  // is only attached after the load resolves). Deferred via setTimeout
+  // so the layout has settled before scrollIntoView fires.
+  useEffect(() => {
+    if (!jumpToScope?.partId || loading) return
+    const t = setTimeout(() => {
+      const el = stockRowRefs.current[jumpToScope.partId]
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setHighlightedPartId(jumpToScope.partId)
+    }, 60)
+    const clear = setTimeout(() => setHighlightedPartId(null), 2200)
+    return () => { clearTimeout(t); clearTimeout(clear) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpToScope?.n, loading, rows.length])
   const [binScope, setBinScope] = useState(SUBMODE_ROLLUP)
   const [bins, setBins] = useState([])
   const [rows, setRows] = useState([])
@@ -62,6 +79,12 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
 
   const lastClickedIndexRef = useRef(null)
   const [internalRefresh, setInternalRefresh] = useState(0)
+
+  // Launcher / cross-link focus: when jumpToScope carries a partId, scroll
+  // to + highlight that part's row inside the loaded scope. Refs map by
+  // part_id; only the row matching the focused part lights up briefly.
+  const stockRowRefs = useRef({})
+  const [highlightedPartId, setHighlightedPartId] = useState(null)
 
   // Load bins whenever the warehouse scope changes. Resets binScope to
   // rollup so we always start at the highest-level view when changing
@@ -450,14 +473,24 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)' }}>
           {filtered.map((r, i) => {
             const isSelected = selectedIds.has(r.part_id)
+            const isHighlighted = highlightedPartId === r.part_id
             const total = Number(r.total)
             const canSelect = canBulkSelect && total > 0
             return (
-              <div key={r.part_id} style={{
-                display: 'flex', alignItems: 'center', padding: '10px 14px',
-                borderBottom: i < filtered.length - 1 ? '1px solid var(--border)' : 'none',
-                gap: 8, background: isSelected ? 'var(--orange-lt)' : 'transparent',
-              }}>
+              <div
+                key={r.part_id}
+                ref={el => { stockRowRefs.current[r.part_id] = el }}
+                style={{
+                  display: 'flex', alignItems: 'center', padding: '10px 14px',
+                  borderBottom: i < filtered.length - 1 ? '1px solid var(--border)' : 'none',
+                  gap: 8,
+                  background: isHighlighted ? 'var(--teal-lt)'
+                    : isSelected ? 'var(--orange-lt)'
+                    : 'transparent',
+                  boxShadow: isHighlighted ? 'inset 0 0 0 2px var(--teal)' : 'none',
+                  transition: 'background 0.3s, box-shadow 0.3s',
+                }}
+              >
                 {canBulkSelect && (
                   <input
                     type="checkbox"
@@ -471,7 +504,23 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
                 )}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {r.name}
+                    {/* Name clickable → jump to that part on the Parts tab.
+                        Cross-link affordance; no behavior change if onJumpToPart
+                        wasn't passed in. */}
+                    {onJumpToPart ? (
+                      <button
+                        type="button"
+                        onClick={() => onJumpToPart(r.part_id)}
+                        title="View this part in the Parts tab"
+                        style={{
+                          background: 'transparent', border: 'none', padding: 0,
+                          color: 'inherit', font: 'inherit', cursor: 'pointer',
+                          textAlign: 'left',
+                        }}
+                      >
+                        {r.name}
+                      </button>
+                    ) : r.name}
                     {r.is_active === false && (
                       <span style={{
                         fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4,

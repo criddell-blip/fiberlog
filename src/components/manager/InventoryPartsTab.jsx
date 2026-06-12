@@ -2,10 +2,11 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../AppContext'
 import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, getPartLocations, SONAR_ROUTING_OPTIONS } from '../../lib/inventory'
 import SkuLabelSheet from './SkuLabelSheet'
+import BulkMoveSheet from './BulkMoveSheet'
 
 const COMMON_UNITS = ['ea', 'ft', 'm', 'in', 'lb', 'kg', 'box', 'roll', 'spool', 'pair', 'pack', 'kit']
 
-export default function InventoryPartsTab({ refreshKey, onChanged }) {
+export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, onJumpToLocation, locations, currentUser }) {
   const { showToast } = useApp()
   // Default to the active-parts view. Drafts (auto-created by CSV imports
   // for SKUs not yet in the catalog) used to be the default since cleanup
@@ -28,6 +29,12 @@ export default function InventoryPartsTab({ refreshKey, onChanged }) {
   // Anchor index for shift-click range select. Cleared when the filtered
   // list changes (so a stale anchor doesn't carry across filter/search changes).
   const lastClickedIndexRef = useRef(null)
+
+  // Per-row refs + transient highlight for the launcher/cross-link focus
+  // mechanism. focusJump arrives as { partId, n } — when n bumps, scroll
+  // to that part's row and highlight it briefly.
+  const partRowRefs = useRef({})
+  const [highlightedPartId, setHighlightedPartId] = useState(null)
 
   async function load() {
     setLoading(true)
@@ -53,6 +60,36 @@ export default function InventoryPartsTab({ refreshKey, onChanged }) {
     setSelectedIds(new Set())
     lastClickedIndexRef.current = null
   }, [filter, search])
+
+  // Launcher / cross-link focus. When focusJump.n bumps, scroll to the
+  // target part and highlight it for ~2 sec. Auto-relaxes the filter to
+  // 'all' if the target part would otherwise be hidden by the current
+  // active/draft toggle.
+  useEffect(() => {
+    if (!focusJump || !focusJump.partId) return
+    const target = parts.find(p => p.id === focusJump.partId)
+    if (!target) return
+    // Make sure the target is visible under the current filter.
+    if (filter === 'active' && !target.is_active) setFilter('all')
+    if (filter === 'draft'  &&  target.is_active) setFilter('all')
+    // Clear any search that would hide the row.
+    if (search && search.trim().length >= 2) {
+      const q = search.toLowerCase()
+      const matchesSearch = (target.name || '').toLowerCase().includes(q)
+        || (target.id || '').toLowerCase().includes(q)
+        || (target.category || '').toLowerCase().includes(q)
+      if (!matchesSearch) setSearch('')
+    }
+    // Defer scroll/highlight a tick so the filter change has rendered.
+    const t = setTimeout(() => {
+      const el = partRowRefs.current[focusJump.partId]
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setHighlightedPartId(focusJump.partId)
+    }, 60)
+    const clear = setTimeout(() => setHighlightedPartId(null), 2200)
+    return () => { clearTimeout(t); clearTimeout(clear) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusJump?.n])
 
   const distinctValues = useMemo(() => {
     const depts = new Set()
@@ -297,12 +334,21 @@ export default function InventoryPartsTab({ refreshKey, onChanged }) {
           {filtered.map((p, i) => {
             const stockQty = stockTotals.get(p.id) || 0
             const isSelected = selectedIds.has(p.id)
+            const isHighlighted = highlightedPartId === p.id
             return (
-              <div key={p.id} style={{
-                display: 'flex', alignItems: 'center', padding: '10px 14px', gap: 10,
-                borderBottom: i < filtered.length - 1 ? '1px solid var(--border)' : 'none',
-                background: isSelected ? 'var(--orange-lt)' : 'transparent',
-              }}>
+              <div
+                key={p.id}
+                ref={el => { partRowRefs.current[p.id] = el }}
+                style={{
+                  display: 'flex', alignItems: 'center', padding: '10px 14px', gap: 10,
+                  borderBottom: i < filtered.length - 1 ? '1px solid var(--border)' : 'none',
+                  background: isHighlighted ? 'var(--teal-lt)'
+                    : isSelected ? 'var(--orange-lt)'
+                    : 'transparent',
+                  boxShadow: isHighlighted ? 'inset 0 0 0 2px var(--teal)' : 'none',
+                  transition: 'background 0.3s, box-shadow 0.3s',
+                }}
+              >
                 {/*
                   Checkbox uses onClick (not onChange) so we can read
                   e.shiftKey for range selection. Empty onChange satisfies
@@ -415,7 +461,11 @@ export default function InventoryPartsTab({ refreshKey, onChanged }) {
       {viewingLocationsFor && (
         <PartLocationsPanel
           part={viewingLocationsFor}
+          locations={locations}
+          currentUser={currentUser}
           onClose={() => setViewingLocationsFor(null)}
+          onJumpToLocation={(id) => { setViewingLocationsFor(null); onJumpToLocation?.(id) }}
+          onMoved={() => { setViewingLocationsFor(null); onChanged?.() }}
         />
       )}
     </div>
@@ -429,10 +479,14 @@ export default function InventoryPartsTab({ refreshKey, onChanged }) {
 // Disclaimer reminds the user this is FiberLog's logged view, not
 // authoritative — Sage owns the verified counts (per the transactional-
 // only positioning).
-function PartLocationsPanel({ part, onClose }) {
+function PartLocationsPanel({ part, locations, currentUser, onClose, onJumpToLocation, onMoved }) {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
   const [data, setData] = useState({ totalQty: 0, locations: [] })
+  // When the user clicks "Move from here" on a location row, hold the
+  // pre-built sourceLocation + selectedRows so BulkMoveSheet can open
+  // with the part + source already populated. NULL = closed.
+  const [moveContext, setMoveContext] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -444,6 +498,22 @@ function PartLocationsPanel({ part, onClose }) {
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [part.id])
+
+  function handleMoveFromHere(l) {
+    const sourceLocation = {
+      id: l.locationId,
+      name: l.name,
+      type: l.type,
+      parent_location_id: l.parentLocationId || null,
+    }
+    const selectedRows = [{
+      part_id: part.id,
+      name: part.name,
+      unit: part.unit || 'ea',
+      quantity: l.qty,  // pre-fill move qty with current logged qty; user can lower
+    }]
+    setMoveContext({ sourceLocation, selectedRows })
+  }
 
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -494,7 +564,7 @@ function PartLocationsPanel({ part, onClose }) {
               }}>
                 {data.locations.map(l => (
                   <div key={l.locationId} style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
+                    display: 'flex', alignItems: 'center', gap: 8,
                     padding: '8px 12px',
                     borderBottom: '1px solid var(--border)',
                     fontSize: 'var(--fs-sm)',
@@ -508,16 +578,49 @@ function PartLocationsPanel({ part, onClose }) {
                     }}>
                       {l.type === 'bin' ? 'bin' : l.type}
                     </div>
-                    <div style={{ flex: 1, fontWeight: 'var(--fw-semibold)' }}>
+                    <div style={{ flex: 1, fontWeight: 'var(--fw-semibold)', minWidth: 0 }}>
                       {l.displayLabel}
                     </div>
                     <div style={{
-                      minWidth: 60, textAlign: 'right',
+                      minWidth: 50, textAlign: 'right',
                       fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-md)',
                       color: 'var(--orange)',
                     }}>
                       {l.qty.toLocaleString()}
                     </div>
+                    {/* Cross-link: jump to this location in the Locations tab */}
+                    {onJumpToLocation && (
+                      <button
+                        type="button"
+                        onClick={() => onJumpToLocation(l.locationId)}
+                        title="Open this location in the Locations tab"
+                        style={{
+                          fontSize: 10, padding: '3px 8px',
+                          background: 'transparent', color: 'var(--muted)',
+                          border: '1px solid var(--border)', borderRadius: 'var(--r-xs)',
+                          cursor: 'pointer', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        → Location
+                      </button>
+                    )}
+                    {/* Move stock from here → opens BulkMoveSheet pre-filled */}
+                    {l.qty > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleMoveFromHere(l)}
+                        title={`Move some of this part out of ${l.displayLabel}`}
+                        style={{
+                          fontSize: 10, padding: '3px 8px',
+                          background: 'var(--orange-lt)', color: 'var(--orange)',
+                          border: '1px solid var(--orange)', borderRadius: 'var(--r-xs)',
+                          cursor: 'pointer', whiteSpace: 'nowrap',
+                          fontWeight: 700,
+                        }}
+                      >
+                        Move from here
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -539,6 +642,17 @@ function PartLocationsPanel({ part, onClose }) {
           </button>
         </div>
       </div>
+
+      {moveContext && (
+        <BulkMoveSheet
+          sourceLocation={moveContext.sourceLocation}
+          selectedRows={moveContext.selectedRows}
+          locations={locations || []}
+          currentUser={currentUser}
+          onClose={() => setMoveContext(null)}
+          onComplete={() => { setMoveContext(null); onMoved?.() }}
+        />
+      )}
     </div>
   )
 }

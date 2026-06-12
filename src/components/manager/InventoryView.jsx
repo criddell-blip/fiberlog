@@ -7,6 +7,7 @@ import InventoryLocationsTab from './InventoryLocationsTab'
 import InventoryPartsTab from './InventoryPartsTab'
 import InventoryMovementsTab from './InventoryMovementsTab'
 import InventoryAuditTab from './InventoryAuditTab'
+import InventoryLauncher from './InventoryLauncher'
 import CountTab from '../cycleCount/CountTab'
 import RecordMovementSheet from './RecordMovementSheet'
 import ReceivePOSheet from './ReceivePOSheet'
@@ -60,23 +61,46 @@ export default function InventoryView() {
   // When the user clicks "View stock" on a location card, we set this and
   // flip the tab. StockTab reads it on mount + on change to seed its
   // scope; the counter ensures repeat clicks on the same location still
-  // re-fire the effect.
-  const [stockJump, setStockJump] = useState({ locationId: null, n: 0 })
+  // re-fire the effect. partId is set by the launcher when picking a
+  // stock pair so the Stock tab can also pre-filter to the SKU.
+  const [stockJump, setStockJump] = useState({ locationId: null, partId: null, n: 0 })
   // Count jump — flips to Count tab and seeds CountTab with a specific run +
   // optional session to auto-open. Used by LocationDetailPanel's "Count this
   // bin" action so the manager goes directly into the bin's session instead
   // of starting from Count tab's empty state. Counter (n) ensures repeat
   // clicks on the same target still re-fire the effect.
   const [countJump, setCountJump] = useState({ run: null, session: null, n: 0 })
+  // Parts / Locations focus jumps from the launcher and cross-tab links.
+  // Each tab consumes its jump prop on mount/change, scrolls to the
+  // target row, and highlights for ~2 sec. Counter pattern matches the
+  // existing stockJump / countJump pattern so repeated clicks on the
+  // same entity still re-fire.
+  const [partsJump, setPartsJump] = useState({ partId: null, n: 0 })
+  const [locationsJump, setLocationsJump] = useState({ locationId: null, n: 0 })
 
   function jumpToStock(locationId) {
-    setStockJump(prev => ({ locationId, n: prev.n + 1 }))
+    setStockJump(prev => ({ locationId, partId: null, n: prev.n + 1 }))
     setTab('stock')
   }
 
   function jumpToCount(run, session) {
     setCountJump(prev => ({ run, session, n: prev.n + 1 }))
     setTab('count')
+  }
+
+  function jumpToPart(partId) {
+    setPartsJump(prev => ({ partId, n: prev.n + 1 }))
+    setTab('parts')
+  }
+
+  function jumpToLocation(locationId) {
+    setLocationsJump(prev => ({ locationId, n: prev.n + 1 }))
+    setTab('locations')
+  }
+
+  function jumpToStockPair({ partId, locationId }) {
+    setStockJump(prev => ({ locationId, partId, n: prev.n + 1 }))
+    setTab('stock')
   }
 
   async function loadLocations() {
@@ -278,6 +302,12 @@ export default function InventoryView() {
             </button>
           </div>
         </div>
+        {/* Unified launcher: one entry point for "find anything inventory." */}
+        <InventoryLauncher
+          onJumpToPart={jumpToPart}
+          onJumpToLocation={jumpToLocation}
+          onJumpToStockPair={jumpToStockPair}
+        />
         {/* Sub-tab nav: pills on desktop, native dropdown on phone.
             6 pills wrap to 2 rows on a 360px viewport; dropdown is 1 row. */}
         {isWide ? (
@@ -340,6 +370,8 @@ export default function InventoryView() {
             locationsLoading={locationsLoading}
             refreshKey={refreshKey}
             jumpToScope={stockJump}
+            onJumpToPart={jumpToPart}
+            onJumpToLocation={jumpToLocation}
           />
         )}
         {tab === 'locations' && (
@@ -349,6 +381,8 @@ export default function InventoryView() {
             onChanged={handleLocationsChanged}
             onJumpToStock={jumpToStock}
             onJumpToCount={jumpToCount}
+            onJumpToPart={jumpToPart}
+            focusJump={locationsJump}
             refreshKey={refreshKey}
           />
         )}
@@ -356,6 +390,10 @@ export default function InventoryView() {
           <InventoryPartsTab
             refreshKey={refreshKey}
             onChanged={handlePartsChanged}
+            focusJump={partsJump}
+            onJumpToLocation={jumpToLocation}
+            locations={locations}
+            currentUser={currentUser}
           />
         )}
         {tab === 'movements' && (

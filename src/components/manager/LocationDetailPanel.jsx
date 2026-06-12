@@ -29,6 +29,7 @@ export default function LocationDetailPanel({
   onClose,
   onJumpToStock,
   onJumpToCount,
+  onJumpToPart,
   onEdit,
   onRetire,
   isOwner,
@@ -316,6 +317,24 @@ export default function LocationDetailPanel({
                       {pc?.unit || 'ea'}
                     </div>
                   </div>
+                  {/* Cross-link: open this part in the Parts tab. Closes
+                      the detail panel so the user lands directly on the
+                      Parts list with the row highlighted. */}
+                  {onJumpToPart && pc?.id && (
+                    <button
+                      type="button"
+                      onClick={() => { onClose(); onJumpToPart(pc.id) }}
+                      title="Open this part in the Parts tab"
+                      style={{
+                        fontSize: 10, padding: '3px 8px',
+                        background: 'transparent', color: 'var(--muted)',
+                        border: '1px solid var(--border)', borderRadius: 'var(--r-xs)',
+                        cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                      }}
+                    >
+                      → Part
+                    </button>
+                  )}
                 </div>
               )
             })}

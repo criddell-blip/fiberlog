@@ -232,6 +232,7 @@ export async function getPartLocations(partId) {
       type: loc.type,
       hasOwner: !!loc.assigned_to,
       isActive: !!loc.is_active,
+      parentLocationId: loc.parent_location_id || null,
       parentName,
       displayLabel: parentName ? `${parentName} · ${loc.name}` : loc.name,
       qty,
@@ -240,6 +241,98 @@ export async function getPartLocations(partId) {
   }
   locations.sort((a, b) => b.qty - a.qty)
   return { totalQty, locations }
+}
+
+// Global inventory search — used by the Inventory launcher at the top of
+// the manager Inventory section. One input, three result groups: parts
+// (by name / SKU / nickname), locations (by name; bins surface their
+// parent's name in the label), and stock pairs (part-at-location rows
+// where both sides match the query).
+//
+// Capped per group so the dropdown stays scannable. Caller debounces;
+// this fires three parallel queries when invoked.
+export async function searchInventoryGlobal(query, { limit = 5 } = {}) {
+  const q = (query || '').trim()
+  if (q.length < 2) return { parts: [], locations: [], stockPairs: [] }
+
+  const like = `%${q.replace(/[%_]/g, '\\$&')}%`
+
+  const [partsRes, locsRes, stockRes] = await Promise.all([
+    db.from('parts_catalog')
+      .select('id, name, nickname, unit, is_active')
+      .or(`name.ilike.${like},id.ilike.${like},nickname.ilike.${like}`)
+      .order('name')
+      .limit(limit),
+    db.from('inventory_locations')
+      .select('id, name, type, parent_location_id, assigned_to, is_active')
+      .ilike('name', like)
+      .eq('is_active', true)
+      .order('name')
+      .limit(limit),
+    // Stock pairs: pull rows whose part OR location matches; filter to
+    // BOTH-sides matches client-side after the join. Cheaper than two
+    // queries with a giant IN list.
+    db.from('inventory_stock')
+      .select('part_id, location_id, quantity, parts_catalog(id, name, nickname), inventory_locations(id, name, type, parent_location_id)')
+      .gt('quantity', 0)
+      .or(`parts_catalog.name.ilike.${like},parts_catalog.id.ilike.${like},inventory_locations.name.ilike.${like}`)
+      .limit(limit * 4),  // overscan; we'll filter and trim below
+  ])
+  if (partsRes.error) throw partsRes.error
+  if (locsRes.error) throw locsRes.error
+  if (stockRes.error) throw stockRes.error
+
+  // Build a small lookup so we can attach parent warehouse names to bins.
+  const allLocs = new Map()
+  for (const l of (locsRes.data || [])) allLocs.set(l.id, l)
+  for (const s of (stockRes.data || [])) {
+    if (s.inventory_locations) allLocs.set(s.inventory_locations.id, s.inventory_locations)
+  }
+  // Pull parents for any bin we don't already have parents for. One
+  // round trip rather than per-row.
+  const parentIdsNeeded = new Set()
+  for (const l of allLocs.values()) {
+    if (l.type === 'bin' && l.parent_location_id && !allLocs.has(l.parent_location_id)) {
+      parentIdsNeeded.add(l.parent_location_id)
+    }
+  }
+  if (parentIdsNeeded.size > 0) {
+    const { data: parents } = await db
+      .from('inventory_locations')
+      .select('id, name, type')
+      .in('id', Array.from(parentIdsNeeded))
+    for (const p of (parents || [])) allLocs.set(p.id, p)
+  }
+  const labelLoc = loc => {
+    if (!loc) return ''
+    if (loc.type === 'bin' && loc.parent_location_id) {
+      const parent = allLocs.get(loc.parent_location_id)
+      return parent ? `${parent.name} · ${loc.name}` : loc.name
+    }
+    return loc.name
+  }
+
+  const parts = (partsRes.data || []).map(p => ({
+    id: p.id, name: p.name, nickname: p.nickname,
+    unit: p.unit, isActive: !!p.is_active,
+  }))
+  const locations = (locsRes.data || []).map(l => ({
+    id: l.id, name: l.name, type: l.type,
+    parent_location_id: l.parent_location_id,
+    displayLabel: labelLoc(l),
+  }))
+  const stockPairs = (stockRes.data || [])
+    .filter(s => s.parts_catalog && s.inventory_locations)
+    .slice(0, limit)
+    .map(s => ({
+      partId: s.part_id,
+      partName: s.parts_catalog.name || s.part_id,
+      locationId: s.location_id,
+      locationLabel: labelLoc(s.inventory_locations),
+      qty: Number(s.quantity) || 0,
+    }))
+
+  return { parts, locations, stockPairs }
 }
 
 export async function getStockSummary() {
@@ -873,31 +966,41 @@ export async function exportLocationStockCSV(location) {
     return s
   }
 
-  // Get stock at the location with full part info
+  const isWarehouse = location.type === 'warehouse'
+  const isBin = location.type === 'bin'
+
+  // For a warehouse export, expand the scope to include the warehouse
+  // itself (unbinned stock) AND every bin under it. Without this, binned
+  // stock — which lives at location_id = bin_id, not warehouse_id — is
+  // silently excluded from the CSV and the Bin column comes out empty.
+  let bins = []
+  if (isWarehouse) {
+    bins = await getBinsForWarehouse(location.id)
+  }
+  const locationIds = isWarehouse
+    ? [location.id, ...bins.map(b => b.id)]
+    : [location.id]
+
+  // Lookup for per-row Bin column labeling. For a warehouse export each
+  // row's location_id will be either the warehouse (unbinned) or one of
+  // its bins; we need both in the map.
+  const locById = new Map()
+  locById.set(location.id, location)
+  for (const b of bins) locById.set(b.id, b)
+
+  // Get stock at all scope-relevant locations. inventory_stock.last_movement_at
+  // already tracks the last touch per (part, location) — use it directly
+  // instead of a separate movements round trip.
   const { data: stock, error: stockErr } = await db
     .from('inventory_stock')
-    .select('*, parts_catalog (id, name, category, department, material_group, unit)')
-    .eq('location_id', location.id)
+    .select('location_id, part_id, quantity, last_movement_at, parts_catalog (id, name, category, department, material_group, unit)')
+    .in('location_id', locationIds)
   if (stockErr) throw stockErr
 
-  // Resolve last-movement timestamps per part at this location
-  const partIds = (stock || []).map(s => s.part_id).filter(Boolean)
-  let lastMoves = {}
-  if (partIds.length > 0) {
-    const { data: moves } = await db
-      .from('inventory_movements')
-      .select('part_id, created_at')
-      .or(`from_location_id.eq.${location.id},to_location_id.eq.${location.id}`)
-      .in('part_id', partIds)
-      .order('created_at', { ascending: false })
-    for (const m of (moves || [])) {
-      if (!lastMoves[m.part_id]) lastMoves[m.part_id] = m.created_at
-    }
-  }
-
-  // Resolve parent warehouse name for bins
+  // Resolve parent warehouse name for a bin-only export so the Location
+  // column reads as the warehouse, not "Aisle 3 B-2".
   let parentName = ''
-  if (location.type === 'bin' && location.parent_location_id) {
+  if (isBin && location.parent_location_id) {
     const { data: parent } = await db
       .from('inventory_locations')
       .select('name')
@@ -906,14 +1009,37 @@ export async function exportLocationStockCSV(location) {
     parentName = parent?.name || ''
   }
 
-  const isBin = location.type === 'bin'
-  const locName = isBin ? parentName : location.name
-  const binName = isBin ? location.name : ''
+  // The warehouse name for this export: itself when exporting a warehouse,
+  // the parent when exporting a single bin. For non-warehouse/non-bin
+  // locations (truck, job_site), it's just the location's own name.
+  const warehouseName = isWarehouse ? location.name
+                     : isBin        ? parentName
+                     : location.name
+
+  // Sort: warehouse-level (unbinned) first, then bins alphabetically;
+  // within each group, parts alphabetically. Makes the printed sheet
+  // walkable for the person doing the physical audit.
+  const sortedStock = (stock || []).slice().sort((a, b) => {
+    const al = locById.get(a.location_id)
+    const bl = locById.get(b.location_id)
+    const aBin = al?.type === 'bin' ? al.name : ''
+    const bBin = bl?.type === 'bin' ? bl.name : ''
+    if (aBin !== bBin) return aBin.localeCompare(bBin)
+    const aName = (a.parts_catalog?.name) || a.part_id || ''
+    const bName = (b.parts_catalog?.name) || b.part_id || ''
+    return aName.localeCompare(bName)
+  })
 
   const lines = [HEADERS.map(csvField).join(',')]
-  ;(stock || []).forEach((r, idx) => {
+  sortedStock.forEach((r, idx) => {
     const rowNum = idx + 2  // 1-based + header row
     const pc = r.parts_catalog || {}
+    const rowLoc = locById.get(r.location_id)
+    // Bin column: bin name if this row's location is a bin; for a
+    // bin-only export, every row IS a bin row, so always show its name.
+    const rowBinName = rowLoc?.type === 'bin'
+      ? rowLoc.name
+      : (isBin ? location.name : '')
     const fields = [
       pc.id || r.part_id,
       pc.name || '',
@@ -921,12 +1047,12 @@ export async function exportLocationStockCSV(location) {
       pc.department || '',
       pc.material_group || '',
       pc.unit || 'ea',
-      locName,
-      binName,
+      warehouseName,
+      rowBinName,
       Number(r.quantity) || 0,
       '',                          // Actual qty — blank for the counter to fill in
       `=J${rowNum}-I${rowNum}`,    // Variance formula (Excel/Sheets — Actual minus Expected)
-      lastMoves[r.part_id] ? new Date(lastMoves[r.part_id]).toISOString().slice(0, 10) : '',
+      r.last_movement_at ? new Date(r.last_movement_at).toISOString().slice(0, 10) : '',
       '',                          // Notes — blank
     ]
     lines.push(fields.map(csvField).join(','))
@@ -942,7 +1068,7 @@ export async function exportLocationStockCSV(location) {
   a.download = `fiberlog-audit-${safeName}-${stamp}.csv`
   a.click()
   URL.revokeObjectURL(url)
-  return (stock || []).length
+  return sortedStock.length
 }
 
 // Fetch caller's truck + stock at it in one round trip. Stock rows have
