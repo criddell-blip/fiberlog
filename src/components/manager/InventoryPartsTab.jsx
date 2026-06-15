@@ -65,8 +65,19 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   // target part and highlight it for ~2 sec. Auto-relaxes the filter to
   // 'all' if the target part would otherwise be hidden by the current
   // active/draft toggle.
+  //
+  // Gates: we need parts to be loaded (the .find lookup needs data) AND
+  // we use a processedJumpRef so re-runs from `parts` changing for
+  // unrelated reasons (refresh, bulk-edit) don't re-trigger the focus.
+  // Without these, the common case — switching tabs from Stock and
+  // mounting Parts fresh — silently dropped the focus because `parts`
+  // was still empty when the effect fired.
+  const processedJumpRef = useRef(-1)
   useEffect(() => {
     if (!focusJump || !focusJump.partId) return
+    if (parts.length === 0) return  // wait for the initial load
+    if (focusJump.n === processedJumpRef.current) return  // already handled
+    processedJumpRef.current = focusJump.n
     const target = parts.find(p => p.id === focusJump.partId)
     if (!target) return
     // Make sure the target is visible under the current filter.
@@ -89,7 +100,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
     const clear = setTimeout(() => setHighlightedPartId(null), 2200)
     return () => { clearTimeout(t); clearTimeout(clear) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusJump?.n])
+  }, [focusJump?.n, parts.length])
 
   const distinctValues = useMemo(() => {
     const depts = new Set()

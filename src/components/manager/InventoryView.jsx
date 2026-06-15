@@ -112,10 +112,10 @@ export default function InventoryView() {
 
   useEffect(() => { loadLocations() }, [])
 
-  function handleMovementRecorded() {
+  function handleMovementRecorded(count = 1) {
     setShowRecordSheet(false)
     setRefreshKey(k => k + 1)
-    showToast('Movement recorded')
+    showToast(count === 1 ? 'Movement recorded' : `${count} movements recorded`)
   }
 
   function handlePOReceived(lineCount) {

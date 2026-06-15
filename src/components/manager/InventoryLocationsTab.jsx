@@ -129,13 +129,22 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   // scroll-in-hierarchy problem when bins are nested inside collapsed
   // aisle groups. Resolves bins via the per-warehouse bin map since
   // bins aren't in the top-level `locations` prop.
+  //
+  // Gates: wait for `locations` to be loaded + use a processedJumpRef to
+  // avoid re-trigger when locations/binsByWarehouse change for unrelated
+  // reasons (refresh after a CRUD action). Same pattern as InventoryPartsTab.
+  const processedFocusRef = useRef(-1)
   useEffect(() => {
     if (!focusJump || !focusJump.locationId) return
+    if (locations.length === 0) return  // wait for the initial load
+    if (focusJump.n === processedFocusRef.current) return  // already handled
     const target = locations.find(l => l.id === focusJump.locationId)
       || Object.values(binsByWarehouse).flat().find(l => l.id === focusJump.locationId)
-    if (target) setDetailFor(target)
+    if (!target) return  // bin not loaded yet — keep ref unmarked so we retry when bins arrive
+    processedFocusRef.current = focusJump.n
+    setDetailFor(target)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusJump?.n])
+  }, [focusJump?.n, locations.length, binsByWarehouse])
 
   // Refresh bin lists whenever the locations prop changes — covers both
   // warehouse adds/removes and our own bin operations

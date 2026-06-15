@@ -1,5 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
-import { recordMovement, searchInventoryParts, getBinsForWarehouse } from '../../lib/inventory'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import {
+  recordMovementsBatch,
+  searchInventoryParts,
+  getBinsForWarehouse,
+  getPartLocations,
+} from '../../lib/inventory'
 
 const TYPES = [
   { id: 'receive',  label: 'Receive',  icon: '⬇',  hint: 'New stock from a vendor' },
@@ -19,21 +24,43 @@ const ENDPOINTS = {
   adjust:   { adjustDir: true                        },
 }
 
+// Manager's free-form movement entry sheet. Multi-part: pick a movement
+// type and From/To, then add as many (part, qty) lines as needed —
+// submit fans out to N inventory_movements rows in one batch.
+//
+// "Smart From" filter: once any parts are added, the From picker shows
+// only locations where at least one of the picked parts has logged
+// stock, with an N/M badge per row. Override toggle restores the
+// "show every location" picker for edge cases (adjust movements that
+// genuinely create stock somewhere FiberLog hasn't seen the part at).
 export default function RecordMovementSheet({ locations, currentUser, onClose, onRecorded }) {
   const [type, setType] = useState('receive')
+
+  // Part search + multi-line state. Each line = one movement at submit.
   const [partQuery, setPartQuery] = useState('')
   const [partResults, setPartResults] = useState([])
-  const [selectedPart, setSelectedPart] = useState(null)
-  const [quantity, setQuantity] = useState('')
+  const [lines, setLines] = useState([])  // [{ part_id, name, unit, qty: '1' }]
+  // Logged locations per part, keyed by part_id. Fetched on add-to-lines;
+  // used by the smart From-picker to compute "N of M parts here" badges.
+  const [partLocationsByPart, setPartLocationsByPart] = useState({})
 
-  // Endpoints split into top-level + bin so a warehouse + bin combo can be
-  // picked. The effective movement endpoint is bin if set, else top-level.
+  // Smart-vs-show-all From picker mode. When "show all" is true we drop
+  // the part-filter and let the manager pick any non-vendor location
+  // (with the standard warehouse → bin cascade).
+  const [showAllFromLocations, setShowAllFromLocations] = useState(false)
+
+  // From picker state. In smart mode `fromLocationId` is set directly
+  // from the flat list. In show-all mode it's derived from the
+  // cascading picker (fromTopId + fromBinId).
+  const [fromLocationId, setFromLocationId] = useState('')
   const [fromTopId, setFromTopId] = useState('')
   const [fromBinId, setFromBinId] = useState('')
-  const [toTopId,   setToTopId]   = useState('')
-  const [toBinId,   setToBinId]   = useState('')
 
-  // Cache bins per warehouse id so we don't refetch on every render
+  // To picker stays cascading regardless (no filter applied).
+  const [toTopId, setToTopId] = useState('')
+  const [toBinId, setToBinId] = useState('')
+
+  // Cache bins per warehouse id so we don't refetch on every render.
   const [binsByWarehouse, setBinsByWarehouse] = useState({})
 
   const [adjustDir, setAdjustDir] = useState('add')
@@ -45,22 +72,23 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
 
   const searchTimerRef = useRef(null)
 
-  // Reset endpoints when type changes
+  // Reset endpoints + clear errors when type changes.
   useEffect(() => {
+    setFromLocationId('')
     setFromTopId(''); setFromBinId('')
-    setToTopId('');   setToBinId('')
+    setToTopId(''); setToBinId('')
     setError(null)
   }, [type])
 
-  // When a top-level location is selected (from or to), fetch its bins if it
-  // happens to be a warehouse. Cached to avoid re-fetching on re-renders.
+  // When a top-level location is selected for the To picker (or for
+  // show-all From), fetch its bins if it's a warehouse. Cached.
   useEffect(() => { ensureBinsLoaded(fromTopId) }, [fromTopId])
-  useEffect(() => { ensureBinsLoaded(toTopId)   }, [toTopId])
+  useEffect(() => { ensureBinsLoaded(toTopId) }, [toTopId])
   async function ensureBinsLoaded(locId) {
     if (!locId) return
     const loc = locations.find(l => l.id === locId)
     if (loc?.type !== 'warehouse') return
-    if (binsByWarehouse[locId] !== undefined) return  // already cached (even if [])
+    if (binsByWarehouse[locId] !== undefined) return
     try {
       const bins = await getBinsForWarehouse(locId)
       setBinsByWarehouse(prev => ({ ...prev, [locId]: bins }))
@@ -69,11 +97,11 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
       setBinsByWarehouse(prev => ({ ...prev, [locId]: [] }))
     }
   }
-  // Clear stale bin selection when top-level changes
+  // Clear stale bin selection when top-level changes.
   useEffect(() => { setFromBinId('') }, [fromTopId])
-  useEffect(() => { setToBinId('')   }, [toTopId])
+  useEffect(() => { setToBinId('') }, [toTopId])
 
-  // Debounced part search
+  // Debounced part search.
   useEffect(() => {
     if (!partQuery || partQuery.length < 2) {
       setPartResults([])
@@ -92,21 +120,102 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   }, [partQuery])
 
   function pickPart(p) {
-    setSelectedPart(p)
     setPartQuery('')
     setPartResults([])
+    // Don't add duplicates — if it's already in the list, do nothing.
+    if (lines.some(l => l.part_id === p.id)) return
+    setLines(prev => [...prev, {
+      part_id: p.id,
+      name: p.name,
+      unit: p.unit || 'ea',
+      qty: '1',
+    }])
+    // Fire the per-part location lookup in the background. Stored even
+    // if it resolves zero locations — keeps the smart-from filter aware
+    // that we tried.
+    getPartLocations(p.id)
+      .then(r => setPartLocationsByPart(prev => ({ ...prev, [p.id]: r })))
+      .catch(e => console.warn(`getPartLocations(${p.id}) failed:`, e))
   }
 
-  // Effective endpoint ids — bin if a bin was picked, else the top-level
-  const effectiveFromId = fromBinId || fromTopId
-  const effectiveToId   = toBinId   || toTopId
+  function removeLine(partId) {
+    setLines(prev => prev.filter(l => l.part_id !== partId))
+    // Don't drop partLocationsByPart — cheap to keep, useful if the user
+    // re-adds the part during the same session.
+  }
+
+  function setLineQty(partId, qty) {
+    setLines(prev => prev.map(l => l.part_id === partId ? { ...l, qty } : l))
+  }
+
+  // Show/hide which fields based on movement type + adjust direction.
+  const ep = ENDPOINTS[type]
+  const showFrom = type === 'adjust' ? adjustDir === 'remove' : !!ep.from
+  const showTo = type === 'adjust' ? adjustDir === 'add' : !!ep.to
+
+  // Smart From options: union of locations where any picked part has
+  // logged stock, sorted by "most parts here" desc. Each entry carries
+  // a partsHere count for the N/M badge. Falls through to "all non-vendor
+  // locations" when the toggle is off OR no parts are picked yet.
+  const smartFromOptions = useMemo(() => {
+    if (lines.length === 0) return []
+    const counter = new Map()  // locationId → count of parts present
+    const labelById = new Map()  // locationId → displayLabel from getPartLocations
+    for (const line of lines) {
+      const pl = partLocationsByPart[line.part_id]
+      if (!pl || !pl.locations) continue
+      for (const loc of pl.locations) {
+        counter.set(loc.locationId, (counter.get(loc.locationId) || 0) + 1)
+        labelById.set(loc.locationId, loc)
+      }
+    }
+    const opts = []
+    for (const [locId, count] of counter.entries()) {
+      const locInfo = labelById.get(locId)
+      // Make sure this location is still in the top-level locations list
+      // OR is a bin under one (bins aren't in the top-level list).
+      const isKnown = locations.some(l => l.id === locId) || locInfo?.type === 'bin'
+      if (!isKnown) continue
+      opts.push({
+        id: locId,
+        displayLabel: locInfo?.displayLabel || locInfo?.name || locId,
+        type: locInfo?.type || 'unknown',
+        partsHere: count,
+      })
+    }
+    return opts.sort((a, b) => b.partsHere - a.partsHere || a.displayLabel.localeCompare(b.displayLabel))
+  }, [lines, partLocationsByPart, locations])
+
+  const useSmartFromPicker = showFrom && !showAllFromLocations && lines.length > 0
+
+  // Effective from-location id depending on which picker is showing.
+  const effectiveFromId = useSmartFromPicker
+    ? fromLocationId
+    : (fromBinId || fromTopId)
+  const effectiveToId = toBinId || toTopId
+
+  // Per-line "no logged stock at the picked From" warning. Renders only
+  // when From is set AND we have the part's location data loaded.
+  function lineHasStockAtFrom(line) {
+    if (!showFrom || !effectiveFromId) return true
+    const pl = partLocationsByPart[line.part_id]
+    if (!pl || !pl.locations) return true  // unknown yet — don't false-warn
+    return pl.locations.some(l => l.locationId === effectiveFromId)
+  }
+
+  // To options — same flavor as before: hide scrap from destinations
+  // (scrap movements use the 'scrap' type, not destination=scrap).
+  const toOptions = useMemo(() => locations.filter(l => l.type !== 'scrap'), [locations])
+  // Show-all From options — hide vendors (you don't transfer FROM a
+  // vendor; that's `receive`).
+  const allFromOptions = useMemo(() => locations.filter(l => l.type !== 'vendor'), [locations])
 
   function validate() {
-    if (!selectedPart) return 'Pick a part'
-    const q = Number(quantity)
-    if (!q || q <= 0) return 'Quantity must be greater than zero'
-
-    const ep = ENDPOINTS[type]
+    if (lines.length === 0) return 'Add at least one part'
+    for (const l of lines) {
+      const q = Number(l.qty)
+      if (!q || q <= 0) return `${l.name}: quantity must be greater than zero`
+    }
     if (type === 'adjust') {
       if (adjustDir === 'add' && !effectiveToId) return 'Pick a location to add to'
       if (adjustDir === 'remove' && !effectiveFromId) return 'Pick a location to remove from'
@@ -126,47 +235,42 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     setError(null)
     setSubmitting(true)
     try {
-      const payload = {
-        movement_type: type,
-        part_id: selectedPart.id,
-        quantity: Number(quantity),
-        unit: selectedPart.unit || 'ea',
-        notes: notes.trim() || null,
-        created_by: currentUser?.id,
-      }
-      if (type === 'adjust') {
-        if (adjustDir === 'add') payload.to_location_id = effectiveToId
-        else                     payload.from_location_id = effectiveFromId
-      } else {
-        const ep = ENDPOINTS[type]
-        if (ep.from) payload.from_location_id = effectiveFromId
-        if (ep.to)   payload.to_location_id   = effectiveToId
-        if (ep.vendor) {
-          payload.vendor_invoice = vendorInvoice.trim() || null
-          payload.unit_cost = unitCost === '' ? null : Number(unitCost)
+      // Build one movement payload per line. Shared from/to/type/notes.
+      const payloads = lines.map(line => {
+        const base = {
+          movement_type: type,
+          part_id: line.part_id,
+          quantity: Number(line.qty),
+          unit: line.unit || 'ea',
+          notes: notes.trim() || null,
+          created_by: currentUser?.id,
         }
-      }
-      await recordMovement(payload)
-      onRecorded()
+        if (type === 'adjust') {
+          if (adjustDir === 'add') base.to_location_id = effectiveToId
+          else                     base.from_location_id = effectiveFromId
+        } else {
+          if (ep.from) base.from_location_id = effectiveFromId
+          if (ep.to)   base.to_location_id = effectiveToId
+          if (ep.vendor) {
+            base.vendor_invoice = vendorInvoice.trim() || null
+            base.unit_cost = unitCost === '' ? null : Number(unitCost)
+          }
+        }
+        return base
+      })
+      await recordMovementsBatch(payloads)
+      onRecorded(payloads.length)
     } catch (e) {
-      console.error('Record movement failed:', e)
-      setError(e.message || 'Failed to record movement')
+      console.error('Record movements failed:', e)
+      setError(e.message || 'Failed to record movements')
     } finally {
       setSubmitting(false)
     }
   }
 
-  const ep = ENDPOINTS[type]
-  const showFrom = type === 'adjust' ? adjustDir === 'remove' : !!ep.from
-  const showTo   = type === 'adjust' ? adjustDir === 'add'    : !!ep.to
-
-  // Filter locations sensibly per type
-  const fromOptions = locations.filter(l => l.type !== 'vendor')
-  const toOptions   = locations.filter(l => l.type !== 'scrap')
-
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="overlay-sheet" style={{ maxWidth: 520 }}>
+      <div className="overlay-sheet" style={{ maxWidth: 560 }}>
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Record movement</div>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
           {currentUser?.name} · {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
@@ -205,89 +309,156 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
           </div>
         )}
 
-        {/* Part picker */}
+        {/* Parts (multi-line) */}
         <div className="field">
-          <label>Part</label>
-          {selectedPart ? (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '10px 12px', background: 'var(--orange-lt)',
-              border: '1.5px solid var(--orange)', borderRadius: 'var(--r-sm)'
-            }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {selectedPart.name}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{selectedPart.id}</div>
-              </div>
-              <button
-                onClick={() => setSelectedPart(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--orange)', fontWeight: 700 }}
-              >Change</button>
-            </div>
-          ) : (
-            <>
-              <input
-                type="text"
-                placeholder="Search by name or SKU…"
-                value={partQuery}
-                onChange={e => setPartQuery(e.target.value)}
-                autoFocus
-                autoComplete="off"
-                spellCheck="false"
-                name="movement-part-search"
-              />
-              {partResults.length > 0 && (
-                <div style={{ marginTop: 4, maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)' }}>
-                  {partResults.map(p => (
-                    <div key={p.id} onClick={() => pickPart(p)} style={{
-                      padding: '8px 12px', cursor: 'pointer',
-                      borderBottom: '1px solid var(--border)', background: 'var(--surface)'
-                    }}>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--hint)' }}>{p.id}{p.category ? ` · ${p.category}` : ''}</div>
+          <label>Parts {lines.length > 0 && <span style={{ color: 'var(--muted)', fontWeight: 400 }}>({lines.length})</span>}</label>
+
+          {/* Existing line rows */}
+          {lines.length > 0 && (
+            <div style={{ marginBottom: 8, border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
+              {lines.map((l, i) => {
+                const warn = !lineHasStockAtFrom(l)
+                return (
+                  <div
+                    key={l.part_id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '8px 10px',
+                      background: warn ? 'var(--amber-lt)' : 'var(--surface)',
+                      borderBottom: i < lines.length - 1 ? '1px solid var(--border)' : 'none',
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {l.name}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--hint)' }}>{l.part_id}</div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={l.qty}
+                      onChange={e => setLineQty(l.part_id, e.target.value)}
+                      style={{
+                        width: 70, padding: '5px 8px', fontSize: 13,
+                        textAlign: 'right',
+                        border: '1.5px solid var(--border2)', borderRadius: 'var(--r-xs)',
+                        background: 'var(--bg)', color: 'var(--text)',
+                      }}
+                    />
+                    <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 22 }}>{l.unit}</span>
+                    {warn && (
+                      <span title="No logged stock at the picked From location" style={{
+                        fontSize: 10, color: 'var(--amber)', fontWeight: 700,
+                      }}>
+                        ⚠
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeLine(l.part_id)}
+                      title="Remove"
+                      style={{
+                        background: 'transparent', border: 'none', cursor: 'pointer',
+                        color: 'var(--muted)', fontSize: 16, padding: '0 4px',
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Part search input */}
+          <input
+            type="text"
+            placeholder={lines.length === 0 ? 'Search by name or SKU…' : 'Add another part…'}
+            value={partQuery}
+            onChange={e => setPartQuery(e.target.value)}
+            autoComplete="off"
+            spellCheck="false"
+            name="movement-part-search"
+          />
+          {partResults.length > 0 && (
+            <div style={{ marginTop: 4, maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)' }}>
+              {partResults.map(p => {
+                const alreadyAdded = lines.some(l => l.part_id === p.id)
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => !alreadyAdded && pickPart(p)}
+                    style={{
+                      padding: '8px 12px',
+                      cursor: alreadyAdded ? 'not-allowed' : 'pointer',
+                      borderBottom: '1px solid var(--border)',
+                      background: alreadyAdded ? 'var(--surface2)' : 'var(--surface)',
+                      opacity: alreadyAdded ? 0.6 : 1,
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>
+                      {p.name}{alreadyAdded && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · already added</span>}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--hint)' }}>{p.id}{p.category ? ` · ${p.category}` : ''}</div>
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
 
-        {/* Quantity */}
-        <div className="field">
-          <label>Quantity{selectedPart ? ` (${selectedPart.unit || 'ea'})` : ''}</label>
-          <input
-            type="number"
-            min="0"
-            step="any"
-            value={quantity}
-            onChange={e => setQuantity(e.target.value)}
-            placeholder="0"
-          />
-        </div>
-
-        {/* From location (with optional bin sub-picker) */}
+        {/* From location */}
         {showFrom && (
           <div className="field">
-            <label>From</label>
-            <LocationWithBinPicker
-              topLevelId={fromTopId} setTopLevelId={setFromTopId}
-              binId={fromBinId}        setBinId={setFromBinId}
-              options={fromOptions}
-              binsByWarehouse={binsByWarehouse}
-              locations={locations}
-            />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <label style={{ margin: 0 }}>From</label>
+              {lines.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAllFromLocations(v => !v)
+                    setFromLocationId('')
+                    setFromTopId('')
+                    setFromBinId('')
+                  }}
+                  style={{
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    fontSize: 11, color: 'var(--orange)', fontWeight: 600,
+                    textDecoration: 'underline',
+                  }}
+                >
+                  {showAllFromLocations ? 'Filter to part locations' : 'Show all locations'}
+                </button>
+              )}
+            </div>
+            {useSmartFromPicker ? (
+              <SmartFromPicker
+                options={smartFromOptions}
+                totalLines={lines.length}
+                value={fromLocationId}
+                onChange={setFromLocationId}
+              />
+            ) : (
+              <LocationWithBinPicker
+                topLevelId={fromTopId} setTopLevelId={setFromTopId}
+                binId={fromBinId} setBinId={setFromBinId}
+                options={allFromOptions}
+                binsByWarehouse={binsByWarehouse}
+                locations={locations}
+              />
+            )}
           </div>
         )}
 
-        {/* To location (with optional bin sub-picker) */}
+        {/* To location (cascading; not filtered) */}
         {showTo && (
           <div className="field">
             <label>To</label>
             <LocationWithBinPicker
               topLevelId={toTopId} setTopLevelId={setToTopId}
-              binId={toBinId}        setBinId={setToBinId}
+              binId={toBinId} setBinId={setToBinId}
               options={toOptions}
               binsByWarehouse={binsByWarehouse}
               locations={locations}
@@ -308,7 +479,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
               />
             </div>
             <div className="field">
-              <label>Unit cost (optional)</label>
+              <label>Unit cost (optional, applies to all parts)</label>
               <input
                 type="number"
                 step="0.01"
@@ -323,7 +494,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
 
         {/* Notes */}
         <div className="field">
-          <label>Notes (optional)</label>
+          <label>Notes (optional, applies to all parts)</label>
           <textarea value={notes} onChange={e => setNotes(e.target.value)} style={{ minHeight: 56 }} />
         </div>
 
@@ -340,10 +511,76 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
             className="btn btn-primary"
             style={{ flex: 2 }}
             onClick={handleSubmit}
-            disabled={submitting}
-          >{submitting ? 'Saving…' : 'Record'}</button>
+            disabled={submitting || lines.length === 0}
+          >
+            {submitting
+              ? 'Saving…'
+              : `Record ${lines.length || ''} movement${lines.length === 1 ? '' : 's'}`.trim()}
+          </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Smart From picker: flat list of logged locations with N/M badge per row.
+// Shown when at least one part is added and the user hasn't toggled
+// "show all locations." Each option is a specific location id (could be
+// a bin or a warehouse-level row).
+function SmartFromPicker({ options, totalLines, value, onChange }) {
+  if (options.length === 0) {
+    return (
+      <div style={{
+        padding: '10px 12px', background: 'var(--amber-lt)',
+        border: '1px solid var(--amber)', borderRadius: 'var(--r-sm)',
+        fontSize: 12, color: 'var(--amber)',
+      }}>
+        No logged stock for these parts at any location. Tap "Show all locations" above to pick any source.
+      </div>
+    )
+  }
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', maxHeight: 280, overflowY: 'auto' }}>
+      {options.map((opt, i) => {
+        const isSelected = value === opt.id
+        const isFull = opt.partsHere === totalLines
+        return (
+          <div
+            key={opt.id}
+            onClick={() => onChange(opt.id)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 12px',
+              borderBottom: i < options.length - 1 ? '1px solid var(--border)' : 'none',
+              background: isSelected ? 'var(--orange-lt)' : 'transparent',
+              cursor: 'pointer',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontWeight: isSelected ? 700 : 600, fontSize: 13,
+                color: isSelected ? 'var(--orange)' : 'var(--text)',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                {opt.displayLabel}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--hint)', textTransform: 'uppercase' }}>
+                {opt.type}
+              </div>
+            </div>
+            <span style={{
+              fontSize: 10, fontWeight: 700,
+              padding: '2px 8px', borderRadius: 10,
+              background: isFull ? 'var(--teal-lt)' : 'var(--surface2)',
+              color: isFull ? 'var(--teal-dk)' : 'var(--muted)',
+              border: `1px solid ${isFull ? 'var(--teal)' : 'var(--border)'}`,
+              whiteSpace: 'nowrap',
+            }}>
+              {opt.partsHere}/{totalLines} parts{isFull ? ' ✓' : ''}
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
 }
