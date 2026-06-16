@@ -6,6 +6,7 @@ import {
 } from '../../lib/inventory'
 import BulkMoveSheet from './BulkMoveSheet'
 import SkuLabelSheet from './SkuLabelSheet'
+import PurchaseRequestSheet from './PurchaseRequestSheet'
 import { useIsWide } from '../../lib/useIsWide'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
 
@@ -53,6 +54,8 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [showBulkMove, setShowBulkMove] = useState(false)
   const [showLabelSheet, setShowLabelSheet] = useState(false)
+  // Purchase-request composition sheet seeded with the bulk-selected parts.
+  const [showPrSheet, setShowPrSheet] = useState(false)
 
   // Two-tier location filter:
   //   typeFilter — top ribbon: 'all' | 'warehouse' | 'truck' | 'job_site'
@@ -592,6 +595,16 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
               fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
             }}
           >↔ Bulk move</button>
+          <button
+            onClick={() => setShowPrSheet(true)}
+            title="Create a purchase request seeded with the selected parts"
+            style={{
+              padding: '7px 14px', borderRadius: 'var(--r-sm)',
+              border: '1.5px solid var(--orange)', background: 'var(--bg)',
+              color: 'var(--orange)',
+              fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+            }}
+          >📋 Create PR</button>
           <button onClick={clearSelection} style={{
             padding: '7px 12px', borderRadius: 'var(--r-sm)',
             border: '1.5px solid var(--border2)', background: 'var(--bg)',
@@ -608,6 +621,18 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
           currentUser={currentUser}
           onClose={() => setShowBulkMove(false)}
           onComplete={handleBulkMoveComplete}
+        />
+      )}
+
+      {showPrSheet && (
+        <PurchaseRequestSheet
+          mode="new"
+          initialParts={filtered
+            .filter(r => selectedIds.has(r.part_id))
+            .map(r => ({ id: r.part_id, name: r.name, unit: r.unit }))}
+          locations={locations}
+          onClose={() => setShowPrSheet(false)}
+          onSaved={() => { setShowPrSheet(false); setSelectedIds(new Set()) }}
         />
       )}
 

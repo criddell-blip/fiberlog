@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, getPartLocations, SONAR_ROUTING_OPTIONS } from '../../lib/inventory'
 import SkuLabelSheet from './SkuLabelSheet'
 import BulkMoveSheet from './BulkMoveSheet'
+import PurchaseRequestSheet from './PurchaseRequestSheet'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
 
 const COMMON_UNITS = ['ea', 'ft', 'm', 'in', 'lb', 'kg', 'box', 'roll', 'spool', 'pair', 'pack', 'kit']
@@ -21,6 +22,8 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   const [editing, setEditing] = useState(null)
   const [bulkEditing, setBulkEditing] = useState(false)
   const [showLabelSheet, setShowLabelSheet] = useState(false)
+  // PR composition sheet seeded with the bulk-selected parts
+  const [showPrSheet, setShowPrSheet] = useState(false)
   // The part whose location-breakdown overlay is open. NULL = closed.
   const [viewingLocationsFor, setViewingLocationsFor] = useState(null)
 
@@ -454,6 +457,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           </div>
           <button onClick={() => setBulkEditing(true)} style={bulkActionBtn('orange')}>✎ Bulk edit</button>
           <button onClick={() => setShowLabelSheet(true)} style={bulkActionBtn('purple')}>🏷 Labels</button>
+          <button onClick={() => setShowPrSheet(true)} style={bulkActionBtn('orange')}>📋 Create PR</button>
           <button onClick={handleBulkActivate} style={bulkActionBtn('teal')}>✓ Activate</button>
           <button onClick={handleBulkDeactivate} style={bulkActionBtn('amber')}>⊘ Deactivate</button>
           <button onClick={clearSelection} style={bulkActionBtn('ghost')}>Cancel</button>
@@ -494,6 +498,18 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           onClose={() => setViewingLocationsFor(null)}
           onJumpToLocation={(id) => { setViewingLocationsFor(null); onJumpToLocation?.(id) }}
           onMoved={() => { setViewingLocationsFor(null); onChanged?.() }}
+        />
+      )}
+
+      {showPrSheet && (
+        <PurchaseRequestSheet
+          mode="new"
+          initialParts={filtered
+            .filter(p => selectedIds.has(p.id))
+            .map(p => ({ id: p.id, name: p.name, unit: p.unit }))}
+          locations={locations || []}
+          onClose={() => setShowPrSheet(false)}
+          onSaved={() => { setShowPrSheet(false); setSelectedIds(new Set()) }}
         />
       )}
     </div>

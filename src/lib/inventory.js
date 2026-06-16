@@ -1826,3 +1826,334 @@ export async function markMovementsExported(movementIds, { userId = null, notes 
 
   return batch
 }
+
+// ─── PURCHASE REQUESTS ───────────────────────────────────────────────────────
+//
+// FiberLog-originated PRs. Replaces the manual spreadsheet workflow:
+// composition + cost-history lookup happens in the app; export is CSV
+// (column order matches Utah Broadband's PR template) or a plaintext
+// email body for handoff to procurement. Lifecycle: pending → ordered
+// → received (or cancelled).
+
+// Most recent unit_cost recorded on a receive movement for this part.
+// NULL if the part has never been received through FiberLog.
+export async function getLastUnitCost(partId) {
+  if (!partId) return null
+  const { data, error } = await db
+    .from('inventory_movements')
+    .select('unit_cost, created_at')
+    .eq('movement_type', 'receive')
+    .eq('part_id', partId)
+    .not('unit_cost', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  return data?.unit_cost != null ? Number(data.unit_cost) : null
+}
+
+// Top recent vendor strings parsed from inventory_movements.vendor_invoice
+// on receive movements. Receive PO writes vendor info into that column
+// (sometimes the bare vendor name, sometimes "Vendor: X · ..." style).
+// Returns a deduped list of vendor strings ordered by recency.
+export async function getRecentVendors({ limit = 25 } = {}) {
+  const { data, error } = await db
+    .from('inventory_movements')
+    .select('vendor_invoice, created_at')
+    .eq('movement_type', 'receive')
+    .not('vendor_invoice', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(400)  // overscan; we'll dedupe client-side
+  if (error) throw error
+  const seen = new Set()
+  const out = []
+  for (const r of data || []) {
+    const v = (r.vendor_invoice || '').trim()
+    if (!v || seen.has(v)) continue
+    seen.add(v)
+    out.push(v)
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+// Insert a PR + its lines. Allocates pr_number via next_pr_number RPC.
+// Returns the inserted PR row joined with its lines.
+export async function createPurchaseRequest({
+  dateRequested = null,
+  targetLocationId = null,
+  notes = null,
+  lines = [],
+  createdBy = null,
+} = {}) {
+  if (!createdBy) throw new Error('createdBy required')
+  if (lines.length === 0) throw new Error('At least one line is required')
+
+  // Allocate the PR number via the helper function.
+  const { data: prNumData, error: prNumErr } = await db.rpc('next_pr_number')
+  if (prNumErr) throw prNumErr
+
+  const { data: prRow, error: prErr } = await db
+    .from('purchase_requests')
+    .insert({
+      pr_number: prNumData,
+      date_requested: dateRequested || new Date().toISOString().slice(0, 10),
+      target_location_id: targetLocationId || null,
+      notes: notes || null,
+      created_by: createdBy,
+    })
+    .select()
+    .single()
+  if (prErr) throw prErr
+
+  // Insert lines. Use a stable ordered_position so re-renders don't shuffle.
+  const linesPayload = lines.map((l, i) => ({
+    request_id: prRow.id,
+    ordered_position: i,
+    vendor: (l.vendor || null) && String(l.vendor).trim() || null,
+    quantity: Number(l.quantity || 0),
+    part_id: l.part_id || null,
+    item_number: (l.item_number || null) && String(l.item_number).trim() || null,
+    description: (l.description || '').trim(),
+    project_reason: (l.project_reason || null) && String(l.project_reason).trim() || null,
+    unit_cost: l.unit_cost == null || l.unit_cost === '' ? null : Number(l.unit_cost),
+    notes: (l.notes || null) && String(l.notes).trim() || null,
+  }))
+  for (const lp of linesPayload) {
+    if (!lp.description) throw new Error('Each line needs a description')
+    if (!lp.quantity || lp.quantity <= 0) throw new Error('Each line needs a quantity > 0')
+  }
+  const { data: insertedLines, error: linesErr } = await db
+    .from('purchase_request_lines')
+    .insert(linesPayload)
+    .select()
+  if (linesErr) throw linesErr
+
+  return { ...prRow, lines: insertedLines || [] }
+}
+
+// List PRs with their line counts + totals. Filters by status; defaults
+// to "active" set (pending + ordered).
+export async function getPurchaseRequests({ statuses = ['pending', 'ordered'], limit = 100 } = {}) {
+  let q = db
+    .from('purchase_requests')
+    .select(`
+      *,
+      created_by_user:users!purchase_requests_created_by_fkey(id, name),
+      target_location:inventory_locations!purchase_requests_target_location_id_fkey(id, name, type),
+      lines:purchase_request_lines(id, quantity, unit_cost, vendor)
+    `)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (statuses && statuses.length > 0) q = q.in('status', statuses)
+  const { data, error } = await q
+  if (error) throw error
+  // Compute aggregates client-side so the UI doesn't have to.
+  return (data || []).map(pr => {
+    const lineCount = pr.lines?.length || 0
+    let estTotal = 0
+    const vendors = new Set()
+    for (const l of pr.lines || []) {
+      const qty = Number(l.quantity || 0)
+      const uc = l.unit_cost == null ? null : Number(l.unit_cost)
+      if (uc != null) estTotal += qty * uc
+      if (l.vendor) vendors.add(l.vendor)
+    }
+    return {
+      ...pr,
+      lineCount,
+      estTotal,
+      vendors: Array.from(vendors),
+    }
+  })
+}
+
+// Full PR detail with lines. Used by the detail/edit sheet.
+export async function getPurchaseRequest(prId) {
+  if (!prId) return null
+  const { data: pr, error: prErr } = await db
+    .from('purchase_requests')
+    .select(`
+      *,
+      created_by_user:users!purchase_requests_created_by_fkey(id, name),
+      approved_by_user:users!purchase_requests_approved_by_fkey(id, name),
+      target_location:inventory_locations!purchase_requests_target_location_id_fkey(id, name, type)
+    `)
+    .eq('id', prId)
+    .maybeSingle()
+  if (prErr) throw prErr
+  if (!pr) return null
+  const { data: lines, error: linesErr } = await db
+    .from('purchase_request_lines')
+    .select('*, part:parts_catalog(id, name, unit)')
+    .eq('request_id', prId)
+    .order('ordered_position', { ascending: true, nullsFirst: false })
+  if (linesErr) throw linesErr
+  return { ...pr, lines: lines || [] }
+}
+
+// Update PR header fields (status, vendor, po, ETA, notes, etc.).
+export async function updatePurchaseRequest(prId, fields = {}) {
+  if (!prId) throw new Error('prId required')
+  const patch = { ...fields }
+  // Stamp approved_at when status flips to ordered (procurement got it).
+  if (patch.status === 'ordered' && !patch.approved_at) {
+    patch.approved_at = new Date().toISOString()
+  }
+  const { data, error } = await db
+    .from('purchase_requests')
+    .update(patch)
+    .eq('id', prId)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+// Replace a PR's lines (delete all + insert new). Used by the edit
+// flow while PR is still pending. Throws if PR isn't pending.
+export async function replacePurchaseRequestLines(prId, lines = []) {
+  if (!prId) throw new Error('prId required')
+  if (lines.length === 0) throw new Error('At least one line is required')
+  const { data: pr } = await db.from('purchase_requests').select('status').eq('id', prId).maybeSingle()
+  if (pr && pr.status !== 'pending') {
+    throw new Error('Lines can only be edited while PR is pending')
+  }
+  const { error: delErr } = await db.from('purchase_request_lines').delete().eq('request_id', prId)
+  if (delErr) throw delErr
+  const linesPayload = lines.map((l, i) => ({
+    request_id: prId,
+    ordered_position: i,
+    vendor: (l.vendor || null) && String(l.vendor).trim() || null,
+    quantity: Number(l.quantity || 0),
+    part_id: l.part_id || null,
+    item_number: (l.item_number || null) && String(l.item_number).trim() || null,
+    description: (l.description || '').trim(),
+    project_reason: (l.project_reason || null) && String(l.project_reason).trim() || null,
+    unit_cost: l.unit_cost == null || l.unit_cost === '' ? null : Number(l.unit_cost),
+    notes: (l.notes || null) && String(l.notes).trim() || null,
+  }))
+  for (const lp of linesPayload) {
+    if (!lp.description) throw new Error('Each line needs a description')
+    if (!lp.quantity || lp.quantity <= 0) throw new Error('Each line needs a quantity > 0')
+  }
+  const { data, error: insErr } = await db
+    .from('purchase_request_lines')
+    .insert(linesPayload)
+    .select()
+  if (insErr) throw insErr
+  return data || []
+}
+
+export async function deletePurchaseRequest(prId) {
+  if (!prId) throw new Error('prId required')
+  const { error } = await db.from('purchase_requests').delete().eq('id', prId)
+  if (error) throw error
+}
+
+// Build a CSV that matches Utah Broadband's PR spreadsheet column order
+// so purchasing can paste directly into their template.
+export function buildPurchaseRequestCsv(pr) {
+  const headers = [
+    'PR Number', 'Date Requested', 'Deliver To', 'Requested By',
+    'Vendor', 'Qty', 'Item #', 'Description', 'Project/Reason',
+    'Unit Price', 'Line Total',
+  ]
+  const csvField = v => {
+    if (v == null) return ''
+    const s = String(v)
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return '"' + s.replace(/"/g, '""') + '"'
+    }
+    return s
+  }
+  const deliverTo = pr.target_location?.name || ''
+  const requestedBy = pr.created_by_user?.name || ''
+  const lines = [headers.map(csvField).join(',')]
+  for (const l of pr.lines || []) {
+    const qty = Number(l.quantity || 0)
+    const uc = l.unit_cost == null ? null : Number(l.unit_cost)
+    const lineTotal = uc == null ? '' : (qty * uc).toFixed(2)
+    const row = [
+      pr.pr_number || '',
+      pr.date_requested || '',
+      deliverTo,
+      requestedBy,
+      l.vendor || '',
+      qty,
+      l.item_number || l.part_id || '',
+      l.description || '',
+      l.project_reason || '',
+      uc == null ? '' : uc.toFixed(2),
+      lineTotal,
+    ]
+    lines.push(row.map(csvField).join(','))
+  }
+  // UTF-8 BOM so Excel reads accented characters / em-dashes correctly.
+  return '﻿' + lines.join('\n')
+}
+
+// Plaintext email body — manager copies to clipboard and pastes into
+// whichever mail client.
+export function buildPurchaseRequestEmail(pr) {
+  const deliverTo = pr.target_location?.name || '—'
+  const requestedBy = pr.created_by_user?.name || '—'
+  const dateRequested = pr.date_requested || ''
+  const fmt$ = n => n == null ? '—' : '$' + Number(n).toFixed(2)
+
+  let subtotal = 0
+  let anyUnknownCost = false
+  const lineRows = (pr.lines || []).map(l => {
+    const qty = Number(l.quantity || 0)
+    const uc = l.unit_cost == null ? null : Number(l.unit_cost)
+    const total = uc == null ? null : qty * uc
+    if (uc == null) anyUnknownCost = true
+    else subtotal += total
+    return {
+      vendor: l.vendor || '—',
+      qty,
+      item: l.item_number || l.part_id || '',
+      desc: l.description || '',
+      reason: l.project_reason || '',
+      unit$: fmt$(uc),
+      total$: fmt$(total),
+    }
+  })
+  // Pad columns for readable plaintext alignment.
+  const widths = {
+    vendor: Math.max(8, ...lineRows.map(r => r.vendor.length)),
+    qty: Math.max(3, ...lineRows.map(r => String(r.qty).length)),
+    item: Math.max(8, ...lineRows.map(r => r.item.length)),
+    desc: Math.max(20, ...lineRows.map(r => r.desc.length)),
+    reason: Math.max(8, ...lineRows.map(r => r.reason.length)),
+    unit$: Math.max(8, ...lineRows.map(r => r.unit$.length)),
+    total$: Math.max(10, ...lineRows.map(r => r.total$.length)),
+  }
+  const pad = (s, w, right = false) => {
+    const str = String(s)
+    if (str.length >= w) return str
+    const padding = ' '.repeat(w - str.length)
+    return right ? padding + str : str + padding
+  }
+  const head = `  ${pad('Vendor', widths.vendor)}  ${pad('Qty', widths.qty, true)}  ${pad('Item #', widths.item)}  ${pad('Description', widths.desc)}  ${pad('Project/Reason', widths.reason)}  ${pad('Unit $', widths.unit$, true)}  ${pad('Line Total', widths.total$, true)}`
+  const sep = '  ' + '─'.repeat(head.length - 2)
+  const body = lineRows.map(r =>
+    `  ${pad(r.vendor, widths.vendor)}  ${pad(r.qty, widths.qty, true)}  ${pad(r.item, widths.item)}  ${pad(r.desc, widths.desc)}  ${pad(r.reason, widths.reason)}  ${pad(r.unit$, widths.unit$, true)}  ${pad(r.total$, widths.total$, true)}`
+  ).join('\n')
+
+  return [
+    `Purchase Request ${pr.pr_number}`,
+    `Date requested: ${dateRequested}`,
+    `Deliver to: ${deliverTo}`,
+    `Requested by: ${requestedBy}`,
+    pr.notes ? `Notes: ${pr.notes}` : '',
+    '',
+    head,
+    sep,
+    body,
+    sep,
+    `${' '.repeat(head.length - widths.total$ - 12)}Subtotal:  ${pad(fmt$(subtotal), widths.total$, true)}`,
+    `${' '.repeat(head.length - widths.total$ - 12)}Total:     ${pad(fmt$(subtotal), widths.total$, true)}`,
+    anyUnknownCost ? '\nNote: One or more lines have no unit price; fill in before sending.' : '',
+  ].filter(Boolean).join('\n')
+}

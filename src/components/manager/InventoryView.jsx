@@ -7,6 +7,7 @@ import InventoryLocationsTab from './InventoryLocationsTab'
 import InventoryPartsTab from './InventoryPartsTab'
 import InventoryMovementsTab from './InventoryMovementsTab'
 import InventoryAuditTab from './InventoryAuditTab'
+import PurchaseRequestsTab from './PurchaseRequestsTab'
 import CountTab from '../cycleCount/CountTab'
 import PausedBanner from '../shared/PausedBanner'
 import RecordMovementSheet from './RecordMovementSheet'
@@ -22,6 +23,7 @@ const SUBTABS = [
   { id: 'locations', label: 'Locations', icon: '🏭' },
   { id: 'parts',     label: 'Parts',     icon: '🔧' },
   { id: 'movements', label: 'Activity',  icon: '📜' },
+  { id: 'prs',       label: 'PRs',       icon: '📋' },
   { id: 'audit',     label: 'Audit',     icon: '🔍' },
   { id: 'count',     label: 'Count',     icon: '🔢' },
 ]
@@ -388,6 +390,12 @@ export default function InventoryView() {
         )}
         {tab === 'movements' && (
           <InventoryMovementsTab
+            locations={locations}
+            refreshKey={refreshKey}
+          />
+        )}
+        {tab === 'prs' && (
+          <PurchaseRequestsTab
             locations={locations}
             refreshKey={refreshKey}
           />
