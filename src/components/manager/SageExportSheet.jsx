@@ -31,6 +31,11 @@ export default function SageExportSheet({ onClose }) {
   const [since, setSince] = useState(defaultSince)
   const [until, setUntil] = useState(defaultUntil)
   const [includeExported, setIncludeExported] = useState(false)
+  // Strict-consumption mode: when on, the filter additionally strips out
+  // truck staging (crew loadouts + returns). Result is a "pure
+  // consumption + purchases" export. Default off so today's behavior is
+  // preserved unless the accountant flips it.
+  const [strictConsumption, setStrictConsumption] = useState(false)
   const [movements, setMovements] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -60,8 +65,14 @@ export default function SageExportSheet({ onClose }) {
   // Load on open + whenever filters change
   useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [since, until, includeExported])
 
-  // Filter to exportable + count by type
-  const exportable = useMemo(() => movements.filter(isExportableMovement), [movements])
+  // Filter to exportable + count by type. Pass strict-consumption flag
+  // so the same filter decision drives both the on-screen preview and
+  // the CSV builder (buildSageCsv runs the same filter at write time).
+  const filterOpts = useMemo(() => ({ strictConsumption }), [strictConsumption])
+  const exportable = useMemo(
+    () => movements.filter(m => isExportableMovement(m, filterOpts)),
+    [movements, filterOpts]
+  )
   const skippedInternal = movements.length - exportable.length
   const typeCounts = useMemo(() => {
     const c = {}
@@ -77,7 +88,7 @@ export default function SageExportSheet({ onClose }) {
     setSubmitting(true)
     setError('')
     try {
-      const csv = buildSageCsv(movements)  // applies the filter internally
+      const csv = buildSageCsv(movements, filterOpts)  // applies the filter internally
       const includedIds = exportable.map(m => m.id)
       // Stamp the batch first — markMovementsExported creates the parent
       // batch row + sets exported_at/export_batch_id on every movement.
@@ -107,8 +118,9 @@ export default function SageExportSheet({ onClose }) {
         </div>
         <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 14 }}>
           Builds a Sage Inventory Transactions CSV from FiberLog movements in the picked range.
-          Truck → truck rows are filtered (internal staging). Downloaded movements get marked
-          exported so the next batch skips them. Toggle "include exported" to re-issue.
+          Internal staging (truck → truck and warehouse↔bin within the same warehouse) is always filtered.
+          Toggle <em>Strict consumption</em> to also drop crew loadouts + returns.
+          Downloaded movements get marked exported so the next batch skips them.
         </div>
 
         {/* Filter row */}
@@ -134,6 +146,18 @@ export default function SageExportSheet({ onClose }) {
               disabled={submitting}
             />
             Include already exported
+          </label>
+          <label
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}
+            title="Drop crew loadouts + returns from the export. Keeps only purchases, truck→project consumption, issue, scrap, and adjusts."
+          >
+            <input
+              type="checkbox"
+              checked={strictConsumption}
+              onChange={e => setStrictConsumption(e.target.checked)}
+              disabled={submitting}
+            />
+            Strict consumption only
           </label>
           <button onClick={load} className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12 }} disabled={loading || submitting}>
             {loading ? 'Loading…' : 'Refresh'}
@@ -170,7 +194,11 @@ export default function SageExportSheet({ onClose }) {
             color: 'var(--muted)', flexWrap: 'wrap',
           }}>
             <span><strong style={{ color: 'var(--text)' }}>{exportable.length}</strong> ready to export</span>
-            {skippedInternal > 0 && <span style={{ color: 'var(--hint)' }}>{skippedInternal} skipped (truck→truck)</span>}
+            {skippedInternal > 0 && (
+              <span style={{ color: 'var(--hint)' }}>
+                {skippedInternal} skipped (internal staging{strictConsumption ? ' + crew loads/returns' : ''})
+              </span>
+            )}
             {Object.entries(typeCounts).map(([type, count]) => (
               <span key={type}><strong style={{ color: 'var(--text)' }}>{count}</strong> {type}</span>
             ))}

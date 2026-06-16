@@ -1541,19 +1541,56 @@ export async function getMovementsForSageExport({ since, until, includeExported 
 }
 
 // Decide whether a movement should be included in the export.
-// Currently filters out: truck → truck (internal crew handoffs).
-// Truck → bucket (consumption) and warehouse → truck (load-out) are kept.
-export function isExportableMovement(m) {
+//
+// Always-excluded:
+//   • truck → truck (internal crew handoffs)
+//   • warehouse/bin ↔ warehouse/bin under the SAME parent warehouse
+//     (internal binning / unbinning / bin rearrangement — these are
+//      noise in an accounting export and were the user's flag for the
+//      "transfers within the warehouse" bug).
+//
+// Opt-in via {strictConsumption: true}:
+//   • Additionally exclude warehouse/bin ↔ truck (crew loadouts +
+//     returns) — these are staging, not consumption. The follow-up
+//     auto-deduct (truck → project bucket) IS consumption and stays.
+//
+// What always stays in the export (default mode AND strict):
+//   receive, transfer to job_site (consumption), issue/scrap, adjust,
+//   inter-warehouse transfers (warehouse → warehouse different parents).
+export function isExportableMovement(m, { strictConsumption = false } = {}) {
   const fromType = m.from_location?.type
   const toType = m.to_location?.type
-  // Skip pure truck-to-truck (internal staging; no Sage relevance yet)
+
+  // (1) Always exclude truck → truck.
   if (fromType === 'truck' && toType === 'truck') return false
+
+  // (2) Always exclude warehouse-internal movements. For a warehouse,
+  //     its "hierarchy id" is itself; for a bin it's its parent. When
+  //     both endpoints resolve to the same hierarchy id, the move
+  //     never left the warehouse — no Sage relevance.
+  const isWhOrBin = t => t === 'warehouse' || t === 'bin'
+  if (isWhOrBin(fromType) && isWhOrBin(toType)) {
+    const fromWh = m.from_location?.type === 'bin'
+      ? m.from_location?.parent_location_id
+      : m.from_location?.id
+    const toWh = m.to_location?.type === 'bin'
+      ? m.to_location?.parent_location_id
+      : m.to_location?.id
+    if (fromWh && toWh && fromWh === toWh) return false
+  }
+
+  // (3) Strict consumption: also exclude truck staging.
+  if (strictConsumption) {
+    if (fromType === 'truck' && toType !== 'job_site') return false
+    if (toType === 'truck' && fromType !== 'job_site') return false
+  }
+
   return true
 }
 
 // Build CSV text in Sage Intacct Inventory Transactions format.
 // One row per movement. Quote anything with commas/newlines.
-export function buildSageCsv(movements) {
+export function buildSageCsv(movements, opts = {}) {
   const headers = [
     'TRANSACTIONTYPE',
     'DATE',
@@ -1577,7 +1614,7 @@ export function buildSageCsv(movements) {
   const lines = [headers.join(',')]
   let lineIdx = 0
   for (const m of movements) {
-    if (!isExportableMovement(m)) continue
+    if (!isExportableMovement(m, opts)) continue
     lineIdx++
 
     const date = m.created_at ? String(m.created_at).slice(0, 10) : ''

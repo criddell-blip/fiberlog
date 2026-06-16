@@ -227,7 +227,7 @@ export default function InventoryView() {
                   title="Export movements to Sage Intacct Inventory Transactions CSV"
                   style={{ padding: '6px 12px', fontSize: 13 }}
                 >
-                  🧾 Sage
+                  🧾 Sage export
                 </button>
               </>
             ) : (
