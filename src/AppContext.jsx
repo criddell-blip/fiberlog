@@ -38,6 +38,14 @@ export function AppProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [toast, setToast] = useState(null)
+  // Org-wide inventory quantity display mode. 'tracking' shows the
+  // numbers as today; 'paused' hides them and shows last-seen recency
+  // instead (Sage is then the authoritative source). Loaded from
+  // app_settings table at init + subscribed via realtime so flipping
+  // the switch in one tab propagates to every connected client.
+  const [qtyDisplayMode, setQtyDisplayMode] = useState('tracking')
+  const [qtyDisplayUpdatedAt, setQtyDisplayUpdatedAt] = useState(null)
+  const [qtyDisplayUpdatedBy, setQtyDisplayUpdatedBy] = useState(null)
 
   // Theme is global state so the toggle works the same way no matter which
   // sub-app the user is in (crew or manager), and it persists across reloads.
@@ -148,6 +156,51 @@ export function AppProvider({ children }) {
     })
 
     return () => sub.unsubscribe()
+  }, [currentUser?.id])
+
+  // Org-wide inventory display mode: fetch on auth + subscribe to
+  // changes. Owner flips it from Admin; every connected client picks up
+  // the change live.
+  useEffect(() => {
+    if (!currentUser?.id) return
+    let cancelled = false
+
+    async function loadMode() {
+      try {
+        const { data } = await db
+          .from('app_settings')
+          .select('value, updated_at, updated_by')
+          .eq('key', 'inventory_qty_display_mode')
+          .maybeSingle()
+        if (cancelled || !data) return
+        setQtyDisplayMode(data.value === 'paused' ? 'paused' : 'tracking')
+        setQtyDisplayUpdatedAt(data.updated_at || null)
+        setQtyDisplayUpdatedBy(data.updated_by || null)
+      } catch (e) {
+        console.warn('Load inventory display mode failed:', e)
+      }
+    }
+    loadMode()
+
+    const channel = db
+      .channel('app_settings_inventory_qty_' + Math.random().toString(36).slice(2, 8))
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'app_settings', filter: 'key=eq.inventory_qty_display_mode' },
+        payload => {
+          const row = payload.new || payload.old
+          if (!row) return
+          setQtyDisplayMode(row.value === 'paused' ? 'paused' : 'tracking')
+          setQtyDisplayUpdatedAt(row.updated_at || null)
+          setQtyDisplayUpdatedBy(row.updated_by || null)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      cancelled = true
+      try { db.removeChannel(channel) } catch (e) { /* noop */ }
+    }
   }, [currentUser?.id])
 
   async function loadAll() {
@@ -277,6 +330,21 @@ export function AppProvider({ children }) {
     }
   }
 
+  // Owner-only: flip the org-wide inventory display mode. RLS enforces
+  // owner-role on the write; non-owners hit a permission error.
+  async function setInventoryQtyDisplayMode(nextMode) {
+    if (nextMode !== 'tracking' && nextMode !== 'paused') {
+      throw new Error('Invalid mode')
+    }
+    const { error: err } = await db
+      .from('app_settings')
+      .update({ value: nextMode, updated_by: currentUser?.id || null })
+      .eq('key', 'inventory_qty_display_mode')
+    if (err) throw err
+    // Optimistic local update — realtime will reconfirm.
+    setQtyDisplayMode(nextMode)
+  }
+
   return (
     <AppContext.Provider value={{
       projects, setProjects,
@@ -294,6 +362,12 @@ export function AppProvider({ children }) {
       darkMode, setDarkMode, toggleDarkMode,
       // View mode (manager↔crew toggle for working managers)
       viewMode, enterCrewMode, exitCrewMode,
+      // Inventory display mode (org-wide pause switch)
+      qtyDisplayMode,
+      isQtyPaused: qtyDisplayMode === 'paused',
+      qtyDisplayUpdatedAt,
+      qtyDisplayUpdatedBy,
+      setInventoryQtyDisplayMode,
     }}>
       {children}
       {toast && <div className="toast">{toast}</div>}

@@ -8,6 +8,7 @@ import InventoryPartsTab from './InventoryPartsTab'
 import InventoryMovementsTab from './InventoryMovementsTab'
 import InventoryAuditTab from './InventoryAuditTab'
 import CountTab from '../cycleCount/CountTab'
+import PausedBanner from '../shared/PausedBanner'
 import RecordMovementSheet from './RecordMovementSheet'
 import ReceivePOSheet from './ReceivePOSheet'
 import ReconcileSheet from './ReconcileSheet'
@@ -169,6 +170,7 @@ export default function InventoryView() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <PausedBanner />
       <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
           <div style={{ fontWeight: 800, fontSize: 17 }}>Inventory</div>

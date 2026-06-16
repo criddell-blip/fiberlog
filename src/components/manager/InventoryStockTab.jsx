@@ -7,6 +7,7 @@ import {
 import BulkMoveSheet from './BulkMoveSheet'
 import SkuLabelSheet from './SkuLabelSheet'
 import { useIsWide } from '../../lib/useIsWide'
+import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
 
 const TYPE_ICONS = {
   warehouse: '🏭',
@@ -25,7 +26,7 @@ const SUBMODE_ROLLUP = 'rollup'
 const SUBMODE_UNBINNED = 'unbinned'
 
 export default function InventoryStockTab({ locations, locationsLoading, refreshKey, jumpToScope, onJumpToPart, onJumpToLocation }) {
-  const { showToast, currentUser } = useApp()
+  const { showToast, currentUser, isQtyPaused } = useApp()
   // Initialize scope from jumpToScope so the very first load fires with
   // the right scope — avoids the race where the parent flipped tabs +
   // signaled a jump, but useState ran first with 'all', kicking off a
@@ -550,10 +551,21 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: total < 0 ? 'var(--red)' : 'var(--orange)' }}>
-                    {total.toLocaleString()}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>{r.unit}</div>
+                  {isQtyPaused ? (
+                    // Paused mode: hide qty, show last-seen recency.
+                    // Negative-flag treatment also disappears (it's
+                    // meaningless once we stop authoritative tracking).
+                    <span style={recencyPillStyle(r.last_movement_at)}>
+                      {recencyOf(r.last_movement_at).label}
+                    </span>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: total < 0 ? 'var(--red)' : 'var(--orange)' }}>
+                        {total.toLocaleString()}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)' }}>{r.unit}</div>
+                    </>
+                  )}
                 </div>
               </div>
             )

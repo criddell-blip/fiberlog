@@ -27,7 +27,7 @@ const TYPE_ICONS = {
 }
 
 export default function InventoryLocationsTab({ locations, loading, onChanged, onJumpToStock, onJumpToCount, onJumpToPart, focusJump, refreshKey }) {
-  const { users, showToast, currentUser } = useApp()
+  const { users, showToast, currentUser, isQtyPaused } = useApp()
   // Retire (deactivate) is owner-only. Managers can do everything else
   // — edit attrs, add bins, jump to stock — but retiring a location is
   // a destructive-by-default action since it removes the location from
@@ -411,7 +411,10 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                   <span>{TYPE_LABELS[type]}{list.length > 1 ? 's' : ''} ({list.length})</span>
                   {sectionRollup.distinctParts > 0 && (
                     <span style={{ marginLeft: 'auto', textTransform: 'none', letterSpacing: 0, fontWeight: 600, color: 'var(--muted)' }}>
-                      {sectionRollup.distinctParts.toLocaleString()} part{sectionRollup.distinctParts === 1 ? '' : 's'} · {sectionRollup.totalUnits.toLocaleString()} units
+                      {sectionRollup.distinctParts.toLocaleString()} part{sectionRollup.distinctParts === 1 ? '' : 's'}
+                      {!isQtyPaused && (
+                        <> · {sectionRollup.totalUnits.toLocaleString()} units</>
+                      )}
                     </span>
                   )}
                 </div>
@@ -500,10 +503,14 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                                 <span title="Distinct parts in stock">
                                   <strong style={{ color: 'var(--text)' }}>{rollup.distinctParts.toLocaleString()}</strong> part{rollup.distinctParts === 1 ? '' : 's'}
                                 </span>
-                                <span style={{ color: 'var(--hint)' }}>·</span>
-                                <span title="Total units across all parts">
-                                  <strong style={{ color: 'var(--text)' }}>{rollup.totalUnits.toLocaleString()}</strong> unit{rollup.totalUnits === 1 ? '' : 's'}
-                                </span>
+                                {!isQtyPaused && (
+                                  <>
+                                    <span style={{ color: 'var(--hint)' }}>·</span>
+                                    <span title="Total units across all parts">
+                                      <strong style={{ color: 'var(--text)' }}>{rollup.totalUnits.toLocaleString()}</strong> unit{rollup.totalUnits === 1 ? '' : 's'}
+                                    </span>
+                                  </>
+                                )}
                               </>
                             )}
                           </div>
@@ -618,7 +625,10 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                                   }}>{group.bins.length}</span>
                                   {aisleRollup.distinctParts > 0 && (
                                     <span style={{ fontSize: 12, color: 'var(--hint)', marginLeft: 'auto' }}>
-                                      {aisleRollup.distinctParts.toLocaleString()} part{aisleRollup.distinctParts === 1 ? '' : 's'} · {aisleRollup.totalUnits.toLocaleString()} units
+                                      {aisleRollup.distinctParts.toLocaleString()} part{aisleRollup.distinctParts === 1 ? '' : 's'}
+                                      {!isQtyPaused && (
+                                        <> · {aisleRollup.totalUnits.toLocaleString()} units</>
+                                      )}
                                     </span>
                                   )}
                                 </div>
@@ -640,8 +650,12 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                                             <>
                                               {bin.notes && <span style={{ color: 'var(--hint)' }}>·</span>}
                                               <span><strong style={{ color: 'var(--text)' }}>{binCounts.distinctParts.toLocaleString()}</strong> part{binCounts.distinctParts === 1 ? '' : 's'}</span>
-                                              <span style={{ color: 'var(--hint)' }}>·</span>
-                                              <span><strong style={{ color: 'var(--text)' }}>{binCounts.totalUnits.toLocaleString()}</strong> unit{binCounts.totalUnits === 1 ? '' : 's'}</span>
+                                              {!isQtyPaused && (
+                                                <>
+                                                  <span style={{ color: 'var(--hint)' }}>·</span>
+                                                  <span><strong style={{ color: 'var(--text)' }}>{binCounts.totalUnits.toLocaleString()}</strong> unit{binCounts.totalUnits === 1 ? '' : 's'}</span>
+                                                </>
+                                              )}
                                             </>
                                           )}
                                           <LastCountedPill ts={bin.last_counted_at} />

@@ -9,6 +9,7 @@ import {
 import BinLabelSheet from '../cycleCount/BinLabelSheet'
 import AisleSignSheet from './AisleSignSheet'
 import SkuLabelSheet from './SkuLabelSheet'
+import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
 
 // Overlay-sheet that opens when a location row is tapped in the Locations
 // tab. Centralizes everything you might want to do with a location:
@@ -34,7 +35,7 @@ export default function LocationDetailPanel({
   onRetire,
   isOwner,
 }) {
-  const { showToast, currentUser } = useApp()
+  const { showToast, currentUser, isQtyPaused } = useApp()
   const [stock, setStock] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -249,7 +250,8 @@ export default function LocationDetailPanel({
               </div>
               {!loading && stock.length > 0 && (
                 <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)' }}>
-                  · {stock.length} type{stock.length === 1 ? '' : 's'} · {totalUnits.toLocaleString()} units
+                  · {stock.length} type{stock.length === 1 ? '' : 's'}
+                  {!isQtyPaused && <> · {totalUnits.toLocaleString()} units</>}
                 </div>
               )}
               {stock.length > 4 && (
@@ -310,12 +312,20 @@ export default function LocationDetailPanel({
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontSize: 'var(--fs-base)', fontWeight: 'var(--fw-bold)', color: qty < 0 ? 'var(--danger-fg)' : 'var(--text)' }}>
-                      {qty.toLocaleString()}
-                    </div>
-                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>
-                      {pc?.unit || 'ea'}
-                    </div>
+                    {isQtyPaused ? (
+                      <span style={recencyPillStyle(r.last_movement_at)}>
+                        {recencyOf(r.last_movement_at).label}
+                      </span>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 'var(--fs-base)', fontWeight: 'var(--fw-bold)', color: qty < 0 ? 'var(--danger-fg)' : 'var(--text)' }}>
+                          {qty.toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                          {pc?.unit || 'ea'}
+                        </div>
+                      </>
+                    )}
                   </div>
                   {/* Cross-link: open this part in the Parts tab. Closes
                       the detail panel so the user lands directly on the

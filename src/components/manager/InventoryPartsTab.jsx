@@ -3,11 +3,12 @@ import { useApp } from '../../AppContext'
 import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, getPartLocations, SONAR_ROUTING_OPTIONS } from '../../lib/inventory'
 import SkuLabelSheet from './SkuLabelSheet'
 import BulkMoveSheet from './BulkMoveSheet'
+import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
 
 const COMMON_UNITS = ['ea', 'ft', 'm', 'in', 'lb', 'kg', 'box', 'roll', 'spool', 'pair', 'pack', 'kit']
 
 export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, onJumpToLocation, locations, currentUser }) {
-  const { showToast } = useApp()
+  const { showToast, isQtyPaused } = useApp()
   // Default to the active-parts view. Drafts (auto-created by CSV imports
   // for SKUs not yet in the catalog) used to be the default since cleanup
   // was the day-job — the active list is what the owner actually wants
@@ -397,10 +398,26 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                 </div>
 
                 <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 60 }}>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: stockQty > 0 ? 'var(--orange)' : 'var(--hint)' }}>
-                    {stockQty.toLocaleString()}
-                  </div>
-                  <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>in stock</div>
+                  {isQtyPaused ? (
+                    stockQty > 0 ? (
+                      <span style={{
+                        fontSize: 10, fontWeight: 700,
+                        padding: '2px 8px', borderRadius: 10,
+                        background: 'var(--teal-lt)', color: 'var(--teal-dk)',
+                        border: '1px solid var(--teal)',
+                        whiteSpace: 'nowrap',
+                      }}>stocked</span>
+                    ) : (
+                      <span style={{ fontSize: 10, color: 'var(--hint)' }}>—</span>
+                    )
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: stockQty > 0 ? 'var(--orange)' : 'var(--hint)' }}>
+                        {stockQty.toLocaleString()}
+                      </div>
+                      <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>in stock</div>
+                    </>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', gap: 4 }}>
@@ -491,6 +508,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
 // authoritative — Sage owns the verified counts (per the transactional-
 // only positioning).
 function PartLocationsPanel({ part, locations, currentUser, onClose, onJumpToLocation, onMoved }) {
+  const { isQtyPaused } = useApp()
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
   const [data, setData] = useState({ totalQty: 0, locations: [] })
@@ -552,8 +570,10 @@ function PartLocationsPanel({ part, locations, currentUser, onClose, onJumpToLoc
         {!loading && !err && (
           <>
             <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 8 }}>
-              Logged at <strong>{data.locations.length}</strong> location{data.locations.length === 1 ? '' : 's'} ·{' '}
-              <strong>{data.totalQty.toLocaleString()}</strong> {part.unit || 'ea'} total
+              Logged at <strong>{data.locations.length}</strong> location{data.locations.length === 1 ? '' : 's'}
+              {!isQtyPaused && (
+                <> · <strong>{data.totalQty.toLocaleString()}</strong> {part.unit || 'ea'} total</>
+              )}
             </div>
 
             {data.locations.length === 0 && (
@@ -592,13 +612,19 @@ function PartLocationsPanel({ part, locations, currentUser, onClose, onJumpToLoc
                     <div style={{ flex: 1, fontWeight: 'var(--fw-semibold)', minWidth: 0 }}>
                       {l.displayLabel}
                     </div>
-                    <div style={{
-                      minWidth: 50, textAlign: 'right',
-                      fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-md)',
-                      color: 'var(--orange)',
-                    }}>
-                      {l.qty.toLocaleString()}
-                    </div>
+                    {isQtyPaused ? (
+                      <span style={recencyPillStyle(l.lastMovementAt)}>
+                        {recencyOf(l.lastMovementAt).label}
+                      </span>
+                    ) : (
+                      <div style={{
+                        minWidth: 50, textAlign: 'right',
+                        fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-md)',
+                        color: 'var(--orange)',
+                      }}>
+                        {l.qty.toLocaleString()}
+                      </div>
+                    )}
                     {/* Cross-link: jump to this location in the Locations tab */}
                     {onJumpToLocation && (
                       <button

@@ -2,6 +2,8 @@ import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useApp } from '../../AppContext'
 import { getMyTruckStock, getMyCrewPermissions } from '../../lib/inventory'
 import CrewMovementSheet from './CrewMovementSheet'
+import PausedBanner from '../shared/PausedBanner'
+import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
 
 // Crew-facing "what's on my truck" view. Read-only stock list scoped to
 // the caller's personal truck (auto-created at user setup), plus action
@@ -14,7 +16,7 @@ import CrewMovementSheet from './CrewMovementSheet'
 // refresh, and after any successful movement. Good enough for a single
 // crew member's session.
 export default function MyStockView({ onBack, onUserTap }) {
-  const { currentUser, showToast } = useApp()
+  const { currentUser, showToast, isQtyPaused } = useApp()
   const [truck, setTruck] = useState(null)
   const [stock, setStock] = useState([])
   const [loading, setLoading] = useState(true)
@@ -72,6 +74,7 @@ export default function MyStockView({ onBack, onUserTap }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <PausedBanner />
       {/* ─── Topbar ────────────────────────────────────────────────────── */}
       <div className="topbar">
         {onBack && <button className="back-btn" onClick={onBack}>←</button>}
@@ -102,10 +105,13 @@ export default function MyStockView({ onBack, onUserTap }) {
         borderBottom: '1px solid var(--border)',
         flexShrink: 0,
       }}>
-        {/* Stats row */}
+        {/* Stats row — Total units hidden when display mode is paused
+            (per org-wide pause switch). Just "Part types" stays. */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
           <Stat label="Part types" value={stock.length} color="var(--teal)" />
-          <Stat label="Total units" value={totalUnits.toLocaleString()} color="var(--orange)" />
+          {!isQtyPaused && (
+            <Stat label="Total units" value={totalUnits.toLocaleString()} color="var(--orange)" />
+          )}
         </div>
 
         {/* Action buttons. Load / Return only for now; Issue/Scrap/Transfer
@@ -246,12 +252,20 @@ export default function MyStockView({ onBack, onUserTap }) {
                 </div>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div style={{ fontSize: 17, fontWeight: 800, color: qty < 0 ? 'var(--red)' : 'var(--text)' }}>
-                  {qty.toLocaleString()}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  {pc?.unit || 'ea'}
-                </div>
+                {isQtyPaused ? (
+                  <span style={recencyPillStyle(r.last_movement_at)}>
+                    {recencyOf(r.last_movement_at).label}
+                  </span>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 17, fontWeight: 800, color: qty < 0 ? 'var(--red)' : 'var(--text)' }}>
+                      {qty.toLocaleString()}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                      {pc?.unit || 'ea'}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )

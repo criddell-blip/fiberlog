@@ -205,7 +205,7 @@ export async function getPartLocations(partId) {
   if (!partId) return { totalQty: 0, locations: [] }
   const [stockRes, locsRes] = await Promise.all([
     db.from('inventory_stock')
-      .select('location_id, quantity')
+      .select('location_id, quantity, last_movement_at')
       .eq('part_id', partId),
     db.from('inventory_locations')
       .select('id, name, type, parent_location_id, assigned_to, is_active'),
@@ -236,6 +236,7 @@ export async function getPartLocations(partId) {
       parentName,
       displayLabel: parentName ? `${parentName} · ${loc.name}` : loc.name,
       qty,
+      lastMovementAt: r.last_movement_at || null,
     })
     totalQty += qty
   }

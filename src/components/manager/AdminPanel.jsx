@@ -5,7 +5,13 @@ import AdminUsersView from './AdminUsersView'
 import CrewTypePermissionsView from './CrewTypePermissionsView'
 
 export default function AdminPanel() {
-  const { projects, setProjects, showToast, reload } = useApp()
+  const {
+    projects, setProjects, showToast, reload, currentUser,
+    qtyDisplayMode, qtyDisplayUpdatedAt, qtyDisplayUpdatedBy,
+    setInventoryQtyDisplayMode, users,
+  } = useApp()
+  const isOwner = currentUser?.role === 'owner'
+  const [qtyToggling, setQtyToggling] = useState(false)
   const [selProject, setSelProject] = useState(null)
   const [loading, setLoading] = useState(false)
   const [confirm, setConfirm] = useState(null)
@@ -255,6 +261,73 @@ export default function AdminPanel() {
 
         {/* Inventory section */}
         <div className="sec-label">Inventory</div>
+
+        {/* Org-wide stock display mode (Tracking / Paused).
+            Pause hides qty numbers across the app and shows "last seen"
+            recency instead — useful when Sage Intacct is authoritative
+            on counts and FiberLog's logged quantities would drift. */}
+        <div style={{
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 8,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>📵 Stock display mode</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, lineHeight: 1.4 }}>
+                {qtyDisplayMode === 'paused'
+                  ? <>Paused — qty numbers are hidden and replaced with last-seen recency.
+                      Sage Intacct is the source of truth. Movements still record qty normally.</>
+                  : <>Tracking — all qty numbers visible. Switch to <strong>Paused</strong> if Sage is
+                      authoritative and you don't want FiberLog's running totals to drift.</>}
+              </div>
+              {qtyDisplayUpdatedAt && (
+                <div style={{ fontSize: 10, color: 'var(--hint)', marginTop: 4 }}>
+                  Last toggled {new Date(qtyDisplayUpdatedAt).toLocaleString()}
+                  {qtyDisplayUpdatedBy && users && (() => {
+                    const u = users.find(x => x.id === qtyDisplayUpdatedBy)
+                    return u ? ` by ${u.name}` : ''
+                  })()}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              disabled={!isOwner || qtyToggling}
+              title={isOwner ? '' : 'Owner only'}
+              onClick={async () => {
+                setQtyToggling(true)
+                try {
+                  const next = qtyDisplayMode === 'paused' ? 'tracking' : 'paused'
+                  await setInventoryQtyDisplayMode(next)
+                  showToast(next === 'paused'
+                    ? 'Stock display paused — Sage is now the authoritative source'
+                    : 'Stock display resumed — qty numbers are back')
+                } catch (e) {
+                  showToast(e.message || 'Failed to update display mode')
+                } finally {
+                  setQtyToggling(false)
+                }
+              }}
+              style={{
+                padding: '6px 12px', borderRadius: 999,
+                background: qtyDisplayMode === 'paused' ? 'var(--amber-lt)' : 'var(--teal-lt)',
+                color: qtyDisplayMode === 'paused' ? 'var(--amber)' : 'var(--teal-dk)',
+                border: `1.5px solid ${qtyDisplayMode === 'paused' ? 'var(--amber)' : 'var(--teal)'}`,
+                fontWeight: 700, fontSize: 12,
+                cursor: isOwner && !qtyToggling ? 'pointer' : 'not-allowed',
+                opacity: isOwner ? 1 : 0.5,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {qtyToggling
+                ? '…'
+                : qtyDisplayMode === 'paused'
+                  ? '⏸ Paused · Resume'
+                  : '▶ Tracking · Pause'}
+            </button>
+          </div>
+        </div>
+
         <div
           onClick={() => setView('crewperms')}
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 16, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
