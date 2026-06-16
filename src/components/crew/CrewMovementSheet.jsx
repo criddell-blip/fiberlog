@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useApp } from '../../AppContext'
-import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement } from '../../lib/inventory'
+import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement, getMyAllowedLoadDestinations } from '../../lib/inventory'
 
 // Unified sheet for crew-initiated movements. Modes covered today:
 //   'load'    — warehouse/bucket → my truck     (pick source, then part)
@@ -38,6 +38,14 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
 
   const isLoad = mode === 'load'
   const isReturn = mode === 'return'
+
+  // Load-only: destination picker. Defaults to the user's own truck.
+  // Owner grants additional destinations per-user via Admin → Users.
+  // When the list contains only the user's truck (zero whitelist rows
+  // OR the user has none), the picker is hidden and Load behaves
+  // exactly as before.
+  const [allowedDestinations, setAllowedDestinations] = useState([])
+  const [destinationLocationId, setDestinationLocationId] = useState('')
 
   // Load mode supports two views: by-location (pick warehouse/bin, see parts
   // there) and by-part (search a part, see all locations stocking it). Part
@@ -83,6 +91,28 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
     })()
     return () => { cancelled = true }
   }, [isReturn, myTruck?.id])
+
+  // Load-only: fetch the caller's allowed destinations (own truck +
+  // owner-granted whitelist). Default selection = own truck. When the
+  // result has only the truck, the picker is hidden and Load behaves
+  // exactly as before.
+  useEffect(() => {
+    if (!isLoad) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const list = await getMyAllowedLoadDestinations()
+        if (cancelled) return
+        setAllowedDestinations(list)
+        // Default to the own-truck entry (always first when present).
+        const truck = list.find(d => d.isOwnTruck)
+        setDestinationLocationId(truck?.id || (list[0]?.id || ''))
+      } catch (e) {
+        if (!cancelled) console.warn('Load destinations load failed:', e)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [isLoad])
 
   // Lazily fetch the all-stock-grouped index when the user first opens
   // by-part view. Cached for the sheet's lifetime — search filters happen
@@ -263,6 +293,14 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
     setError(null)
     setSubmitting(true)
     try {
+      // For Load: pass the picked destination through to the RPC. NULL
+      // / own-truck both default to the existing "load → truck" path
+      // server-side. Non-truck destinations are gated by the RPC's
+      // crew_load_destinations check.
+      const destForLoad = isLoad
+        ? (destinationLocationId && destinationLocationId !== myTruck?.id
+            ? destinationLocationId : null)
+        : null
       await recordCrewMovement({
         operation: mode,
         partId: selectedPartId,
@@ -270,9 +308,18 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
         otherLocationId,
         unit: selectedPart?.parts_catalog?.unit || null,
         notes: notes.trim() || null,
+        destinationLocationId: destForLoad,
       })
       const partName = selectedPart?.parts_catalog?.name || selectedPartId
-      showToast(`${isLoad ? 'Loaded' : 'Returned'} ${quantity} × ${partName}`)
+      // Toast tells the user where it went if not the default truck.
+      let target = ''
+      if (isLoad && destForLoad) {
+        const d = allowedDestinations.find(x => x.id === destForLoad)
+        if (d) {
+          target = ' to ' + (d.parentName ? `${d.parentName} · ${d.name}` : d.name)
+        }
+      }
+      showToast(`${isLoad ? 'Loaded' : 'Returned'} ${quantity} × ${partName}${target}`)
       onComplete()
     } catch (e) {
       console.error('Movement failed:', e)
@@ -537,6 +584,39 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
           </>
         )}
 
+        {/* Load-only: destination picker. Hidden when the user has only
+            their own truck (no whitelist) — Load behaves exactly as before. */}
+        {isLoad && allowedDestinations.length > 1 && (
+          <div className="field">
+            <label>Load to</label>
+            <select
+              value={destinationLocationId}
+              onChange={e => setDestinationLocationId(e.target.value)}
+              disabled={submitting}
+              autoComplete="off"
+              name="crew-movement-destination"
+            >
+              {allowedDestinations.map(d => (
+                <option key={d.id} value={d.id}>
+                  {d.isOwnTruck
+                    ? `🚚 My truck (${d.name})`
+                    : `${locationIcon(d.type, false)} ${d.parentName ? `${d.parentName} · ${d.name}` : d.name}`}
+                </option>
+              ))}
+            </select>
+            {destinationLocationId && destinationLocationId !== myTruck?.id && (
+              <div style={{
+                marginTop: 6, padding: '6px 10px',
+                background: 'var(--amber-lt)', color: 'var(--amber)',
+                borderRadius: 'var(--r-sm)', fontSize: 11, fontWeight: 600,
+              }}>
+                Loading directly to this location records a transfer — the
+                material counts as moved, not staged on your truck.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Error */}
         {error && (
           <div style={{
@@ -559,7 +639,13 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
             onClick={handleSubmit}
             disabled={submitting || !selectedPartId || !quantity}
           >
-            {submitting ? 'Saving…' : (isLoad ? 'Load to my truck' : 'Return to warehouse')}
+            {submitting
+              ? 'Saving…'
+              : (isLoad
+                  ? (destinationLocationId && destinationLocationId !== myTruck?.id
+                      ? 'Load to picked location'
+                      : 'Load to my truck')
+                  : 'Return to warehouse')}
           </button>
         </div>
       </div>

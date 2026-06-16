@@ -7,7 +7,10 @@ import {
   CREW_OPERATIONS,
   getUserPermissions, setUserOperationPermission, clearUserOperationPermission,
 } from '../../lib/admin'
-import { getLocations, bulkAssignPullLocation } from '../../lib/inventory'
+import {
+  getLocations, bulkAssignPullLocation,
+  getCrewLoadDestinations, setCrewLoadDestinations,
+} from '../../lib/inventory'
 
 const ROLE_OPTIONS = [
   { id: 'crew',       label: 'Crew',       desc: 'Field worker' },
@@ -852,7 +855,10 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
               Saves immediately on toggle — independent of the form Save button
               since it writes a separate table. */}
           {!isNew && (role === 'crew' || role === 'contractor') && (
-            <CrewPermissionsSection userId={user?.id} />
+            <>
+              <CrewPermissionsSection userId={user?.id} />
+              <LoadDestinationsSection userId={user?.id} />
+            </>
           )}
 
           {error && (
@@ -1212,6 +1218,188 @@ function CrewPermissionsSection({ userId }) {
 
       {err && (
         <div style={{ padding: '6px 10px', fontSize: 12, color: 'var(--red)', background: 'var(--red-lt)', borderRadius: 'var(--r-xs)' }}>
+          {err}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Load-destinations whitelist section ──────────────────────────────────
+// Per-user list of locations this crew member can Load TO (in addition
+// to their own truck, which is always implicit). Empty list = today's
+// behavior (truck-only). Owner-only writes per RLS — for managers the
+// add/remove controls render disabled with a tooltip.
+function LoadDestinationsSection({ userId }) {
+  const { currentUser } = useApp()
+  const isOwner = currentUser?.role === 'owner'
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [allLocations, setAllLocations] = useState([])
+  const [addPickerId, setAddPickerId] = useState('')
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
+    setLoading(true)
+    Promise.all([
+      getCrewLoadDestinations(userId),
+      getLocations({ includeBins: true }),
+    ])
+      .then(([dests, locs]) => {
+        if (cancelled) return
+        setRows(dests || [])
+        setAllLocations((locs || []).filter(l => l.is_active))
+      })
+      .catch(e => { if (!cancelled) setErr(e.message || 'Failed to load destinations') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [userId])
+
+  const grantedIds = useMemo(() => new Set(rows.map(r => r.id)), [rows])
+  // Master list of options the owner can add: any active location they
+  // haven't already granted, minus this user's own truck (always allowed
+  // implicitly so it shouldn't appear).
+  const addOptions = useMemo(() => {
+    return allLocations.filter(l =>
+      !grantedIds.has(l.id) &&
+      // Hide the user's own truck so it doesn't appear as an option (it's
+      // implicit). We don't have userId-truck mapping in this section, so
+      // we just hide trucks assigned to this user.
+      !(l.type === 'truck' && l.assigned_to === userId)
+    )
+  }, [allLocations, grantedIds, userId])
+
+  async function persist(nextIds) {
+    if (!isOwner) return
+    setSaving(true); setErr('')
+    try {
+      await setCrewLoadDestinations(userId, nextIds, { grantedBy: currentUser?.id || null })
+      // Build the new rows array from allLocations using the picked IDs.
+      const next = nextIds
+        .map(id => allLocations.find(l => l.id === id))
+        .filter(Boolean)
+      setRows(next)
+      setAddPickerId('')
+    } catch (e) {
+      setErr(e.message || 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function add(id) {
+    if (!id) return
+    const nextIds = [...rows.map(r => r.id), id]
+    persist(nextIds)
+  }
+  function remove(id) {
+    const nextIds = rows.map(r => r.id).filter(x => x !== id)
+    persist(nextIds)
+  }
+
+  function labelFor(loc) {
+    if (!loc) return ''
+    if (loc.type === 'bin' && loc.parent_location_id) {
+      const parent = allLocations.find(l => l.id === loc.parent_location_id)
+      if (parent) return `${parent.name} · ${loc.name}`
+    }
+    return loc.name
+  }
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{
+        fontSize: 12, fontWeight: 700, color: 'var(--muted)',
+        textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6,
+      }}>
+        🚚 Load destinations
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--hint)', marginBottom: 8 }}>
+        Allowed Load targets besides this user's own truck. Empty = truck-only (default).
+        {!isOwner && ' (Owner only.)'}
+      </div>
+
+      {loading && (
+        <div style={{ padding: 8, color: 'var(--muted)', fontSize: 12 }}>Loading…</div>
+      )}
+
+      {!loading && rows.length === 0 && (
+        <div style={{
+          padding: '8px 12px', marginBottom: 8,
+          background: 'var(--surface2)', border: '1px dashed var(--border)',
+          borderRadius: 'var(--r-sm)', fontSize: 12, color: 'var(--muted)',
+        }}>
+          Truck-only (no additional destinations granted).
+        </div>
+      )}
+
+      {!loading && rows.map(loc => (
+        <div
+          key={loc.id}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '8px 12px', marginBottom: 6,
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--r-sm)',
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>{labelFor(loc)}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase' }}>{loc.type}</div>
+          </div>
+          <button
+            type="button"
+            disabled={!isOwner || saving}
+            onClick={() => remove(loc.id)}
+            title={isOwner ? 'Remove' : 'Owner only'}
+            style={{
+              padding: '4px 10px', fontSize: 11, fontWeight: 700,
+              background: 'transparent', color: 'var(--red)',
+              border: '1px solid var(--red)', borderRadius: 'var(--r-xs)',
+              cursor: isOwner && !saving ? 'pointer' : 'not-allowed',
+              opacity: isOwner ? 1 : 0.5,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+
+      {!loading && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <select
+            value={addPickerId}
+            onChange={e => setAddPickerId(e.target.value)}
+            disabled={!isOwner || saving || addOptions.length === 0}
+            autoComplete="off"
+            name={`load-dest-picker-${userId}`}
+            style={{ flex: 1 }}
+          >
+            <option value="">
+              {addOptions.length === 0 ? '— no locations available —' : '＋ Add a destination'}
+            </option>
+            {addOptions.map(l => (
+              <option key={l.id} value={l.id}>{labelFor(l)} ({l.type})</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!isOwner || saving || !addPickerId}
+            onClick={() => add(addPickerId)}
+            title={isOwner ? '' : 'Owner only'}
+            className="btn btn-ghost"
+            style={{ padding: '6px 12px', fontSize: 12, opacity: isOwner ? 1 : 0.5 }}
+          >
+            Add
+          </button>
+        </div>
+      )}
+
+      {err && (
+        <div style={{ padding: '6px 10px', marginTop: 6, fontSize: 12, color: 'var(--red)', background: 'var(--red-lt)', borderRadius: 'var(--r-xs)' }}>
           {err}
         </div>
       )}

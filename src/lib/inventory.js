@@ -1019,6 +1019,11 @@ export async function getMyCrewPermissions() {
 export async function recordCrewMovement({
   operation, partId, quantity, otherLocationId,
   unit, notes, vendorInvoice, unitCost, taskId,
+  // Load-only: optional destination override. When null/undefined the
+  // RPC defaults to the caller's own truck (today's behavior). When set
+  // to a non-truck location, the RPC verifies the caller has a row in
+  // crew_load_destinations for it (owner bypasses).
+  destinationLocationId,
 } = {}) {
   if (!operation) throw new Error('operation required')
   if (!partId) throw new Error('partId required')
@@ -1034,9 +1039,113 @@ export async function recordCrewMovement({
     p_vendor_invoice: vendorInvoice || null,
     p_unit_cost: unitCost == null || unitCost === '' ? null : Number(unitCost),
     p_task_id: taskId || null,
+    p_destination_location_id: destinationLocationId || null,
   })
   if (error) throw error
   return data
+}
+
+// Allowed-destination helpers (per-user crew_load_destinations table).
+// The crew picker uses getMyAllowedLoadDestinations; the Users admin
+// uses get/setCrewLoadDestinations.
+
+// Returns the caller's allowed Load destinations: own truck (always)
+// plus whitelist entries. Shape:
+//   [{ id, name, type, parentName, isOwnTruck }]
+// Own truck is always the first entry. Empty whitelist → length 1.
+export async function getMyAllowedLoadDestinations() {
+  const { data: { session } } = await db.auth.getSession()
+  if (!session?.user?.id) return []
+  const userId = session.user.id
+
+  // Three parallel flat queries: own truck, whitelist row IDs, all
+  // active locations (for resolving names / parent names). Cheaper and
+  // more robust than an embedded join (which fails if the FK name isn't
+  // exactly as PostgREST expects).
+  const [truckRes, wlRes, locsRes] = await Promise.all([
+    db.from('inventory_locations')
+      .select('id, name, type, parent_location_id')
+      .eq('assigned_to', userId)
+      .eq('type', 'truck')
+      .eq('is_active', true)
+      .order('created_at', { ascending: true })
+      .limit(1),
+    db.from('crew_load_destinations')
+      .select('location_id')
+      .eq('user_id', userId),
+    db.from('inventory_locations')
+      .select('id, name, type, parent_location_id, is_active')
+      .eq('is_active', true),
+  ])
+  if (truckRes.error) throw truckRes.error
+  if (wlRes.error) throw wlRes.error
+  if (locsRes.error) throw locsRes.error
+
+  const locById = new Map((locsRes.data || []).map(l => [l.id, l]))
+  const parentNameById = new Map(
+    (locsRes.data || []).filter(l => l.type === 'warehouse').map(l => [l.id, l.name])
+  )
+  const truck = truckRes.data?.[0]
+
+  const out = []
+  if (truck) {
+    out.push({
+      id: truck.id, name: truck.name, type: truck.type,
+      parentName: null, isOwnTruck: true,
+    })
+  }
+  for (const row of wlRes.data || []) {
+    if (truck && row.location_id === truck.id) continue  // de-dup
+    const loc = locById.get(row.location_id)
+    if (!loc) continue  // inactive or deleted; skip
+    out.push({
+      id: loc.id, name: loc.name, type: loc.type,
+      parentName: loc.type === 'bin' ? parentNameById.get(loc.parent_location_id) || null : null,
+      isOwnTruck: false,
+    })
+  }
+  return out
+}
+
+// Owner / staff: returns a user's whitelist with location details.
+export async function getCrewLoadDestinations(userId) {
+  if (!userId) return []
+  const { data, error } = await db
+    .from('crew_load_destinations')
+    .select('location_id')
+    .eq('user_id', userId)
+  if (error) throw error
+  const ids = (data || []).map(r => r.location_id)
+  if (ids.length === 0) return []
+  const { data: locs } = await db
+    .from('inventory_locations')
+    .select('id, name, type, parent_location_id, is_active, assigned_to')
+    .in('id', ids)
+  return locs || []
+}
+
+// Owner-only (RLS enforced server-side). Replaces a user's whitelist
+// atomically: delete all existing rows, insert the new set. Pass an
+// empty array to clear the whitelist (revert to truck-only).
+export async function setCrewLoadDestinations(userId, locationIds, { grantedBy = null, notes = null } = {}) {
+  if (!userId) throw new Error('userId required')
+  const ids = Array.from(new Set((locationIds || []).filter(Boolean)))
+
+  // Atomic replace: delete existing, then insert (best-effort — Postgres
+  // can't transact two REST calls, but the second failing leaves the user
+  // with no rows which matches today's "truck-only" default. Reasonable
+  // failure mode.)
+  const del = await db.from('crew_load_destinations').delete().eq('user_id', userId)
+  if (del.error) throw del.error
+  if (ids.length === 0) return 0
+
+  const rows = ids.map(location_id => ({
+    user_id: userId, location_id,
+    granted_by: grantedBy, notes,
+  }))
+  const ins = await db.from('crew_load_destinations').insert(rows)
+  if (ins.error) throw ins.error
+  return ids.length
 }
 
 // ─── PARTS CATALOG ──────────────────────────────────────────────────────────
