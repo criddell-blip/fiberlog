@@ -118,9 +118,9 @@ export default function SageExportSheet({ onClose }) {
         </div>
         <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 14 }}>
           Builds a Sage Inventory Transactions CSV from FiberLog movements in the picked range.
-          Internal staging (truck → truck and warehouse↔bin within the same warehouse) is always filtered.
-          Toggle <em>Strict consumption</em> to also drop crew loadouts + returns.
-          Downloaded movements get marked exported so the next batch skips them.
+          Internal staging (truck → truck and warehouse↔bin within the same warehouse) plus count
+          corrections (adjusts) are always filtered. Toggle <em>Strict consumption</em> to also drop
+          crew loadouts + returns. Downloaded movements get marked exported so the next batch skips them.
         </div>
 
         {/* Filter row */}
@@ -196,7 +196,7 @@ export default function SageExportSheet({ onClose }) {
             <span><strong style={{ color: 'var(--text)' }}>{exportable.length}</strong> ready to export</span>
             {skippedInternal > 0 && (
               <span style={{ color: 'var(--hint)' }}>
-                {skippedInternal} skipped (internal staging{strictConsumption ? ' + crew loads/returns' : ''})
+                {skippedInternal} skipped (internal staging + adjusts{strictConsumption ? ' + crew loads/returns' : ''})
               </span>
             )}
             {Object.entries(typeCounts).map(([type, count]) => (

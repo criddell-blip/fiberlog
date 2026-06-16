@@ -1558,6 +1558,13 @@ export async function getMovementsForSageExport({ since, until, includeExported 
 //   receive, transfer to job_site (consumption), issue/scrap, adjust,
 //   inter-warehouse transfers (warehouse → warehouse different parents).
 export function isExportableMovement(m, { strictConsumption = false } = {}) {
+  // (0) Always exclude `adjust` — count corrections are FiberLog-internal
+  // bookkeeping (cycle-count reconciliations, audit-CSV variances, manual
+  // fixes). They don't represent purchases, consumption, transfers, or
+  // scrap, and Sage Intacct runs its own physical-inventory reconciliation
+  // — double-correcting in both systems would misstate the books.
+  if (m.movement_type === 'adjust') return false
+
   const fromType = m.from_location?.type
   const toType = m.to_location?.type
 
