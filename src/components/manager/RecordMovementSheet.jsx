@@ -39,6 +39,9 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   // Part search + multi-line state. Each line = one movement at submit.
   const [partQuery, setPartQuery] = useState('')
   const [partResults, setPartResults] = useState([])
+  // IDs ticked in the current search-results dropdown. Reset on every
+  // new query so a stale selection from a previous search can't leak in.
+  const [selectedSearchIds, setSelectedSearchIds] = useState(() => new Set())
   const [lines, setLines] = useState([])  // [{ part_id, name, unit, qty: '1' }]
   // Logged locations per part, keyed by part_id. Fetched on add-to-lines;
   // used by the smart From-picker to compute "N of M parts here" badges.
@@ -105,8 +108,12 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   useEffect(() => {
     if (!partQuery || partQuery.length < 2) {
       setPartResults([])
+      setSelectedSearchIds(new Set())
       return
     }
+    // Clear stale selection whenever the query changes — a tick they
+    // made for one search shouldn't bleed into the next set of results.
+    setSelectedSearchIds(new Set())
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
     searchTimerRef.current = setTimeout(async () => {
       try {
@@ -122,6 +129,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   function pickPart(p) {
     setPartQuery('')
     setPartResults([])
+    setSelectedSearchIds(new Set())
     // Don't add duplicates — if it's already in the list, do nothing.
     if (lines.some(l => l.part_id === p.id)) return
     setLines(prev => [...prev, {
@@ -136,6 +144,48 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     getPartLocations(p.id)
       .then(r => setPartLocationsByPart(prev => ({ ...prev, [p.id]: r })))
       .catch(e => console.warn(`getPartLocations(${p.id}) failed:`, e))
+  }
+
+  // Toggle a part's selection in the search-results dropdown without
+  // adding it to lines yet. Used when the user wants to multi-select
+  // several results and add them all in one go.
+  function toggleSearchSelect(partId) {
+    setSelectedSearchIds(prev => {
+      const next = new Set(prev)
+      if (next.has(partId)) next.delete(partId)
+      else next.add(partId)
+      return next
+    })
+  }
+
+  // Batch-add every checked search result to lines. Skips duplicates +
+  // fires the per-part location lookup for each new line. Clears the
+  // search after so the user can keep typing.
+  function addSelectedSearchResults() {
+    const toAdd = partResults.filter(p =>
+      selectedSearchIds.has(p.id) && !lines.some(l => l.part_id === p.id)
+    )
+    if (toAdd.length === 0) {
+      setSelectedSearchIds(new Set())
+      return
+    }
+    setLines(prev => [
+      ...prev,
+      ...toAdd.map(p => ({
+        part_id: p.id,
+        name: p.name,
+        unit: p.unit || 'ea',
+        qty: '1',
+      })),
+    ])
+    for (const p of toAdd) {
+      getPartLocations(p.id)
+        .then(r => setPartLocationsByPart(prev => ({ ...prev, [p.id]: r })))
+        .catch(e => console.warn(`getPartLocations(${p.id}) failed:`, e))
+    }
+    setPartQuery('')
+    setPartResults([])
+    setSelectedSearchIds(new Set())
   }
 
   function removeLine(partId) {
@@ -385,28 +435,86 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
             name="movement-part-search"
           />
           {partResults.length > 0 && (
-            <div style={{ marginTop: 4, maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)' }}>
-              {partResults.map(p => {
-                const alreadyAdded = lines.some(l => l.part_id === p.id)
-                return (
-                  <div
-                    key={p.id}
-                    onClick={() => !alreadyAdded && pickPart(p)}
+            <div style={{ marginTop: 4, border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
+              {/* Results — clicking a row toggles its tick. Already-added
+                  parts can't be re-ticked. Bottom bar adds everything ticked
+                  in one go. */}
+              <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                {partResults.map(p => {
+                  const alreadyAdded = lines.some(l => l.part_id === p.id)
+                  const isSelected = selectedSearchIds.has(p.id)
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => !alreadyAdded && toggleSearchSelect(p.id)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '8px 12px',
+                        cursor: alreadyAdded ? 'not-allowed' : 'pointer',
+                        borderBottom: '1px solid var(--border)',
+                        background: alreadyAdded
+                          ? 'var(--surface2)'
+                          : isSelected
+                            ? 'var(--orange-lt)'
+                            : 'var(--surface)',
+                        opacity: alreadyAdded ? 0.6 : 1,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected && !alreadyAdded}
+                        disabled={alreadyAdded}
+                        onChange={() => {}}  // div handles click; satisfies controlled-input contract
+                        onClick={e => e.stopPropagation()}
+                        style={{ cursor: alreadyAdded ? 'not-allowed' : 'pointer', flexShrink: 0 }}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {p.name}{alreadyAdded && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · already added</span>}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--hint)' }}>{p.id}{p.category ? ` · ${p.category}` : ''}</div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {/* Sticky add-bar: only shows when at least one item is ticked.
+                  Hidden otherwise so single-click feel is preserved when the
+                  manager hasn't engaged multi-select. */}
+              {selectedSearchIds.size > 0 && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 10px',
+                  borderTop: '1px solid var(--orange)',
+                  background: 'var(--orange-lt)',
+                }}>
+                  <div style={{ flex: 1, fontSize: 12, fontWeight: 700, color: 'var(--orange)' }}>
+                    {selectedSearchIds.size} selected
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSearchIds(new Set())}
                     style={{
-                      padding: '8px 12px',
-                      cursor: alreadyAdded ? 'not-allowed' : 'pointer',
-                      borderBottom: '1px solid var(--border)',
-                      background: alreadyAdded ? 'var(--surface2)' : 'var(--surface)',
-                      opacity: alreadyAdded ? 0.6 : 1,
+                      padding: '5px 10px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+                      background: 'transparent', color: 'var(--muted)',
+                      border: '1px solid var(--border)', cursor: 'pointer',
                     }}
                   >
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>
-                      {p.name}{alreadyAdded && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · already added</span>}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--hint)' }}>{p.id}{p.category ? ` · ${p.category}` : ''}</div>
-                  </div>
-                )
-              })}
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    onClick={addSelectedSearchResults}
+                    style={{
+                      padding: '5px 12px', borderRadius: 4, fontSize: 12, fontWeight: 700,
+                      background: 'var(--orange)', color: 'white',
+                      border: 'none', cursor: 'pointer',
+                    }}
+                  >
+                    ＋ Add {selectedSearchIds.size}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
