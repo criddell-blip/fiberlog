@@ -438,10 +438,16 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
             <div style={{
               marginTop: 4, border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
               overflow: 'hidden', width: '100%',
+              // Containment isolates the dropdown's layout from any global
+              // .field cascade that might collapse flex children's widths.
+              contain: 'layout',
             }}>
               {/* Results — clicking a row toggles its tick. Already-added
                   parts can't be re-ticked. Bottom bar adds everything ticked
-                  in one go. Compact rows so multiple matches fit on a phone. */}
+                  in one go. Compact rows so multiple matches fit on a phone.
+                  Uses CSS Grid (NOT flex) for the row so the text column is
+                  guaranteed `1fr` and can't collapse to zero width — earlier
+                  flex layout was being eaten by .field cascade. */}
               <div style={{ maxHeight: 200, overflowY: 'auto', overflowX: 'hidden', width: '100%' }}>
                 {partResults.map(p => {
                   const alreadyAdded = lines.some(l => l.part_id === p.id)
@@ -451,8 +457,10 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                       key={p.id}
                       onClick={() => !alreadyAdded && toggleSearchSelect(p.id)}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '5px 10px', minHeight: 32,
+                        display: 'grid',
+                        gridTemplateColumns: '20px 1fr',
+                        alignItems: 'center', gap: 10,
+                        padding: '6px 10px', minHeight: 36,
                         width: '100%', maxWidth: '100%', boxSizing: 'border-box',
                         cursor: alreadyAdded ? 'not-allowed' : 'pointer',
                         borderBottom: '1px solid var(--border)',
@@ -470,20 +478,21 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                         disabled={alreadyAdded}
                         onChange={() => {}}  // div handles click; satisfies controlled-input contract
                         onClick={e => e.stopPropagation()}
-                        style={{ cursor: alreadyAdded ? 'not-allowed' : 'pointer', flexShrink: 0, margin: 0 }}
+                        style={{ cursor: alreadyAdded ? 'not-allowed' : 'pointer', margin: 0, width: 16, height: 16 }}
                       />
-                      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                      <div style={{ minWidth: 0, overflow: 'hidden' }}>
                         <div style={{
-                          fontWeight: 600, fontSize: 12,
+                          fontWeight: 600, fontSize: 13,
                           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                          lineHeight: 1.2,
+                          lineHeight: 1.25,
+                          color: 'var(--text)',
                         }}>
                           {p.name}{alreadyAdded && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · added</span>}
                         </div>
                         <div style={{
-                          fontSize: 10, color: 'var(--hint)',
+                          fontSize: 11, color: 'var(--hint)',
                           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                          lineHeight: 1.2,
+                          lineHeight: 1.25,
                         }}>
                           {p.id}{p.category ? ` · ${p.category}` : ''}
                         </div>
