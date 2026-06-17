@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useApp } from '../../AppContext'
 import {
   createPurchaseRequest, getPurchaseRequest,
@@ -67,6 +68,17 @@ export default function PurchaseRequestSheet({
   // ── Submit state ────────────────────────────────────────────────────
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
+
+  // When set, the printable PR view renders via Portal + we trigger
+  // window.print(). Cleared on the browser's afterprint event so the
+  // hidden portal doesn't linger in the DOM after the dialog closes.
+  const [printablePr, setPrintablePr] = useState(null)
+  useEffect(() => {
+    if (!printablePr) return
+    const handler = () => setPrintablePr(null)
+    window.addEventListener('afterprint', handler)
+    return () => window.removeEventListener('afterprint', handler)
+  }, [printablePr])
 
   // Load recent vendors once on mount.
   useEffect(() => {
@@ -287,6 +299,16 @@ export default function PurchaseRequestSheet({
     } catch (e) {
       showToast('Could not access clipboard — open the PR detail to copy manually')
     }
+  }
+
+  // PDF export = render a print-styled layout via Portal + trigger
+  // window.print(). The browser print dialog has "Save as PDF" as a
+  // destination so the manager gets a real PDF without us bundling a
+  // PDF library. Pattern matches BinLabelSheet / SkuLabelSheet.
+  function printPdf(saved) {
+    setPrintablePr(saved)
+    // Defer the print() so the portal renders first
+    setTimeout(() => window.print(), 80)
   }
 
   async function changeStatus(nextStatus) {
@@ -700,15 +722,15 @@ export default function PurchaseRequestSheet({
         )}
 
         {/* Footer buttons */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose} disabled={submitting}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-ghost" style={{ flex: '1 1 80px' }} onClick={onClose} disabled={submitting}>
             Cancel
           </button>
           {!isLocked && (
             <>
               <button
                 className="btn btn-ghost"
-                style={{ flex: 1 }}
+                style={{ flex: '1 1 110px' }}
                 onClick={() => saveAndDo()}
                 disabled={submitting || lines.length === 0}
               >
@@ -716,15 +738,23 @@ export default function PurchaseRequestSheet({
               </button>
               <button
                 className="btn btn-ghost"
-                style={{ flex: 1.2 }}
+                style={{ flex: '1 1 110px' }}
                 onClick={() => saveAndDo(exportCsv)}
                 disabled={submitting || lines.length === 0}
               >
                 ⬇ Save & CSV
               </button>
               <button
+                className="btn btn-ghost"
+                style={{ flex: '1 1 110px' }}
+                onClick={() => saveAndDo(printPdf)}
+                disabled={submitting || lines.length === 0}
+              >
+                📄 Save & PDF
+              </button>
+              <button
                 className="btn btn-primary"
-                style={{ flex: 1.4 }}
+                style={{ flex: '1 1 150px' }}
                 onClick={() => saveAndDo(copyEmail)}
                 disabled={submitting || lines.length === 0}
               >
@@ -736,7 +766,7 @@ export default function PurchaseRequestSheet({
             <>
               <button
                 className="btn btn-ghost"
-                style={{ flex: 1 }}
+                style={{ flex: '1 1 130px' }}
                 onClick={async () => {
                   const fresh = await getPurchaseRequest(prId)
                   if (fresh) exportCsv(fresh)
@@ -746,8 +776,19 @@ export default function PurchaseRequestSheet({
                 ⬇ Download CSV
               </button>
               <button
+                className="btn btn-ghost"
+                style={{ flex: '1 1 130px' }}
+                onClick={async () => {
+                  const fresh = await getPurchaseRequest(prId)
+                  if (fresh) printPdf(fresh)
+                }}
+                disabled={submitting}
+              >
+                📄 Print PDF
+              </button>
+              <button
                 className="btn btn-primary"
-                style={{ flex: 1 }}
+                style={{ flex: '1 1 130px' }}
                 onClick={async () => {
                   const fresh = await getPurchaseRequest(prId)
                   if (fresh) await copyEmail(fresh)
@@ -759,6 +800,168 @@ export default function PurchaseRequestSheet({
             </>
           )}
         </div>
+      </div>
+
+      {/* Print-only stylesheet + portal. When printablePr is set, the
+          screen overlay hides and the portal renders the printable PR
+          via createPortal so it's a direct child of body. window.print()
+          fires from printPdf(); afterprint clears the state. Pattern
+          matches BinLabelSheet. */}
+      {printablePr && (
+        <>
+          <style>{`
+            .pr-print-portal { display: none; }
+            @media print {
+              /* global.css locks html/body/#root to 100% height — undo so
+                 the document can be multi-page. */
+              html, body, #root { height: auto !important; overflow: visible !important; }
+              body > *:not(.pr-print-portal) { display: none !important; }
+              .pr-print-portal { display: block !important; }
+              @page { size: letter; margin: 0.5in; }
+            }
+          `}</style>
+          {createPortal(
+            <div className="pr-print-portal">
+              <PrintablePR pr={printablePr} />
+            </div>,
+            document.body
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// Printable layout for a PR. Mirrors the Utah Broadband purchase-request
+// spreadsheet structure (header + Vendor / Qty / Item # / Description /
+// Project-Reason / Unit Price / Line Total table + subtotal/total) so
+// purchasing recognizes it at a glance. Black-on-white inline styles
+// because @media print zaps the app's dark theme.
+function PrintablePR({ pr }) {
+  const lines = pr.lines || []
+  let subtotal = 0
+  let anyUnknownCost = false
+  const computed = lines.map(l => {
+    const qty = Number(l.quantity || 0)
+    const uc = l.unit_cost == null ? null : Number(l.unit_cost)
+    const total = uc == null ? null : qty * uc
+    if (uc == null) anyUnknownCost = true
+    else subtotal += total
+    return { l, qty, uc, total }
+  })
+  const fmt$ = n => n == null ? '—' : '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const cell = { border: '1px solid #ccc', padding: '6px 8px', fontSize: 11, verticalAlign: 'top' }
+  const headerCell = { ...cell, background: '#f2f2f2', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, fontSize: 10, color: '#333' }
+
+  return (
+    <div style={{
+      color: '#000', background: '#fff',
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+      padding: 0, fontSize: 12, lineHeight: 1.4,
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', borderBottom: '2px solid #f59342', paddingBottom: 10, marginBottom: 14 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 20, color: '#f59342', letterSpacing: 1 }}>UTAH BROADBAND</div>
+          <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>FiberLog Purchase Request</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: 0.5 }}>Purchase Request</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#f59342', marginTop: 2 }}>{pr.pr_number}</div>
+        </div>
+      </div>
+
+      {/* Meta box */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 14, fontSize: 11 }}>
+        <tbody>
+          <tr>
+            <td style={{ ...cell, width: '20%', fontWeight: 700 }}>Date Requested</td>
+            <td style={cell}>{pr.date_requested || '—'}</td>
+            <td style={{ ...cell, width: '20%', fontWeight: 700 }}>Deliver To</td>
+            <td style={cell}>{pr.target_location?.name || '—'}</td>
+          </tr>
+          <tr>
+            <td style={{ ...cell, fontWeight: 700 }}>Requested By</td>
+            <td style={cell}>{pr.created_by_user?.name || '—'}</td>
+            <td style={{ ...cell, fontWeight: 700 }}>Status</td>
+            <td style={{ ...cell, textTransform: 'uppercase', fontWeight: 700 }}>{pr.status || 'pending'}</td>
+          </tr>
+          {pr.notes && (
+            <tr>
+              <td style={{ ...cell, fontWeight: 700 }}>Notes</td>
+              <td style={cell} colSpan={3}>{pr.notes}</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+
+      {/* Lines table */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 14 }}>
+        <thead>
+          <tr>
+            <th style={headerCell}>Vendor</th>
+            <th style={{ ...headerCell, textAlign: 'right', width: 50 }}>Qty</th>
+            <th style={{ ...headerCell, width: 110 }}>Item #</th>
+            <th style={headerCell}>Description</th>
+            <th style={{ ...headerCell, width: 110 }}>Project / Reason</th>
+            <th style={{ ...headerCell, textAlign: 'right', width: 80 }}>Unit Price</th>
+            <th style={{ ...headerCell, textAlign: 'right', width: 90 }}>Line Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {computed.length === 0 && (
+            <tr>
+              <td style={cell} colSpan={7}>(no lines)</td>
+            </tr>
+          )}
+          {computed.map(({ l, qty, uc, total }, i) => (
+            <tr key={l.id || i} style={i % 2 === 1 ? { background: '#fafafa' } : undefined}>
+              <td style={cell}>{l.vendor || ''}</td>
+              <td style={{ ...cell, textAlign: 'right' }}>{qty}</td>
+              <td style={cell}>{l.item_number || l.part_id || ''}</td>
+              <td style={cell}>{l.description || ''}</td>
+              <td style={cell}>{l.project_reason || ''}</td>
+              <td style={{ ...cell, textAlign: 'right' }}>{fmt$(uc)}</td>
+              <td style={{ ...cell, textAlign: 'right', fontWeight: 600 }}>{fmt$(total)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Totals */}
+      <table style={{ width: 300, marginLeft: 'auto', borderCollapse: 'collapse', marginBottom: 18 }}>
+        <tbody>
+          <tr>
+            <td style={{ padding: '4px 8px', textAlign: 'right', fontSize: 11, color: '#666' }}>Subtotal</td>
+            <td style={{ padding: '4px 8px', textAlign: 'right', width: 110, fontWeight: 700, borderTop: '1px solid #ccc' }}>{fmt$(subtotal)}</td>
+          </tr>
+          <tr>
+            <td style={{ padding: '6px 8px', textAlign: 'right', fontSize: 13, fontWeight: 700 }}>TOTAL</td>
+            <td style={{ padding: '6px 8px', textAlign: 'right', fontSize: 14, fontWeight: 800, borderTop: '2px solid #000', color: '#f59342' }}>{fmt$(subtotal)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {anyUnknownCost && (
+        <div style={{ fontSize: 10, fontStyle: 'italic', color: '#666', marginBottom: 12 }}>
+          Note: One or more lines have no unit price; fill in before sending to procurement.
+        </div>
+      )}
+
+      {pr.po_number && (
+        <div style={{ marginBottom: 4, fontSize: 11 }}>
+          <strong>Supplier PO #:</strong> {pr.po_number}
+        </div>
+      )}
+      {pr.expected_at && (
+        <div style={{ marginBottom: 4, fontSize: 11 }}>
+          <strong>Expected arrival:</strong> {pr.expected_at}
+        </div>
+      )}
+
+      {/* Footer signature */}
+      <div style={{ marginTop: 30, borderTop: '1px solid #ccc', paddingTop: 12, fontSize: 10, color: '#666' }}>
+        Generated by FiberLog · {new Date().toLocaleString()}
       </div>
     </div>
   )
