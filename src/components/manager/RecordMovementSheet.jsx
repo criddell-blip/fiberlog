@@ -435,11 +435,14 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
             name="movement-part-search"
           />
           {partResults.length > 0 && (
-            <div style={{ marginTop: 4, border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
+            <div style={{
+              marginTop: 4, border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+              overflow: 'hidden', width: '100%',
+            }}>
               {/* Results — clicking a row toggles its tick. Already-added
                   parts can't be re-ticked. Bottom bar adds everything ticked
-                  in one go. */}
-              <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                  in one go. Compact rows so multiple matches fit on a phone. */}
+              <div style={{ maxHeight: 200, overflowY: 'auto', overflowX: 'hidden', width: '100%' }}>
                 {partResults.map(p => {
                   const alreadyAdded = lines.some(l => l.part_id === p.id)
                   const isSelected = selectedSearchIds.has(p.id)
@@ -448,8 +451,9 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                       key={p.id}
                       onClick={() => !alreadyAdded && toggleSearchSelect(p.id)}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: 10,
-                        padding: '8px 12px',
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '5px 10px', minHeight: 32,
+                        width: '100%', maxWidth: '100%', boxSizing: 'border-box',
                         cursor: alreadyAdded ? 'not-allowed' : 'pointer',
                         borderBottom: '1px solid var(--border)',
                         background: alreadyAdded
@@ -466,13 +470,23 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                         disabled={alreadyAdded}
                         onChange={() => {}}  // div handles click; satisfies controlled-input contract
                         onClick={e => e.stopPropagation()}
-                        style={{ cursor: alreadyAdded ? 'not-allowed' : 'pointer', flexShrink: 0 }}
+                        style={{ cursor: alreadyAdded ? 'not-allowed' : 'pointer', flexShrink: 0, margin: 0 }}
                       />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {p.name}{alreadyAdded && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · already added</span>}
+                      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                        <div style={{
+                          fontWeight: 600, fontSize: 12,
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          lineHeight: 1.2,
+                        }}>
+                          {p.name}{alreadyAdded && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · added</span>}
                         </div>
-                        <div style={{ fontSize: 11, color: 'var(--hint)' }}>{p.id}{p.category ? ` · ${p.category}` : ''}</div>
+                        <div style={{
+                          fontSize: 10, color: 'var(--hint)',
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          lineHeight: 1.2,
+                        }}>
+                          {p.id}{p.category ? ` · ${p.category}` : ''}
+                        </div>
                       </div>
                     </div>
                   )
