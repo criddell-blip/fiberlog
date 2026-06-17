@@ -4,6 +4,7 @@ import {
   getStockForAudit,
   getPartsCatalogTaxonomy,
   getBinsForWarehouse,
+  compareNamesNatural,
 } from '../../lib/inventory'
 
 // Audit / cycle-count export tab.
@@ -155,7 +156,7 @@ export default function InventoryAuditTab({ locations, refreshKey }) {
         if (aLoc?.type === 'warehouse' && bLoc?.type === 'bin') return -1
         if (aLoc?.type === 'bin' && bLoc?.type === 'warehouse') return 1
         if (aLoc?.type === 'bin' && bLoc?.type === 'bin') {
-          const binCmp = (aLoc.name || '').localeCompare(bLoc.name || '')
+          const binCmp = compareNamesNatural(aLoc.name, bLoc.name)
           if (binCmp !== 0) return binCmp
         }
 

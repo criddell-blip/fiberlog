@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useApp } from '../../AppContext'
-import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement, getMyAllowedLoadDestinations } from '../../lib/inventory'
+import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement, getMyAllowedLoadDestinations, compareNamesNatural } from '../../lib/inventory'
 
 // Unified sheet for crew-initiated movements. Modes covered today:
 //   'load'    — warehouse/bucket → my truck     (pick source, then part)
@@ -208,13 +208,13 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
       return l.name || ''
     }
     return otherLocations.slice().sort((a, b) => {
-      const gcmp = groupName(a).localeCompare(groupName(b))
+      const gcmp = compareNamesNatural(groupName(a), groupName(b))
       if (gcmp !== 0) return gcmp
-      // Same group: parent first, then bins by name
+      // Same group: parent first, then bins by name (natural order so A2 < A10)
       if ((a.parent_location_id || null) !== (b.parent_location_id || null)) {
         return a.parent_location_id ? 1 : -1
       }
-      return (a.name || '').localeCompare(b.name || '')
+      return compareNamesNatural(a.name, b.name)
     }).map(l => {
       const parent = l.parent_location_id ? byId.get(l.parent_location_id) : null
       return {

@@ -4,6 +4,7 @@ import {
   searchInventoryParts,
   getBinsForWarehouse,
   getPartLocations,
+  compareNamesNatural,
 } from '../../lib/inventory'
 
 const TYPES = [
@@ -233,7 +234,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
         partsHere: count,
       })
     }
-    return opts.sort((a, b) => b.partsHere - a.partsHere || a.displayLabel.localeCompare(b.displayLabel))
+    return opts.sort((a, b) => b.partsHere - a.partsHere || compareNamesNatural(a.displayLabel, b.displayLabel))
   }, [lines, partLocationsByPart, locations])
 
   const useSmartFromPicker = showFrom && !showAllFromLocations && lines.length > 0

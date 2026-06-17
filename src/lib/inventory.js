@@ -4,6 +4,14 @@
 
 import { db, searchPartsCatalog } from './supabase'
 
+// Natural / "logical" name compare. Beats plain localeCompare on alnum bin
+// labels: "A2" < "A10" instead of "A10" < "A2". Used everywhere bins or
+// alphanumeric labels are listed so creating a new bin slots it into the
+// expected spot rather than the lexicographic one.
+export function compareNamesNatural(a, b) {
+  return (a || '').localeCompare(b || '', undefined, { numeric: true, sensitivity: 'base' })
+}
+
 // ─── LOCATIONS ───────────────────────────────────────────────────────────────
 
 // Get top-level locations (warehouses, trucks, job sites, etc.). By default
@@ -30,7 +38,7 @@ export async function getLocations(opts = {}) {
     if (t !== 0) return t
     const an = a.assigned_user?.name || a.name || ''
     const bn = b.assigned_user?.name || b.name || ''
-    return an.localeCompare(bn)
+    return compareNamesNatural(an, bn)
   })
 }
 
@@ -46,7 +54,7 @@ export async function getBinsForWarehouse(warehouseId, { includeInactive = false
   if (!includeInactive) q = q.eq('is_active', true)
   const { data, error } = await q
   if (error) throw error
-  return (data || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+  return (data || []).sort((a, b) => compareNamesNatural(a.name, b.name))
 }
 
 export async function createLocation({ name, type, assigned_to, notes, parent_location_id }) {

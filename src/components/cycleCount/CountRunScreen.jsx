@@ -15,7 +15,7 @@ import {
   getSessionLines,
   discardCountRun,
 } from '../../lib/cycleCount'
-import { getBinsForWarehouse, getLocations, createPart } from '../../lib/inventory'
+import { getBinsForWarehouse, getLocations, createPart, compareNamesNatural } from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
 
 // The active count run screen. Built around a persistent scan input at top
@@ -808,7 +808,7 @@ function BinPickerSheet({ bins, statusByBinId = {}, onPick, onClose }) {
     const oa = order[statusByBinId[a.id]] ?? 0
     const ob = order[statusByBinId[b.id]] ?? 0
     if (oa !== ob) return oa - ob
-    return (a.name || '').localeCompare(b.name || '')
+    return compareNamesNatural(a.name, b.name)
   })
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
