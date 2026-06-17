@@ -503,7 +503,8 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   }
 
   return (
-    <div className="overlay open" onClick={e => e.target === e.currentTarget && !submitting && onClose()}>
+    // Backdrop tap does NOT dismiss — prevents mid-edit data loss. Cancel button below.
+    <div className="overlay open">
       <div className="overlay-sheet" style={{ maxWidth: 1080, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4 }}>
           🧵 Sonar fiber jobs import

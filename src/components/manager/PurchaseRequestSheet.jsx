@@ -363,7 +363,7 @@ export default function PurchaseRequestSheet({
 
   if (loading) {
     return (
-      <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="overlay open">
         <div className="overlay-sheet" style={{ maxWidth: 1100 }}>
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>Loading PR…</div>
         </div>
@@ -372,7 +372,8 @@ export default function PurchaseRequestSheet({
   }
 
   return (
-    <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
+    // Backdrop tap does NOT dismiss — prevents mid-edit data loss. Cancel button below.
+    <div className="overlay open">
       <div className="overlay-sheet" style={{ maxWidth: 1100, maxHeight: '94vh', display: 'flex', flexDirection: 'column' }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 4 }}>

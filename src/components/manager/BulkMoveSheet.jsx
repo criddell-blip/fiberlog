@@ -169,7 +169,8 @@ export default function BulkMoveSheet({
   const destBins = destIsWarehouse ? (binsByWarehouse[destTopId] || []) : []
 
   return (
-    <div className="overlay open" onClick={e => e.target === e.currentTarget && !submitting && onClose()}>
+    // Backdrop tap does NOT dismiss — prevents mid-edit data loss. Cancel button below.
+    <div className="overlay open">
       <div className="overlay-sheet" style={{ maxWidth: 640, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, flexShrink: 0 }}>
           <div style={{ fontWeight: 800, fontSize: 17 }}>Bulk move stock</div>

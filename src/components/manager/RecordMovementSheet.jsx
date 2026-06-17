@@ -269,7 +269,9 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   }
 
   return (
-    <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
+    // Backdrop tap does NOT dismiss — prevents data loss when the user
+    // misses the input/button they were aiming for. Use Cancel button.
+    <div className="overlay open">
       <div className="overlay-sheet" style={{ maxWidth: 560 }}>
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Record movement</div>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>

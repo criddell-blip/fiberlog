@@ -160,7 +160,8 @@ export default function ReconcileSheet({ onClose, onApplied }) {
   }
 
   return (
-    <div className="overlay open" onClick={e => e.target === e.currentTarget && !submitting && onClose()}>
+    // Backdrop tap does NOT dismiss — prevents mid-edit data loss. Cancel button below.
+    <div className="overlay open">
       <div className="overlay-sheet" style={{ maxWidth: 920, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 2 }}>🔄 Reconcile inventory</div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>

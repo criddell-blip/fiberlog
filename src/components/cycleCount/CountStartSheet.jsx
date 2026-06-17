@@ -76,7 +76,8 @@ export default function CountStartSheet({ onClose, onStarted }) {
   }
 
   return (
-    <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
+    // Backdrop tap does NOT dismiss — prevents mid-edit data loss. Cancel button below.
+    <div className="overlay open">
       <div className="overlay-sheet" style={{ maxWidth: 480 }}>
         <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4 }}>
           Cycle count

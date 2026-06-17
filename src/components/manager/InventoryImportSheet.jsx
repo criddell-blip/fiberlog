@@ -319,7 +319,8 @@ export default function InventoryImportSheet({ locations, currentUser, onClose, 
   // ─── Render ─────────────────────────────────────────────────────────────
 
   return (
-    <div className="overlay open" onClick={e => e.target === e.currentTarget && stage !== STAGES.importing && onClose()}>
+    // Backdrop tap does NOT dismiss — prevents mid-edit data loss. Cancel button below.
+    <div className="overlay open">
       <div className="overlay-sheet" style={{ maxWidth: 720, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div style={{ fontWeight: 800, fontSize: 17 }}>Import inventory CSV</div>
