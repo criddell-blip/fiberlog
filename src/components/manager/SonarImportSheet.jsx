@@ -906,6 +906,9 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             }}>
               📥 Auto-delivered from Sonar ({pendingImports.length})
             </div>
+            {/* Scroll the list itself, not the whole sheet — a long backlog
+                otherwise buries the part-mapping section below the fold. */}
+            <div style={{ maxHeight: 240, overflowY: 'auto', paddingRight: 2 }}>
             {pendingImports.map(p => {
               const isActive = activePendingId === p.id
               return (
@@ -956,6 +959,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                 </div>
               )
             })}
+            </div>
           </div>
         )}
 

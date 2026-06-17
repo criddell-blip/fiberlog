@@ -554,6 +554,10 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             }}>
               📥 Auto-delivered from Sonar ({pendingImports.length})
             </div>
+            {/* Scroll the list itself, not the whole sheet — otherwise a long
+                backlog (we saw 13) buries the part-mapping section below the
+                fold. ~4 rows visible with a partial 5th to signal more. */}
+            <div style={{ maxHeight: 240, overflowY: 'auto', paddingRight: 2 }}>
             {pendingImports.map(p => {
               const isActive = activePendingId === p.id
               return (
@@ -603,6 +607,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
                 </div>
               )
             })}
+            </div>
           </div>
         )}
 
