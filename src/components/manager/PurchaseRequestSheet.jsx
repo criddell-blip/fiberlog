@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import {
   createPurchaseRequest, getPurchaseRequest,
   updatePurchaseRequest, replacePurchaseRequestLines, deletePurchaseRequest,
+  markPurchaseRequestReceived,
   getLastUnitCost, getRecentVendors,
   buildPurchaseRequestCsv, buildPurchaseRequestEmail,
 } from '../../lib/inventory'
@@ -292,6 +293,37 @@ export default function PurchaseRequestSheet({
     setSubmitting(true)
     setError(null)
     try {
+      if (nextStatus === 'received') {
+        // Mark Received also fans out receive movements so the goods
+        // actually book into stock. Confirm first because this writes
+        // to the inventory ledger.
+        const lineCount = (pr?.lines || []).length
+        const freeformCount = (pr?.lines || []).filter(l => !l.part_id).length
+        const catalogCount = lineCount - freeformCount
+        const msg = [
+          `Mark ${pr?.pr_number} received?`,
+          '',
+          `This writes ${catalogCount} receive movement${catalogCount === 1 ? '' : 's'} into ${pr?.target_location?.name || 'the target location'}, increasing stock there.`,
+          freeformCount > 0
+            ? `\n${freeformCount} freeform line${freeformCount === 1 ? '' : 's'} (no catalog SKU) will be SKIPPED — add the SKU via Parts admin if you need it booked.`
+            : '',
+        ].filter(Boolean).join('\n')
+        if (!window.confirm(msg)) {
+          setSubmitting(false)
+          return
+        }
+        const { movementsWritten, skippedFreeformLines } =
+          await markPurchaseRequestReceived(prId, { createdBy: currentUser?.id })
+        const reloaded = await getPurchaseRequest(prId)
+        setPr(reloaded)
+        onSaved?.(reloaded)
+        if (skippedFreeformLines.length > 0) {
+          showToast(`Received ${movementsWritten} line${movementsWritten === 1 ? '' : 's'} · ${skippedFreeformLines.length} freeform skipped`)
+        } else {
+          showToast(`Received ${movementsWritten} line${movementsWritten === 1 ? '' : 's'} into ${reloaded?.target_location?.name || 'stock'}`)
+        }
+        return
+      }
       const patch = { status: nextStatus }
       if (nextStatus === 'ordered') {
         if (poNumber) patch.po_number = poNumber

@@ -2051,6 +2051,64 @@ export async function deletePurchaseRequest(prId) {
   if (error) throw error
 }
 
+// Mark a PR received — also fans out receive movements per line so the
+// goods actually book into stock at the PR's target location. Lines
+// without a part_id (freeform — SKU not yet in catalog) get skipped
+// with a count returned in the result so the UI can warn the manager.
+//
+// Returns: {
+//   movementsWritten: int,           // receive movements actually inserted
+//   skippedFreeformLines: array      // lines we couldn't auto-receive (no part_id)
+// }
+export async function markPurchaseRequestReceived(prId, { createdBy } = {}) {
+  if (!prId) throw new Error('prId required')
+  if (!createdBy) throw new Error('createdBy required')
+
+  // Pull the PR + lines in one go.
+  const pr = await getPurchaseRequest(prId)
+  if (!pr) throw new Error('PR not found')
+  if (pr.status === 'received') throw new Error('PR is already received')
+  if (!pr.target_location_id) {
+    throw new Error('PR has no "Deliver to" location set — open the PR and pick one before marking received')
+  }
+
+  // Split lines into the receivable (has part_id) and skipped (freeform).
+  const receivable = []
+  const skipped = []
+  for (const l of pr.lines || []) {
+    if (l.part_id) receivable.push(l)
+    else skipped.push(l)
+  }
+
+  // Build the receive movements. Existing inventory_stock trigger will
+  // increment stock at the destination as each insert lands.
+  let movementsWritten = 0
+  if (receivable.length > 0) {
+    const payloads = receivable.map(l => ({
+      movement_type: 'receive',
+      part_id: l.part_id,
+      quantity: Number(l.quantity),
+      unit: l.part?.unit || null,
+      from_location_id: null,
+      to_location_id: pr.target_location_id,
+      vendor_invoice: l.vendor || null,
+      unit_cost: l.unit_cost != null ? Number(l.unit_cost) : null,
+      notes: `Auto-received from ${pr.pr_number}` + (l.project_reason ? ` · ${l.project_reason}` : ''),
+      created_by: createdBy,
+    }))
+    await recordMovementsBatch(payloads)
+    movementsWritten = payloads.length
+  }
+
+  // Flip status + stamp received_at. Trigger maintains updated_at.
+  await updatePurchaseRequest(prId, {
+    status: 'received',
+    received_at: new Date().toISOString(),
+  })
+
+  return { movementsWritten, skippedFreeformLines: skipped }
+}
+
 // Build a CSV that matches Utah Broadband's PR spreadsheet column order
 // so purchasing can paste directly into their template.
 export function buildPurchaseRequestCsv(pr) {
