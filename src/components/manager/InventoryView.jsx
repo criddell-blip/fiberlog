@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 import { getLocations } from '../../lib/inventory'
 import InventoryStockTab from './InventoryStockTab'
 import InventoryLocationsTab from './InventoryLocationsTab'
@@ -19,35 +20,26 @@ import FiberJobsImportSheet from './FiberJobsImportSheet'
 import InventoryImportSheet from './InventoryImportSheet'
 import SageExportSheet from './SageExportSheet'
 
+// Secondary nav for the Inventory section (Console line icons). The top-level
+// section nav lives in ManagerApp's sidebar; these are the inventory sub-views.
 const SUBTABS = [
-  { id: 'stock',     label: 'Stock',     icon: '📦' },
-  { id: 'locations', label: 'Locations', icon: '🏭' },
-  { id: 'parts',     label: 'Parts',     icon: '🔧' },
-  { id: 'movements', label: 'Activity',  icon: '📜' },
-  { id: 'prs',       label: 'PRs',       icon: '📋' },
-  { id: 'audit',     label: 'Audit',     icon: '🔍' },
-  { id: 'count',     label: 'Count',     icon: '🔢' },
+  { id: 'stock',     label: 'Stock',         icon: 'box' },
+  { id: 'locations', label: 'Locations',     icon: 'warehouse' },
+  { id: 'parts',     label: 'Parts',         icon: 'nut' },
+  { id: 'movements', label: 'Activity',      icon: 'activity' },
+  { id: 'prs',       label: 'Purchase Reqs', icon: 'clipboard' },
+  { id: 'audit',     label: 'Audit',         icon: 'scan' },
+  { id: 'count',     label: 'Cycle Count',   icon: 'grid' },
 ]
 
 export default function InventoryView() {
   const { showToast, currentUser } = useApp()
   const isWide = useIsWide()
-  // Mobile action-menu state. On phone the 4 secondary actions (Import / PO /
-  // Reconcile / Sonar) collapse behind a "⋯ More" button to keep the header
-  // slim; primary "+ Record movement" stays visible. Closed by default.
+  // Phone: the secondary inventory actions collapse into a bottom "Actions"
+  // sheet opened from the toolbar ⋯ button. Desktop shows them inline as the
+  // Actions strip. Closed by default.
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
-  const actionMenuRef = useRef(null)
-  // Auto-close the menu on outside-tap (matches native popover UX)
-  useEffect(() => {
-    if (!actionMenuOpen) return
-    const handler = (e) => {
-      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target)) {
-        setActionMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [actionMenuOpen])
+  useBackClose(actionMenuOpen ? 1 : 0, () => setActionMenuOpen(false))
   const [tab, setTab] = useState('stock')
   // Back returns from any sub-tab to the default Stock sub-tab (then another
   // Back leaves the Inventory tab via ManagerApp's tab layer). Sheets opened
@@ -62,26 +54,12 @@ export default function InventoryView() {
   const [showFiberJobsSheet, setShowFiberJobsSheet] = useState(false)
   const [showImportSheet, setShowImportSheet] = useState(false)
   const [showSageSheet, setShowSageSheet] = useState(false)
-  // Bumped after a movement is recorded or part is updated, so child tabs
-  // re-fetch their data
+  // Bumped after a movement is recorded or part is updated, so child tabs re-fetch.
   const [refreshKey, setRefreshKey] = useState(0)
-  // When the user clicks "View stock" on a location card, we set this and
-  // flip the tab. StockTab reads it on mount + on change to seed its
-  // scope; the counter ensures repeat clicks on the same location still
-  // re-fire the effect. partId is set by the launcher when picking a
-  // stock pair so the Stock tab can also pre-filter to the SKU.
+  // Cross-tab jumps (launcher + inline links). Each tab consumes its jump on
+  // mount/change; the `n` counter re-fires the effect on repeat jumps.
   const [stockJump, setStockJump] = useState({ locationId: null, partId: null, n: 0 })
-  // Count jump — flips to Count tab and seeds CountTab with a specific run +
-  // optional session to auto-open. Used by LocationDetailPanel's "Count this
-  // bin" action so the manager goes directly into the bin's session instead
-  // of starting from Count tab's empty state. Counter (n) ensures repeat
-  // clicks on the same target still re-fire the effect.
   const [countJump, setCountJump] = useState({ run: null, session: null, n: 0 })
-  // Parts / Locations focus jumps from the launcher and cross-tab links.
-  // Each tab consumes its jump prop on mount/change, scrolls to the
-  // target row, and highlights for ~2 sec. Counter pattern matches the
-  // existing stockJump / countJump pattern so repeated clicks on the
-  // same entity still re-fire.
   const [partsJump, setPartsJump] = useState({ partId: null, n: 0 })
   const [locationsJump, setLocationsJump] = useState({ locationId: null, n: 0 })
 
@@ -89,17 +67,14 @@ export default function InventoryView() {
     setStockJump(prev => ({ locationId, partId: null, n: prev.n + 1 }))
     setTab('stock')
   }
-
   function jumpToCount(run, session) {
     setCountJump(prev => ({ run, session, n: prev.n + 1 }))
     setTab('count')
   }
-
   function jumpToPart(partId) {
     setPartsJump(prev => ({ partId, n: prev.n + 1 }))
     setTab('parts')
   }
-
   function jumpToLocation(locationId) {
     setLocationsJump(prev => ({ locationId, n: prev.n + 1 }))
     setTab('locations')
@@ -125,231 +100,138 @@ export default function InventoryView() {
     setRefreshKey(k => k + 1)
     showToast(count === 1 ? 'Movement recorded' : `${count} movements recorded`)
   }
-
   function handlePOReceived(lineCount) {
     setShowReceiveSheet(false)
     setRefreshKey(k => k + 1)
     showToast(`Received ${lineCount} item${lineCount === 1 ? '' : 's'}`)
   }
-
   function handleReconcileApplied(count) {
     setShowReconcileSheet(false)
     setRefreshKey(k => k + 1)
     showToast(`Applied ${count} adjustment${count === 1 ? '' : 's'}`)
   }
-
   function handleSonarApplied(count) {
     setShowSonarSheet(false)
     setRefreshKey(k => k + 1)
     showToast(`Issued ${count} Sonar transaction${count === 1 ? '' : 's'}`)
   }
-
   function handleFiberJobsApplied(count) {
     setShowFiberJobsSheet(false)
     setRefreshKey(k => k + 1)
     showToast(`Imported ${count} fiber-job movement${count === 1 ? '' : 's'}`)
   }
-
   function handleLocationsChanged() {
     loadLocations()
     setRefreshKey(k => k + 1)
   }
-
   function handleImportComplete() {
     loadLocations()
     setRefreshKey(k => k + 1)
   }
-
   function handlePartsChanged() {
     setRefreshKey(k => k + 1)
   }
 
   const noLocations = !locationsLoading && locations.length === 0
 
+  // Secondary inventory actions (shared by the desktop Actions strip + the
+  // phone Actions sheet). These open the various import/receive/export sheets.
+  const ACTIONS = [
+    { id: 'receive',   label: 'Receive PO',  sub: 'Vendor delivery',     icon: 'download', onClick: () => setShowReceiveSheet(true),   disabled: noLocations },
+    { id: 'reconcile', label: 'Reconcile',   sub: 'Apply an audit CSV',  icon: 'refresh',  onClick: () => setShowReconcileSheet(true), disabled: noLocations },
+    { id: 'sonar',     label: 'Sonar',       sub: 'Serialized installs', icon: 'zap',      onClick: () => setShowSonarSheet(true),     disabled: noLocations },
+    { id: 'fiber',     label: 'Fiber jobs',  sub: 'Cable & drops report',icon: 'layers',   onClick: () => setShowFiberJobsSheet(true), disabled: noLocations },
+    { id: 'import',    label: 'Import CSV',  sub: 'BoxHero catalog',     icon: 'upload',   onClick: () => setShowImportSheet(true),    disabled: false },
+    { id: 'sage',      label: 'Sage export', sub: 'Build the period CSV',icon: 'receipt',  onClick: () => setShowSageSheet(true),      disabled: false },
+  ]
+
   // Count sub-tab takes over the full panel — its body is a scanner-driven
-  // counter UI that needs every vertical pixel on mobile. The Inventory
-  // chrome (action buttons + sub-tab pills) doesn't apply while counting,
-  // so we suppress it and give CountTab the full panel. Navigation back is
+  // counter UI that needs every vertical pixel on mobile. Navigation back is
   // via CountTab's own "← Inventory" button.
   if (tab === 'count') {
     return <CountTab onExitTab={() => setTab('stock')} jumpTo={countJump} />
   }
 
+  const activeLabel = SUBTABS.find(s => s.id === tab)?.label || 'Inventory'
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <PausedBanner />
-      <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ fontWeight: 800, fontSize: 17 }}>Inventory</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {/* Desktop: all 4 secondary actions visible.
-                Mobile: collapsed behind a "⋯ More" button to keep the
-                header at one row even on a 360px viewport. */}
-            {isWide ? (
-              <>
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => setShowImportSheet(true)}
-                  style={{ padding: '6px 12px', fontSize: 13 }}
-                >
-                  ⇪ Import CSV
-                </button>
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => setShowReceiveSheet(true)}
-                  disabled={noLocations}
-                  title={noLocations ? 'Create a destination location first' : 'Receive a vendor delivery / purchase order'}
-                  style={{ padding: '6px 12px', fontSize: 13 }}
-                >
-                  📥 Receive PO
-                </button>
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => setShowReconcileSheet(true)}
-                  disabled={noLocations}
-                  title={noLocations ? 'Create a location first' : 'Upload a filled-in Audit CSV to reconcile system stock to a physical count'}
-                  style={{ padding: '6px 12px', fontSize: 13 }}
-                >
-                  🔄 Reconcile
-                </button>
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => setShowSonarSheet(true)}
-                  disabled={noLocations}
-                  title={noLocations ? 'Create a location first' : 'Import the Sonar asset-tagged consumption report'}
-                  style={{ padding: '6px 12px', fontSize: 13 }}
-                >
-                  ⚡ Sonar
-                </button>
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => setShowFiberJobsSheet(true)}
-                  disabled={noLocations}
-                  title={noLocations ? 'Create a location first' : 'Import the Sonar fiber-jobs report (pushable cable, drops, ONT boxes, etc.)'}
-                  style={{ padding: '6px 12px', fontSize: 13 }}
-                >
-                  🧵 Fiber jobs
-                </button>
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => setShowSageSheet(true)}
-                  title="Export movements to Sage Intacct Inventory Transactions CSV"
-                  style={{ padding: '6px 12px', fontSize: 13 }}
-                >
-                  🧾 Sage export
-                </button>
-              </>
-            ) : (
-              <div ref={actionMenuRef} style={{ position: 'relative' }}>
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => setActionMenuOpen(v => !v)}
-                  style={{ padding: '6px 12px', fontSize: 13 }}
-                  title="Import / Receive PO / Reconcile / Sonar"
-                >
-                  ⋯ More
-                </button>
-                {actionMenuOpen && (
-                  <div style={{
-                    // left:0 anchors the popover to the LEFT edge of the
-                    // button. On phone the action row wraps to its own line
-                    // and the More button ends up near the left of the
-                    // viewport, so right:0 was sending the popover off-screen.
-                    // (More button is mobile-only — desktop renders all 4
-                    // actions inline so this menu never opens there.)
-                    position: 'absolute', top: 'calc(100% + 4px)', left: 0,
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--r-sm)',
-                    padding: 4, minWidth: 180,
-                    maxWidth: 'calc(100vw - 32px)',
-                    zIndex: 100,
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                  }}>
-                    {[
-                      { label: '⇪ Import CSV', onClick: () => setShowImportSheet(true), disabled: false },
-                      { label: '📥 Receive PO', onClick: () => setShowReceiveSheet(true), disabled: noLocations },
-                      { label: '🔄 Reconcile', onClick: () => setShowReconcileSheet(true), disabled: noLocations },
-                      { label: '⚡ Sonar (assets)', onClick: () => setShowSonarSheet(true), disabled: noLocations },
-                      { label: '🧵 Sonar (fiber jobs)', onClick: () => setShowFiberJobsSheet(true), disabled: noLocations },
-                      { label: '🧾 Sage export', onClick: () => setShowSageSheet(true), disabled: false },
-                    ].map(item => (
-                      <button
-                        key={item.label}
-                        onClick={() => { item.onClick(); setActionMenuOpen(false) }}
-                        disabled={item.disabled}
-                        style={{
-                          display: 'block', width: '100%', textAlign: 'left',
-                          padding: '8px 12px', background: 'transparent', border: 'none',
-                          fontSize: 13, fontWeight: 600,
-                          color: item.disabled ? 'var(--hint)' : 'var(--text)',
-                          cursor: item.disabled ? 'not-allowed' : 'pointer',
-                          borderRadius: 'var(--r-xs)',
-                        }}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            <button
-              className="btn btn-primary"
-              onClick={() => setShowRecordSheet(true)}
-              disabled={noLocations}
-              title={noLocations ? 'Create a location first' : ''}
-              style={{ padding: '6px 14px', fontSize: 13 }}
-            >
-              ＋ Record movement
-            </button>
-          </div>
+
+      {/* Toolbar */}
+      <div style={{
+        height: 60, flexShrink: 0, padding: '0 20px', background: 'var(--surface)',
+        borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12,
+      }}>
+        <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.01em', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {activeLabel}
         </div>
-        {/* Sub-tab nav: pills on desktop, native dropdown on phone.
-            6 pills wrap to 2 rows on a 360px viewport; dropdown is 1 row. */}
-        {isWide ? (
-          <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-            {SUBTABS.map(s => (
-              <button
-                key={s.id}
-                onClick={() => setTab(s.id)}
-                style={{
-                  padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-                  background: tab === s.id ? 'var(--orange)' : 'var(--gray-lt)',
-                  color: tab === s.id ? 'white' : 'var(--muted)',
-                  border: 'none', cursor: 'pointer'
-                }}
-              >
-                {s.icon} {s.label}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div style={{ marginBottom: 12 }}>
-            <select
-              value={tab}
-              onChange={e => setTab(e.target.value)}
-              style={{
-                width: '100%', padding: '8px 12px', fontSize: 14, fontWeight: 700,
-                border: '1.5px solid var(--orange)',
-                borderRadius: 'var(--r-sm)',
-                background: 'var(--surface2)', color: 'var(--text)',
-              }}
-            >
-              {SUBTABS.map(s => (
-                <option key={s.id} value={s.id}>{s.icon} {s.label}</option>
-              ))}
-            </select>
-          </div>
+        <button
+          className="btn btn-primary"
+          onClick={() => setShowRecordSheet(true)}
+          disabled={noLocations}
+          title={noLocations ? 'Create a location first' : ''}
+          style={{ height: 36, padding: '0 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap' }}
+        >
+          <Icon name="plus" size={16} /> {isWide ? 'Record movement' : 'Record'}
+        </button>
+        {!isWide && (
+          <button
+            onClick={() => setActionMenuOpen(true)}
+            aria-label="More actions"
+            style={{ width: 36, height: 36, borderRadius: 8, border: '1px solid var(--border2)', background: 'var(--surface)', color: 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+          >
+            <Icon name="dots" size={18} />
+          </button>
         )}
       </div>
 
+      {/* Secondary sub-nav */}
+      <div style={{
+        flexShrink: 0, display: 'flex', gap: 4, padding: '8px 16px', background: 'var(--surface)',
+        borderBottom: '1px solid var(--border)', overflowX: 'auto',
+      }}>
+        {SUBTABS.map(s => {
+          const active = tab === s.id
+          return (
+            <button key={s.id} onClick={() => setTab(s.id)} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 12px', borderRadius: 8,
+              fontSize: 13, fontWeight: active ? 700 : 600, whiteSpace: 'nowrap', border: 'none', cursor: 'pointer',
+              background: active ? 'var(--accent-lt)' : 'transparent',
+              color: active ? 'var(--accent-dk)' : 'var(--muted)',
+            }}>
+              <Icon name={s.icon} size={16} /> {s.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Actions strip (desktop) */}
+      {isWide && (
+        <div style={{
+          flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px',
+          background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexWrap: 'wrap',
+        }}>
+          <span className="eyebrow" style={{ marginRight: 2 }}>Actions</span>
+          {ACTIONS.map(a => (
+            <button key={a.id} onClick={a.onClick} disabled={a.disabled}
+              title={a.disabled ? 'Create a location first' : a.sub}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7, height: 30, padding: '0 12px', borderRadius: 8,
+                fontSize: 12.5, fontWeight: 600, background: 'var(--surface2)', border: '1px solid var(--border2)',
+                color: a.disabled ? 'var(--hint)' : 'var(--text)', cursor: a.disabled ? 'not-allowed' : 'pointer',
+              }}>
+              <Icon name={a.icon} size={15} /> {a.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {noLocations && tab !== 'locations' && (
-        <div style={{ padding: '0 20px 12px' }}>
+        <div style={{ padding: '12px 20px 0' }}>
           <div style={{
             background: 'var(--amber-lt)', border: '1px solid var(--amber)',
-            borderRadius: 'var(--r-sm)', padding: '10px 14px',
-            fontSize: 13, color: 'var(--amber)'
+            borderRadius: 'var(--r-sm)', padding: '10px 14px', fontSize: 13, color: 'var(--amber)',
           }}>
             No locations yet — head to <button
               onClick={() => setTab('locations')}
@@ -394,25 +276,43 @@ export default function InventoryView() {
           />
         )}
         {tab === 'movements' && (
-          <InventoryMovementsTab
-            locations={locations}
-            refreshKey={refreshKey}
-          />
+          <InventoryMovementsTab locations={locations} refreshKey={refreshKey} />
         )}
         {tab === 'prs' && (
-          <PurchaseRequestsTab
-            locations={locations}
-            refreshKey={refreshKey}
-          />
+          <PurchaseRequestsTab locations={locations} refreshKey={refreshKey} />
         )}
         {tab === 'audit' && (
-          <InventoryAuditTab
-            locations={locations}
-            refreshKey={refreshKey}
-          />
+          <InventoryAuditTab locations={locations} refreshKey={refreshKey} />
         )}
-        {tab === 'count' && <CountTab />}
       </div>
+
+      {/* Phone: Actions bottom sheet */}
+      {actionMenuOpen && !isWide && (
+        <div className="overlay open" onClick={e => e.target === e.currentTarget && setActionMenuOpen(false)}>
+          <div className="overlay-sheet">
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12 }}>Actions</div>
+            {ACTIONS.map(a => (
+              <button key={a.id} disabled={a.disabled}
+                onClick={() => { a.onClick(); setActionMenuOpen(false) }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '12px 4px',
+                  background: 'transparent', border: 'none', borderBottom: '1px solid var(--row-divider)',
+                  textAlign: 'left', cursor: a.disabled ? 'not-allowed' : 'pointer', opacity: a.disabled ? 0.5 : 1,
+                }}>
+                <div style={{ width: 38, height: 38, borderRadius: 9, background: 'var(--surface2)', color: 'var(--accent-dk)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Icon name={a.icon} size={18} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600 }}>{a.label}</div>
+                  <div style={{ fontSize: 12, color: 'var(--hint)' }}>{a.sub}</div>
+                </div>
+                <Icon name="chevron-right" size={18} color="var(--hint)" />
+              </button>
+            ))}
+            <button className="btn btn-ghost" style={{ width: '100%', marginTop: 14 }} onClick={() => setActionMenuOpen(false)}>Close</button>
+          </div>
+        </div>
+      )}
 
       {showRecordSheet && (
         <RecordMovementSheet
@@ -422,7 +322,6 @@ export default function InventoryView() {
           onRecorded={handleMovementRecorded}
         />
       )}
-
       {showReceiveSheet && (
         <ReceivePOSheet
           locations={locations}
@@ -431,32 +330,27 @@ export default function InventoryView() {
           onRecorded={handlePOReceived}
         />
       )}
-
       {showReconcileSheet && (
         <ReconcileSheet
           onClose={() => setShowReconcileSheet(false)}
           onApplied={handleReconcileApplied}
         />
       )}
-
       {showSonarSheet && (
         <SonarImportSheet
           onClose={() => setShowSonarSheet(false)}
           onApplied={handleSonarApplied}
         />
       )}
-
       {showFiberJobsSheet && (
         <FiberJobsImportSheet
           onClose={() => setShowFiberJobsSheet(false)}
           onApplied={handleFiberJobsApplied}
         />
       )}
-
       {showSageSheet && (
         <SageExportSheet onClose={() => setShowSageSheet(false)} />
       )}
-
       {showImportSheet && (
         <InventoryImportSheet
           locations={locations}
