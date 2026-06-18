@@ -1,36 +1,46 @@
 :root {
-  --orange: #F5871F;
-  --orange-dk: #C96D0F;
-  --orange-lt: #2A1F0E;
-  --orange-mid: #F5A050;
-  --teal: #1D9E75;
-  --teal-dk: #0F6E56;
-  --teal-lt: #0D2118;
-  --teal-mid: #5DCAA5;
-  --amber: #E09020;
-  --amber-lt: #2A1E08;
-  --amber-mid: #EFB040;
-  --blue: #378ADD;
-  --blue-lt: #0D1E2E;
-  --blue-mid: #5FA8F0;
-  --red: #E24B4A;
-  --red-lt: #2A0E0E;
-  --red-mid: #F07070;
-  --gray: #888780;
-  --gray-lt: #232320;
-  --gray-mid: #555550;
-  --purple: #7F77DD;
-  --purple-lt: #1A1830;
-  --bg: #111210;
-  --surface: #1C1C1A;
-  --surface2: #242422;
-  --border: #2E2E2B;
-  --border2: #3E3E3A;
-  --text: #F0EFE8;
-  --muted: #888780;
-  --hint: #555550;
-  --r: 14px;
-  --r-sm: 10px;
+  /* ─── Console palette — light default, emerald accent ─────────────────────
+   * Redesign handoff: docs/design_handoff_console_redesign. Token NAMES are
+   * preserved so re-pointing their values cascades through every existing
+   * inline style (the intended low-risk path). Console has a SINGLE accent
+   * (emerald), so the legacy --orange and --teal families both remap onto it;
+   * semantic colors are amber = warning/low, grey = draft, red = danger.
+   * Dark mode is deferred (light-first) — see the handoff's Polish phase. */
+  --accent: #0E9F6E;
+  --accent-dk: #0A7A54;
+  --accent-lt: #E7F6EF;
+  --accent-mid: #1F9D63;
+
+  /* Legacy accent names → emerald, so existing --orange/--teal usages adopt it */
+  --orange: var(--accent); --orange-dk: var(--accent-dk); --orange-lt: var(--accent-lt); --orange-mid: var(--accent-mid);
+  --teal: var(--accent); --teal-dk: var(--accent-dk); --teal-lt: var(--accent-lt); --teal-mid: var(--accent-dk);
+
+  --amber: #B7791F;  --amber-lt: #FEF3E2;  --amber-mid: #C2841C;
+  --blue: #2F6FBF;   --blue-lt: #EAF2FC;   --blue-mid: #5FA8F0;
+  --red: #DC2626;    --red-lt: #FEECEC;    --red-mid: #F07070;
+  --gray: #94A3B8;   --gray-lt: #F1F5F9;   --gray-mid: #CBD5E1;
+  --purple: #6D63D1; --purple-lt: #EEEDFB;
+
+  --bg: #FBFBFC;
+  --surface: #FFFFFF;
+  --surface2: #F4F6F8;
+  --sidebar: #FAFBFC;
+  --row-divider: #EEF1F5;
+  --border: #E8EBEF;
+  --border2: #DDE2E8;
+  --text: #0F172A;
+  --muted: #475569;
+  --hint: #94A3B8;
+
+  /* Console extras (new names, used by the redesigned views) */
+  --selected-row: #ECFDF3;
+  --dark-bar: #0F172A;
+  --mint: #5EEAB0;
+  --font-sans: 'Public Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'DM Mono', monospace;
+
+  --r: 12px;
+  --r-sm: 8px;
   --r-xs: 6px;
 
   /* ─── Phase 1 foundation: extended scale tokens ──────────────────────
@@ -99,31 +109,19 @@
 }
 
 
-[data-theme="light"] {
-  --bg: #F5F4EF;
-  --surface: #FFFFFF;
-  --surface2: #F0EFE8;
-  --border: #E0DED6;
-  --border2: #CCCAC0;
-  --text: #1A1A17;
-  --muted: #666660;
-  --hint: #999990;
-  --orange-lt: #FEF3E8;
-  --teal-lt: #E8F5F0;
-  --teal-mid: #1D9E75;
-  --teal-dk: #0F6E56;
-  --amber-lt: #FEF4E0;
-  --red-lt: #FEE8E8;
-  --gray-lt: #F0EFE8;
-  --gray-mid: #AAAAAA;
-}
+/* Console is light-default. The previous dark-default `:root` + light override
+   split is retired here — both the no-theme default and the legacy
+   `data-theme="light"` resolve to the Console light palette above, so the
+   existing dark-mode toggle no-ops visually until dark Console is designed
+   (deferred to the Polish phase per the handoff). */
+[data-theme="light"], [data-theme="dark"] {}
 
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
 html, body, #root {
   height: 100%;
   overflow: hidden;
-  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg);
   color: var(--text);
   font-size: 15px;

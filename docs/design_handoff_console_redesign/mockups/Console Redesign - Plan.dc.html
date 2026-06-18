@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  @media print {
+    .doc-bg { background: #fff !important; padding: 0 !important; }
+    .doc-paper { box-shadow: none !important; }
+  }
+</style>
+</helmet>
+
+<svg aria-hidden="true" width="0" height="0" style="position:absolute">
+  <symbol id="p-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11"></path></symbol>
+  <symbol id="p-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l9-5 9 5v8l-9 5-9-5V8z"></path><path d="M3 8l9 5 9-5"></path><path d="M12 13v8"></path></symbol>
+  <symbol id="p-layout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></symbol>
+  <symbol id="p-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1"></rect><rect x="13" y="4" width="7" height="7" rx="1"></rect><rect x="4" y="13" width="7" height="7" rx="1"></rect><rect x="13" y="13" width="7" height="7" rx="1"></rect></symbol>
+  <symbol id="p-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"></path><path d="M3 13l9 5 9-5"></path></symbol>
+  <symbol id="p-scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3"></path><path d="M16 4h3a1 1 0 0 1 1 1v3"></path><path d="M20 16v3a1 1 0 0 1-1 1h-3"></path><path d="M8 20H5a1 1 0 0 1-1-1v-3"></path><line x1="4" y1="12" x2="20" y2="12"></line></symbol>
+  <symbol id="p-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></symbol>
+  <symbol id="p-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"></path></symbol>
+</svg>
+
+<div class="doc-bg" style="min-height:100vh; background:#E7E5DF; padding:56px 24px; font-family:'Public Sans',system-ui,sans-serif; color:#0F172A;">
+  <div class="doc-paper" style="max-width:880px; margin:0 auto; background:#fff; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,.1), 0 20px 50px rgba(0,0,0,.07); overflow:hidden;">
+
+    <!-- masthead -->
+    <div style="padding:48px 56px 36px; border-bottom:1px solid #E8EBEF;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:26px;">
+        <div style="width:28px; height:28px; border-radius:7px; background:#0E9F6E; display:flex; align-items:center; justify-content:center; color:#fff;"><svg viewBox="0 0 24 24" width="17" height="17"><use href="#p-box"></use></svg></div>
+        <div style="font-size:17px; font-weight:800; letter-spacing:-0.03em;">FiberLog</div>
+        <div style="margin-left:auto; font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:#94A3B8;">Build plan · v1</div>
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:12px; letter-spacing:0.18em; text-transform:uppercase; color:#0A7A54; margin-bottom:14px;">Console redesign</div>
+      <h1 style="font-size:38px; line-height:1.08; font-weight:800; letter-spacing:-0.025em; margin:0 0 16px;">Rebuilding the Inventory tab</h1>
+      <p style="font-size:16px; line-height:1.55; color:#475569; margin:0 0 28px; max-width:640px;">Scope, sequencing, and effort for shipping the Console direction — sidebar navigation, a light system, a real icon set, and responsive desktop + phone layouts — as production UI.</p>
+      <div style="display:flex; gap:36px; flex-wrap:wrap;">
+        <div><div style="font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:#94A3B8; margin-bottom:4px;">Scope</div><div style="font-size:14px; font-weight:600;">Inventory tab only</div></div>
+        <div><div style="font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:#94A3B8; margin-bottom:4px;">Build estimate</div><div style="font-size:14px; font-weight:600; color:#0A7A54;">27–39 dev-days</div></div>
+        <div><div style="font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:#94A3B8; margin-bottom:4px;">Calendar</div><div style="font-size:14px; font-weight:600;">~6–8 wks (1 dev)</div></div>
+      </div>
+    </div>
+
+    <div style="padding:40px 56px 52px;">
+
+      <!-- 1 · What changes -->
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#94A3B8; margin-bottom:16px;">01 · What we're fixing</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:40px;">
+        <div style="border:1px solid #E8EBEF; border-radius:12px; padding:18px 20px;">
+          <div style="font-size:14.5px; font-weight:700; margin-bottom:5px;">Emoji → icon system</div>
+          <div style="font-size:13.5px; line-height:1.5; color:#64748B;">Every emoji replaced with one consistent line-icon set, so a glyph means the same thing everywhere and reads as a real product.</div>
+        </div>
+        <div style="border:1px solid #E8EBEF; border-radius:12px; padding:18px 20px;">
+          <div style="font-size:14.5px; font-weight:700; margin-bottom:5px;">Navigation ≠ actions</div>
+          <div style="font-size:13.5px; line-height:1.5; color:#64748B;">Sub-tabs move into a left sidebar (a drawer on phone); the seven “do something” actions live in one toolbar / sheet. No more mixing the two rows.</div>
+        </div>
+        <div style="border:1px solid #E8EBEF; border-radius:12px; padding:18px 20px;">
+          <div style="font-size:14.5px; font-weight:700; margin-bottom:5px;">Light, modern surface</div>
+          <div style="font-size:13.5px; line-height:1.5; color:#64748B;">A calm slate + emerald palette, tighter type scale, and a proper data table replace the current dark card stack.</div>
+        </div>
+        <div style="border:1px solid #E8EBEF; border-radius:12px; padding:18px 20px;">
+          <div style="font-size:14.5px; font-weight:700; margin-bottom:5px;">Genuinely responsive</div>
+          <div style="font-size:13.5px; line-height:1.5; color:#64748B;">Each view defines a desktop table and a phone card layout from the same data — not a single layout that degrades.</div>
+        </div>
+      </div>
+
+      <!-- 2 · Scope inventory -->
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#94A3B8; margin-bottom:16px;">02 · What the tab contains today</div>
+      <p style="font-size:14.5px; line-height:1.55; color:#475569; margin:0 0 18px;">Pulled from the codebase so the estimate reflects real surface area, not a guess.</p>
+      <div style="border:1px solid #E8EBEF; border-radius:12px; overflow:hidden; margin-bottom:14px;">
+        <div style="display:grid; grid-template-columns:1fr 90px; padding:11px 20px; background:#F4F6F8; border-bottom:1px solid #E8EBEF; font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:0.06em; text-transform:uppercase; color:#94A3B8;"><div>Surface</div><div style="text-align:right;">Count</div></div>
+        <div style="display:grid; grid-template-columns:1fr 90px; padding:12px 20px; border-bottom:1px solid #EEF1F5; font-size:14px;"><div><span style="font-weight:600;">Sub-tab views</span> <span style="color:#94A3B8;">— Stock, Locations, Parts, Activity, PRs, Audit, Count</span></div><div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:600;">7</div></div>
+        <div style="display:grid; grid-template-columns:1fr 90px; padding:12px 20px; border-bottom:1px solid #EEF1F5; font-size:14px;"><div><span style="font-weight:600;">Action & detail sheets</span> <span style="color:#94A3B8;">— Record, Receive PO, Reconcile, Sonar, Sage, Bulk move…</span></div><div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:600;">~12</div></div>
+        <div style="display:grid; grid-template-columns:1fr 90px; padding:12px 20px; border-bottom:1px solid #EEF1F5; font-size:14px;"><div><span style="font-weight:600;">App shell</span> <span style="color:#94A3B8;">— header, nav, action bar, location/bin filters</span></div><div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:600;">1</div></div>
+        <div style="display:grid; grid-template-columns:1fr 90px; padding:12px 20px; font-size:14px;"><div><span style="font-weight:600;">Cycle-count scanner flow</span> <span style="color:#94A3B8;">— full-screen, multi-step, separate chrome</span></div><div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:600;">1</div></div>
+      </div>
+      <div style="display:flex; align-items:flex-start; gap:9px; padding:12px 16px; background:#E7F6EF; border-radius:10px; margin-bottom:40px;"><span style="color:#0A7A54; flex-shrink:0; margin-top:1px;"><svg viewBox="0 0 24 24" width="17" height="17"><use href="#p-check"></use></svg></span><div style="font-size:13px; line-height:1.5; color:#0A7A54;"><strong>Good news:</strong> the codebase already has a token layer and a light theme in <span style="font-family:'IBM Plex Mono',monospace; font-size:12px;">global.css</span>. We're re-pointing and extending it, not starting the system from zero.</div></div>
+
+      <!-- 3 · Approach -->
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#94A3B8; margin-bottom:16px;">03 · Approach</div>
+      <div style="margin-bottom:40px;">
+        <div style="display:flex; gap:14px; padding:0 0 16px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; color:#0E9F6E; flex-shrink:0; width:22px;">A</div><div style="font-size:14.5px; line-height:1.55; color:#334155;"><strong>System first.</strong> Lock tokens, the icon set, and a handful of shared primitives (button, badge, table, card, sheet, sidebar) before touching screens. Everything after reuses them.</div></div>
+        <div style="display:flex; gap:14px; padding:0 0 16px; border-top:1px solid #EEF1F5; padding-top:16px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; color:#0E9F6E; flex-shrink:0; width:22px;">B</div><div style="font-size:14.5px; line-height:1.55; color:#334155;"><strong>Stock is the template.</strong> It's the most-used view and exercises the table↔card, filters, and bulk-select patterns. Nail it once; the other tabs inherit the recipe.</div></div>
+        <div style="display:flex; gap:14px; border-top:1px solid #EEF1F5; padding-top:16px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; color:#0E9F6E; flex-shrink:0; width:22px;">C</div><div style="font-size:14.5px; line-height:1.55; color:#334155;"><strong>Ship behind a flag, tab by tab.</strong> The redesign can run next to the current UI per-view, so nothing big-bangs and QA stays focused.</div></div>
+      </div>
+
+      <!-- 4 · The plan -->
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#94A3B8; margin-bottom:16px;">04 · Phased plan & effort</div>
+      <div style="border:1px solid #E8EBEF; border-radius:12px; overflow:hidden; margin-bottom:14px;">
+        <div style="display:grid; grid-template-columns:34px 1fr 92px; padding:11px 20px; background:#F4F6F8; border-bottom:1px solid #E8EBEF; font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:0.06em; text-transform:uppercase; color:#94A3B8;"><div></div><div>Phase &amp; deliverable</div><div style="text-align:right;">Days</div></div>
+
+        <div style="display:grid; grid-template-columns:34px 1fr 92px; align-items:center; padding:15px 20px; border-bottom:1px solid #EEF1F5;">
+          <div style="color:#0E9F6E;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#p-sliders"></use></svg></div>
+          <div><div style="font-size:14.5px; font-weight:700;">0 · Foundation</div><div style="font-size:13px; color:#64748B; margin-top:2px;">Tokens, ~30 icons, shared primitives (button, badge, table, card, sheet, filter bar, empty/loading states).</div></div>
+          <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:600;">4–6</div>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 1fr 92px; align-items:center; padding:15px 20px; border-bottom:1px solid #EEF1F5;">
+          <div style="color:#0E9F6E;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#p-layout"></use></svg></div>
+          <div><div style="font-size:14.5px; font-weight:700;">1 · App shell</div><div style="font-size:13px; color:#64748B; margin-top:2px;">Sidebar + responsive drawer, top toolbar, the “More” actions sheet, page frame.</div></div>
+          <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:600;">3–4</div>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 1fr 92px; align-items:center; padding:15px 20px; border-bottom:1px solid #EEF1F5;">
+          <div style="color:#0E9F6E;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#p-box"></use></svg></div>
+          <div><div style="font-size:14.5px; font-weight:700;">2 · Stock <span style="font-size:10px; font-weight:800; color:#0A7A54; background:#E7F6EF; padding:1px 7px; border-radius:5px; letter-spacing:0.03em; vertical-align:middle;">FLAGSHIP</span></div><div style="font-size:13px; color:#64748B; margin-top:2px;">Table + card layouts, location/bin filters, search, bulk-select + selection bar.</div></div>
+          <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:600;">3–4</div>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 1fr 92px; align-items:center; padding:15px 20px; border-bottom:1px solid #EEF1F5;">
+          <div style="color:#0E9F6E;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#p-grid"></use></svg></div>
+          <div><div style="font-size:14.5px; font-weight:700;">3 · Read tabs ×5</div><div style="font-size:13px; color:#64748B; margin-top:2px;">Locations (warehouse→bin tree is the heavy one), Parts, Activity, PRs, Audit.</div></div>
+          <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:600;">6–9</div>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 1fr 92px; align-items:center; padding:15px 20px; border-bottom:1px solid #EEF1F5;">
+          <div style="color:#0E9F6E;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#p-scan"></use></svg></div>
+          <div><div style="font-size:14.5px; font-weight:700;">4 · Cycle count</div><div style="font-size:13px; color:#64748B; margin-top:2px;">Full-screen scanner flow — start, per-bin session, review/variance.</div></div>
+          <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:600;">2–3</div>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 1fr 92px; align-items:center; padding:15px 20px; border-bottom:1px solid #EEF1F5;">
+          <div style="color:#0E9F6E;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#p-layers"></use></svg></div>
+          <div><div style="font-size:14.5px; font-weight:700;">5 · Action & detail sheets ×12</div><div style="font-size:13px; color:#64748B; margin-top:2px;">Record, Receive PO, Reconcile, Sonar, Fiber jobs, Import, Sage, Bulk move, PR composer, labels…</div></div>
+          <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:600;">6–8</div>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 1fr 92px; align-items:center; padding:15px 20px;">
+          <div style="color:#0E9F6E;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#p-sparkle"></use></svg></div>
+          <div><div style="font-size:14.5px; font-weight:700;">6 · Polish & QA</div><div style="font-size:13px; color:#64748B; margin-top:2px;">Responsive sweep, empty/loading/error states, accessibility, dark-mode decision, handoff.</div></div>
+          <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:600;">3–5</div>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:34px 1fr 92px; align-items:center; padding:15px 20px; background:#0F172A; border-radius:12px; margin-bottom:40px; color:#fff;">
+        <div></div>
+        <div style="font-size:15px; font-weight:800;">Total — build</div>
+        <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-size:15px; font-weight:600; color:#5EEAB0;">27–39</div>
+      </div>
+
+      <!-- 5 · Timeline scenarios -->
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#94A3B8; margin-bottom:16px;">05 · What that looks like in calendar time</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-bottom:40px;">
+        <div style="border:1px solid #E8EBEF; border-radius:12px; padding:20px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:26px; font-weight:500; margin-bottom:4px;">6–8<span style="font-size:13px; color:#94A3B8; margin-left:4px;">wks</span></div><div style="font-size:13px; font-weight:700; margin-bottom:3px;">1 front-end dev</div><div style="font-size:12.5px; color:#64748B; line-height:1.45;">Steady, sequential. Lowest coordination cost.</div></div>
+        <div style="border:1px solid #E8EBEF; border-radius:12px; padding:20px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:26px; font-weight:500; margin-bottom:4px;">3–4<span style="font-size:13px; color:#94A3B8; margin-left:4px;">wks</span></div><div style="font-size:13px; font-weight:700; margin-bottom:3px;">2 devs + design</div><div style="font-size:12.5px; color:#64748B; line-height:1.45;">One on shell/system, one on tabs once primitives land.</div></div>
+        <div style="border:1px solid #0E9F6E; border-radius:12px; padding:20px; background:#F4FBF8;"><div style="font-family:'IBM Plex Mono',monospace; font-size:26px; font-weight:500; margin-bottom:4px; color:#0A7A54;">~1<span style="font-size:13px; color:#5BA98C; margin-left:4px;">wk</span></div><div style="font-size:13px; font-weight:700; margin-bottom:3px;">Stock only, shippable</div><div style="font-size:12.5px; color:#3F7E66; line-height:1.45;">Phases 0–2 → one polished, flagged view in users' hands fast.</div></div>
+      </div>
+      <p style="font-size:13px; line-height:1.55; color:#64748B; margin:-22px 0 40px;">A design track of <strong style="color:#334155;">~5–8 days</strong> runs in parallel (hi-fi specs per view + the icon set), mostly overlapping the build above rather than adding to it.</p>
+
+      <!-- 6 · Assumptions -->
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#94A3B8; margin-bottom:16px;">06 · Assumptions & what could move it</div>
+      <div style="font-size:14px; line-height:1.6; color:#475569;">
+        <div style="display:flex; gap:10px; margin-bottom:10px;"><span style="color:#94A3B8; font-weight:700;">·</span><div><strong style="color:#0F172A;">Data & logic stay put.</strong> This is presentation only — no schema, RPC, or business-logic changes. If we touch data flows, add time.</div></div>
+        <div style="display:flex; gap:10px; margin-bottom:10px;"><span style="color:#94A3B8; font-weight:700;">·</span><div><strong style="color:#0F172A;">Inventory tab only.</strong> The crew app, admin, reports, and approvals are separate efforts — likely 2–3× this combined once the system exists to reuse.</div></div>
+        <div style="display:flex; gap:10px; margin-bottom:10px;"><span style="color:#94A3B8; font-weight:700;">·</span><div><strong style="color:#0F172A;">Dark mode is a decision.</strong> Keeping full light+dark parity adds roughly 15–20%. Recommend shipping light-first, dark as a fast-follow.</div></div>
+        <div style="display:flex; gap:10px;"><span style="color:#94A3B8; font-weight:700;">·</span><div><strong style="color:#0F172A;">Estimates are working ranges</strong> for one experienced React/front-end dev, excluding code review and release process.</div></div>
+      </div>
+
+    </div>
+
+    <!-- footer -->
+    <div style="padding:22px 56px; background:#F4F6F8; border-top:1px solid #E8EBEF; display:flex; align-items:center; gap:10px;">
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#94A3B8; letter-spacing:0.04em;">FiberLog · Console redesign · Inventory tab</div>
+      <div style="margin-left:auto; font-family:'IBM Plex Mono',monospace; font-size:11px; color:#94A3B8;">Estimate, not a commitment</div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  ::-webkit-scrollbar { width: 0; height: 0; }
+</style>
+</helmet>
+
+<svg aria-hidden="true" width="0" height="0" style="position:absolute">
+  <symbol id="m-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="16.5" y1="16.5" x2="21" y2="21"></line></symbol>
+  <symbol id="m-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></symbol>
+  <symbol id="m-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l9-5 9 5v8l-9 5-9-5V8z"></path><path d="M3 8l9 5 9-5"></path><path d="M12 13v8"></path></symbol>
+  <symbol id="m-warehouse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l9-5 9 5v12"></path><path d="M3 21h18"></path><rect x="9" y="13" width="6" height="8"></rect></symbol>
+  <symbol id="m-nut" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10l5 8-5 8H7l-5-8z"></path><circle cx="12" cy="12" r="3.2"></circle></symbol>
+  <symbol id="m-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"></path></symbol>
+  <symbol id="m-clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2"></rect><rect x="9" y="2.5" width="6" height="4" rx="1"></rect><line x1="9" y1="11" x2="15" y2="11"></line><line x1="9" y1="15" x2="13" y2="15"></line></symbol>
+  <symbol id="m-scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3"></path><path d="M16 4h3a1 1 0 0 1 1 1v3"></path><path d="M20 16v3a1 1 0 0 1-1 1h-3"></path><path d="M8 20H5a1 1 0 0 1-1-1v-3"></path><line x1="4" y1="12" x2="20" y2="12"></line></symbol>
+  <symbol id="m-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1"></rect><rect x="13" y="4" width="7" height="7" rx="1"></rect><rect x="4" y="13" width="7" height="7" rx="1"></rect><rect x="13" y="13" width="7" height="7" rx="1"></rect></symbol>
+  <symbol id="m-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"></path><path d="M7 11l5 5 5-5"></path><path d="M4 20h16"></path></symbol>
+  <symbol id="m-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V9"></path><path d="M7 13l5-5 5 5"></path><path d="M4 4h16"></path></symbol>
+  <symbol id="m-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12a8.5 8.5 0 0 1 14.5-6"></path><path d="M18 2.5V7h-4.5"></path><path d="M20.5 12a8.5 8.5 0 0 1-14.5 6"></path><path d="M6 21.5V17h4.5"></path></symbol>
+  <symbol id="m-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></symbol>
+  <symbol id="m-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"></path><path d="M3 13l9 5 9-5"></path></symbol>
+  <symbol id="m-receipt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"></path><line x1="9" y1="8" x2="15" y2="8"></line><line x1="9" y1="12" x2="15" y2="12"></line></symbol>
+  <symbol id="m-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></symbol>
+  <symbol id="m-truck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="12" height="9" rx="1"></rect><path d="M14 10h4l3 3v3h-7z"></path><circle cx="7" cy="18.5" r="1.7"></circle><circle cx="18" cy="18.5" r="1.7"></circle></symbol>
+  <symbol id="m-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"></path><circle cx="12" cy="10" r="2.4"></circle></symbol>
+  <symbol id="m-move" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 8l-3.5 4 3.5 4"></path><path d="M16.5 8l3.5 4-3.5 4"></path><line x1="4.5" y1="12" x2="19.5" y2="12"></line></symbol>
+  <symbol id="m-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></symbol>
+  <symbol id="m-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"></line><line x1="18" y1="6" x2="6" y2="18"></line></symbol>
+  <symbol id="m-dots" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="19" cy="12" r="1.7"></circle></symbol>
+</svg>
+
+<div style="min-width:100%; min-height:100vh; width:max-content; box-sizing:border-box; padding:48px; background:#E7E5DF; font-family:'Public Sans',system-ui,sans-serif; color:#0F172A;">
+
+  <!-- header -->
+  <div style="max-width:900px; margin-bottom:40px;">
+    <div style="font-family:'IBM Plex Mono',monospace; font-size:12px; letter-spacing:0.2em; text-transform:uppercase; color:#94A3B8; margin-bottom:14px;">Direction 02 · Console — Mobile</div>
+    <h1 style="font-size:34px; line-height:1.1; font-weight:800; letter-spacing:-0.02em; margin:0 0 14px;">Console on a phone</h1>
+    <p style="font-size:16px; line-height:1.55; color:#55534B; margin:0; max-width:720px;">The left sidebar can't persist on a narrow screen, so it becomes a slide-in <strong>drawer</strong> opened from the menu button. The dense table restacks into <strong>cards</strong>, the primary action stays pinned to a bottom bar, and the seven secondary actions collapse into a <strong>sheet</strong>. Same emerald-on-slate system, same data.</p>
+  </div>
+
+  <div style="display:flex; gap:48px; align-items:flex-start;">
+
+    <!-- ── PHONE 1 · STOCK ─────────────────────────────────────── -->
+    <div style="flex:none;">
+      <div style="margin-bottom:16px; width:402px;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#94A3B8;">Screen 01</div>
+        <div style="font-size:18px; font-weight:800; margin-top:2px;">Stock — default</div>
+        <div style="font-size:13.5px; color:#6B6A62; margin-top:2px;">Table → cards. Filter chips scroll horizontally. Primary action pinned bottom-left, all other actions behind “More”.</div>
+      </div>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" hint-size="402px,874px">
+        <div style="height:100%; display:flex; flex-direction:column; background:#FBFBFC; font-family:'Public Sans',sans-serif; color:#0F172A;">
+          <div style="padding:56px 16px 0; background:#fff; border-bottom:1px solid #E8EBEF;">
+            <div style="display:flex; align-items:center; gap:12px; padding-bottom:13px;">
+              <span style="display:inline-flex; color:#334155;"><svg viewBox="0 0 24 24" width="24" height="24"><use href="#m-menu"></use></svg></span>
+              <div style="font-size:22px; font-weight:800; letter-spacing:-0.02em;">Stock</div>
+              <span style="margin-left:auto; display:inline-flex; color:#334155;"><svg viewBox="0 0 24 24" width="22" height="22"><use href="#m-search"></use></svg></span>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; padding:12px 16px; background:#fff; border-bottom:1px solid #E8EBEF; overflow-x:auto;">
+            <span style="flex:none; display:inline-flex; align-items:center; height:30px; padding:0 13px; background:#0F172A; color:#fff; border-radius:999px; font-size:12.5px; font-weight:700; white-space:nowrap;">All locations</span>
+            <span style="flex:none; display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 13px; background:#fff; border:1px solid #DDE2E8; color:#475569; border-radius:999px; font-size:12.5px; font-weight:600; white-space:nowrap;"><svg viewBox="0 0 24 24" width="14" height="14"><use href="#m-warehouse"></use></svg>Main Whse</span>
+            <span style="flex:none; display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 13px; background:#fff; border:1px solid #DDE2E8; color:#475569; border-radius:999px; font-size:12.5px; font-weight:600; white-space:nowrap;"><svg viewBox="0 0 24 24" width="14" height="14"><use href="#m-truck"></use></svg>Edgar's</span>
+            <span style="flex:none; display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 13px; background:#fff; border:1px solid #DDE2E8; color:#475569; border-radius:999px; font-size:12.5px; font-weight:600; white-space:nowrap;"><svg viewBox="0 0 24 24" width="14" height="14"><use href="#m-pin"></use></svg>Heber</span>
+          </div>
+          <div style="padding:10px 16px 4px; font-size:12px; color:#94A3B8; font-weight:600;">8 of 64 parts · 25,606 units</div>
+          <div style="flex:1; overflow:auto;">
+            <div style="padding:13px 16px; background:#fff; border-bottom:1px solid #EEF1F5; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1; min-width:0;"><div style="font-size:15px; font-weight:700;">GigaSpire BLAST u4</div><div style="margin-top:3px; font-size:12px; color:#94A3B8;"><span style="font-family:'IBM Plex Mono',monospace; color:#64748B;">RT-GS-4200</span> · Routers · Main Whse</div></div>
+              <div style="text-align:right; flex-shrink:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600;">142<span style="font-size:11px; color:#94A3B8; margin-left:2px;">ea</span></div><div style="font-size:10px; font-weight:700; color:#0A7A54; letter-spacing:0.04em; margin-top:1px;">IN STOCK</div></div>
+            </div>
+            <div style="padding:13px 16px; background:#fff; border-bottom:1px solid #EEF1F5; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1; min-width:0;"><div style="font-size:15px; font-weight:700;">GigaPoint ONT</div><div style="margin-top:3px; font-size:12px; color:#94A3B8;"><span style="font-family:'IBM Plex Mono',monospace; color:#64748B;">ONT-GP-1100</span> · Cust. Equip · Fiber Product</div></div>
+              <div style="text-align:right; flex-shrink:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600;">318<span style="font-size:11px; color:#94A3B8; margin-left:2px;">ea</span></div><div style="font-size:10px; font-weight:700; color:#0A7A54; letter-spacing:0.04em; margin-top:1px;">IN STOCK</div></div>
+            </div>
+            <div style="padding:13px 16px; background:#fff; border-bottom:1px solid #EEF1F5; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1; min-width:0;"><div style="font-size:15px; font-weight:700;">144ct ADSS Cable</div><div style="margin-top:3px; font-size:12px; color:#94A3B8;"><span style="font-family:'IBM Plex Mono',monospace; color:#64748B;">CBL-144-AD</span> · Fiber Cable · Main Whse</div></div>
+              <div style="text-align:right; flex-shrink:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600;">24,800<span style="font-size:11px; color:#94A3B8; margin-left:2px;">ft</span></div><div style="font-size:10px; font-weight:700; color:#0A7A54; letter-spacing:0.04em; margin-top:1px;">IN STOCK</div></div>
+            </div>
+            <div style="padding:13px 16px; background:#fff; border-bottom:1px solid #EEF1F5; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1; min-width:0;"><div style="font-size:15px; font-weight:700;">Bullet Fiber Connector</div><div style="margin-top:3px; font-size:12px; color:#94A3B8;"><span style="font-family:'IBM Plex Mono',monospace; color:#64748B;">FC-BUL-002</span> · Connectors · Edgar's Truck</div></div>
+              <div style="text-align:right; flex-shrink:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600; color:#B7791F;">48<span style="font-size:11px; color:#94A3B8; margin-left:2px;">ea</span></div><div style="font-size:10px; font-weight:700; color:#B7791F; letter-spacing:0.04em; margin-top:1px;">LOW</div></div>
+            </div>
+            <div style="padding:13px 16px; background:#fff; border-bottom:1px solid #EEF1F5; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1; min-width:0;"><div style="font-size:15px; font-weight:700;">12-port Splice Tray</div><div style="margin-top:3px; font-size:12px; color:#94A3B8;"><span style="font-family:'IBM Plex Mono',monospace; color:#64748B;">SPL-TRY-12</span> · Splice · Main Whse</div></div>
+              <div style="text-align:right; flex-shrink:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600;">76<span style="font-size:11px; color:#94A3B8; margin-left:2px;">ea</span></div><div style="font-size:10px; font-weight:700; color:#0A7A54; letter-spacing:0.04em; margin-top:1px;">IN STOCK</div></div>
+            </div>
+            <div style="padding:13px 16px; background:#fff; border-bottom:1px solid #EEF1F5; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1; min-width:0;"><div style="font-size:15px; font-weight:700;">24″ Pedestal Enclosure</div><div style="margin-top:3px; font-size:12px; color:#94A3B8;"><span style="font-family:'IBM Plex Mono',monospace; color:#64748B;">ENC-PED-24</span> · Enclosures · Wasatch Front</div></div>
+              <div style="text-align:right; flex-shrink:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600; color:#B7791F;">12<span style="font-size:11px; color:#94A3B8; margin-left:2px;">ea</span></div><div style="font-size:10px; font-weight:700; color:#B7791F; letter-spacing:0.04em; margin-top:1px;">LOW</div></div>
+            </div>
+            <div style="padding:13px 16px; background:#fff; border-bottom:1px solid #EEF1F5; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1; min-width:0;"><div style="font-size:15px; font-weight:700;">8ft Copper Ground Rod</div><div style="margin-top:3px; font-size:12px; color:#94A3B8;"><span style="font-family:'IBM Plex Mono',monospace; color:#64748B;">GRD-ROD-8</span> · Hardware · Main Whse</div></div>
+              <div style="text-align:right; flex-shrink:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600;">210<span style="font-size:11px; color:#94A3B8; margin-left:2px;">ea</span></div><div style="font-size:10px; font-weight:700; color:#0A7A54; letter-spacing:0.04em; margin-top:1px;">IN STOCK</div></div>
+            </div>
+          </div>
+          <div style="display:flex; gap:10px; padding:11px 16px 30px; background:#fff; border-top:1px solid #E8EBEF;">
+            <button style="flex:1; display:inline-flex; align-items:center; justify-content:center; gap:8px; height:46px; background:#0E9F6E; border-radius:11px; font-size:15px; font-weight:700; color:#fff; font-family:inherit;"><svg viewBox="0 0 24 24" width="18" height="18"><use href="#m-plus"></use></svg>Record movement</button>
+            <button style="flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; width:46px; height:46px; background:#fff; border:1px solid #DDE2E8; border-radius:11px; color:#475569;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-dots"></use></svg></button>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <!-- ── PHONE 2 · NAV DRAWER ────────────────────────────────── -->
+    <div style="flex:none;">
+      <div style="margin-bottom:16px; width:402px;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#94A3B8;">Screen 02</div>
+        <div style="font-size:18px; font-weight:800; margin-top:2px;">Navigation drawer</div>
+        <div style="font-size:13.5px; color:#6B6A62; margin-top:2px;">The sidebar, intact — slides over a dimmed Stock view when the menu button is tapped. Identical nav, same active treatment.</div>
+      </div>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" hint-size="402px,874px">
+        <div style="height:100%; position:relative; background:#FBFBFC; font-family:'Public Sans',sans-serif; color:#0F172A; overflow:hidden;">
+          <!-- dimmed background -->
+          <div style="position:absolute; inset:0;">
+            <div style="padding:56px 16px 0; background:#fff; border-bottom:1px solid #E8EBEF;">
+              <div style="display:flex; align-items:center; gap:12px; padding-bottom:13px;">
+                <span style="display:inline-flex; color:#334155;"><svg viewBox="0 0 24 24" width="24" height="24"><use href="#m-menu"></use></svg></span>
+                <div style="font-size:22px; font-weight:800; letter-spacing:-0.02em;">Stock</div>
+              </div>
+            </div>
+            <div style="padding:20px 16px;"><div style="height:54px; background:#fff; border:1px solid #EEF1F5; border-radius:10px; margin-bottom:10px;"></div><div style="height:54px; background:#fff; border:1px solid #EEF1F5; border-radius:10px; margin-bottom:10px;"></div><div style="height:54px; background:#fff; border:1px solid #EEF1F5; border-radius:10px;"></div></div>
+          </div>
+          <!-- scrim -->
+          <div style="position:absolute; inset:0; background:rgba(15,23,42,0.45);"></div>
+          <!-- drawer -->
+          <div style="position:absolute; top:0; bottom:0; left:0; width:300px; background:#FAFBFC; box-shadow:0 0 40px rgba(0,0,0,0.25); display:flex; flex-direction:column;">
+            <div style="padding:56px 20px 0;">
+              <div style="display:flex; align-items:center; gap:10px; padding-bottom:16px; border-bottom:1px solid #E8EBEF;">
+                <div style="width:28px; height:28px; border-radius:7px; background:#0E9F6E; display:flex; align-items:center; justify-content:center; color:#fff;"><svg viewBox="0 0 24 24" width="17" height="17"><use href="#m-box"></use></svg></div>
+                <div style="font-size:18px; font-weight:800; letter-spacing:-0.03em;">FiberLog</div>
+                <span style="margin-left:auto; display:inline-flex; color:#94A3B8;"><svg viewBox="0 0 24 24" width="22" height="22"><use href="#m-x"></use></svg></span>
+              </div>
+            </div>
+            <div style="padding:14px 12px; flex:1;">
+              <div style="font-size:10.5px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#94A3B8; padding:0 10px; margin-bottom:8px;">Inventory</div>
+              <div style="display:flex; align-items:center; gap:13px; padding:12px 12px; border-radius:9px; background:#E7F6EF; color:#0A7A54; font-size:15px; font-weight:700; box-shadow:inset 3px 0 0 #0E9F6E; margin-bottom:2px;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-box"></use></svg>Stock</div>
+              <div style="display:flex; align-items:center; gap:13px; padding:12px 12px; border-radius:9px; color:#475569; font-size:15px; font-weight:600; margin-bottom:2px;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-warehouse"></use></svg>Locations</div>
+              <div style="display:flex; align-items:center; gap:13px; padding:12px 12px; border-radius:9px; color:#475569; font-size:15px; font-weight:600; margin-bottom:2px;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-nut"></use></svg>Parts</div>
+              <div style="display:flex; align-items:center; gap:13px; padding:12px 12px; border-radius:9px; color:#475569; font-size:15px; font-weight:600; margin-bottom:2px;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-activity"></use></svg>Activity</div>
+              <div style="display:flex; align-items:center; gap:13px; padding:12px 12px; border-radius:9px; color:#475569; font-size:15px; font-weight:600; margin-bottom:2px;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-clipboard"></use></svg>Purchase Reqs<span style="margin-left:auto; padding:1px 8px; background:#EEF1F5; color:#64748B; border-radius:999px; font-size:11px; font-weight:700;">4</span></div>
+              <div style="display:flex; align-items:center; gap:13px; padding:12px 12px; border-radius:9px; color:#475569; font-size:15px; font-weight:600; margin-bottom:2px;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-scan"></use></svg>Audit</div>
+              <div style="display:flex; align-items:center; gap:13px; padding:12px 12px; border-radius:9px; color:#475569; font-size:15px; font-weight:600;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-grid"></use></svg>Cycle Count</div>
+            </div>
+            <div style="padding:14px 16px 30px; border-top:1px solid #E8EBEF; display:flex; align-items:center; gap:11px;">
+              <div style="width:36px; height:36px; border-radius:50%; background:#E7F6EF; color:#0A7A54; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px;">DK</div>
+              <div style="min-width:0;"><div style="font-size:14px; font-weight:700;">Dana Keller</div><div style="font-size:12px; color:#94A3B8;">Warehouse manager</div></div>
+            </div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <!-- ── PHONE 3 · BULK SELECT ───────────────────────────────── -->
+    <div style="flex:none;">
+      <div style="margin-bottom:16px; width:402px;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#94A3B8;">Screen 03</div>
+        <div style="font-size:18px; font-weight:800; margin-top:2px;">Bulk select</div>
+        <div style="font-size:13.5px; color:#6B6A62; margin-top:2px;">Long-press a card to enter select mode. The dark action bar from desktop docks above the home indicator.</div>
+      </div>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" hint-size="402px,874px">
+        <div style="height:100%; display:flex; flex-direction:column; background:#FBFBFC; font-family:'Public Sans',sans-serif; color:#0F172A;">
+          <div style="padding:56px 16px 0; background:#fff; border-bottom:1px solid #E8EBEF;">
+            <div style="display:flex; align-items:center; gap:12px; padding-bottom:13px;">
+              <span style="display:inline-flex; color:#334155;"><svg viewBox="0 0 24 24" width="22" height="22"><use href="#m-x"></use></svg></span>
+              <div style="font-size:18px; font-weight:800; letter-spacing:-0.01em;">2 selected</div>
+              <span style="margin-left:auto; font-size:13px; font-weight:700; color:#0A7A54;">Select all</span>
+            </div>
+          </div>
+          <div style="flex:1; overflow:auto;">
+            <div style="padding:13px 16px; background:#ECFDF3; border-bottom:1px solid #EEF1F5; display:flex; align-items:center; gap:12px;">
+              <input type="checkbox" checked style="width:18px; height:18px; accent-color:#0E9F6E; flex-shrink:0;">
+              <div style="flex:1; min-width:0;"><div style="font-size:15px; font-weight:700;">GigaSpire BLAST u4</div><div style="margin-top:3px; font-size:12px; color:#94A3B8;"><span style="font-family:'IBM Plex Mono',monospace; color:#64748B;">RT-GS-4200</span> · Routers · Main Whse</div></div>
+              <div style="text-align:right; flex-shrink:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600;">142<span style="font-size:11px; color:#94A3B8; margin-left:2px;">ea</span></div></div>
+            </div>
+            <div style="padding:13px 16px; background:#fff; border-bottom:1px solid #EEF1F5; display:flex; align-items:center; gap:12px;">
+              <input type="checkbox" style="width:18px; height:18px; accent-color:#0E9F6E; flex-shrink:0;">
+              <div style="flex:1; min-width:0;"><div style="font-size:15px; font-weight:700;">GigaPoint ONT</div><div style="margin-top:3px; font-size:12px; color:#94A3B8;"><span style="font-family:'IBM Plex Mono',monospace; color:#64748B;">ONT-GP-1100</span> · Cust. Equip · Fiber Product</div></div>
+              <div style="text-align:right; flex-shrink:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600;">318<span style="font-size:11px; color:#94A3B8; margin-left:2px;">ea</span></div></div>
+            </div>
+            <div style="padding:13px 16px; background:#fff; border-bottom:1px solid #EEF1F5; display:flex; align-items:center; gap:12px;">
+              <input type="checkbox" style="width:18px; height:18px; accent-color:#0E9F6E; flex-shrink:0;">
+              <div style="flex:1; min-width:0;"><div style="font-size:15px; font-weight:700;">144ct ADSS Cable</div><div style="margin-top:3px; font-size:12px; color:#94A3B8;"><span style="font-family:'IBM Plex Mono',monospace; color:#64748B;">CBL-144-AD</span> · Fiber Cable · Main Whse</div></div>
+              <div style="text-align:right; flex-shrink:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600;">24,800<span style="font-size:11px; color:#94A3B8; margin-left:2px;">ft</span></div></div>
+            </div>
+            <div style="padding:13px 16px; background:#ECFDF3; border-bottom:1px solid #EEF1F5; display:flex; align-items:center; gap:12px;">
+              <input type="checkbox" checked style="width:18px; height:18px; accent-color:#0E9F6E; flex-shrink:0;">
+              <div style="flex:1; min-width:0;"><div style="font-size:15px; font-weight:700;">Bullet Fiber Connector</div><div style="margin-top:3px; font-size:12px; color:#94A3B8;"><span style="font-family:'IBM Plex Mono',monospace; color:#64748B;">FC-BUL-002</span> · Connectors · Edgar's Truck</div></div>
+              <div style="text-align:right; flex-shrink:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600; color:#B7791F;">48<span style="font-size:11px; color:#94A3B8; margin-left:2px;">ea</span></div></div>
+            </div>
+            <div style="padding:13px 16px; background:#fff; border-bottom:1px solid #EEF1F5; display:flex; align-items:center; gap:12px;">
+              <input type="checkbox" style="width:18px; height:18px; accent-color:#0E9F6E; flex-shrink:0;">
+              <div style="flex:1; min-width:0;"><div style="font-size:15px; font-weight:700;">12-port Splice Tray</div><div style="margin-top:3px; font-size:12px; color:#94A3B8;"><span style="font-family:'IBM Plex Mono',monospace; color:#64748B;">SPL-TRY-12</span> · Splice · Main Whse</div></div>
+              <div style="text-align:right; flex-shrink:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600;">76<span style="font-size:11px; color:#94A3B8; margin-left:2px;">ea</span></div></div>
+            </div>
+            <div style="padding:13px 16px; background:#fff; border-bottom:1px solid #EEF1F5; display:flex; align-items:center; gap:12px;">
+              <input type="checkbox" style="width:18px; height:18px; accent-color:#0E9F6E; flex-shrink:0;">
+              <div style="flex:1; min-width:0;"><div style="font-size:15px; font-weight:700;">8ft Copper Ground Rod</div><div style="margin-top:3px; font-size:12px; color:#94A3B8;"><span style="font-family:'IBM Plex Mono',monospace; color:#64748B;">GRD-ROD-8</span> · Hardware · Main Whse</div></div>
+              <div style="text-align:right; flex-shrink:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600;">210<span style="font-size:11px; color:#94A3B8; margin-left:2px;">ea</span></div></div>
+            </div>
+          </div>
+          <div style="padding:12px 14px 30px; background:#0F172A; display:flex; align-items:center; gap:9px;">
+            <button style="flex:1; display:inline-flex; align-items:center; justify-content:center; gap:7px; height:42px; background:#0E9F6E; border-radius:10px; font-size:14px; font-weight:700; color:#fff; font-family:inherit;"><svg viewBox="0 0 24 24" width="17" height="17"><use href="#m-move"></use></svg>Bulk move</button>
+            <button style="flex:1; display:inline-flex; align-items:center; justify-content:center; gap:7px; height:42px; background:transparent; border:1px solid #475569; border-radius:10px; font-size:14px; font-weight:700; color:#E2E8F0; font-family:inherit;"><svg viewBox="0 0 24 24" width="17" height="17"><use href="#m-clipboard"></use></svg>Create PR</button>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <!-- ── PHONE 4 · ACTIONS SHEET ─────────────────────────────── -->
+    <div style="flex:none;">
+      <div style="margin-bottom:16px; width:402px;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#94A3B8;">Screen 04</div>
+        <div style="font-size:18px; font-weight:800; margin-top:2px;">Actions sheet</div>
+        <div style="font-size:13.5px; color:#6B6A62; margin-top:2px;">“More” opens a sheet with all seven actions, each labeled with its line icon — no more guessing what an emoji meant.</div>
+      </div>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" hint-size="402px,874px">
+        <div style="height:100%; position:relative; background:#FBFBFC; font-family:'Public Sans',sans-serif; color:#0F172A; overflow:hidden;">
+          <div style="position:absolute; inset:0;">
+            <div style="padding:56px 16px 0; background:#fff; border-bottom:1px solid #E8EBEF;">
+              <div style="display:flex; align-items:center; gap:12px; padding-bottom:13px;">
+                <span style="display:inline-flex; color:#334155;"><svg viewBox="0 0 24 24" width="24" height="24"><use href="#m-menu"></use></svg></span>
+                <div style="font-size:22px; font-weight:800; letter-spacing:-0.02em;">Stock</div>
+              </div>
+            </div>
+            <div style="padding:20px 16px;"><div style="height:54px; background:#fff; border:1px solid #EEF1F5; border-radius:10px; margin-bottom:10px;"></div><div style="height:54px; background:#fff; border:1px solid #EEF1F5; border-radius:10px;"></div></div>
+          </div>
+          <div style="position:absolute; inset:0; background:rgba(15,23,42,0.45);"></div>
+          <!-- sheet -->
+          <div style="position:absolute; left:0; right:0; bottom:0; background:#fff; border-radius:22px 22px 0 0; padding:10px 0 30px; box-shadow:0 -10px 40px rgba(0,0,0,0.2);">
+            <div style="width:38px; height:5px; border-radius:99px; background:#CBD5E1; margin:6px auto 12px;"></div>
+            <div style="display:flex; align-items:center; padding:0 20px 12px;">
+              <div style="font-size:18px; font-weight:800;">Actions</div>
+              <span style="margin-left:auto; display:inline-flex; width:30px; height:30px; align-items:center; justify-content:center; background:#F1F5F9; border-radius:50%; color:#64748B;"><svg viewBox="0 0 24 24" width="17" height="17"><use href="#m-x"></use></svg></span>
+            </div>
+            <div style="display:flex; align-items:center; gap:14px; margin:0 16px 8px; padding:13px 14px; background:#0E9F6E; border-radius:13px; color:#fff;"><svg viewBox="0 0 24 24" width="22" height="22"><use href="#m-plus"></use></svg><div style="flex:1;"><div style="font-size:15px; font-weight:700;">Record movement</div><div style="font-size:12px; color:rgba(255,255,255,0.8);">Manual one-off entry</div></div></div>
+            <div style="display:flex; align-items:center; gap:14px; padding:12px 20px;"><div style="width:38px; height:38px; border-radius:10px; background:#F1F5F9; color:#475569; display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-download"></use></svg></div><div style="flex:1;"><div style="font-size:15px; font-weight:600;">Receive PO</div><div style="font-size:12px; color:#94A3B8;">Vendor delivery</div></div><span style="color:#CBD5E1;"><svg viewBox="0 0 24 24" width="18" height="18"><use href="#m-chevron-right"></use></svg></span></div>
+            <div style="display:flex; align-items:center; gap:14px; padding:12px 20px;"><div style="width:38px; height:38px; border-radius:10px; background:#F1F5F9; color:#475569; display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-refresh"></use></svg></div><div style="flex:1;"><div style="font-size:15px; font-weight:600;">Reconcile</div><div style="font-size:12px; color:#94A3B8;">Apply an audit CSV</div></div><span style="color:#CBD5E1;"><svg viewBox="0 0 24 24" width="18" height="18"><use href="#m-chevron-right"></use></svg></span></div>
+            <div style="display:flex; align-items:center; gap:14px; padding:12px 20px;"><div style="width:38px; height:38px; border-radius:10px; background:#F1F5F9; color:#475569; display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-zap"></use></svg></div><div style="flex:1;"><div style="font-size:15px; font-weight:600;">Sonar (assets)</div><div style="font-size:12px; color:#94A3B8;">Serialized installs</div></div><span style="color:#CBD5E1;"><svg viewBox="0 0 24 24" width="18" height="18"><use href="#m-chevron-right"></use></svg></span></div>
+            <div style="display:flex; align-items:center; gap:14px; padding:12px 20px;"><div style="width:38px; height:38px; border-radius:10px; background:#F1F5F9; color:#475569; display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-layers"></use></svg></div><div style="flex:1;"><div style="font-size:15px; font-weight:600;">Fiber jobs</div><div style="font-size:12px; color:#94A3B8;">Cable & drops report</div></div><span style="color:#CBD5E1;"><svg viewBox="0 0 24 24" width="18" height="18"><use href="#m-chevron-right"></use></svg></span></div>
+            <div style="display:flex; align-items:center; gap:14px; padding:12px 20px;"><div style="width:38px; height:38px; border-radius:10px; background:#F1F5F9; color:#475569; display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-upload"></use></svg></div><div style="flex:1;"><div style="font-size:15px; font-weight:600;">Import CSV</div><div style="font-size:12px; color:#94A3B8;">BoxHero catalog</div></div><span style="color:#CBD5E1;"><svg viewBox="0 0 24 24" width="18" height="18"><use href="#m-chevron-right"></use></svg></span></div>
+            <div style="display:flex; align-items:center; gap:14px; padding:12px 20px;"><div style="width:38px; height:38px; border-radius:10px; background:#F1F5F9; color:#475569; display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg viewBox="0 0 24 24" width="20" height="20"><use href="#m-receipt"></use></svg></div><div style="flex:1;"><div style="font-size:15px; font-weight:600;">Sage export</div><div style="font-size:12px; color:#94A3B8;">Build the period CSV</div></div><span style="color:#CBD5E1;"><svg viewBox="0 0 24 24" width="18" height="18"><use href="#m-chevron-right"></use></svg></span></div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

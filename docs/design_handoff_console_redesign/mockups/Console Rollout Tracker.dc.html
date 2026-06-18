@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+</style>
+</helmet>
+
+<svg aria-hidden="true" width="0" height="0" style="position:absolute">
+  <symbol id="t-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></symbol>
+  <symbol id="t-layout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></symbol>
+  <symbol id="t-scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3"></path><path d="M16 4h3a1 1 0 0 1 1 1v3"></path><path d="M20 16v3a1 1 0 0 1-1 1h-3"></path><path d="M8 20H5a1 1 0 0 1-1-1v-3"></path><line x1="4" y1="12" x2="20" y2="12"></line></symbol>
+  <symbol id="t-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l9-5 9 5v8l-9 5-9-5V8z"></path><path d="M3 8l9 5 9-5"></path><path d="M12 13v8"></path></symbol>
+  <symbol id="t-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"></path><path d="M3 13l9 5 9-5"></path></symbol>
+  <symbol id="t-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1"></rect><rect x="13" y="4" width="7" height="7" rx="1"></rect><rect x="4" y="13" width="7" height="7" rx="1"></rect><rect x="13" y="13" width="7" height="7" rx="1"></rect></symbol>
+  <symbol id="t-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></symbol>
+  <symbol id="t-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="20" y2="20"></line><rect x="6" y="11" width="3" height="6"></rect><rect x="11" y="6" width="3" height="11"></rect><rect x="16" y="13" width="3" height="4"></rect></symbol>
+  <symbol id="t-nut" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10l5 8-5 8H7l-5-8z"></path><circle cx="12" cy="12" r="3.2"></circle></symbol>
+  <symbol id="t-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"></circle><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path></symbol>
+  <symbol id="t-truck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="12" height="9" rx="1"></rect><path d="M14 10h4l3 3v3h-7z"></path><circle cx="7" cy="18.5" r="1.7"></circle><circle cx="18" cy="18.5" r="1.7"></circle></symbol>
+  <symbol id="t-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"></path></symbol>
+  <symbol id="t-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11"></path></symbol>
+  <symbol id="t-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></symbol>
+  <symbol id="t-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></symbol>
+  <symbol id="t-rotate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"></path><path d="M20 3.5V8h-4.5"></path></symbol>
+  <symbol id="t-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="12" x2="19" y2="12"></line><path d="M13 6l6 6-6 6"></path></symbol>
+  <symbol id="t-dash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="12" x2="17" y2="12"></line></symbol>
+</svg>
+
+<div style="min-height:100vh; background:#E7E5DF; padding:48px 24px; font-family:'Public Sans',system-ui,sans-serif; color:#0F172A;">
+  <div style="max-width:1040px; margin:0 auto; background:#fff; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,.1), 0 20px 50px rgba(0,0,0,.07); overflow:hidden;">
+
+    <!-- ── header ── -->
+    <div style="padding:40px 44px 30px; border-bottom:1px solid #E8EBEF;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:22px;">
+        <div style="width:28px; height:28px; border-radius:7px; background:#0E9F6E; display:flex; align-items:center; justify-content:center; color:#fff;"><svg viewBox="0 0 24 24" width="17" height="17"><use href="#t-box"></use></svg></div>
+        <div style="font-size:17px; font-weight:800; letter-spacing:-0.03em;">FiberLog</div>
+        <div style="margin-left:auto; font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#94A3B8;">Console rollout · full app</div>
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:12px; letter-spacing:0.18em; text-transform:uppercase; color:#0A7A54; margin-bottom:12px;">Project tracker</div>
+      <h1 style="font-size:34px; line-height:1.1; font-weight:800; letter-spacing:-0.025em; margin:0 0 12px;">Rolling Console across the whole app</h1>
+      <p style="font-size:15.5px; line-height:1.55; color:#475569; margin:0 0 26px; max-width:640px;">Every workstream to take the Console design from the Inventory test to the entire product. Click any task to cycle <strong>Not started → In progress → Done</strong>. Progress and day-counts update live and save automatically — close it and come back where you left off.</p>
+
+      <!-- stat strip -->
+      <div style="display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:16px;">
+        <div style="border:1px solid #E8EBEF; border-radius:12px; padding:16px 18px;">
+          <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:9px;">
+            <span style="font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:#94A3B8;">Overall progress</span>
+            <span style="font-family:'IBM Plex Mono',monospace; font-size:15px; font-weight:600; color:#0A7A54;">{{ overallPct }}%</span>
+          </div>
+          <div style="height:9px; background:#EEF1F5; border-radius:99px; overflow:hidden;"><div style="height:100%; background:#0E9F6E; border-radius:99px; transition:width .35s ease; width: {{ overallPctStr }}%"></div></div>
+        </div>
+        <div style="border:1px solid #E8EBEF; border-radius:12px; padding:16px 18px;">
+          <div style="font-family:'IBM Plex Mono',monospace; font-size:22px; font-weight:500;">{{ doneCount }}<span style="color:#CBD5E1;">/{{ totalCount }}</span></div>
+          <div style="font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:#94A3B8; margin-top:3px;">Tasks done</div>
+        </div>
+        <div style="border:1px solid #E8EBEF; border-radius:12px; padding:16px 18px;">
+          <div style="font-family:'IBM Plex Mono',monospace; font-size:22px; font-weight:500;">{{ doneDaysStr }}<span style="color:#CBD5E1;">/{{ totalDaysStr }}</span></div>
+          <div style="font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:#94A3B8; margin-top:3px;">Dev-days · ≈{{ rangeLabel }}</div>
+        </div>
+      </div>
+
+      <!-- next up -->
+      <sc-if value="{{ hasNext }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex; align-items:center; gap:13px; margin-top:16px; padding:14px 18px; background:#0F172A; border-radius:12px;">
+          <div style="width:34px; height:34px; border-radius:9px; background:rgba(94,234,176,0.15); color:#5EEAB0; display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg viewBox="0 0 24 24" width="19" height="19"><use href="#t-arrow"></use></svg></div>
+          <div style="min-width:0;"><div style="font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#5EEAB0; margin-bottom:2px;">Next up · {{ nextStream }}</div><div style="font-size:14.5px; font-weight:700; color:#fff;">{{ nextName }}</div></div>
+        </div>
+      </sc-if>
+    </div>
+
+    <!-- ── controls ── -->
+    <div style="display:flex; align-items:center; gap:8px; padding:14px 44px; background:#FBFBFC; border-bottom:1px solid #E8EBEF; flex-wrap:wrap;">
+      <span style="font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:0.06em; text-transform:uppercase; color:#94A3B8; margin-right:2px;">Filter</span>
+      <button onClick="{{ fAll }}" style="{{ pillAll }}">All</button>
+      <button onClick="{{ fTodo }}" style="{{ pillTodo }}">Not started</button>
+      <button onClick="{{ fWip }}" style="{{ pillWip }}">In progress</button>
+      <button onClick="{{ fDone }}" style="{{ pillDone }}">Done</button>
+      <button onClick="{{ reset }}" style="margin-left:auto; display:inline-flex; align-items:center; gap:7px; height:30px; padding:0 12px; background:#fff; border:1px solid #DDE2E8; border-radius:999px; font-size:12px; font-weight:600; color:#64748B; font-family:inherit;"><svg viewBox="0 0 24 24" width="14" height="14"><use href="#t-rotate"></use></svg>Reset</button>
+    </div>
+
+    <!-- ── streams ── -->
+    <div style="padding:20px 44px 36px;">
+      <sc-for list="{{ streams }}" as="stream" hint-placeholder-count="6">
+        <div style="border:1px solid #E8EBEF; border-radius:14px; margin-bottom:14px; overflow:hidden;">
+          <button onClick="{{ stream.onToggle }}" style="display:flex; align-items:center; gap:13px; width:100%; padding:15px 18px; background:#fff; border:none; text-align:left; font-family:inherit; cursor:pointer;">
+            <div style="width:34px; height:34px; border-radius:9px; background:#F1F5F9; color:#475569; display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg viewBox="0 0 24 24" width="19" height="19"><use href="{{ stream.iconHref }}"></use></svg></div>
+            <div style="min-width:0; flex:1;">
+              <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+                <span style="font-size:15.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ stream.name }}</span>
+                <sc-if value="{{ stream.flagship }}" hint-placeholder-val="{{ false }}"><span style="font-size:9.5px; font-weight:800; color:#0A7A54; background:#E7F6EF; padding:1px 7px; border-radius:5px; letter-spacing:0.03em;">FLAGSHIP</span></sc-if>
+              </div>
+              <div style="display:flex; align-items:center; gap:10px; margin-top:7px;">
+                <div style="width:120px; height:6px; background:#EEF1F5; border-radius:99px; overflow:hidden;"><div style="height:100%; background:#0E9F6E; border-radius:99px; transition:width .3s; width: {{ stream.pctStr }}%"></div></div>
+                <span style="font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:#94A3B8;">{{ stream.countLabel }}</span>
+              </div>
+            </div>
+            <span style="font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600; color:#64748B; flex-shrink:0;">{{ stream.daysStr }}d</span>
+            <span style="color:#CBD5E1; flex-shrink:0; display:inline-flex;">
+              <sc-if value="{{ stream.expanded }}" hint-placeholder-val="{{ true }}"><svg viewBox="0 0 24 24" width="18" height="18"><use href="#t-chevron-down"></use></svg></sc-if>
+              <sc-if value="{{ stream.collapsed }}" hint-placeholder-val="{{ false }}"><svg viewBox="0 0 24 24" width="18" height="18"><use href="#t-chevron-right"></use></svg></sc-if>
+            </span>
+          </button>
+          <sc-if value="{{ stream.expanded }}" hint-placeholder-val="{{ true }}">
+            <div style="border-top:1px solid #EEF1F5;">
+              <sc-for list="{{ stream.tasks }}" as="task" hint-placeholder-count="4">
+                <div style="display:flex; align-items:center; gap:14px; padding:11px 18px; border-bottom:1px solid #F4F6F8;">
+                  <button onClick="{{ task.onClick }}" title="Click to change status" style="flex-shrink:0; border:none; background:transparent; padding:0; cursor:pointer; font-family:inherit;">
+                    <sc-if value="{{ task.isDone }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 11px 0 8px; background:#0E9F6E; color:#fff; border-radius:999px; font-size:11.5px; font-weight:700; white-space:nowrap;"><svg viewBox="0 0 24 24" width="14" height="14"><use href="#t-check"></use></svg>Done</span></sc-if>
+                    <sc-if value="{{ task.isWip }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex; align-items:center; gap:7px; height:26px; padding:0 12px; background:#FEF3E2; color:#B7791F; border:1px solid #F5D9A8; border-radius:999px; font-size:11.5px; font-weight:700; white-space:nowrap;"><span style="width:7px; height:7px; border-radius:50%; background:#E0951C;"></span>In progress</span></sc-if>
+                    <sc-if value="{{ task.isTodo }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex; align-items:center; gap:7px; height:26px; padding:0 12px; background:#fff; color:#94A3B8; border:1px solid #DDE2E8; border-radius:999px; font-size:11.5px; font-weight:600; white-space:nowrap;"><span style="width:7px; height:7px; border-radius:50%; border:1.5px solid #CBD5E1;"></span>Not started</span></sc-if>
+                  </button>
+                  <div style="flex:1; min-width:0;">
+                    <div style="font-size:14px; font-weight:600;">{{ task.name }}</div>
+                    <div style="font-size:12.5px; color:#94A3B8; margin-top:1px;">{{ task.note }}</div>
+                  </div>
+                  <span style="font-family:'IBM Plex Mono',monospace; font-size:12.5px; font-weight:500; color:#64748B; flex-shrink:0;">{{ task.daysStr }}d</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- footer -->
+    <div style="padding:18px 44px; background:#F4F6F8; border-top:1px solid #E8EBEF; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#94A3B8; letter-spacing:0.04em;">Foundation-first · ship behind a flag, workstream by workstream</div>
+      <div style="margin-left:auto; font-family:'IBM Plex Mono',monospace; font-size:11px; color:#94A3B8;">Saved to this browser · estimate, not a commitment</div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props)
+    this.KEY = 'fiberlog_console_tracker_v1'
+    this.STREAMS = [
+      { id: 'foundation', name: 'Foundation & system', icon: 't-sliders', tasks: [
+        { id: 'f_tokens', name: 'Design tokens', note: 'Light default, emerald + slate scale', days: 1 },
+        { id: 'f_icons', name: 'Icon set', note: '~30 line icons — replaces every emoji', days: 1.5 },
+        { id: 'f_prim', name: 'Core primitives', note: 'Button, badge, pill, card', days: 1 },
+        { id: 'f_table', name: 'Table + responsive card-list', note: 'The table↔card pattern, once', days: 1.5 },
+        { id: 'f_shell', name: 'Sheet, drawer & sidebar primitives', note: 'Shared chrome building blocks', days: 1.5 },
+      ]},
+      { id: 'shell', name: 'App shell & navigation', icon: 't-layout', tasks: [
+        { id: 's_mgr', name: 'Manager sidebar + responsive drawer', note: 'Desktop rail → phone drawer', days: 2 },
+        { id: 's_crew', name: 'Crew shell chrome', note: 'Sidebar + phone top bar', days: 2 },
+        { id: 's_toggles', name: 'Theme + crew-mode toggles', note: 'Light/dark, acting-as-crew', days: 1 },
+        { id: 's_actions', name: 'Action toolbar + “More” sheet', note: 'Actions separated from nav', days: 1 },
+      ]},
+      { id: 'auth', name: 'Auth & global states', icon: 't-scan', tasks: [
+        { id: 'a_login', name: 'Login redesign', note: 'Sign-in + remembered username', days: 1.5 },
+        { id: 'a_states', name: 'UserPicker + loading / error / offline', note: 'Connection + empty states', days: 1.5 },
+      ]},
+      { id: 'inventory', name: 'Inventory — manager', icon: 't-box', flagship: true, tasks: [
+        { id: 'i_stock', name: 'Stock', note: 'Flagship: table↔card, filters, bulk-select', days: 3.5 },
+        { id: 'i_loc', name: 'Locations', note: 'Warehouse → bin tree', days: 3 },
+        { id: 'i_parts', name: 'Parts catalog', note: 'Active + drafts cleanup', days: 2 },
+        { id: 'i_act', name: 'Activity', note: 'Movement history + filters', days: 2 },
+        { id: 'i_prs', name: 'Purchase Requests', note: 'Queue + status pills', days: 2 },
+        { id: 'i_audit', name: 'Audit CSV generator', note: 'Scope + filters', days: 2 },
+        { id: 'i_count', name: 'Cycle-count scanner flow', note: 'Full-screen, multi-step', days: 2.5 },
+        { id: 'i_sheets', name: 'Action & detail sheets ×12', note: 'Record, Receive, Reconcile, Sonar, Sage…', days: 7 },
+      ]},
+      { id: 'submissions', name: 'Submissions — manager', icon: 't-layers', tasks: [
+        { id: 'sub_queue', name: 'Queue list + filters', note: 'Pending / Approved / Flagged', days: 2 },
+        { id: 'sub_detail', name: 'Detail + approve / flag / archive', note: 'The #1 daily action', days: 3 },
+      ]},
+      { id: 'crewstatus', name: 'Crew status — manager', icon: 't-grid', tasks: [
+        { id: 'cs_grid', name: 'Live status grid', note: 'In-progress / started / submitted', days: 2.5 },
+      ]},
+      { id: 'projects', name: 'Projects — manager', icon: 't-folder', tasks: [
+        { id: 'p_list', name: 'Project list & progress cards', note: 'Fiber + infra at a glance', days: 1.5 },
+        { id: 'p_fiber', name: 'Fiber phases + editable targets', note: 'Strand/fiber/conduit/MST…', days: 2.5 },
+        { id: 'p_infra', name: 'Infra sites + edit-site sheet', note: 'Towers, MDUs, business installs', days: 2.5 },
+        { id: 'p_tasks', name: 'Task editor + decommission / retire', note: 'Recovery flows', days: 2.5 },
+      ]},
+      { id: 'reports', name: 'Reports — manager', icon: 't-chart', tasks: [
+        { id: 'r_filters', name: 'Filters + grouped results table', note: 'By part / person / project', days: 2 },
+        { id: 'r_stock', name: 'Stock levels + CSV export', note: 'Live BoxHero annotations', days: 1.5 },
+        { id: 'r_pdf', name: 'Progress PDF layout', note: 'Fiber-progress report', days: 1.5 },
+      ]},
+      { id: 'assemblies', name: 'Assemblies — manager', icon: 't-nut', tasks: [
+        { id: 'asm_kits', name: 'Kit list by crew type + editor', note: 'Aerial / splice / infra / install…', days: 3.5 },
+      ]},
+      { id: 'admin', name: 'Admin — owner', icon: 't-gear', tasks: [
+        { id: 'adm_users', name: 'Users CRUD + roles', note: 'Add, edit, deactivate', days: 2 },
+        { id: 'adm_perms', name: 'Crew × Dept permissions matrix', note: 'Whitelist grid', days: 2 },
+        { id: 'adm_sync', name: 'BoxHero sync + password flows', note: 'Reset, sync', days: 1.5 },
+      ]},
+      { id: 'crew', name: 'Crew app — field', icon: 't-truck', tasks: [
+        { id: 'c_stock', name: 'Crew shell + My Stock', note: 'Load / return parts', days: 4.5 },
+        { id: 'c_task', name: 'Task workspace', note: 'Kits, footage, hours, notes, autosave', days: 5 },
+        { id: 'c_submit', name: 'Submit-day flow + read-only summaries', note: 'Review + confirm + flag handling', days: 2.5 },
+        { id: 'c_infra', name: 'Infra crew shell + workspace variant', note: 'Sites-shaped shell', days: 4 },
+      ]},
+      { id: 'polish', name: 'Polish & QA — whole app', icon: 't-sparkle', tasks: [
+        { id: 'q_resp', name: 'Responsive sweep', note: 'Every view, every breakpoint', days: 3 },
+        { id: 'q_states', name: 'Empty / loading / error states', note: 'Consistent across app', days: 2 },
+        { id: 'q_a11y', name: 'Accessibility pass', note: 'Focus, labels, contrast', days: 2 },
+        { id: 'q_dark', name: 'Dark-mode parity (optional)', note: '~+15–20% if kept', days: 3 },
+      ]},
+    ]
+    let saved = {}
+    try { saved = JSON.parse(localStorage.getItem(this.KEY)) || {} } catch (e) { saved = {} }
+    this.state = {
+      statuses: saved.statuses || {},
+      collapsed: saved.collapsed || {},
+      filter: saved.filter || 'all',
+    }
+  }
+
+  persist() {
+    try {
+      localStorage.setItem(this.KEY, JSON.stringify({
+        statuses: this.state.statuses,
+        collapsed: this.state.collapsed,
+        filter: this.state.filter,
+      }))
+    } catch (e) { /* ignore */ }
+  }
+
+  cycle(id) {
+    const order = ['todo', 'wip', 'done']
+    const cur = this.state.statuses[id] || 'todo'
+    const next = order[(order.indexOf(cur) + 1) % 3]
+    this.setState(s => ({ statuses: { ...s.statuses, [id]: next } }), () => this.persist())
+  }
+
+  toggleCollapse(id) {
+    this.setState(s => ({ collapsed: { ...s.collapsed, [id]: !s.collapsed[id] } }), () => this.persist())
+  }
+
+  setFilter(f) {
+    this.setState({ filter: f }, () => this.persist())
+  }
+
+  reset() {
+    this.setState({ statuses: {} }, () => this.persist())
+  }
+
+  fmt(n) { return n % 1 === 0 ? String(n) : n.toFixed(1) }
+
+  pillStyle(active) {
+    const base = 'display:inline-flex; align-items:center; height:30px; padding:0 14px; border-radius:999px; font-size:12.5px; font-weight:700; cursor:pointer; font-family:inherit; white-space:nowrap;'
+    return active
+      ? base + ' background:#0F172A; color:#fff; border:1px solid #0F172A;'
+      : base + ' background:#fff; color:#475569; border:1px solid #DDE2E8;'
+  }
+
+  renderVals() {
+    const statuses = this.state.statuses
+    const filter = this.state.filter
+    let doneCount = 0, totalCount = 0, doneDays = 0, totalDays = 0
+
+    const streams = this.STREAMS.map(s => {
+      let sDone = 0, sDays = 0
+      const tasksAll = s.tasks.map(t => {
+        const st = statuses[t.id] || 'todo'
+        totalCount++; totalDays += t.days; sDays += t.days
+        if (st === 'done') { doneCount++; doneDays += t.days; sDone++ }
+        return {
+          id: t.id, name: t.name, note: t.note, daysStr: this.fmt(t.days),
+          isTodo: st === 'todo', isWip: st === 'wip', isDone: st === 'done',
+          status: st, visible: filter === 'all' || filter === st,
+          onClick: () => this.cycle(t.id),
+        }
+      })
+      const sTotal = s.tasks.length
+      const pct = sTotal ? Math.round((sDone / sTotal) * 100) : 0
+      const collapsed = !!this.state.collapsed[s.id]
+      return {
+        id: s.id, name: s.name, iconHref: '#' + s.icon, flagship: !!s.flagship,
+        tasks: tasksAll.filter(t => t.visible),
+        pctStr: String(pct),
+        daysStr: this.fmt(sDays),
+        countLabel: sDone + '/' + sTotal + ' done',
+        collapsed, expanded: !collapsed,
+        onToggle: () => this.toggleCollapse(s.id),
+      }
+    })
+
+    const overallPct = totalCount ? Math.round((doneCount / totalCount) * 100) : 0
+
+    let next = null
+    for (const s of this.STREAMS) {
+      for (const t of s.tasks) {
+        if ((statuses[t.id] || 'todo') !== 'done') { next = { stream: s.name, name: t.name }; break }
+      }
+      if (next) break
+    }
+
+    return {
+      streams,
+      overallPct, overallPctStr: String(overallPct),
+      doneCount, totalCount,
+      doneDaysStr: this.fmt(doneDays), totalDaysStr: this.fmt(totalDays),
+      rangeLabel: '80–110',
+      hasNext: !!next,
+      nextStream: next ? next.stream : '',
+      nextName: next ? next.name : 'All done — ship it.',
+      filter,
+      fAll: () => this.setFilter('all'),
+      fTodo: () => this.setFilter('todo'),
+      fWip: () => this.setFilter('wip'),
+      fDone: () => this.setFilter('done'),
+      reset: () => this.reset(),
+      pillAll: this.pillStyle(filter === 'all'),
+      pillTodo: this.pillStyle(filter === 'todo'),
+      pillWip: this.pillStyle(filter === 'wip'),
+      pillDone: this.pillStyle(filter === 'done'),
+    }
+  }
+}
+</script>
+</body>
+</html>
