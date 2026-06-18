@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { db, saveAssembly, deleteAssembly, getAssembliesRaw, searchPartsCatalog } from '../../lib/supabase'
 import { useApp } from '../../AppContext'
+import { useBackClose } from '../../lib/backStack'
 
 // All crew types now show as tabs. The new install/infrastructure tabs will
 // be empty until the manager builds out their kits — Chris will see them
@@ -49,6 +50,11 @@ export default function AssemblyEditor() {
   const [editing, setEditing] = useState(null) // null | new-template object | existing assembly object
   const [saving, setSaving] = useState(false)
   const [confirm, setConfirm] = useState(null)
+
+  // Back dismisses the delete-confirm first (move-to-top), else closes the
+  // editor back to the assembly list (like its Cancel).
+  useBackClose(confirm ? 1 : 0, () => setConfirm(null))
+  useBackClose(editing ? 1 : 0, () => setEditing(null))
   const [partSearch, setPartSearch] = useState('')
   const [partResults, setPartResults] = useState([])
 

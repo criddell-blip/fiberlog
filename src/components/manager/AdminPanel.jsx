@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { db } from '../../lib/supabase'
 import AdminUsersView from './AdminUsersView'
 import CrewTypePermissionsView from './CrewTypePermissionsView'
+import { useBackClose } from '../../lib/backStack'
 
 export default function AdminPanel() {
   const {
@@ -16,6 +17,9 @@ export default function AdminPanel() {
   const [loading, setLoading] = useState(false)
   const [confirm, setConfirm] = useState(null)
   const [view, setView] = useState('projects') // 'projects' | 'users' | 'crewperms'
+
+  // Back dismisses the confirm dialog (same as its Cancel).
+  useBackClose(confirm ? 1 : 0, () => setConfirm(null))
 
   // Editing state
   const [editingName, setEditingName] = useState(null)

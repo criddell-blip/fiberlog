@@ -7,6 +7,7 @@ import {
   getTaskCountsBySite, getTasksBySite, getMaterialsAtSite,
 } from '../../lib/supabase'
 import { getLocations } from '../../lib/inventory'
+import { useBackClose } from '../../lib/backStack'
 
 const SITE_TYPES = [
   { id: 'wireless', label: 'Wireless', icon: '📡' },
@@ -158,6 +159,29 @@ export default function ProjectManager() {
   // query cost just for opening the edit overlay.
   const [siteTasksModal, setSiteTasksModal] = useState(null)        // { siteId, siteName, loading, rows }
   const [siteMaterialsModal, setSiteMaterialsModal] = useState(null)  // { siteId, siteName, loading, rows }
+
+  // Back button: close whichever overlay is open (most-recently-opened wins via
+  // the coordinator's move-to-top, so stacked sub-modals close first). Add-forms
+  // confirm before discarding typed input; edit/confirm/display overlays close
+  // immediately (edit overlays load existing values; confirm dialogs and the
+  // tasks/materials drilldowns have nothing to lose).
+  useBackClose(showAddPhase ? 1 : 0, () => setShowAddPhase(false), {
+    confirm: () => !phaseName.trim() || window.confirm('Discard this phase?'),
+  })
+  useBackClose(showAddProject ? 1 : 0, () => setShowAddProject(false), {
+    confirm: () => !projName.trim() || window.confirm('Discard this project?'),
+  })
+  useBackClose(showAddTask ? 1 : 0, () => setShowAddTask(false), {
+    confirm: () => !(taskName.trim() || taskNotes.trim()) || window.confirm('Discard this task?'),
+  })
+  useBackClose(showAddSite ? 1 : 0, () => setShowAddSite(false), {
+    confirm: () => !(siteName.trim() || siteAddress.trim() || siteNotes.trim()) || window.confirm('Discard this site?'),
+  })
+  useBackClose(editSite ? 1 : 0, () => setEditSite(null))
+  useBackClose(confirmDeleteTask ? 1 : 0, () => setConfirmDeleteTask(null))
+  useBackClose(confirmDecommSite ? 1 : 0, () => setConfirmDecommSite(null))
+  useBackClose(siteTasksModal ? 1 : 0, () => setSiteTasksModal(null))
+  useBackClose(siteMaterialsModal ? 1 : 0, () => setSiteMaterialsModal(null))
 
   useEffect(() => {
     if (!selProject?.id) {

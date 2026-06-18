@@ -7,6 +7,7 @@ import {
 import BinLabelSheet from '../cycleCount/BinLabelSheet'
 import AisleSignSheet from './AisleSignSheet'
 import LocationDetailPanel from './LocationDetailPanel'
+import { useBackClose } from '../../lib/backStack'
 
 const TYPE_LABELS = {
   warehouse: 'Warehouse',
@@ -114,6 +115,13 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   const [retireDestinationId, setRetireDestinationId] = useState('')
   const [retireLoading, setRetireLoading] = useState(false)
   const [retireSaving, setRetireSaving] = useState(false)
+
+  // Back closes whichever overlay is open (behaves like each one's Cancel).
+  // detailFor / label / aisle-sign render self-registering sheets, so they're
+  // not listed here.
+  useBackClose(editing ? 1 : 0, () => setEditing(null))
+  useBackClose(addingBinFor ? 1 : 0, () => setAddingBinFor(null))
+  useBackClose(retiring ? 1 : 0, () => setRetiring(null))
 
   useEffect(() => {
     let cancelled = false

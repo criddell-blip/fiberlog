@@ -5,6 +5,7 @@ import SkuLabelSheet from './SkuLabelSheet'
 import BulkMoveSheet from './BulkMoveSheet'
 import PurchaseRequestSheet from './PurchaseRequestSheet'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
+import { useBackClose } from '../../lib/backStack'
 
 const COMMON_UNITS = ['ea', 'ft', 'm', 'in', 'lb', 'kg', 'box', 'roll', 'spool', 'pair', 'pack', 'kit']
 
@@ -26,6 +27,11 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   const [showPrSheet, setShowPrSheet] = useState(false)
   // The part whose location-breakdown overlay is open. NULL = closed.
   const [viewingLocationsFor, setViewingLocationsFor] = useState(null)
+
+  // Back closes the edit-part form or the location-breakdown overlay. The label
+  // / bulk-move / PR sheets self-register, so they're not listed here.
+  useBackClose(editing ? 1 : 0, () => setEditing(null))
+  useBackClose(viewingLocationsFor ? 1 : 0, () => setViewingLocationsFor(null))
 
   // Selection: a Set of part ids checked for bulk operations
   const [selectedIds, setSelectedIds] = useState(() => new Set())

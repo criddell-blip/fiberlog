@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { approveSubmission, db, nextChannelSuffix } from '../../lib/supabase'
 import { useApp } from '../../AppContext'
+import { useBackClose } from '../../lib/backStack'
 
 const STATUS_COLORS = {
   pending: { bg: 'var(--amber-lt)', text: 'var(--amber)', label: 'Pending' },
@@ -45,6 +46,9 @@ export default function SubmissionsQueue() {
   const [filter, setFilter] = useState('pending')
   const [showArchived, setShowArchived] = useState(false)
   const [expandedProjects, setExpandedProjects] = useState({})
+
+  // Back closes the submission detail/approval overlay.
+  useBackClose(selected ? 1 : 0, () => setSelected(null))
 
   // Set up realtime channel with auto-reconnect on disconnect.
   // We listen for both INSERT (new submissions from crew) and UPDATE

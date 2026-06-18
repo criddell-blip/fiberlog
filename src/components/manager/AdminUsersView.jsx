@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
+import { useBackClose } from '../../lib/backStack'
 import {
   createUser, updateUserMetadata, deactivateUser, reactivateUser,
   resetUserPassword, getAllUsers,
@@ -67,6 +68,11 @@ export default function AdminUsersView({ onBack }) {
   const [editing, setEditing] = useState(null)     // null | { mode: 'new' } | user object
   const [resettingPwFor, setResettingPwFor] = useState(null)
   const [showBulkAssign, setShowBulkAssign] = useState(false)
+
+  // Back closes whichever overlay is open (behaves like each one's Cancel).
+  useBackClose(editing ? 1 : 0, () => setEditing(null))
+  useBackClose(resettingPwFor ? 1 : 0, () => setResettingPwFor(null))
+  useBackClose(showBulkAssign ? 1 : 0, () => setShowBulkAssign(false))
 
   const isOwner = currentUser?.role === 'owner'
   // Truck-type locations for the per-user "Pull materials from" dropdown.
