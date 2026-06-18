@@ -372,11 +372,11 @@ export default function CrewApp() {
   }
 
   // ── Browser/phone Back button ───────────────────────────────────────────────
-  // Make Back walk back up the narrow-layout screen stack instead of leaving the
-  // app. Each level owns one history entry (see lib/backStack.js). Wide layout is
-  // driven by sidebar selection state, not `screen`, so it opts out for now
-  // (depth 0); the sign-out dialog is wired in both layouts since it's a simple
-  // top-of-stack overlay.
+  // Make Back walk back up the navigation instead of leaving the app. Each level
+  // owns one history entry (see lib/backStack.js). The sign-out dialog is wired
+  // in both layouts as a simple top-of-stack overlay.
+  //
+  // Narrow layout: a single `screen` stack.
   const screenDepth = { projects: 0, mystock: 1, phases: 1, tasks: 2, workspace: 3 }[screen] || 0
   useBackClose(isWide ? 0 : screenDepth, () => {
     if (screen === 'workspace') navTo('tasks')
@@ -384,6 +384,15 @@ export default function CrewApp() {
     else if (screen === 'phases') navTo('projects')
     else if (screen === 'mystock') navTo('projects')
   })
+  // Wide layout: sidebar-driven selection. Back steps task → phase → (picker).
+  // selTask always implies selPhase, so the depth is 2/1/0.
+  const wideSelDepth = isWide ? (selTaskId ? 2 : selPhaseId ? 1 : 0) : 0
+  useBackClose(wideSelDepth, () => {
+    if (selTaskId) setSelTaskId(null)
+    else if (selPhaseId) setSelPhaseId(null)
+  })
+  // Wide layout: My Stock is a peer toggle over the current selection.
+  useBackClose(isWide && view === 'mystock' ? 1 : 0, () => setView('projects'))
   useBackClose(showSignOut ? 1 : 0, () => setShowSignOut(false))
 
   if (loading) return (

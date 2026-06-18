@@ -451,8 +451,8 @@ export default function InfraCrewApp() {
 
   // ── Browser/phone Back button ───────────────────────────────────────────────
   // Same as CrewApp, but the middle layer is `sites` instead of `phases`. Back
-  // walks workspace → tasks → sites → projects in the narrow layout; wide layout
-  // opts out (sidebar-driven). See lib/backStack.js.
+  // walks workspace → tasks → sites → projects in the narrow layout. See
+  // lib/backStack.js.
   const screenDepth = { projects: 0, mystock: 1, sites: 1, tasks: 2, workspace: 3 }[screen] || 0
   useBackClose(isWide ? 0 : screenDepth, () => {
     if (screen === 'workspace') navTo('tasks')
@@ -460,6 +460,15 @@ export default function InfraCrewApp() {
     else if (screen === 'sites') navTo('projects')
     else if (screen === 'mystock') navTo('projects')
   })
+  // Wide layout: sidebar-driven selection. Back steps task → site → project list.
+  const wideSelDepth = isWide ? (selTaskId ? 3 : selSiteId ? 2 : selProjectId ? 1 : 0) : 0
+  useBackClose(wideSelDepth, () => {
+    if (selTaskId) setSelTaskId(null)
+    else if (selSiteId) setSelSiteId(null)
+    else if (selProjectId) setSelProjectId(null)
+  })
+  // Wide layout: My Stock is a peer toggle over the current selection.
+  useBackClose(isWide && view === 'mystock' ? 1 : 0, () => setView('projects'))
   useBackClose(showSignOut ? 1 : 0, () => setShowSignOut(false))
 
   function handleSidebarTaskSelect(project, site, task) {
