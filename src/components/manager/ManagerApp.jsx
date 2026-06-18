@@ -158,9 +158,11 @@ export default function ManagerApp() {
   }, [isRestrictedToInventory, tab])
 
   // Back button: phone drawer closes first; otherwise a non-home tab returns
-  // to the home tab (in-tab drill-ins register their own deeper layers).
+  // to the home tab — on BOTH layouts now (the persistent desktop sidebar no
+  // longer means top-level Back is skipped). In-tab drill-ins register their
+  // own deeper layers, so Back unwinds detail → sub-tab → tab → home.
   useBackClose(drawerOpen ? 1 : 0, () => setDrawerOpen(false))
-  useBackClose(!isWide && tab !== homeTab ? 1 : 0, () => setTab(homeTab))
+  useBackClose(tab !== homeTab ? 1 : 0, () => setTab(homeTab))
 
   function navigate(id) { setTab(id); setDrawerOpen(false) }
 
