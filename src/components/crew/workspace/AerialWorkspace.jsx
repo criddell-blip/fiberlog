@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { calcStrandParts, calcLashingParts, calcStrandFootageParts, mergeParts } from '../../../lib/calculations'
 import PartSearch from './PartSearch'
 import PartsTally from './PartsTally'
+import { useBackClose } from '../../../lib/backStack'
 
 const BOLT_SIZES = ['12', '14', '16']
 
@@ -69,6 +70,13 @@ export default function AerialWorkspace({ task, sessionId, userId, onPartsChange
 
   const [showPartSearch, setShowPartSearch] = useState(false)
   const [showMstPicker, setShowMstPicker] = useState(false)
+
+  // Back closes whichever picker is open (PartSearch registers itself). The
+  // MST picker is display-only; the Add-pole form confirms if a count was typed.
+  useBackClose(showMstPicker ? 1 : 0, () => setShowMstPicker(false))
+  useBackClose(showAddPole ? 1 : 0, () => setShowAddPole(false), {
+    confirm: () => !batchCount.trim() || window.confirm('Discard this pole batch?'),
+  })
 
   function addBatch() {
     if (!batchCount || parseInt(batchCount) <= 0) return

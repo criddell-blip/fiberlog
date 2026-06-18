@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement, getMyAllowedLoadDestinations, compareNamesNatural } from '../../lib/inventory'
+import { useBackClose } from '../../lib/backStack'
 
 // Unified sheet for crew-initiated movements. Modes covered today:
 //   'load'    — warehouse/bucket → my truck     (pick source, then part)
@@ -56,6 +57,16 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   // when by-part view is first opened; filtered client-side via partSearch.
   const [partGroups, setPartGroups] = useState(null)
   const [loadingPartGroups, setLoadingPartGroups] = useState(false)
+
+  // Back button: this sheet is mounted only while open (depth 1). Backdrop-tap
+  // is already disabled to avoid losing input, so Back gets the same guard —
+  // confirm before discarding a part/qty/notes the user has started entering.
+  useBackClose(1, onClose, {
+    confirm: () => {
+      const dirty = !!selectedPartId || quantity.trim() !== '' || notes.trim() !== ''
+      return !dirty || window.confirm('Discard this entry?')
+    },
+  })
 
   // Pull the location list once. For 'load' we want anything that can hold
   // stock and isn't a crew truck — warehouses + bins under warehouses +

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import { db, addTask, subscribeToTasks } from '../../lib/supabase'
 import { t } from '../../lib/i18n'
+import { useBackClose } from '../../lib/backStack'
 
 const JOB_TYPES = [
   { id: 'aerial', label: 'Aerial Construction', icon: '🏗️' },
@@ -45,6 +46,11 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
   // and reverted, so the crew knows there's a flag to address before
   // even opening the workspace.
   const [flaggedTaskIds, setFlaggedTaskIds] = useState(() => new Set())
+
+  // Back closes the New-task overlay; confirm first if a name/notes were typed.
+  useBackClose(showNewTask ? 1 : 0, () => setShowNewTask(false), {
+    confirm: () => !(taskName.trim() || taskNotes.trim()) || window.confirm('Discard this new task?'),
+  })
 
   // Refresh the flagged-id set whenever the task list changes (covers
   // realtime task INSERTs/UPDATEs that change which tasks are in scope).

@@ -25,7 +25,13 @@ import { useEffect, useRef } from 'react'
 // screens (e.g. SignOutConfirm over the workspace). One listener dispatching to
 // the top of an ordered list is the only way to hit the right layer once.
 
-const layers = []        // [{ id, ref }] in registration (declaration) order; tail = top
+const layers = []        // [{ id, ref }]; tail = top. A layer moves to the tail
+                         // when it becomes active (see useBackClose), so the
+                         // MOST RECENTLY OPENED layer always wins — regardless of
+                         // which component mounted first. This matters once sheets
+                         // nest inside child components (a sheet opened over a
+                         // drilled-in screen must be "above" it even though the
+                         // shell mounted earlier).
 let installed = false
 let armed = 0            // # of synthetic history entries we currently own
 let suppressPops = 0     // # of upcoming popstate events to ignore (from our own history.back())
@@ -36,9 +42,7 @@ function totalDepth() {
   return sum
 }
 
-// Top-most layer that currently has any depth. Registration order is declaration
-// order within a component, so an overlay's hook (declared after the screen-stack
-// hook) sits later in the array and wins while it's open.
+// Top-most active layer = last one in the array with depth > 0.
 function topLayer() {
   for (let i = layers.length - 1; i >= 0; i--) {
     if ((layers[i].ref.current.depth || 0) > 0) return layers[i]
@@ -120,13 +124,15 @@ export function useBackClose(depth, onBack, opts = {}) {
   ref.current.depth = depth
   ref.current.onBack = onBack
   ref.current.confirm = opts.confirm
+  const layerRef = useRef(null)
 
   // Layer lifecycle — register on mount, unregister on unmount. Deps [] so the
   // layer is NOT torn down when depth changes mid-stack (drilling deeper). The
   // earlier single-effect-on-[depth] version tore the layer down on every level
   // change, which fired spurious history.back() calls and corrupted the count.
   useEffect(() => {
-    const layer = { id: Symbol('backlayer'), ref }
+    const layer = { id: Symbol('backlayer'), ref, prevDepth: 0 }
+    layerRef.current = layer
     layers.push(layer)
     install()
     return () => {
@@ -140,5 +146,18 @@ export function useBackClose(depth, onBack, opts = {}) {
   // mount and whenever depth changes — growing (push) on descent, shrinking
   // (suppressed history.back()) on a UI-initiated ascent. After a hardware Back,
   // onPop already decremented `armed`, so this reconcile is a no-op.
-  useEffect(() => { reconcile() }, [depth])
+  useEffect(() => {
+    const layer = layerRef.current
+    if (layer) {
+      // On activation (0 -> >0) move this layer to the tail so it becomes the
+      // top-most — the most recently opened overlay receives Back first, even
+      // if its component mounted before the layer underneath it.
+      if (depth > 0 && layer.prevDepth === 0) {
+        const i = layers.indexOf(layer)
+        if (i !== -1 && i !== layers.length - 1) { layers.splice(i, 1); layers.push(layer) }
+      }
+      layer.prevDepth = depth
+    }
+    reconcile()
+  }, [depth])
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useApp } from '../../../AppContext'
 import { addInfraTask } from '../../../lib/supabase'
+import { useBackClose } from '../../../lib/backStack'
 
 // SiteTaskList — leaf layer of the infra navigation. Shows the tasks for a
 // given site and lets the crew create a new one. Mirrors TaskList.jsx from
@@ -30,6 +31,11 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
   const [jobType, setJobType]     = useState('maintenance')
   const [saving, setSaving]       = useState(false)
   const [showPast, setShowPast]   = useState(false)
+
+  // Back closes the New-task overlay; confirm first if a name/notes were typed.
+  useBackClose(showNewTask ? 1 : 0, () => setShowNewTask(false), {
+    confirm: () => !(taskName.trim() || taskNotes.trim()) || window.confirm('Discard this new task?'),
+  })
 
   const activeTasks    = site.tasks.filter(isActiveCrewTask)
   const completedTasks = site.tasks.filter(isCompletedTask)
