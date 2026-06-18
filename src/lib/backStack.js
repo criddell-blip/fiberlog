@@ -114,21 +114,31 @@ function onPop() {
  */
 export function useBackClose(depth, onBack, opts = {}) {
   // Keep the latest handlers/depth in a ref so realtime re-renders don't re-arm
-  // history (the effect keys only on the numeric depth).
+  // history. The ref is written every render (before effects run), so reconcile()
+  // always reads the current depth.
   const ref = useRef({})
   ref.current.depth = depth
   ref.current.onBack = onBack
   ref.current.confirm = opts.confirm
 
+  // Layer lifecycle — register on mount, unregister on unmount. Deps [] so the
+  // layer is NOT torn down when depth changes mid-stack (drilling deeper). The
+  // earlier single-effect-on-[depth] version tore the layer down on every level
+  // change, which fired spurious history.back() calls and corrupted the count.
   useEffect(() => {
     const layer = { id: Symbol('backlayer'), ref }
     layers.push(layer)
     install()
-    reconcile()
     return () => {
       const idx = layers.indexOf(layer)
       if (idx !== -1) layers.splice(idx, 1)
       reconcile()
     }
-  }, [depth])
+  }, [])
+
+  // Keep the armed history-entry count in sync with this layer's depth. Runs on
+  // mount and whenever depth changes — growing (push) on descent, shrinking
+  // (suppressed history.back()) on a UI-initiated ascent. After a hardware Back,
+  // onPop already decremented `armed`, so this reconcile is a no-op.
+  useEffect(() => { reconcile() }, [depth])
 }
