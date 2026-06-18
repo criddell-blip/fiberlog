@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getBinsForWarehouse } from '../../lib/inventory'
+import { useBackClose } from '../../lib/backStack'
 
 // Big readable signs for warehouse navigation — one sign per aisle,
 // extracted from existing bin names via the same prefix-parse the
@@ -49,6 +50,8 @@ function summarizeBays(bins) {
 }
 
 export default function AisleSignSheet({ warehouse, onClose }) {
+  // Back closes the sheet (mounted only when open); display-only, no confirm.
+  useBackClose(1, onClose)
   const [bins, setBins] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)

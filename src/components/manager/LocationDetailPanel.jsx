@@ -10,6 +10,7 @@ import BinLabelSheet from '../cycleCount/BinLabelSheet'
 import AisleSignSheet from './AisleSignSheet'
 import SkuLabelSheet from './SkuLabelSheet'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
+import { useBackClose } from '../../lib/backStack'
 
 // Overlay-sheet that opens when a location row is tapped in the Locations
 // tab. Centralizes everything you might want to do with a location:
@@ -47,6 +48,10 @@ export default function LocationDetailPanel({
   const [showBinLabels, setShowBinLabels] = useState(false)
   const [showAisleSigns, setShowAisleSigns] = useState(false)
   const [showSkuLabels, setShowSkuLabels] = useState(false)
+
+  // Back closes the panel (mounted only when open). Display/actions hub, no
+  // confirm. Nested label sheets register their own layers and close first.
+  useBackClose(1, onClose)
 
   const isBin = location?.type === 'bin'
   const isWarehouse = location?.type === 'warehouse'

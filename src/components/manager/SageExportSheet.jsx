@@ -7,6 +7,7 @@ import {
   markMovementsExported,
 } from '../../lib/inventory'
 import { downloadTextAsFile } from '../../lib/csvImport'
+import { useBackClose } from '../../lib/backStack'
 
 // Prototype Sage Intacct export. Pick a date range, preview what would
 // export, download the CSV, and stamp every included row's exported_at
@@ -19,6 +20,10 @@ import { downloadTextAsFile } from '../../lib/csvImport'
 // values are known.
 export default function SageExportSheet({ onClose }) {
   const { showToast, currentUser } = useApp()
+
+  // Back closes the export sheet (mounted only when open). No data entry to
+  // lose — just a date range — so no confirm.
+  useBackClose(1, onClose)
 
   // Default range: last 7 days (Sat night → Fri night kind of window)
   const defaultUntil = useMemo(() => isoLocalDate(new Date()), [])

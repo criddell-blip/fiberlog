@@ -14,6 +14,7 @@ import {
 } from '../../lib/inventory'
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
 import BulkSonarProjectsSheet from './BulkSonarProjectsSheet'
+import { useBackClose } from '../../lib/backStack'
 
 // Sonar daily-install-report importer (backlog #3).
 //
@@ -104,6 +105,13 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [csvRows, setCsvRows] = useState(null)
   const [error, setError] = useState('')
   const [parsing, setParsing] = useState(false)
+
+  // Back closes the importer (mounted only when open). Confirm once a CSV is
+  // loaded so a stray Back doesn't throw away mapping work. The nested
+  // BulkSonarProjectsSheet registers its own layer and is closed first.
+  useBackClose(1, onClose, {
+    confirm: () => csvRows == null || window.confirm('Close the Sonar import? Unsaved mapping will be lost.'),
+  })
   // When the CSV came from a pending webhook delivery, remember its id so
   // we can flip status='imported' on successful apply.
   const [activePendingId, setActivePendingId] = useState(null)

@@ -10,6 +10,7 @@ import {
   parseFiberRow, isFiberValueIgnored, FIBER_NON_MATERIAL_COLUMNS,
 } from '../../lib/inventory'
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
+import { useBackClose } from '../../lib/backStack'
 
 // Importer for Sonar's "All fiber all jobs" report — the companion to
 // SonarImportSheet which handles asset-tagged consumption.
@@ -52,6 +53,12 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   const [csvHeaders, setCsvHeaders] = useState([])
   const [csvRows, setCsvRows] = useState(null)
   const [activePendingId, setActivePendingId] = useState(null)
+
+  // Back closes the importer (mounted only when open). Confirm once a CSV is
+  // loaded so mapping work isn't lost to a stray Back.
+  useBackClose(1, onClose, {
+    confirm: () => csvRows == null || window.confirm('Close the fiber-jobs import? Unsaved mapping will be lost.'),
+  })
   const [parsing, setParsing] = useState(false)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)

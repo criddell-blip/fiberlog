@@ -6,6 +6,7 @@ import {
   getPartLocations,
   compareNamesNatural,
 } from '../../lib/inventory'
+import { useBackClose } from '../../lib/backStack'
 
 const TYPES = [
   { id: 'receive',  label: 'Receive',  icon: '⬇',  hint: 'New stock from a vendor' },
@@ -44,6 +45,12 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   // new query so a stale selection from a previous search can't leak in.
   const [selectedSearchIds, setSelectedSearchIds] = useState(() => new Set())
   const [lines, setLines] = useState([])  // [{ part_id, name, unit, qty: '1' }]
+
+  // Back closes the sheet (mounted only when open). Confirm first if any
+  // movement lines have been staged.
+  useBackClose(1, onClose, {
+    confirm: () => lines.length === 0 || window.confirm('Discard this movement entry?'),
+  })
   // Logged locations per part, keyed by part_id. Fetched on add-to-lines;
   // used by the smart From-picker to compute "N of M parts here" badges.
   const [partLocationsByPart, setPartLocationsByPart] = useState({})

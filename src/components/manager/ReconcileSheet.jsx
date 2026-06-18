@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { db } from '../../lib/supabase'
 import { recordMovementsBatch } from '../../lib/inventory'
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
+import { useBackClose } from '../../lib/backStack'
 
 // Reconcile sheet (backlog #1).
 //
@@ -35,6 +36,12 @@ export default function ReconcileSheet({ onClose, onApplied }) {
   const [search, setSearch] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  // Back closes the sheet (mounted only when open). Confirm once a CSV has been
+  // resolved so the reconcile work isn't lost.
+  useBackClose(1, onClose, {
+    confirm: () => resolved == null || window.confirm('Discard this reconcile? Unsaved changes will be lost.'),
+  })
 
   async function handleFile(file) {
     if (!file) return

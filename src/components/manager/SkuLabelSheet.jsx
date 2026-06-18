@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
+import { useBackClose } from '../../lib/backStack'
 
 // Printable labels for parts. Each label = name + SKU + QR encoding the SKU
 // directly. Stick on product packaging when received; scan during cycle
@@ -90,6 +91,8 @@ const FORMAT_PRESETS = {
 
 export default function SkuLabelSheet({ parts, title = 'Print SKU labels', onClose }) {
   // parts is an array of { id, name, unit?, ... } objects
+  // Back closes the sheet (mounted only when open); display-only, no confirm.
+  useBackClose(1, onClose)
   const [format, setFormat] = useState('letter_4up')
   const [selected, setSelected] = useState(() => new Set((parts || []).map(p => p.id)))
   const [qrCache, setQrCache] = useState({})  // partId → data URL

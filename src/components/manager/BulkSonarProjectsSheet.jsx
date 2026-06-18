@@ -7,6 +7,7 @@ import {
   getPhasesWithBuckets,
   getSonarProjectMap,
 } from '../../lib/inventory'
+import { useBackClose } from '../../lib/backStack'
 
 // Bulk-bootstrap (or top-up) the Sonar project → FiberLog phase map.
 // Paste a CSV with a "Project" column (the format Sonar emits in the
@@ -34,6 +35,12 @@ export default function BulkSonarProjectsSheet({ onClose, onDone }) {
   const [rows, setRows] = useState([])  // [{sonarProject, projectId, status, suggestedReason}]
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState(null)
+
+  // Back closes the sheet (mounted only when open). Confirm once a CSV is
+  // loaded. Sits on top of SonarImportSheet's layer, so Back closes this first.
+  useBackClose(1, onClose, {
+    confirm: () => rows.length === 0 || window.confirm('Discard these project mappings?'),
+  })
 
   useEffect(() => {
     let cancelled = false

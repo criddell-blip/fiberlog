@@ -10,6 +10,7 @@ import {
 } from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
 import { downloadTextAsFile } from '../../lib/csvImport'
+import { useBackClose } from '../../lib/backStack'
 
 // Purchase Request composition + detail/edit sheet.
 //
@@ -49,6 +50,16 @@ export default function PurchaseRequestSheet({
   // Each line: { tempId, part_id, item_number, description, vendor, qty,
   //              project_reason, unit_cost }
   const [lines, setLines] = useState([])
+
+  // Back closes the sheet (mounted only when open). Confirm if composing a new
+  // PR with content, or if a note was typed (detail mode loads an existing PR,
+  // so don't nag on a plain view-and-close).
+  useBackClose(1, onClose, {
+    confirm: () => {
+      const dirty = notes.trim() !== '' || (mode === 'new' && lines.length > 0)
+      return !dirty || window.confirm('Discard this purchase request?')
+    },
+  })
 
   // ── Suggestions ─────────────────────────────────────────────────────
   const [vendorSuggestions, setVendorSuggestions] = useState([])

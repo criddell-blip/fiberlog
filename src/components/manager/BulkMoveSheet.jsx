@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { recordMovementsBatch, getBinsForWarehouse } from '../../lib/inventory'
+import { useBackClose } from '../../lib/backStack'
 
 const CHUNK_SIZE = 100
 
@@ -25,6 +26,12 @@ export default function BulkMoveSheet({
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
+
+  // Back closes the sheet (mounted only when open). Confirm if a note was typed
+  // (qty/row edits can be re-selected; the free-text note is the losable bit).
+  useBackClose(1, onClose, {
+    confirm: () => notes.trim() === '' || window.confirm('Discard this bulk move?'),
+  })
 
   const [rowState, setRowState] = useState(() => {
     const m = {}

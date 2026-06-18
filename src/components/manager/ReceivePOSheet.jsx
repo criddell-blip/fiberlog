@@ -5,6 +5,7 @@ import {
 } from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
 import SkuLabelSheet from './SkuLabelSheet'
+import { useBackClose } from '../../lib/backStack'
 
 // Receive PO / vendor delivery sheet (backlog #12 MVP).
 //
@@ -37,6 +38,16 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
   // "print labels for these items" prompt can use them.
   const [justReceived, setJustReceived] = useState(null)  // null | array of parts
   const [showLabelSheet, setShowLabelSheet] = useState(false)
+
+  // Back closes the sheet (mounted only when open). Confirm first if the user
+  // has started a delivery (ref, vendor, or any line). The nested SkuLabelSheet
+  // registers its own layer, so Back closes it first when it's up.
+  useBackClose(1, onClose, {
+    confirm: () =>
+      !(poRef.trim() || vendorName.trim() ||
+        lines.some(l => l.part || String(l.quantity).trim() || String(l.unit_cost).trim()))
+      || window.confirm('Discard this delivery?'),
+  })
 
   // Load bins when the destination is a warehouse
   useEffect(() => {

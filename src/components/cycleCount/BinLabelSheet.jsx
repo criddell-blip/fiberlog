@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
 import { formatBinCode } from '../../lib/cycleCount'
 import { getBinsForWarehouse } from '../../lib/inventory'
+import { useBackClose } from '../../lib/backStack'
 
 // Print bin labels for stuck-on-the-shelf scanning. Generates a QR code
 // encoding `BIN:<uuid>` per bin, plus the bin name in large readable type
@@ -76,6 +77,8 @@ const FORMAT_PRESETS = {
 }
 
 export default function BinLabelSheet({ warehouse, onClose }) {
+  // Back closes the sheet (mounted only when open); display-only, no confirm.
+  useBackClose(1, onClose)
   const [format, setFormat] = useState('letter_4up')
   const [bins, setBins] = useState([])
   const [loading, setLoading] = useState(true)

@@ -15,6 +15,7 @@ import {
   createLocation,
   createDraftParts,
 } from '../../lib/inventory'
+import { useBackClose } from '../../lib/backStack'
 
 const STAGES = {
   pick:      'pick',
@@ -32,6 +33,12 @@ export default function InventoryImportSheet({ locations, currentUser, onClose, 
   const { showToast } = useApp()
   const [stage, setStage] = useState(STAGES.pick)
   const [parseError, setParseError] = useState(null)
+
+  // Back closes the importer (mounted only when open). Confirm once past the
+  // file-pick stage so a stray Back doesn't drop a loaded CSV / column mapping.
+  useBackClose(1, onClose, {
+    confirm: () => stage === STAGES.pick || window.confirm('Close the import? Unsaved mapping will be lost.'),
+  })
 
   const [headers, setHeaders] = useState([])
   const [rows, setRows] = useState([])
