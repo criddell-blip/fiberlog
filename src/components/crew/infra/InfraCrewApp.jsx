@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../../AppContext'
 import { useIsWide } from '../../../lib/useIsWide'
+import { useBackClose } from '../../../lib/backStack'
 import { getInfraTree, subscribeToAllTaskChanges } from '../../../lib/supabase'
 import MyStockView from '../MyStockView'
 import TaskWorkspace from '../TaskWorkspace'
@@ -447,6 +448,19 @@ export default function InfraCrewApp() {
 
   function navTo(s) { setScreen(s) }
   function handleSignOut() { selectUser(null); setShowSignOut(false) }
+
+  // ── Browser/phone Back button ───────────────────────────────────────────────
+  // Same as CrewApp, but the middle layer is `sites` instead of `phases`. Back
+  // walks workspace → tasks → sites → projects in the narrow layout; wide layout
+  // opts out (sidebar-driven). See lib/backStack.js.
+  const screenDepth = { projects: 0, mystock: 1, sites: 1, tasks: 2, workspace: 3 }[screen] || 0
+  useBackClose(isWide ? 0 : screenDepth, () => {
+    if (screen === 'workspace') navTo('tasks')
+    else if (screen === 'tasks') navTo('sites')
+    else if (screen === 'sites') navTo('projects')
+    else if (screen === 'mystock') navTo('projects')
+  })
+  useBackClose(showSignOut ? 1 : 0, () => setShowSignOut(false))
 
   function handleSidebarTaskSelect(project, site, task) {
     setSelProjectId(project.id)

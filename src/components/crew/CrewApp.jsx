@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
+import { useBackClose } from '../../lib/backStack'
 import ProjectList from './ProjectList'
 import PhaseList from './PhaseList'
 import TaskList from './TaskList'
@@ -369,6 +370,21 @@ export default function CrewApp() {
     selectUser(null)
     setShowSignOut(false)
   }
+
+  // ── Browser/phone Back button ───────────────────────────────────────────────
+  // Make Back walk back up the narrow-layout screen stack instead of leaving the
+  // app. Each level owns one history entry (see lib/backStack.js). Wide layout is
+  // driven by sidebar selection state, not `screen`, so it opts out for now
+  // (depth 0); the sign-out dialog is wired in both layouts since it's a simple
+  // top-of-stack overlay.
+  const screenDepth = { projects: 0, mystock: 1, phases: 1, tasks: 2, workspace: 3 }[screen] || 0
+  useBackClose(isWide ? 0 : screenDepth, () => {
+    if (screen === 'workspace') navTo('tasks')
+    else if (screen === 'tasks') navTo('phases')
+    else if (screen === 'phases') navTo('projects')
+    else if (screen === 'mystock') navTo('projects')
+  })
+  useBackClose(showSignOut ? 1 : 0, () => setShowSignOut(false))
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 12 }}>

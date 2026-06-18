@@ -336,6 +336,18 @@ Parent components own a `refreshKey` integer that gets bumped (`setRefreshKey(k 
 ### Realtime channel names
 Always build channel names via `nextChannelSuffix()` (exported from `lib/supabase.js`) — e.g. `db.channel('crew_status_live_' + nextChannelSuffix())`. Two subscribers using `Date.now()` alone (or a static name) can collide in the same tick and supabase-realtime throws "cannot add postgres_changes callbacks after subscribe()", which kills the React render. The helper appends a process-local counter so collision is impossible. Defensively wrap component-level `subscribeToAllTaskChanges` / `db.channel(...)` calls in try/catch so realtime breakage degrades to "no live updates" instead of "blank shell" (see `InfraCrewApp.jsx` for the pattern).
 
+### Browser / hardware Back button
+FiberLog has no router — navigation is local `useState`, so the browser/phone Back gesture used to exit the app entirely. `src/lib/backStack.js` fixes this: a central coordinator keeps one synthetic `history.pushState` entry per back-able step, and a single `popstate` listener routes Back to the top-most registered layer. At the root nothing is armed, so Back leaves the app (correct).
+
+Wire a back-closable layer with the `useBackClose(depth, onBack, opts?)` hook:
+- `depth` — integer count of back-steps this layer contributes (0 = inactive). Modal: `open ? 1 : 0`. Multi-level screen stack: the current level index (crew narrow uses projects=0, phases/sites=1, tasks=2, workspace=3 — depth, not boolean, so a 3-deep descent owns 3 entries and the 2nd Back doesn't eject the user).
+- `onBack` — step this layer back one; reuse the existing `setScreen` / `onClose` / `setShowX` handler.
+- `opts.confirm` — optional `() => boolean`; return `false` to veto the Back (e.g. show a "Discard changes?" prompt for unsaved input). The hook re-arms so Back can retry.
+
+Call it unconditionally at the top of the component (Rules of Hooks), before any early return; pass `depth 0` while loading/inactive. Push uses `url=null` so the visible path never changes (GitHub Pages `/fiberlog/` base stays intact). The coordinator tolerates React `<StrictMode>`'s mount→cleanup→mount and swallows its own programmatic `history.back()` via a suppress counter.
+
+Shipped (Phase 1): crew narrow screen stack + sign-out dialog in `CrewApp.jsx` and `InfraCrewApp.jsx`. Pending: data-entry sheets + unsaved-input confirm (Phase 2), manager tabs + drill-ins (Phase 3), crew wide-layout selection (Phase 4).
+
 ### Browser autofill suppression
 For any input that's NOT meant to be filled by the browser's saved-credentials list, use `autoComplete="off"` plus a non-standard `name=` like `name="user-search"`. For password reset / new-password fields, use `autoComplete="new-password"`. Past bug: opening the reset-password sheet was autofilling the user's username into the search field below.
 
