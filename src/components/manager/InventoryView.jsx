@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
+import { useBackClose } from '../../lib/backStack'
 import { getLocations } from '../../lib/inventory'
 import InventoryStockTab from './InventoryStockTab'
 import InventoryLocationsTab from './InventoryLocationsTab'
@@ -48,6 +49,10 @@ export default function InventoryView() {
     return () => document.removeEventListener('mousedown', handler)
   }, [actionMenuOpen])
   const [tab, setTab] = useState('stock')
+  // Back returns from any sub-tab to the default Stock sub-tab (then another
+  // Back leaves the Inventory tab via ManagerApp's tab layer). Sheets opened
+  // over a sub-tab self-register and close first.
+  useBackClose(tab !== 'stock' ? 1 : 0, () => setTab('stock'))
   const [locations, setLocations] = useState([])
   const [locationsLoading, setLocationsLoading] = useState(true)
   const [showRecordSheet, setShowRecordSheet] = useState(false)

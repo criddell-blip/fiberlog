@@ -20,6 +20,12 @@ export default function AdminPanel() {
 
   // Back dismisses the confirm dialog (same as its Cancel).
   useBackClose(confirm ? 1 : 0, () => setConfirm(null))
+  // Back steps out of a sub-view (Users / Crew perms) or the project detail
+  // back to the admin home. One level — these don't stack.
+  useBackClose((view !== 'projects' || selProject) ? 1 : 0, () => {
+    if (view !== 'projects') setView('projects')
+    else if (selProject) setSelProject(null)
+  })
 
   // Editing state
   const [editingName, setEditingName] = useState(null)

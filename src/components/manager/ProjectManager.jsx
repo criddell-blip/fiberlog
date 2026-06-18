@@ -182,6 +182,12 @@ export default function ProjectManager() {
   useBackClose(confirmDecommSite ? 1 : 0, () => setConfirmDecommSite(null))
   useBackClose(siteTasksModal ? 1 : 0, () => setSiteTasksModal(null))
   useBackClose(siteMaterialsModal ? 1 : 0, () => setSiteMaterialsModal(null))
+  // Drill-in: Back steps phase detail → project detail → project list. Overlays
+  // above (add forms, confirms) close first via move-to-top.
+  useBackClose((selPhase && selProject) ? 2 : selProject ? 1 : 0, () => {
+    if (selPhase) setSelPhase(null)
+    else if (selProject) setSelProject(null)
+  })
 
   useEffect(() => {
     if (!selProject?.id) {
