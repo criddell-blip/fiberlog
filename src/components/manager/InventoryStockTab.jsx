@@ -9,6 +9,7 @@ import SkuLabelSheet from './SkuLabelSheet'
 import PurchaseRequestSheet from './PurchaseRequestSheet'
 import { useIsWide } from '../../lib/useIsWide'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
+import Icon from '../shared/Icon'
 
 const TYPE_ICONS = {
   warehouse: '🏭',
@@ -17,6 +18,25 @@ const TYPE_ICONS = {
   vendor:    '🏢',
   scrap:     '🗑️',
   bin:       '📥',
+}
+
+// Console line-icon name per location type (used by the filter chips).
+const TYPE_ICON_NAME = {
+  warehouse: 'warehouse',
+  truck:     'truck',
+  job_site:  'pin',
+  vendor:    'warehouse',
+  scrap:     'x',
+  bin:       'box',
+}
+
+// Console row status from the existing data. No reorder threshold exists in the
+// schema yet, so "low" stands in for zero/negative (the actionable state);
+// a real LOW threshold would refine this (flagged for a later data change).
+function stockStatus(r) {
+  if (r.is_active === false) return { label: 'DRAFT', cls: 'status-draft' }
+  if (Number(r.total) <= 0)  return { label: 'LOW', cls: 'status-low' }
+  return { label: 'IN STOCK', cls: 'status-instock' }
 }
 
 // Sub-modes when a warehouse is scoped:
@@ -324,11 +344,10 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
       }}>
         <button
           onClick={() => setShowFilters(v => !v)}
-          className="btn btn-ghost"
-          style={{ padding: '4px 10px', fontSize: 11, fontWeight: 600 }}
+          style={pillStyle(showFilters)}
           title={showFilters ? 'Hide location filters' : 'Show location + bin filters'}
         >
-          {showFilters ? '▴ Hide filters' : '▾ Filters'}
+          <Icon name="filter" size={14} /> {showFilters ? 'Hide filters' : 'Filters'}
         </button>
         {!showFilters && (
           <div style={{
@@ -384,7 +403,8 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
                 .filter(loc => typeFilter === 'all' || loc.type === typeFilter)
                 .map(loc => (
                   <button key={loc.id} onClick={() => setScope(loc.id)} style={pillStyle(scope === loc.id)}>
-                    {TYPE_ICONS[loc.type] || '📦'} {loc.assigned_user?.name || loc.name}
+                    <Icon name={TYPE_ICON_NAME[loc.type] || 'box'} size={14} />
+                    {loc.assigned_user?.name || loc.name}
                   </button>
                 ))}
             </div>
@@ -393,17 +413,17 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
             {isWarehouseScope && (
               <div style={{
                 display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap',
-                paddingLeft: 16, borderLeft: '2px solid var(--orange)',
+                paddingLeft: 16, borderLeft: '2px solid var(--accent)',
               }}>
                 <button onClick={() => setBinScope(SUBMODE_ROLLUP)} style={subPillStyle(binScope === SUBMODE_ROLLUP)}>
-                  📦 All (rollup)
+                  <Icon name="layers" size={13} /> All (rollup)
                 </button>
                 <button onClick={() => setBinScope(SUBMODE_UNBINNED)} style={subPillStyle(binScope === SUBMODE_UNBINNED)}>
-                  🏭 Unbinned
+                  <Icon name="warehouse" size={13} /> Unbinned
                 </button>
                 {bins.map(b => (
                   <button key={b.id} onClick={() => setBinScope(b.id)} style={subPillStyle(binScope === b.id)}>
-                    📥 {b.name}
+                    <Icon name="box" size={13} /> {b.name}
                   </button>
                 ))}
                 {bins.length === 0 && (
@@ -423,55 +443,48 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
         )
       })()}
 
-      <input
-        type="text"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        placeholder="Search parts by name, SKU, or category…"
-        autoComplete="off"
-        spellCheck="false"
-        name="stock-search"
-        style={{
-          width: '100%', padding: '10px 12px',
-          border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)',
-          fontSize: 14, background: 'var(--bg)', marginBottom: 10
-        }}
-      />
+      <div style={{ position: 'relative', marginBottom: 10 }}>
+        <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--hint)', display: 'flex', pointerEvents: 'none' }}>
+          <Icon name="search" size={16} />
+        </span>
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search parts by name, SKU, or category…"
+          autoComplete="off"
+          spellCheck="false"
+          name="stock-search"
+          style={{
+            width: '100%', height: 38, padding: '0 12px 0 36px',
+            border: '1px solid var(--border2)', borderRadius: 'var(--r-sm)',
+            fontSize: 14, background: 'var(--surface)',
+          }}
+        />
+      </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-          {loading ? 'Loading…' : `${filtered.length} of ${totalLines} part types · ${totalUnits.toLocaleString()} total units`}
+        <div className="mono" style={{ fontSize: 12, color: 'var(--hint)' }}>
+          {loading ? 'Loading…' : `${filtered.length} of ${totalLines} parts · ${totalUnits.toLocaleString()} units`}
           {canBulkSelect && filtered.length > 0 && (
-            <span style={{ color: 'var(--hint)', marginLeft: 6 }}>· tip: shift-click for range</span>
+            <span style={{ marginLeft: 6 }}>· shift-click for range</span>
           )}
           {inRollupMode && filtered.length > 0 && (
-            <span style={{ color: 'var(--hint)', marginLeft: 6 }}>· drill into a bin to bulk-move</span>
+            <span style={{ marginLeft: 6 }}>· drill into a bin to bulk-move</span>
           )}
         </div>
-        {!loading && filtered.length > 0 && (
-          <button
-            onClick={() => setShowLabelSheet(true)}
-            title="Print SKU labels for the parts shown above"
-            style={{
-              fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 'var(--r-sm)',
-              border: '1.5px solid var(--purple)', background: 'var(--purple-lt)', color: 'var(--purple)', cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            🏷 Labels
-          </button>
-        )}
-        {canBulkSelect && filtered.length > 0 && (
-          <button
-            onClick={allVisibleSelected ? clearSelection : selectAllVisible}
-            style={{
-              fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 'var(--r-sm)',
-              border: '1.5px solid var(--border2)', background: 'var(--bg)', color: 'var(--muted)', cursor: 'pointer',
-            }}
-          >
-            {allVisibleSelected ? 'Deselect all' : `Select all`}
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {!loading && filtered.length > 0 && (
+            <button onClick={() => setShowLabelSheet(true)} title="Print SKU labels for the parts shown above" style={pillStyle(false)}>
+              <Icon name="tag" size={14} /> Labels
+            </button>
+          )}
+          {canBulkSelect && filtered.length > 0 && (
+            <button onClick={allVisibleSelected ? clearSelection : selectAllVisible} style={pillStyle(false)}>
+              {allVisibleSelected ? 'Deselect all' : 'Select all'}
+            </button>
+          )}
+        </div>
       </div>
 
       {!loading && filtered.length === 0 && (
@@ -482,91 +495,122 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
         </div>
       )}
 
-      {filtered.length > 0 && (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)' }}>
+      {/* Desktop: Console data table */}
+      {filtered.length > 0 && isWide && (() => {
+        const gridCols = canBulkSelect
+          ? '28px minmax(0,1fr) 132px 130px 104px 92px'
+          : 'minmax(0,1fr) 132px 130px 104px 92px'
+        return (
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', overflow: 'hidden', boxShadow: '0 1px 3px rgba(15,23,42,0.06)' }}>
+            {/* Header row */}
+            <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 12, alignItems: 'center', height: 38, padding: '0 16px', background: 'var(--surface2)', borderBottom: '1px solid var(--border)' }}>
+              {canBulkSelect && (
+                <input type="checkbox" checked={allVisibleSelected} onChange={allVisibleSelected ? clearSelection : selectAllVisible} title="Select all" style={{ accentColor: 'var(--accent)', cursor: 'pointer' }} />
+              )}
+              <span className="eyebrow">Part</span>
+              <span className="eyebrow">SKU</span>
+              <span className="eyebrow">Category</span>
+              <span className="eyebrow" style={{ textAlign: 'right' }}>On hand</span>
+              <span className="eyebrow" style={{ textAlign: 'right' }}>Status</span>
+            </div>
+            {filtered.map((r, i) => {
+              const isSelected = selectedIds.has(r.part_id)
+              const isHighlighted = highlightedPartId === r.part_id
+              const total = Number(r.total)
+              const canSelect = canBulkSelect && total > 0
+              const isDraft = r.is_active === false
+              const st = stockStatus(r)
+              return (
+                <div key={r.part_id} ref={el => { stockRowRefs.current[r.part_id] = el }}
+                  style={{
+                    display: 'grid', gridTemplateColumns: gridCols, gap: 12, alignItems: 'center', minHeight: 44, padding: '6px 16px',
+                    borderBottom: i < filtered.length - 1 ? '1px solid var(--row-divider)' : 'none',
+                    background: isHighlighted ? 'var(--accent-lt)' : isSelected ? 'var(--selected-row)' : 'transparent',
+                    boxShadow: isHighlighted ? 'inset 0 0 0 2px var(--accent)' : 'none',
+                    transition: 'background .25s', opacity: isDraft ? 0.6 : 1,
+                  }}>
+                  {canBulkSelect && (
+                    <input type="checkbox" checked={isSelected} disabled={!canSelect} onChange={() => {}}
+                      onClick={e => canSelect && handleCheckboxClick(e, i)}
+                      title={!canSelect ? 'Cannot move negative or zero stock' : ''}
+                      style={{ accentColor: 'var(--accent)', cursor: canSelect ? 'pointer' : 'not-allowed' }} />
+                  )}
+                  <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {onJumpToPart ? (
+                        <button type="button" onClick={() => onJumpToPart(r.part_id)} title="View this part in the Parts tab"
+                          style={{ background: 'transparent', border: 'none', padding: 0, color: 'inherit', font: 'inherit', cursor: 'pointer', textAlign: 'left' }}>{r.name}</button>
+                      ) : r.name}
+                    </span>
+                    {inRollupMode && r.locationCount > 1 && (
+                      <span className="pill pill-muted pill-sm" style={{ flexShrink: 0 }}>{r.locationCount} spots</span>
+                    )}
+                  </div>
+                  <div className="mono" style={{ fontSize: 12, color: 'var(--hint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.part_id}</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.category || '—'}</div>
+                  <div style={{ textAlign: 'right' }}>
+                    {isQtyPaused ? (
+                      <span style={recencyPillStyle(r.last_movement_at)}>{recencyOf(r.last_movement_at).label}</span>
+                    ) : (
+                      <span className="mono" style={{ fontSize: 14, fontWeight: 600, color: total < 0 ? 'var(--red)' : total <= 0 ? 'var(--amber)' : 'var(--text)' }}>
+                        {total.toLocaleString()}<span style={{ color: 'var(--hint)', fontWeight: 500, marginLeft: 3 }}>{r.unit}</span>
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    {!isQtyPaused && <span className={`status ${st.cls}`} style={{ justifyContent: 'flex-end' }}>{st.label}</span>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
+
+      {/* Phone: cards */}
+      {filtered.length > 0 && !isWide && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {filtered.map((r, i) => {
             const isSelected = selectedIds.has(r.part_id)
             const isHighlighted = highlightedPartId === r.part_id
             const total = Number(r.total)
             const canSelect = canBulkSelect && total > 0
+            const isDraft = r.is_active === false
+            const st = stockStatus(r)
             return (
-              <div
-                key={r.part_id}
-                ref={el => { stockRowRefs.current[r.part_id] = el }}
+              <div key={r.part_id} ref={el => { stockRowRefs.current[r.part_id] = el }}
                 style={{
-                  display: 'flex', alignItems: 'center', padding: '10px 14px',
-                  borderBottom: i < filtered.length - 1 ? '1px solid var(--border)' : 'none',
-                  gap: 8,
-                  background: isHighlighted ? 'var(--teal-lt)'
-                    : isSelected ? 'var(--orange-lt)'
-                    : 'transparent',
-                  boxShadow: isHighlighted ? 'inset 0 0 0 2px var(--teal)' : 'none',
-                  transition: 'background 0.3s, box-shadow 0.3s',
-                }}
-              >
+                  display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px',
+                  background: isHighlighted ? 'var(--accent-lt)' : isSelected ? 'var(--selected-row)' : 'var(--surface)',
+                  border: '1px solid var(--border)', borderRadius: 'var(--r)',
+                  boxShadow: isHighlighted ? 'inset 0 0 0 2px var(--accent)' : '0 1px 3px rgba(15,23,42,0.06)',
+                  transition: 'background .25s', opacity: isDraft ? 0.6 : 1,
+                }}>
                 {canBulkSelect && (
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    disabled={!canSelect}
-                    onChange={() => {}}
+                  <input type="checkbox" checked={isSelected} disabled={!canSelect} onChange={() => {}}
                     onClick={e => canSelect && handleCheckboxClick(e, i)}
-                    title={!canSelect ? 'Cannot move negative or zero stock' : ''}
-                    style={{ cursor: canSelect ? 'pointer' : 'not-allowed', flexShrink: 0 }}
-                  />
+                    style={{ accentColor: 'var(--accent)', cursor: canSelect ? 'pointer' : 'not-allowed', flexShrink: 0 }} />
                 )}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {/* Name clickable → jump to that part on the Parts tab.
-                        Cross-link affordance; no behavior change if onJumpToPart
-                        wasn't passed in. */}
+                  <div style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {onJumpToPart ? (
-                      <button
-                        type="button"
-                        onClick={() => onJumpToPart(r.part_id)}
-                        title="View this part in the Parts tab"
-                        style={{
-                          background: 'transparent', border: 'none', padding: 0,
-                          color: 'inherit', font: 'inherit', cursor: 'pointer',
-                          textAlign: 'left',
-                        }}
-                      >
-                        {r.name}
-                      </button>
+                      <button type="button" onClick={() => onJumpToPart(r.part_id)} style={{ background: 'transparent', border: 'none', padding: 0, color: 'inherit', font: 'inherit', cursor: 'pointer', textAlign: 'left' }}>{r.name}</button>
                     ) : r.name}
-                    {r.is_active === false && (
-                      <span style={{
-                        fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
-                        background: 'var(--amber-lt)', color: 'var(--amber)',
-                        marginLeft: 6, verticalAlign: 'middle',
-                      }}>DRAFT</span>
-                    )}
-                    {inRollupMode && r.locationCount > 1 && (
-                      <span style={{
-                        fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
-                        background: 'var(--teal-lt)', color: 'var(--teal)',
-                        marginLeft: 6, verticalAlign: 'middle',
-                      }}>{r.locationCount} spots</span>
-                    )}
+                    {inRollupMode && r.locationCount > 1 && <span className="pill pill-muted pill-sm" style={{ marginLeft: 6 }}>{r.locationCount} spots</span>}
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--hint)' }}>
+                  <div className="mono" style={{ fontSize: 12, color: 'var(--hint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 1 }}>
                     {r.part_id}{r.category ? ` · ${r.category}` : ''}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
                   {isQtyPaused ? (
-                    // Paused mode: hide qty, show last-seen recency.
-                    // Negative-flag treatment also disappears (it's
-                    // meaningless once we stop authoritative tracking).
-                    <span style={recencyPillStyle(r.last_movement_at)}>
-                      {recencyOf(r.last_movement_at).label}
-                    </span>
+                    <span style={recencyPillStyle(r.last_movement_at)}>{recencyOf(r.last_movement_at).label}</span>
                   ) : (
                     <>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: total < 0 ? 'var(--red)' : 'var(--orange)' }}>
-                        {total.toLocaleString()}
+                      <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: total < 0 ? 'var(--red)' : total <= 0 ? 'var(--amber)' : 'var(--text)' }}>
+                        {total.toLocaleString()}<span style={{ fontSize: 11, color: 'var(--hint)', fontWeight: 500, marginLeft: 3 }}>{r.unit}</span>
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--muted)' }}>{r.unit}</div>
+                      <span className={`status ${st.cls}`} style={{ justifyContent: 'flex-end', marginTop: 2 }}>{st.label}</span>
                     </>
                   )}
                 </div>
@@ -579,37 +623,36 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
       {selectedCount > 0 && canBulkSelect && (
         <div style={{
           position: 'sticky', bottom: 0, marginTop: 10,
-          background: 'var(--surface)', border: '1.5px solid var(--orange)',
-          borderRadius: 'var(--r-sm)', padding: '10px 14px',
-          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-          boxShadow: '0 -4px 12px rgba(0,0,0,0.1)',
+          background: 'var(--dark-bar)', borderRadius: 'var(--r)', padding: '10px 14px',
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          boxShadow: '0 -6px 20px rgba(15,23,42,0.20)',
         }}>
-          <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--orange)', flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#fff', flex: 1 }}>
             {selectedCount} selected
           </div>
           <button
             onClick={() => setShowBulkMove(true)}
             style={{
-              padding: '7px 14px', borderRadius: 'var(--r-sm)',
-              border: 'none', background: 'var(--orange)', color: 'white',
-              fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+              padding: '8px 14px', borderRadius: 8, border: 'none',
+              background: 'var(--accent)', color: '#fff',
+              fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
             }}
-          >↔ Bulk move</button>
+          ><Icon name="move" size={15} /> Bulk move</button>
           <button
             onClick={() => setShowPrSheet(true)}
             title="Create a purchase request seeded with the selected parts"
             style={{
-              padding: '7px 14px', borderRadius: 'var(--r-sm)',
-              border: '1.5px solid var(--orange)', background: 'var(--bg)',
-              color: 'var(--orange)',
-              fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+              padding: '8px 14px', borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.3)', background: 'transparent', color: '#fff',
+              fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
             }}
-          >📋 Create PR</button>
+          ><Icon name="clipboard" size={15} /> Create PR</button>
           <button onClick={clearSelection} style={{
-            padding: '7px 12px', borderRadius: 'var(--r-sm)',
-            border: '1.5px solid var(--border2)', background: 'var(--bg)',
-            color: 'var(--muted)', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-          }}>Cancel</button>
+            padding: '8px 12px', borderRadius: 8, border: 'none', background: 'transparent',
+            color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+          }}>Clear</button>
         </div>
       )}
 
@@ -663,21 +706,27 @@ function toRowShape(data) {
   }))
 }
 
+// Console filter chips — active reads as a dark chip; inactive is a white
+// hairline chip. (Shared visual: the .chip / .chip-active classes in global.css;
+// these inline styles mirror them so the existing call sites stay unchanged.)
 function pillStyle(selected) {
   return {
-    padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-    background: selected ? 'var(--teal)' : 'var(--gray-lt)',
-    color: selected ? 'white' : 'var(--muted)',
-    border: 'none', cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    height: 30, padding: '0 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+    whiteSpace: 'nowrap', cursor: 'pointer',
+    background: selected ? 'var(--dark-bar)' : 'var(--surface)',
+    color: selected ? '#fff' : 'var(--muted)',
+    border: `1px solid ${selected ? 'var(--dark-bar)' : 'var(--border2)'}`,
   }
 }
 
 function subPillStyle(selected) {
   return {
-    padding: '4px 10px', borderRadius: 16, fontSize: 11, fontWeight: 600,
-    background: selected ? 'var(--orange)' : 'var(--surface2)',
-    color: selected ? 'white' : 'var(--muted)',
-    border: `1.5px solid ${selected ? 'var(--orange)' : 'var(--border2)'}`,
-    cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    height: 28, padding: '0 11px', borderRadius: 999, fontSize: 11.5, fontWeight: 600,
+    whiteSpace: 'nowrap', cursor: 'pointer',
+    background: selected ? 'var(--accent-lt)' : 'var(--surface)',
+    color: selected ? 'var(--accent-dk)' : 'var(--muted)',
+    border: `1px solid ${selected ? 'var(--accent)' : 'var(--border2)'}`,
   }
 }
