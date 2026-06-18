@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { VALID_FIELD_CREW_TYPES } from '../../lib/crewTypes'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
+import { useBackClose } from '../../lib/backStack'
 import SubmissionsQueue from './SubmissionsQueue'
 import CrewStatus from './CrewStatus'
 import ProjectManager from './ProjectManager'
@@ -224,6 +225,15 @@ export default function ManagerApp() {
   useEffect(() => {
     if (isRestrictedToInventory && tab !== 'inventory') setTab('inventory')
   }, [isRestrictedToInventory, tab])
+
+  // Browser/phone Back: from any non-home tab, Back returns to the home tab
+  // (Approvals, or Inventory for warehouse-only managers); from the home tab it
+  // leaves the app. This is the conventional bottom-nav back behavior and
+  // applies to both the desktop sidebar and the narrow bottom-nav (both drive
+  // the same `tab` state). Wired for both layouts since desktop managers rely on
+  // the browser Back button too. See lib/backStack.js.
+  const homeTab = isRestrictedToInventory ? 'inventory' : 'submissions'
+  useBackClose(tab !== homeTab ? 1 : 0, () => setTab(homeTab))
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 12 }}>
