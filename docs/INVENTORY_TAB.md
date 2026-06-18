@@ -1,426 +1,367 @@
-# FiberLog — Inventory Tab Reference
+# Inventory tab — a walk-through
 
-Deep dive on every component inside Manager portal → **📦 Inventory**: what each does, when to reach for it, how they fit together end-to-end.
+This is the manager portal's home for everything inventory. If you've never used FiberLog before, start here.
 
-> Companion docs: **[INVENTORY_FLOW.md](./INVENTORY_FLOW.md)** (the ledger from vendor → Sage) · **[MANAGER_GUIDE.md](./MANAGER_GUIDE.md)** (manager portal overview) · **[CREW_GUIDE.md](./CREW_GUIDE.md)** (crew side).
+> Looking for the end-to-end story (vendor → warehouse → truck → project → Sage)? See **[INVENTORY_FLOW.md](./INVENTORY_FLOW.md)**.
+> Looking for the manager portal at large? See **[MANAGER_GUIDE.md](./MANAGER_GUIDE.md)**.
 
-Last updated: 2026-06-01.
+Last updated: 2026-06-17.
 
 ---
 
-## At a glance
+## What is the Inventory tab for?
 
-The Inventory tab is the manager's command center for everything stock-related. Layout:
+This tab is where you answer questions about stock, record what happened to stock, and export the record for accounting. Everything material — what we have, where it is, who has it, where it went — lives here. There is no other source of truth.
+
+You'll use it in three modes:
+
+- **Looking things up** — "what does Edgar have on his truck?", "do we have any more bullet connectors?", "where did that drum of cable end up?"
+- **Recording activity** — receiving a vendor delivery, applying a daily Sonar install report, fixing a count, scrapping damaged stock
+- **Exporting** — Sage every period, audit CSVs for cycle counts, BEAD reporting later
+
+You don't have to think about cycle counts or imports on day one. Most of what you do will be looking things up and confirming activity is being recorded correctly by crews and auto-processes.
+
+---
+
+## The mental model
+
+Three concepts. Once you've got these, the rest is just buttons.
+
+### 1. Parts
+
+A **part** is anything we stock. Bullet fiber connectors, GigaSpire routers, drums of 144ct cable, ladders, ground rods.
+
+Each part has a SKU (a unique code, often from BoxHero), a name, a unit (`ea` for things you count, `ft` for things you measure), and category metadata (department + material group).
+
+You'll find these in the **🔧 Parts** sub-tab.
+
+### 2. Locations
+
+A **location** is anywhere stock can sit. There are five types:
+
+- **Warehouses** — the buildings (Main Warehouse, Fiber product, etc.)
+- **Bins** — sub-locations *inside* a warehouse (Aisle 2 Shelf B-3, etc.). A bin always belongs to one warehouse.
+- **Trucks** — one per crew member. Each fiber/infra/install crew member automatically gets a personal truck when their user is created. There are also shared trailers (Aerial Crew trailer, Contractor - RNS, etc.).
+- **Project buckets** — one per active project (Heber, Wasatch Front, Gigwave, etc.). These are *not* drained — they are the permanent ledger of what was consumed on that project. Sage exports pull from them.
+- **Vendor / scrap** — rarely used. Vendor is the "from" side of a receipt; scrap is where damaged stock goes.
+
+You'll find these in the **🏭 Locations** sub-tab.
+
+### 3. Movements
+
+A **movement** is the only way stock changes. There are six types:
+
+| Type | What it means | Example |
+|---|---|---|
+| Receive | New stock arrives | Vendor delivery into a warehouse |
+| Transfer | Stock moves between two locations | Warehouse → truck (a "load") |
+| Return | Stock comes back to a warehouse | Truck → warehouse end of day |
+| Issue | Stock leaves the system (used) | Truck → nowhere (consumed on a job) |
+| Scrap | Damaged stock removed | Truck → nowhere with a reason |
+| Adjust | Count correction | "We had 50, system said 52, so −2" |
+
+When a movement is recorded, the system automatically updates the on-hand quantity at each affected location. **You don't update stock counts directly — you record what happened, and stock updates itself.** This is the most important thing to internalize. There is no "edit stock count" button; if a count is wrong, you record an adjust movement.
+
+You'll see every movement that's ever happened in the **📜 Activity** sub-tab.
+
+That's the whole model. Parts live at Locations, change via Movements.
+
+---
+
+## What you see when you open the tab
+
+The top of the tab has two rows:
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  📦 Inventory          [+ Record movement]  📥  🔄  ⚡  🧾  [⋯ More] │
-├─────────────────────────────────────────────────────────────────────┤
-│  📦 Stock  🏭 Locations  🔧 Parts  📜 Activity  🔍 Audit  🔢 Count  │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│                       (sub-tab content)                             │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  📦 Inventory   ⇪  📥  🔄  ⚡  🧵  🧾   [+ Record movement]              │
+├─────────────────────────────────────────────────────────────────────────┤
+│  📦 Stock  🏭 Locations  🔧 Parts  📜 Activity  📋 PRs  🔍 Audit  🔢 Count │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Sub-tabs (6)**: read views into the inventory state — Stock, Locations, Parts, Activity, Audit, Count
-- **Header buttons (7)**: action sheets that write new movements or export data — Record movement, Receive PO, Reconcile, Sonar import, Sage export, Import CSV, Bulk-add Sonar projects
-- **Mobile**: secondary actions collapse behind a `⋯ More` popover; primary `+ Record movement` stays inline
+**The bottom row is what you're looking at** — seven different windows into the inventory state. Pick one.
 
-Restricted-to-inventory managers (warehouse-only) see ONLY this tab. See [Permissions](#permissions) below.
+**The top row is what you're doing** — buttons that change something or export the record. Each opens a sheet that walks you through it.
 
----
+### The seven sub-tabs (looking things up)
 
-## The 6 sub-tabs
+| Tab | The question it answers |
+|---|---|
+| 📦 **Stock** | "What's where right now?" Quantities per part per location. The most-used tab. |
+| 🏭 **Locations** | "What warehouses / bins / trucks / projects do we have?" Manage them here. |
+| 🔧 **Parts** | "What's in our catalog? Are there draft parts I need to clean up?" |
+| 📜 **Activity** | "What just happened?" Every movement, ever, with filters. |
+| 📋 **PRs** | Purchase Requests — originate, track, mark received. The queue between "we need this" and "it arrived". |
+| 🔍 **Audit** | Generates a CSV for walking the warehouse and physically counting. |
+| 🔢 **Count** | Live scanner-based cycle counting. Faster than the audit-CSV flow. |
 
-### 📦 Stock
+### The seven action buttons (changing something)
 
-Source: [InventoryStockTab.jsx](../src/components/manager/InventoryStockTab.jsx)
+| Button | What it does |
+|---|---|
+| ＋ **Record movement** | Manual one-off entry — any of the six movement types. The primary button. |
+| ⇪ **Import CSV** | Bulk import from BoxHero (catalog seed or top-up) |
+| 📥 **Receive PO** | Vendor delivery — multi-line, creates `receive` movements |
+| 🔄 **Reconcile** | Upload a filled audit CSV — turns variances into adjust movements |
+| ⚡ **Sonar** (assets) | Apply Sonar's daily report for serialized equipment installs (routers, ONTs, etc.) |
+| 🧵 **Fiber jobs** | Apply Sonar's daily fiber-jobs report (pushable cable, drops, ONT boxes, etc.) |
+| 🧾 **Sage export** | Build the Sage CSV for the period and mark movements as exported |
 
-**Purpose**: "What's where right now?" The canonical view of on-hand quantities per (part, location).
-
-**What you see**:
-- Filterable table of `inventory_stock` rows: SKU, name, location, qty, unit
-- Filter controls: location picker (warehouse / bin / truck / job_site), search by SKU/name, type filter (truck only, bucket only, etc.)
-- Warehouse "rollup" mode aggregates bin-level stock under the parent warehouse; drill into a specific bin or "Unbinned" for bin-level granularity
-
-**Common actions**:
-- Click a row → bulk-select for moving (use the Bulk Move sheet that opens)
-- Tap a column header → sort
-- **🏷 Labels** → opens [SkuLabelSheet](#sku-label-sheet) seeded with the selected parts
-
-**Gotchas**:
-- **Bins as audit sources for bulk-move**: bulk-select is disabled in warehouse rollup mode because the source bin is ambiguous. Drill into a specific bin or "Unbinned" first.
-- Stock is derived from `inventory_movements` via the `update_inventory_stock_on_movement` trigger. If movements get manipulated outside the normal path (rare), stock can drift — Reconcile fixes that.
-- No realtime subscription on `inventory_stock` — when a manager applies a Sonar import or auto-deduct, crew screens (MyStockView) won't see the change until manual refresh.
-
-### 🏭 Locations
-
-Source: [InventoryLocationsTab.jsx](../src/components/manager/InventoryLocationsTab.jsx)
-
-**Purpose**: Add/edit warehouses, bins, trucks, and project buckets. Per-location detail drill-in.
-
-**What you see**:
-- Grouped list: Warehouses (with bin counts) · Trucks (assigned to crew) · Job-site buckets (per project) · Vendors / Scrap (rare)
-- Per-warehouse expansion shows the bins underneath
-- Each row has buttons: **📋 Details**, **🏷 Labels**, **+ Add bin** (warehouses only), **✏ Edit**, **🛑 Retire**
-
-**Common actions**:
-- **+ Add warehouse**: top-of-section button. Single name field.
-- **+ Add bin**: appears under each warehouse row. Bin form has an **aisle picker** (existing aisles pre-fill, or type a new one) + a **shelf** field. Name displays as "Aisle 2, Shelf B-3".
-- **📋 Details** → opens [Location detail panel](#location-detail-panel) with stock, count, export, label actions
-- **🏷 Labels** on a warehouse → opens [BinLabelSheet](#bin-label-sheet) for all bins under that warehouse
-- **Aisle signs** → big-print full-page signs auto-parsed from bin names ("Aisle 4" sign at 180pt with bay range sub-line). Source: [AisleSignSheet.jsx](../src/components/manager/AisleSignSheet.jsx)
-
-**Constraints**:
-- **Single-level nesting only**: bins can't contain sub-bins. Encode deep shelving in the bin name ("Aisle 5, Rack 2, Shelf C").
-- A bin's `parent_location_id` must point to a `type='warehouse'` row. Enforced by trigger `trg_inv_location_validate_parent`.
-- Locations are FK targets for inventory_movements — never hard-deleted. Use **🛑 Retire** (sets `is_active=false`).
-
-### 🔧 Parts
-
-Source: [InventoryPartsTab.jsx](../src/components/manager/InventoryPartsTab.jsx)
-
-**Purpose**: Browse and edit the parts catalog. Bulk operations for category/department cleanup.
-
-**What you see**:
-- Filterable table: SKU, name, unit, department, material group, status (active/draft)
-- **Drafts** sub-filter: parts auto-created with `is_active=false` by CSV imports or Receive PO when an unknown SKU shows up. These need metadata cleanup before they show up everywhere else.
-- Bulk-select rows → bulk-edit department / material group / unit / activate
-- **🏷 Labels** button → opens [SkuLabelSheet](#sku-label-sheet) for the selected parts
-
-**Common actions**:
-- **+ Add part** (one-off): a SKU you typed that doesn't exist yet
-- **Bulk activate drafts**: select all drafts → "Activate"
-- **Edit a part**: name, unit, department, material group, barcode, BoxHero ID. `category` is computed from `department + material_group` — don't edit it directly.
-
-**Gotcha**: `parts_catalog.id` is the SKU itself (text PK). You can't rename a SKU after creation without breaking every movement that references it. If a SKU is wrong, retire it (`is_active=false`) and create a new one.
-
-### 📜 Activity
-
-Source: [InventoryMovementsTab.jsx](../src/components/manager/InventoryMovementsTab.jsx)
-
-**Purpose**: Audit log of every inventory_movement. The system's chronological ledger.
-
-**What you see**:
-- Reverse-chronological list: timestamp, type, part, qty, from → to, who, notes
-- Filters: date range, movement type, location, part, user
-- Each row shows the rich identifiers: `task_id`, `submission_id`, `consumed_by_user_id`, `phase_id`, `export_batch_id` — visible when relevant
-
-**Common actions**:
-- Verify a recent auto-deduct landed correctly
-- Trace consumption back to a specific submission or task
-- Confirm a Sonar import or Receive PO before approving the next batch
-
-**Gotcha**: movements are **immutable**. There's no edit/delete. The `prevent_movement_modification` + `prevent_movement_delete` triggers enforce this. If a movement is wrong, create a counter-movement (e.g., a `transfer` back).
-
-### 🔍 Audit
-
-Source: [InventoryAuditTab.jsx](../src/components/manager/InventoryAuditTab.jsx)
-
-**Purpose**: Generate audit CSVs for physical-count round-trips. Pairs with the [Reconcile sheet](#-reconcile).
-
-**What you see**:
-- Scope picker: which warehouse(s), which bins, which part filters (department, material group, stock level, staleness)
-- Preview of how many rows the CSV would contain
-- **Generate CSV** button → downloads a CSV with a blank `Actual Qty` column and a `Variance = =J<row>-I<row>` formula in the Variance column
-
-**Workflow**:
-1. Generate CSV here
-2. Print or load on tablet, walk the warehouse, fill in `Actual Qty`
-3. Upload via [Reconcile sheet](#-reconcile) to apply `adjust` movements
-
-**Gotcha**: the round-trip uses location **names**, not IDs. Two trucks with the same first name (rare) would collide. Warning only, not blocker.
-
-### 🔢 Count
-
-Source: [CountTab.jsx](../src/components/cycleCount/CountTab.jsx)
-
-**Purpose**: Live cycle counting via scanner or phone camera. Pairs of variances auto-reconcile within a warehouse; leftovers go to manager review.
-
-**What you see**:
-- **Start a new run** button + list of pending-review runs + completed history
-- A run scopes the count to a single warehouse (or cross-warehouse) and an optional "Bin distribution mode" for moving warehouse-level stock into specific bins
-
-**Workflow**:
-1. Counter starts a run → opens [CountRunScreen](../src/components/cycleCount/CountRunScreen.jsx)
-2. Scans a bin QR (`BIN:<uuid>`) → session opens for that bin
-3. Scans part QRs (each scan = +1 qty) or picks parts from a search; can also create new SKUs inline if the warehouse surfaces a part not yet in the catalog
-4. Submits each bin session → counter sees variances per part (expected vs counted)
-5. End of run → `end_count_run_and_reconcile` RPC:
-   - Pairs offsetting variances within the warehouse as internal `transfer` movements
-   - Leftovers go to `count_resolutions` for manager review
-
-**Bin distribution mode** (DB flag `is_first_binning`): a freely re-runnable mode where counts become direct warehouse → bin transfers instead of variance reconciliation. Use it for the initial distribution AND any time a new shipment lands at warehouse-level and needs to be sorted into bins. No review queue.
-
-**Gotcha**: cycle count writes `inventory_movements` with `count_run_id` set, which links those movements back to the originating run. If you delete a count run, you must clear `count_resolutions` first (FK chain).
+On a phone, every button except **＋ Record movement** collapses behind a **⋯ More** menu — the primary action stays out in the open.
 
 ---
 
-## The 7 action sheets
+## The most common things you'll do
 
-These all live in the header. On desktop they spread across the action bar; on mobile, secondary actions collapse behind `⋯ More`.
+Each section below is a walk-through. The first time you do one, follow it step by step.
 
-### ➕ Record movement
+### Find what's in a particular bin
 
-Source: [RecordMovementSheet.jsx](../src/components/manager/RecordMovementSheet.jsx)
+1. Open **🏭 Locations**
+2. Find the warehouse — click the row to expand
+3. Find the aisle group — click to expand
+4. Find the bin — click **📋 Details**
 
-**Purpose**: One-off manual movement. Covers all 6 movement types.
+You'll see every part in that bin and how many. From there you can drill into the count flow, export the bin's contents as a CSV, print labels, or edit the bin's name.
 
-**When to use**: ad-hoc adjustments. Stock moved between bins manually. Scrap when something's broken. Manual issue when no other path fits. Not the right tool for bulk operations — use Bulk Move or Reconcile instead.
+### Find what's on a specific truck
 
-**Permissions**: staff-only; no per-user permission filter applied (those gate crew-initiated movements via the `record_crew_movement` RPC, which this sheet bypasses).
+1. Open **📦 Stock**
+2. Filter by **Location** → pick the crew member's truck
+3. (Optional) search by SKU to narrow further
 
-**Movement-type validation**: the `validateMovement()` helper in `lib/inventory.js` mirrors the DB's `movement_endpoints_valid` CHECK constraint, so bad from/to combinations fail fast with a friendly error.
+If the truck shows stock that doesn't match what the crew member says they have, that's normal-ish — it means there are movements they haven't recorded yet (still loading, or returns from yesterday they haven't entered). If it's wildly off, plan a cycle count of their truck.
 
-### 📥 Receive PO
+### Originate a Purchase Request
 
-Source: [ReceivePOSheet.jsx](../src/components/manager/ReceivePOSheet.jsx)
+PRs are how a need ("we're out of bullet connectors", "Edgar wants another splice kit") becomes an order. The PR feature replaces the spreadsheet-emailed-to-purchasing workflow.
 
-**Purpose**: Multi-line vendor delivery. Creates `receive` movements: NULL → warehouse/bin.
+There are three ways to start one:
 
-**Workflow**:
-1. Vendor name + invoice ref + destination warehouse
-2. Per-line: SKU + qty + unit + unit_cost
-3. Inline part creation: if a SKU doesn't exist, type it and a "create + add" affordance appears. Auto `is_active=true`.
-4. Submit → one `receive` movement per line, all sharing the same `vendor_invoice`
-5. Post-save: prompt to print labels for the newly-received parts via [SkuLabelSheet](#sku-label-sheet)
+- **From the PRs sub-tab** → click **＋ New PR**. Best when you're starting from scratch.
+- **From the Stock tab** → bulk-select some rows → click **📋 Create PR**. Best when you're already looking at "what we're low on" and want to pre-fill the PR with those parts.
+- **From the Parts tab** → same bulk-select → **📋 Create PR**. Best when you're picking from the catalog rather than from current stock.
 
-**Gotcha**: inline-create doesn't refresh the catalog search index in the same session. If you create a new SKU then type it again in a later line of the same PO, the autocomplete won't find it. Workaround: close and reopen the sheet.
+Then in the composition sheet:
 
-### 🔄 Reconcile
+1. Fill the header — title, requested-by, requested-for (department or project)
+2. For each line: vendor, qty, item number, description, project/reason, unit price, line total. Vendor is **per line** (not per PR) because one PR often spans multiple suppliers.
+3. Save with one of four options:
+   - **Save draft** — keeps it in your queue, no export
+   - **Save & CSV** — saves and downloads a CSV (the same shape as the old spreadsheet)
+   - **Save & PDF** — saves and opens a print-ready PDF
+   - **Save & copy email** — saves and copies a pre-formatted email body to your clipboard, ready to paste
 
-Source: [ReconcileSheet.jsx](../src/components/manager/ReconcileSheet.jsx)
+The PR lands in the **📋 PRs** sub-tab with status **pending**. When purchasing places the order, change it to **ordered**. When the delivery arrives, open the PR and click **Mark received** — this writes the receive movements for you (no need to re-enter the parts via Receive PO). The PR moves to **received**.
 
-**Purpose**: Apply the audit CSV round-trip — turn physical counts into `adjust` movements.
+The PRs sub-tab has filter pills: **All / Active / Pending / Ordered / Received / Cancelled**. Default is **Active** (pending + ordered) so you see what's in motion.
 
-**Workflow**:
-1. Upload the filled-in audit CSV (from the [Audit tab](#-audit))
-2. System computes `Actual - System = Variance` per row
-3. Preview shows per-location variance counts + total adjustment quantity
-4. Confirm → one `adjust` movement per variance row (positive = "found more", negative = "missing")
+### Receive a vendor delivery
 
-**Pairing**: this is the standard go-live + monthly cleanup tool. Pre go-live: generate audit CSV with no system stock, walk warehouse, upload to seed opening balances. Monthly: same flow to true-up drift.
+This is one of your most common tasks. Two flows depending on whether the delivery has a PR backing it:
 
-### ⚡ Sonar import
+- **Has a PR**: open the PR in the **📋 PRs** tab → click **Mark received**. Done — receive movements are written automatically.
+- **No PR (vendor just showed up)**: use the **📥 Receive PO** sheet manually, walked through below.
 
-Source: [SonarImportSheet.jsx](../src/components/manager/SonarImportSheet.jsx)
+**Manual Receive PO walkthrough:**
 
-**Purpose**: Apply Sonar's daily install report. Creates `transfer` movements: crew truck → project bucket, with `phase_id` stamped for Sage cost-center grouping.
+1. Click **📥 Receive PO**
+2. Fill the header: **Vendor**, **Invoice number**, **Destination warehouse**
+3. For each line:
+   - Search for the SKU — pick the part
+   - Enter quantity, unit (auto-fills from the part), and unit cost if you have it
+   - If the part doesn't exist in the catalog yet: type its SKU and click the "+ create" affordance that appears. A draft part is created on the spot.
+4. Click **Save** when done
+5. The sheet will offer to print labels for any new SKUs — accept if you want fresh QR labels on the boxes
 
-**Pending deliveries banner**: webhook-delivered reports (from the `sonar-webhook` edge function) show up at the top as "📥 Auto-delivered from Sonar". Tap **Review** to load one as if uploaded manually.
+What this does:
+- Creates one `receive` movement per line (NULL → destination warehouse)
+- Stock at the destination warehouse goes up automatically
+- All lines share the same `vendor_invoice`, so the Activity tab will group them
 
-**Workflow**:
-1. Manual upload OR click a pending delivery
-2. Manage three mapping sections (each persisted across imports):
-   - **Crew mappings**: Sonar source → FiberLog user (auto-matched by name in parens)
-   - **Part mappings + routing policy**: Sonar model → FiberLog SKU + routing (`region` / `gigwave` / `none` / `ask`)
-   - **Sonar project mappings**: Sonar Project column → FiberLog phase (saved to `sonar_project_phase_map`). When set, this overrides part-level routing.
-3. **Intra-delivery dedup**: rows sharing the same item ID in `Model Field Data | Value List` collapse into one (Looker emits each install at multiple aggregation levels). Each preview row shows `× N` when duplicates were collapsed.
-4. **Inter-delivery dedup**: rows whose `[sonar:<itemId>]` marker already exists in `inventory_movements.notes` (last 90 days) flag as `already-imported` (gray pill, skipped).
-5. **Audit panel**: toggle "▸ Show recent webhook deliveries (audit)" to see processed + auto-discarded deliveries. Useful for confirming Sonar's nightly push actually fired.
-6. Submit → one `transfer` movement per ready row + the pending row marks itself imported
+**If you typed a new SKU and want to use it again later in the same PO**, close and reopen the sheet — the search index doesn't refresh mid-session. Cosmetic, not data-losing.
 
-Bonus button at the top: **📦 Bulk-add projects** opens [BulkSonarProjectsSheet](#-bulk-add-sonar-projects).
+### Handle a Sonar daily report
 
-### 🧾 Sage export
+Sonar pushes two CSVs every morning around 6 AM — one for **serialized equipment** (routers, ONTs, etc.) and one for **fiber jobs** (pushable cable, drops, splice trays). You'll see each at the top of its respective sheet as "📥 Auto-delivered from Sonar".
 
-Source: [SageExportSheet.jsx](../src/components/manager/SageExportSheet.jsx)
+**Why two sheets?** The two reports describe different kinds of work and need different mappings:
 
-**Purpose**: Build the Sage Intacct Inventory Transactions CSV and mark movements exported.
+- **⚡ Sonar (assets)** — serial-number-tracked equipment that lands at a customer address. One row per device.
+- **🧵 Fiber jobs** — quantitative material consumption (linear feet of cable, count of drops, etc.) that doesn't have serial numbers. One row per job, with material parsed from descriptive columns.
 
-**Workflow**:
-1. Pick date range (default: last 7 days)
-2. Toggle "Include already exported" if re-issuing a corrected batch
-3. Preview shows movements that'll export — skips `truck → truck` (internal staging, no Sage relevance)
-4. Stats summarize counts by movement type
-5. Click **Download CSV + mark X exported**:
-   - Inserts a parent row in `inventory_export_batches` capturing `exported_by` + `movement_count`
-   - Updates every included movement's `exported_at` + `export_batch_id`
-   - Builds the CSV and triggers browser download
+The walkthrough is the same for both:
 
-**CSV columns** (18, in this order): `TRANSACTIONTYPE, DATE, REFERENCENO, LINE, ITEMID, ITEMDESC, QUANTITY, UNIT, PRICE, FROM_WAREHOUSE, TO_WAREHOUSE, TO_BIN, PROJECTID, CLASSID, DEPARTMENTID, VENDORID, MEMO, FIBERLOG_MOVEMENT_ID`.
+1. Click **⚡ Sonar** (or **🧵 Fiber jobs**)
+2. Find the day you want in the auto-delivered list (newest at top)
+3. Click **Review** on that row — the import preview loads
+4. Confirm the mapping sections (most are persisted from past imports, so usually just glance):
+   - **Crew mappings** — Sonar's "Source" → a FiberLog user
+   - **Part mappings + routing** — Sonar's model/description → a FiberLog SKU + where consumption lands (region-based, gigwave, none, or ask each time)
+   - **Sonar project mappings** — Sonar's Project column → a FiberLog phase
+5. Scroll the preview rows — anything in red needs a decision before you can apply
+6. Click **Apply** at the bottom
 
-- `PROJECTID` = phase's parent project (Heber, Park City, etc.)
-- `CLASSID` = phase name (Center Creek, Snyderville, etc.)
-- `FIBERLOG_MOVEMENT_ID` = `inventory_movements.id`, kept so Sage's audit can back-reference any line
+What this does:
+- Creates one `transfer` movement per applied row (crew member's truck → the project bucket)
+- Stamps `phase_id` so Sage knows which cost center each consumption belongs to
+- Marks the delivery as imported (won't re-import the same rows later)
 
-Next export skips already-exported movements automatically via the partial index `WHERE exported_at IS NULL`.
+Skipped rows happen for two reasons: rows that duplicate something already imported (the `[sonar:<itemId>]` marker is how we detect this) and rows without enough info to route. The preview tells you which is which.
 
-### ⇪ Import CSV (BoxHero seed)
+There's also a **📦 Bulk-add Sonar projects** button inside the assets sheet for the rare case Sonar introduces new project names — it pre-fills mappings in bulk instead of one-at-a-time. You won't reach for it often.
 
-Source: [InventoryImportSheet.jsx](../src/components/manager/InventoryImportSheet.jsx)
+### Run a cycle count
 
-**Purpose**: Bulk-import from BoxHero's CSV export. Used for initial parts catalog seeding AND for post-seed catalog top-ups when BoxHero gets new SKUs.
+There are two ways to count stock physically. Pick by warehouse size:
 
-**Workflow**:
-1. Upload BoxHero CSV — file picker auto-detects the per-location quantity columns (`Qty(<location>)`)
-2. Stage 1 (parse): catalog index built; unmatched SKUs (in CSV but NOT in `parts_catalog`) flagged
-3. Stage 2 (mapping): per-Qty-column picker — map to existing FiberLog location OR set to "skip"
-4. **Auto-create drafts** toggle: creates unmatched SKUs as `is_active=false` so the import succeeds. Manager cleans them up in the [Parts tab](#-parts) afterward.
-5. Stage 3 (import): one `adjust` movement per row+column combo OR drafts-only if all columns skipped
+- **Small (a few bins, focused area)**: use the **🔢 Count** tab live with a scanner or phone camera
+- **Large (whole warehouse)**: use the **🔍 Audit** tab to generate a CSV, walk the warehouse with a tablet/clipboard, then upload via **🔄 Reconcile**
 
-**Catalog-only sync mode**: set every Qty column to "skip" to use this just as a parts catalog sync (catches new SKUs, doesn't touch stock). Useful for periodic re-imports against the current BoxHero list.
+**Live count walkthrough:**
 
-**Gotcha**: inline-create during the same session doesn't refresh the catalog search. Same pattern as Receive PO.
+1. Open **🔢 Count** → **Start a new run**
+2. Pick the warehouse (or leave blank for cross-warehouse)
+3. Open it on a phone with the camera scanner
+4. Scan a bin QR label — the session opens for that bin showing expected parts + counts
+5. For each part: scan the part QR (each scan = +1) or type the count manually. If you see something not on the expected list, scan or type it — it adds as an "unexpected" line.
+6. Submit the bin → move to the next
+7. When you're done with all bins, end the run. The system pairs offsetting variances within the warehouse (e.g. found 2 extra of Part X in Bin A, missing 2 of Part X from Bin B → that's a within-warehouse transfer, no real loss). Leftover variances go to a manager-review queue.
 
-### 📦 Bulk-add Sonar projects
+There's also a **"Bin distribution mode"** for the case where stock currently sits at the warehouse-level (unbinned) and you're sorting it into specific bins as you count. Counts become direct transfers from warehouse → bin, no variances. Use it for initial bin setup and any time a fresh shipment lands unbinned and needs to be distributed.
 
-Source: [BulkSonarProjectsSheet.jsx](../src/components/manager/BulkSonarProjectsSheet.jsx)
+### Reconcile a paper count (the CSV round-trip)
 
-**Purpose**: Bootstrap (or top-up) the `sonar_project_phase_map` from a Sonar project list. Triggered from a button inside [SonarImportSheet](#-sonar-import).
+1. Open **🔍 Audit**
+2. Pick scope: warehouse, optional bin/department/material-group filters
+3. Click **Generate CSV** — downloads a file with each part + system qty + an empty "Actual Qty" column + a Variance formula
+4. Walk the warehouse, fill in Actual Qty (paper or tablet)
+5. Back in the office, click **🔄 Reconcile**
+6. Upload the filled CSV
+7. The preview shows per-location variance counts. Confirm.
+8. Click **Apply** → one `adjust` movement per non-zero variance
 
-**Workflow**:
-1. Paste or upload a CSV with a `Project` column
-2. Auto-suggestions: exact phase-name match → "auto-picked" status. Contains-either-way match → suggested.
-3. Already-mapped Sonar projects show as "already mapped" (skipped by default)
-4. **Assign all pending to…** shortcut for bulk same-region picks
-5. Submit → creates phases under picked regions + upserts `sonar_project_phase_map` entries
+### Add a part that doesn't exist yet
 
-**Bonus**: same UI will eventually serve as the review queue for a weekly Sonar projects webhook (when set up — see `sonar-webhook` pattern).
+Two ways:
 
-### 🛠 Bulk move
+- **During a Receive PO** — type the SKU, click the "+ create" affordance. Fastest if you're already receiving it.
+- **Directly in the catalog** — **🔧 Parts** sub-tab → **+ Add part**. Fill SKU, name, unit, department, material group. Use this when you need the part to exist for some other reason (e.g. setting up an assembly).
 
-Source: [BulkMoveSheet.jsx](../src/components/manager/BulkMoveSheet.jsx)
+When parts auto-appear from CSV imports or webhook deliveries, they're created as **drafts** (`is_active=false`) with minimal metadata. You'll want to periodically open the Parts tab, filter by "Drafts", and clean them up: set unit (`ft` for cable, `ea` for things you count), set department, then bulk-activate.
 
-**Purpose**: Move multiple parts between locations in one operation. Opens from the Stock tab's bulk-select.
+### Fix a wrong movement
 
-**Workflow**:
-1. Bulk-select rows in Stock tab → "Move selected" button → this sheet opens
-2. Pick destination location
-3. Confirm — creates one `transfer` movement per selected row
+Movements are **immutable** — there's no edit or delete button. If a movement is wrong, you create a counter-movement that cancels it out.
 
-**Gotcha**: source must be unambiguous. Won't open from warehouse rollup mode; drill into a specific bin first.
+Example: someone accidentally recorded a transfer of 50 connectors warehouse → Edgar's truck, but Edgar didn't actually load them.
+
+1. Click **+ Record movement** → pick **Transfer**
+2. From: Edgar's truck. To: original warehouse. Quantity: 50.
+3. In the notes, write something like "Reversing mistake from movement <id> — Edgar did not actually load these."
+4. Save.
+
+Net effect: stock returns to the warehouse. The original wrong movement is still in the audit trail (good — that's what we want), but it's been compensated for. If Sage is asked, both movements appear and cancel.
+
+For one-off correction movements between locations you don't normally connect, you can also use **Record movement** with the **Adjust** type — adjust is the only type that goes one-sided (from-only or to-only), which is useful when stock simply needs to vanish or appear at one location with no counterpart.
+
+### Export for Sage at end of period
+
+1. Click **🧾 Sage export**
+2. Pick the date range (defaults to the last 7 days)
+3. Decide whether to use **strict-consumption mode**:
+   - **Off (default)**: includes everything Sage cares about — receives, sells, project consumption, scrap, returns. Excludes internal truck-to-truck transfers (those aren't Sage-relevant).
+   - **On**: also excludes crew loads and returns (warehouse ↔ truck staging). Use this if Sage doesn't want to see staging activity, only true consumption.
+4. Review the preview — it tells you how many movements will export and how many are being skipped, with the reason
+5. Click **Download CSV + mark X exported**
+6. Send the CSV to accounting (or upload to Sage Intacct directly)
+
+What this does:
+- Stamps every included movement with `exported_at` + a batch ID
+- Future exports skip already-exported movements automatically
+- If you need to re-issue a corrected batch, there's a toggle for "Include already exported"
+
+### Decommission a location (retire a bin, scrap a truck, etc.)
+
+Locations are never hard-deleted — they're referenced by every movement that touched them, and we want the audit trail intact forever.
+
+1. Open **🏭 Locations** → find the row
+2. Click **🛑 Retire**
+3. If there's any stock currently at that location, the sheet prompts you to recover it: pick a destination for each part with stock, and one `transfer` movement is created per part. The location then becomes inactive.
+4. Confirm.
+
+Decommissioned locations stop appearing in pickers but stay in Activity history and in past Sage exports.
 
 ---
 
-## Supporting sheets (not in the header)
+## Cadence — what to do daily / weekly / monthly
 
-### Location detail panel
+### Daily (5 minutes)
 
-Source: [LocationDetailPanel.jsx](../src/components/manager/LocationDetailPanel.jsx)
-
-**Purpose**: Drill-in panel for a single location. Opens from the **📋 Details** button on Locations tab.
-
-**What you see**:
-- Stock list at this location (parts + qty)
-- Action buttons:
-  - **🔢 Count this bin** — auto-detects active count run (or starts new), jumps to that bin's session in CountTab
-  - **📥 Export CSV** — downloads stock at this location as CSV (per-location audit)
-  - **📦 View in Stock** — jumps to Stock tab filtered to this location
-  - **🏷 Labels** — opens [SkuLabelSheet](#sku-label-sheet) for parts here, OR [BinLabelSheet](#bin-label-sheet) if it's a bin/warehouse
-  - **✏ Edit** / **🛑 Retire** — modify the location
-
-**Why this matters**: location-level drill-in is the natural entry point for "I want to know everything about THIS bin". Without it the manager would bounce between 3 tabs.
-
-### Bin label sheet
-
-Source: [BinLabelSheet.jsx](../src/components/cycleCount/BinLabelSheet.jsx)
-
-**Purpose**: Print QR labels for bins. Each label encodes `BIN:<uuid>` so cycle counts and scan-mode loadouts can identify the bin.
-
-**Four presets**:
-- **Label — 4/page** (default, stick-on): bin name + warehouse + big QR
-- **Label — 8/page** (denser stick-on)
-- **Scan sheet — 30/page** (reference clipboard sheet)
-- **Scan sheet — 60/page** (max density; clip to a board, scan from anywhere)
-
-**Triggered from**: Locations tab (per warehouse, all its bins) OR LocationDetailPanel (single bin's labels).
-
-**Print mechanics**: rendered via React Portal directly to body so multi-page output flows naturally. Print-only CSS hides everything except the portal. See [SKU label sheet](#sku-label-sheet) for the same pattern.
-
-### SKU label sheet
-
-Source: [SkuLabelSheet.jsx](../src/components/manager/SkuLabelSheet.jsx)
-
-**Purpose**: Print QR labels for parts. Each label encodes the SKU. Sticks on packaging at receive time so cycle counts confirm "yes, this is Part X" without typing.
-
-**Five presets**:
-- **Label — US Letter, 4/page** (plain paper, peel-as-you-go)
-- **Label — Avery 5163** (10/page, 2×4 in pre-cut)
-- **Label — Avery 5160** (30/page, 1×2 5/8 in pre-cut, smaller parts)
-- **Scan sheet — 60/page** (reference sheet, name + SKU)
-- **Scan sheet — 120/page** (max density, SKU + QR only)
-
-**Triggered from**: Parts tab (bulk), Receive PO (post-save offer for new SKUs), Stock tab, LocationDetailPanel.
-
-### Aisle sign sheet
-
-Source: [AisleSignSheet.jsx](../src/components/manager/AisleSignSheet.jsx)
-
-**Purpose**: Big-print full-page aisle signs for warehouse navigation. Auto-parses bin names ("Aisle 4, Shelf B-3" → groups under "Aisle 4").
-
-**Output**: 180pt aisle header + bay-range sub-line ("Bays B1 – B12") per page. Print, laminate, hang at the end of the aisle.
-
-**Triggered from**: Locations tab (per warehouse) — separate button from bin labels.
-
----
-
-## How they fit together — typical operations cadence
-
-### Daily
-
-1. **Morning** — Activity tab quick-scan: anything weird from overnight (Sonar auto-deliveries, edge-case auto-deducts)?
-2. **As deliveries arrive** — Receive PO. Print SKU labels for new arrivals if needed.
-3. **As crews report odd stock** — Stock tab → search → confirm system says what they say
-4. **Approvals queue** (separate tab) drives most auto-deduct movements — those show up in Activity without you touching Inventory
+- Open **📜 Activity**, scan the last 24 hours. Anything weird? Auto-deducts that don't make sense? Movements with empty notes from accounts that shouldn't be writing?
+- Check **⚡ Sonar** and **🧵 Fiber jobs** for the morning's auto-delivered reports. Click **Review**, confirm mappings, **Apply**.
+- Check the **📋 PRs** tab (Active filter) for anything that arrived overnight — click **Mark received** so the parts land in stock.
 
 ### Weekly
 
-1. **Sonar daily reports** — Sonar import sheet handles automatic webhook delivery; manager confirms unmapped projects/cities/parts, then applies. Audit panel under Sonar import confirms every delivery is accounted for.
-2. **End-of-period or monthly Sage export** — Sage export sheet pulls all un-exported movements in the period and stamps them exported.
+- Address any drafts piling up in **🔧 Parts** → Drafts filter — set unit + department, bulk-activate.
+- Glance at **📋 PRs** (Ordered filter) to see what's outstanding. Anything stale should get a follow-up with purchasing.
+- If your team uses **Receive PO** heavily, glance at the catalog for SKUs without department/material group set and clean them up.
 
-### Monthly / quarterly
+### Monthly
 
-1. **Cycle count** — pick a section of the warehouse, generate audit CSV from the Audit tab OR run a live cycle count via the Count tab
-2. **Reconcile** — upload the filled CSV via Reconcile sheet. Variances get applied as `adjust` movements.
-3. **Drafts cleanup** — Parts tab → Drafts filter → bulk-activate or set proper metadata on drafts created from inline-creates during the month
+- Run **🧾 Sage export** for the period. Send to accounting.
+- Pick a section of the warehouse and run a **🔢 Count** (or **🔍 Audit** + **🔄 Reconcile** for a bigger area).
+- Check **🏭 Locations** for any bin/aisle that's gotten unwieldy — split or consolidate as needed.
 
-### Quarterly / one-time
+### Once a quarter / one-time
 
-1. **BoxHero re-import** — Import CSV with all Qty columns set to "skip" to catch new SKUs without touching stock
-2. **Bulk-add Sonar projects** — when Sonar adds new projects, this sheet maps them to phases (or you wait for the weekly projects webhook once that's wired up)
-3. **Bin labels reprint** — if a section gets relabeled, print fresh bin scan sheets
-
----
-
-## Permissions
-
-`role='owner'` or `role='manager'` is required to reach this tab at all (router gate in `App.jsx`).
-
-For inventory mutations specifically:
-- All movement INSERTs go through either `record_crew_movement` (gated by `crew_operation_permissions` + `crew_type_part_restrictions`) or directly via staff-write RLS on `inventory_movements`
-- Staff are gated by `public.is_staff()` (returns true for owner + manager roles)
-- The `inventory_movements` table has 3 protective triggers: `prevent_movement_delete`, `prevent_movement_modification` (only `exported_at` and `export_batch_id` are mutable post-create), and `update_inventory_stock_on_movement` (auto-syncs stock)
-
-### Warehouse-only manager
-
-A `role='manager'` user with `restricted_to_inventory=true` sees ONLY the Inventory tab — no Approvals, Crew, Projects, Reports, or Assemblies. They keep full manager-level DB access (so `is_staff()` returns true and every RPC/RLS check works normally), but the manager portal's nav filters them down. Use it for warehouse-only managers who don't need approval or project visibility.
-
-Set the flag in **Admin → Users → edit user** → check **📦 Warehouse-only manager** (only visible when role = Manager).
+- BoxHero catalog re-sync: open **⇪ Import CSV** (on phone: **⋯ More → ⇪ Import CSV**), upload the BoxHero export, set all Qty columns to "skip". This catches new SKUs without touching stock.
+- Reprint bin labels for areas that have been relabeled.
 
 ---
 
-## Common gotchas
+## Things to know before you act
 
-- **Stock isn't realtime**: crew screens don't auto-refresh when manager applies a Sonar import or Reconcile. Crew needs to manually pull-to-refresh.
-- **Movements are immutable**: no edit/delete. Create a counter-movement instead. The protective triggers enforce this at the DB level.
-- **Bins can't nest**: single-level only. Encode shelving depth in the bin name.
-- **`parts_catalog.id` is the SKU**: no renaming. Retire and recreate if needed.
-- **`parts_catalog.category` is computed**: update `department` and/or `material_group`, not `category` directly.
-- **Receive PO inline-create doesn't refresh search in-session**: close + reopen if you need to re-reference a freshly-created SKU.
-- **Receive PO + Sonar sheets aren't phone-responsive**: `maxWidth: 760` — work on tablet+. Assumed manager-on-laptop environment.
-- **Audit round-trip uses location *names***: rare collision risk if two trucks share a first name. Warning only.
-- **Movements with `notes LIKE '%[sonar:%'` are the dedup signal**: don't manually edit those notes or the next Sonar import will re-import.
-- **Sage export skips truck→truck**: those are internal handoffs, not Sage-relevant. Confirmed by the export's "skipped (truck→truck)" stat.
-- **Project buckets auto-create**: `trg_ensure_project_job_site` creates a `job_site` location when a project becomes active. Don't manually create it.
+Short list of "this will trip you up if you didn't know it." Not gotchas — just system facts that aren't obvious from the UI.
+
+- **Stock follows movements automatically.** You never edit stock numbers directly. To change stock, record a movement.
+- **Movements can't be edited or deleted.** If you make a mistake, create a counter-movement. This is on purpose — the audit trail must be inviolate for Sage and BEAD reporting.
+- **Bins can't be nested.** A bin lives inside one warehouse — bins can't contain other bins. Encode shelf depth in the bin name ("Aisle 5, Rack 2, Shelf C").
+- **A SKU can't be renamed.** Once a part is in the catalog, its SKU is permanent (because every past movement references it). If a SKU is wrong, retire it and create a new one with the right SKU.
+- **`category` is auto-computed** from department + material group. Don't try to edit category directly — edit department or material group and category updates itself.
+- **Sonar imports dedupe by item ID.** Both Sonar sheets (assets and fiber jobs) collapse duplicates within a delivery and refuse to re-import the same item ID across deliveries (90-day window). The Sonar daily report often emits the same install multiple times at different aggregation levels — that's why dedup is necessary. If you ever see "already imported" rows, that's working as intended.
+- **Project buckets are the permanent record.** When materials transfer to a project bucket (Heber, Wasatch Front, etc.), they don't get "drained" out by anything. The bucket is the consumption ledger — that's what Sage and BEAD pull from.
+- **Crews don't see your changes in real time.** If you apply a Sonar import or a Reconcile, the affected crew member's "My stock" view won't update until they pull-to-refresh. This is rare friction; if it matters, send a text.
+
+---
+
+## Permissions: what you can do depends on your role
+
+- **Owner / Manager** — full access to the Inventory tab and everything in it.
+- **Warehouse-only manager** (a Manager with the "Warehouse-only" flag set) — sees ONLY the Inventory tab. No Approvals, no Reports, no Crew status. Use this for an inventory clerk who doesn't approve crew passdowns.
+- **Crew** — does not see this tab at all. Crew interact with inventory through the **Load** and **Return** flows on their own truck, and via passdown submissions that auto-deduct after manager approval.
+
+To make someone warehouse-only: **Admin → Users → edit user → check "📦 Warehouse-only manager"** (only visible when their role is Manager).
+
+---
+
+## When something goes wrong
+
+Most issues fall into three buckets:
+
+1. **"Stock doesn't match physical reality"** — run a cycle count (Live or CSV round-trip). Variances become `adjust` movements, system catches up to reality.
+2. **"A movement was recorded wrong"** — create a counter-movement (see "Fix a wrong movement" above). The wrong one stays in the audit trail; that's correct.
+3. **"Sonar import skipped a row I think it should have imported"** — open the relevant Sonar sheet's "▸ Show recent deliveries (audit)" panel. It tells you whether the row's item ID was duplicated, whether it was already imported in a prior delivery, or whether routing was unmapped. Each has a different fix.
+
+For anything else, **📜 Activity** is the first place to look. Filter by date, location, or user; you'll usually find the moment things diverged from what you expected.
 
 ---
 
 ## Cross-references
 
-- The ledger end-to-end (vendor → Sage): **[INVENTORY_FLOW.md](./INVENTORY_FLOW.md)**
-- Crew side of inventory (Load / Return / MyStockView): **[CREW_GUIDE.md](./CREW_GUIDE.md)**
+- End-to-end material flow (vendor → warehouse → truck → project → Sage): **[INVENTORY_FLOW.md](./INVENTORY_FLOW.md)**
+- Crew side of inventory (Load, Return, MyStock): **[CREW_GUIDE.md](./CREW_GUIDE.md)**
 - Manager portal at large: **[MANAGER_GUIDE.md](./MANAGER_GUIDE.md)**
-- Database schema + RPCs + RLS: see CLAUDE.md "Database schema highlights" + "Database RPCs"
+- Database internals (tables, RPCs, triggers, RLS): see **CLAUDE.md** in the repo root — "Database schema highlights" and "Database RPCs" sections
