@@ -203,6 +203,8 @@ select option {
   border-radius: var(--r);
   padding: 16px;
   margin-bottom: 10px;
+  /* Console: soft elevation so surfaces read as layered, not flat tiles. */
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 .card-tap {
   cursor: pointer;
@@ -239,13 +241,17 @@ select option {
 .btn {
   padding: 13px 18px; border-radius: var(--r-sm);
   font-size: 15px; font-weight: 600;
+  transition: background .12s, box-shadow .12s, border-color .12s, transform .08s;
 }
-.btn-primary { background: var(--orange); color: white; }
+.btn:active { transform: translateY(0.5px); }
+.btn-primary { background: var(--orange); color: white; box-shadow: 0 1px 2px rgba(10, 122, 84, 0.25); }
+.btn-primary:hover { background: var(--accent-dk); }
 .btn-primary:active { background: var(--orange-dk); }
 .btn-ghost {
   background: var(--surface2); color: var(--text);
   border: 1px solid var(--border2);
 }
+.btn-ghost:hover { background: #EEF1F5; border-color: var(--gray-mid); }
 .btn-danger { background: var(--red-lt); color: var(--red); border: 1px solid var(--red-mid); }
 
 /* ── Input ── */
@@ -404,6 +410,48 @@ select option {
 .pill-solid-accent { background: var(--orange); color: #fff; }
 .pill-sm  { padding: 1px 6px; font-size: 10px; }
 .pill-dot { width: 8px; height: 8px; padding: 0; border-radius: 50%; gap: 0; }
+
+/* ─── Console primitives ─────────────────────────────────────────────────────
+ * Shared building blocks for the redesigned views (docs/design_handoff_console
+ * _redesign). Used by the Inventory flagship first, then the rest of the app.
+ */
+
+/* Filter chip — single active "location" filter reads as a dark chip; inactive
+   chips are white with a hairline. (Spec: 30px tall, icon + label.) */
+.chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 30px; padding: 0 13px; border-radius: var(--r-pill);
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  background: var(--surface); color: var(--muted);
+  border: 1px solid var(--border2);
+  transition: background .12s, border-color .12s, color .12s;
+}
+.chip:hover { border-color: var(--gray-mid); }
+.chip-active { background: var(--dark-bar); color: #fff; border-color: var(--dark-bar); }
+.chip-active:hover { border-color: var(--dark-bar); }
+
+/* Status text — inventory row status. Emerald = in stock, amber = low,
+   grey = draft. Uppercase, with an optional leading dot (.status-dot). */
+.status {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .03em; white-space: nowrap;
+}
+.status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: currentColor; }
+.status-instock { color: var(--accent-dk); }
+.status-low     { color: var(--amber); }
+.status-draft   { color: var(--hint); }
+
+/* Mono utility — IBM Plex Mono for SKUs, quantities, counts, stat figures,
+   and uppercase labels. The "mono-for-data" treatment is a Console signature. */
+.mono { font-family: var(--font-mono); }
+
+/* Uppercase eyebrow label (sidebar section labels, "ACTIONS", column headers). */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--hint);
+}
 
 /* ─── Banner family ─────────────────────────────────────────────────────
  * Replaces stackable status strips in TaskWorkspace (flag / continuation
