@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { approveSubmission, db, nextChannelSuffix } from '../../lib/supabase'
 import { useApp } from '../../AppContext'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 const STATUS_COLORS = {
   pending: { bg: 'var(--amber-lt)', text: 'var(--amber)', label: 'Pending' },
@@ -28,8 +29,8 @@ function submissionLocation(sub) {
 function StatPill({ label, value }) {
   return (
     <div style={{ fontSize: 12 }}>
-      <span style={{ color: 'var(--muted)' }}>{label} </span>
-      <span style={{ fontWeight: 700 }}>{value}</span>
+      <span className="eyebrow" style={{ fontSize: 10 }}>{label} </span>
+      <span className="mono" style={{ fontWeight: 600 }}>{value}</span>
     </div>
   )
 }
@@ -275,11 +276,9 @@ export default function SubmissionsQueue() {
             value={filter}
             onChange={e => setFilter(e.target.value)}
             style={{
-              padding: '5px 10px', fontSize: 12, fontWeight: 700,
-              border: '1.5px solid var(--orange)',
-              borderRadius: 20,
-              background: 'var(--orange-lt)', color: 'var(--orange)',
-              cursor: 'pointer',
+              height: 30, padding: '0 10px', fontSize: 12, fontWeight: 600,
+              border: '1px solid var(--border2)', borderRadius: 999,
+              background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer',
             }}
           >
             {[
@@ -291,11 +290,10 @@ export default function SubmissionsQueue() {
               <option key={opt.id} value={opt.id}>Status: {opt.label}</option>
             ))}
           </select>
-          <button onClick={() => setShowArchived(prev => !prev)} style={{
-            padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-            background: showArchived ? 'var(--gray-mid)' : 'var(--gray-lt)',
-            color: showArchived ? 'white' : 'var(--muted)', border: 'none', cursor: 'pointer'
-          }}>📦 Archived</button>
+          <button onClick={() => setShowArchived(prev => !prev)}
+            className={`chip${showArchived ? ' chip-active' : ''}`}>
+            <Icon name="box" size={14} /> Archived
+          </button>
         </div>
       </div>
 
@@ -303,7 +301,7 @@ export default function SubmissionsQueue() {
         {loading && <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Loading...</div>}
         {!loading && sortedProjects.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--hint)' }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10, color: 'var(--gray-mid)' }}><Icon name="layers" size={32} /></div>
             <div>No {filter} submissions</div>
           </div>
         )}
@@ -317,15 +315,16 @@ export default function SubmissionsQueue() {
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '10px 14px', background: 'var(--surface)',
                 border: '1px solid var(--border)',
-                borderRadius: isOpen ? 'var(--r-sm) var(--r-sm) 0 0' : 'var(--r-sm)',
-                cursor: 'pointer'
+                borderRadius: isOpen ? 'var(--r) var(--r) 0 0' : 'var(--r)',
+                cursor: 'pointer',
+                boxShadow: isOpen ? 'none' : '0 1px 3px rgba(15,23,42,0.06)',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontSize: 14, fontWeight: 800 }}>{projName}</span>
-                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>{subs.length} submission{subs.length !== 1 ? 's' : ''}</span>
-                  {pendingInGroup > 0 && <span style={{ background: 'var(--amber)', color: 'white', fontSize: 11, fontWeight: 700, padding: '1px 7px', borderRadius: 20 }}>{pendingInGroup} pending</span>}
+                  <span className="mono" style={{ fontSize: 12, color: 'var(--hint)' }}>{subs.length} submission{subs.length !== 1 ? 's' : ''}</span>
+                  {pendingInGroup > 0 && <span style={{ background: 'var(--amber-lt)', color: 'var(--amber)', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20 }}>{pendingInGroup} pending</span>}
                 </div>
-                <span style={{ fontSize: 16, color: 'var(--muted)', display: 'inline-block', transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}>›</span>
+                <span style={{ color: 'var(--hint)', display: 'inline-flex', transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}><Icon name="chevron-right" size={16} /></span>
               </button>
 
               {isOpen && subs.map((sub, i) => {
@@ -353,7 +352,7 @@ export default function SubmissionsQueue() {
                             </div>
                           </div>
                         </div>
-                        {task && <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>📍 {locationName || '—'} › {task.name}</div>}
+                        {task && <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}><Icon name="pin" size={12} /> {locationName || '—'} › {task.name}</div>}
                         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                           <StatPill label="Hrs" value={sub.hours_worked || 0} />
                           {sub.total_poles > 0 && <StatPill label="Poles" value={sub.total_poles} />}
