@@ -18,6 +18,7 @@ Direction: dark/orange-teal + emoji → **light / emerald-slate + line icons**, 
 | App shell | `ManagerApp.jsx` rebuilt — Console sidebar (desktop) + slide-in drawer (phone), line-icon nav, emerald active state, Back-aware drawer |
 | Inventory chrome | `InventoryView.jsx` — toolbar + secondary sub-nav + desktop actions strip / phone actions sheet |
 | **Stock flagship** | `InventoryStockTab.jsx` — desktop data table + phone cards, filter chips, search, **dark bulk-select bar**, status badges. Verified on real data (220 parts). |
+| Inventory read tabs | **Parts**, **Activity**, **Purchase Requests**, **Audit** — Console list/table + chips + status pills + mono data + dark bulk bar (Parts). Verified live. |
 | (back button) | Desktop top-level tab Back enabled in the new shell |
 
 The whole manager app already navigates + looks like Console; un-redesigned screens are recolored (token cascade) but keep their old layouts until their turn.
@@ -26,12 +27,10 @@ The whole manager app already navigates + looks like Console; un-redesigned scre
 
 ## ⏭️ Next up (ordered — each inherits the Stock recipe)
 
-### A. Remaining inventory sub-tabs (content still old inside the new chrome)
-1. **Locations** — warehouse → bin tree (the heaviest; nested disclosure). `InventoryLocationsTab.jsx`
-2. **Parts** — catalog + drafts cleanup. `InventoryPartsTab.jsx`
-3. **Activity** — movement history + filters. `InventoryMovementsTab.jsx`
-4. **Purchase Requests** — queue + status pills. `PurchaseRequestsTab.jsx`
-5. **Audit** — CSV generator (scope + filters). `InventoryAuditTab.jsx`
+### A. Remaining inventory sub-tab
+1. **Locations** — warehouse → bin tree (the heaviest; nested disclosure + add-bin/edit/retire-with-recovery + the `LocationDetailPanel` drill-in). `InventoryLocationsTab.jsx`. *Not yet redesigned — its row chrome is still the old layout (recolored via tokens). Best done as its own focused pass with verification, given its CRUD surface.*
+
+   ~~Parts · Activity · Purchase Requests · Audit~~ — ✅ done (see the Done table).
 
 ### B. Cycle count
 6. Full-screen scanner flow — its own chrome. `cycleCount/CountTab.jsx` (+ `cycleCount/*`)
