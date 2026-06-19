@@ -24,6 +24,8 @@ Direction: dark/orange-teal + emoji → **light / emerald-slate + line icons**, 
 
 **→ The entire Inventory section is now Console (all 6 sub-tabs).**
 
+| Manager screens | **Submissions/Approvals** (filter pill, chips, group elevation, mono stats, line icons) and **Crew status** (elevated mono stat cards, line icons) — done. |
+
 The whole manager app already navigates + looks like Console; un-redesigned screens are recolored (token cascade) but keep their old layouts until their turn.
 
 ---
@@ -43,10 +45,10 @@ summary strings; the action/detail **sheets** (see C).
 7. Record movement, Receive PO, Reconcile, Sonar, Fiber jobs, Import CSV, Sage export, Bulk move, PR composer, SKU/bin labels, Location detail, Aisle signs. (All are already Back-wired + functional; this is visual only.)
 
 ### D. The rest of the manager app (per the rollout tracker)
-8. **Submissions / Approvals** (`SubmissionsQueue.jsx`) — #1 daily action
-9. **Crew status** (`CrewStatus.jsx`)
-10. **Projects** (`ProjectManager.jsx`) — fiber phases + infra sites + edit/decommission
-11. **Reports** (`ReportsView.jsx`)
+8. ✅ **Submissions / Approvals** (`SubmissionsQueue.jsx`) — done
+9. ✅ **Crew status** (`CrewStatus.jsx`) — done
+10. **Projects** (`ProjectManager.jsx`) — fiber phases + infra sites + edit/decommission *(large — project list view is the high-value first slice; detail/phase/site overlays after)*
+11. **Reports** (`ReportsView.jsx`) — filters + grouped results table + BoxHero stock + PDF
 12. **Assemblies** (`AssemblyEditor.jsx`)
 13. **Admin** (`AdminPanel.jsx`, `AdminUsersView.jsx`, `CrewTypePermissionsView.jsx`)
 
