@@ -8,6 +8,27 @@ import BinLabelSheet from '../cycleCount/BinLabelSheet'
 import AisleSignSheet from './AisleSignSheet'
 import LocationDetailPanel from './LocationDetailPanel'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
+
+// Console line-icon per location type (the header rows use this instead of emoji).
+const TYPE_ICON_NAME = {
+  warehouse: 'warehouse',
+  truck:     'truck',
+  job_site:  'pin',
+  vendor:    'warehouse',
+  scrap:     'x',
+  bin:       'box',
+}
+
+// Unified Console action chip for the location row buttons.
+function locActionChip() {
+  return {
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    fontSize: 12, fontWeight: 600, color: 'var(--muted)',
+    background: 'var(--surface)', border: '1px solid var(--border2)',
+    borderRadius: 8, padding: '5px 10px', cursor: 'pointer', whiteSpace: 'nowrap',
+  }
+}
 
 const TYPE_LABELS = {
   warehouse: 'Warehouse',
@@ -363,8 +384,8 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-        <button className="btn btn-primary" onClick={() => setEditing('new')} style={{ padding: '6px 14px', fontSize: 13 }}>
-          ＋ Add location
+        <button className="btn btn-primary" onClick={() => setEditing('new')} style={{ height: 34, padding: '0 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+          <Icon name="plus" size={15} /> Add location
         </button>
       </div>
 
@@ -454,20 +475,23 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                         onClick={isWhExpandable ? () => toggleWarehouse(loc.id) : undefined}
                         style={{
                           background: 'var(--surface)', border: '1px solid var(--border)',
-                          borderRadius: isWhExpanded ? 'var(--r-sm) var(--r-sm) 0 0' : 'var(--r-sm)',
+                          borderRadius: isWhExpanded ? 'var(--r) var(--r) 0 0' : 'var(--r)',
                           padding: '10px 14px',
                           display: 'flex', alignItems: 'center', gap: 8,
                           flexWrap: 'wrap',
                           cursor: isWhExpandable ? 'pointer' : 'default',
+                          boxShadow: isWhExpanded ? 'none' : '0 1px 3px rgba(15,23,42,0.06)',
                         }}>
                         {isWhExpandable && (
                           <span style={{
-                            fontSize: 14, color: 'var(--muted)', display: 'inline-block',
+                            color: 'var(--hint)', display: 'inline-flex',
                             transform: isWhExpanded ? 'rotate(90deg)' : 'none',
-                            transition: 'transform .15s', width: 12, textAlign: 'center',
-                          }}>›</span>
+                            transition: 'transform .15s',
+                          }}><Icon name="chevron-right" size={16} /></span>
                         )}
-                        <span style={{ fontSize: 20 }}>{TYPE_ICONS[type]}</span>
+                        <span style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--surface2)', color: 'var(--accent-dk)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Icon name={TYPE_ICON_NAME[type] || 'box'} size={18} />
+                        </span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 700, fontSize: 15 }}>
                             {loc.name}
@@ -523,56 +547,31 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                             )}
                           </div>
                         </div>
-                        <button
-                          onClick={stop(() => setDetailFor(loc))}
-                          title="Open details panel — view stock, count, export, edit"
-                          style={{
-                            fontSize: 12, color: 'var(--orange)', background: 'var(--orange-lt)',
-                            border: '1px solid var(--orange-dk)', borderRadius: 14, padding: '4px 12px',
-                            cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
-                          }}
-                        >📋 Details</button>
+                        <button onClick={stop(() => setDetailFor(loc))} title="Open details panel — view stock, count, export, edit" style={locActionChip()}>
+                          <Icon name="layout" size={14} /> Details
+                        </button>
                         {onJumpToStock && rollup && rollup.distinctParts > 0 && (
-                          <button
-                            onClick={stop(() => onJumpToStock(loc.id))}
-                            title="View stock at this location"
-                            style={{
-                              fontSize: 12, color: 'var(--muted)', background: 'transparent',
-                              border: '1px solid var(--border2)', borderRadius: 14, padding: '4px 12px',
-                              cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
-                            }}
-                          >📦 Stock</button>
+                          <button onClick={stop(() => onJumpToStock(loc.id))} title="View stock at this location" style={locActionChip()}>
+                            <Icon name="box" size={14} /> Stock
+                          </button>
                         )}
                         {type === 'warehouse' && (
-                          <button
-                            onClick={stop(() => setAddingBinFor(loc))}
-                            style={{
-                              fontSize: 12, color: 'var(--teal)', background: 'var(--teal-lt)',
-                              border: '1px solid var(--teal)', borderRadius: 14, padding: '4px 12px',
-                              cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
-                            }}
-                          >＋ Bin</button>
+                          <button onClick={stop(() => setAddingBinFor(loc))} style={locActionChip()}>
+                            <Icon name="plus" size={14} /> Bin
+                          </button>
                         )}
                         {type === 'warehouse' && bins.length > 0 && (
                           <button
                             onClick={stop(() => setLabelsFor(loc))}
                             title="Print scannable BIN: QR labels for this warehouse"
-                            style={{
-                              fontSize: 12, color: 'var(--purple)', background: 'var(--purple-lt)',
-                              border: '1px solid var(--purple)', borderRadius: 14, padding: '4px 12px',
-                              cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
-                            }}
+                            style={locActionChip()}
                           >🏷 Bins</button>
                         )}
                         {type === 'warehouse' && bins.length > 0 && (
                           <button
                             onClick={stop(() => setAisleSignsFor(loc))}
                             title="Print full-page aisle signs for warehouse navigation"
-                            style={{
-                              fontSize: 12, color: 'var(--blue)', background: 'var(--blue-lt)',
-                              border: '1px solid var(--blue)', borderRadius: 14, padding: '4px 12px',
-                              cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap',
-                            }}
+                            style={locActionChip()}
                           >🏷 Aisles</button>
                         )}
                         <button
