@@ -576,12 +576,15 @@ function downloadText(filename, text) {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
+// Console filter chip — active reads as a dark chip.
 function pillStyle(selected) {
   return {
-    padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-    background: selected ? 'var(--orange)' : 'var(--gray-lt)',
-    color: selected ? 'white' : 'var(--muted)',
-    border: 'none', cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    height: 30, padding: '0 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+    whiteSpace: 'nowrap', cursor: 'pointer',
+    background: selected ? 'var(--dark-bar)' : 'var(--surface)',
+    color: selected ? '#fff' : 'var(--muted)',
+    border: `1px solid ${selected ? 'var(--dark-bar)' : 'var(--border2)'}`,
   }
 }
 
@@ -589,12 +592,13 @@ function Stat({ label, value, accent }) {
   return (
     <div style={{
       flex: 1, minWidth: 110,
-      background: accent ? 'var(--orange-lt)' : 'var(--surface)',
-      border: `1px solid ${accent ? 'var(--orange)' : 'var(--border)'}`,
-      borderRadius: 'var(--r-sm)', padding: '8px 10px', textAlign: 'center',
+      background: accent ? 'var(--accent-lt)' : 'var(--surface)',
+      border: `1px solid ${accent ? 'var(--accent)' : 'var(--border)'}`,
+      borderRadius: 'var(--r)', padding: '10px 12px', textAlign: 'center',
+      boxShadow: accent ? 'none' : '0 1px 3px rgba(15,23,42,0.06)',
     }}>
-      <div style={{ fontSize: 18, fontWeight: 800, color: accent ? 'var(--orange)' : 'var(--text)' }}>{value}</div>
-      <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginTop: 2 }}>{label}</div>
+      <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: accent ? 'var(--accent-dk)' : 'var(--text)' }}>{value}</div>
+      <div className="eyebrow" style={{ marginTop: 2 }}>{label}</div>
     </div>
   )
 }

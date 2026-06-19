@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { getPurchaseRequests } from '../../lib/inventory'
 import PurchaseRequestSheet from './PurchaseRequestSheet'
+import Icon from '../shared/Icon'
 
 // Purchase Requests queue.
 //
@@ -16,6 +17,8 @@ const STATUS_OPTIONS = [
   { id: 'received',  label: 'Received',   statuses: ['received'] },
   { id: 'cancelled', label: 'Cancelled',  statuses: ['cancelled'] },
 ]
+
+const GRID = '130px 96px 1.2fr 64px 100px 130px 96px 28px'
 
 export default function PurchaseRequestsTab({ locations, refreshKey }) {
   const { currentUser } = useApp()
@@ -53,22 +56,10 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
 
   return (
     <div>
-      {/* Top action row */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        marginBottom: 12, flexWrap: 'wrap',
-      }}>
+      {/* Filter chips + New PR */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         {STATUS_OPTIONS.map(opt => (
-          <button
-            key={opt.id}
-            onClick={() => setFilter(opt.id)}
-            style={{
-              padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-              background: filter === opt.id ? 'var(--orange)' : 'var(--gray-lt)',
-              color: filter === opt.id ? 'white' : 'var(--muted)',
-              border: 'none', cursor: 'pointer',
-            }}
-          >
+          <button key={opt.id} onClick={() => setFilter(opt.id)} style={chipStyle(filter === opt.id)}>
             {opt.label}
           </button>
         ))}
@@ -77,19 +68,15 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
           <button
             onClick={() => setShowSheet({ mode: 'new' })}
             className="btn btn-primary"
-            style={{ padding: '6px 14px', fontSize: 13 }}
+            style={{ height: 32, padding: '0 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 7 }}
           >
-            ＋ New PR
+            <Icon name="plus" size={15} /> New PR
           </button>
         )}
       </div>
 
       {error && (
-        <div style={{
-          padding: '8px 12px', marginBottom: 10,
-          background: 'var(--red-lt)', color: 'var(--red)',
-          borderRadius: 'var(--r-sm)', fontSize: 13,
-        }}>
+        <div style={{ padding: '8px 12px', marginBottom: 10, background: 'var(--red-lt)', color: 'var(--red)', borderRadius: 'var(--r-sm)', fontSize: 13 }}>
           {error}
         </div>
       )}
@@ -99,36 +86,31 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
       )}
 
       {!loading && rows.length === 0 && (
-        <div style={{ padding: 40, textAlign: 'center', color: 'var(--hint)' }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+        <div style={{ padding: 48, textAlign: 'center', color: 'var(--hint)' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10, color: 'var(--border2)' }}>
+            <Icon name="clipboard" size={36} />
+          </div>
           <div>No purchase requests in this view.</div>
           {canCreate && (
             <div style={{ marginTop: 12, fontSize: 12 }}>
-              Click <strong>＋ New PR</strong> or use bulk-select on the Stock / Parts tabs to create one.
+              Click <strong>New PR</strong> or use bulk-select on the Stock / Parts tabs to create one.
             </div>
           )}
         </div>
       )}
 
       {!loading && rows.length > 0 && (
-        <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
-          {/* Column header */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '130px 90px 1.2fr 70px 100px 130px 100px 50px',
-            gap: 8, padding: '8px 12px',
-            background: 'var(--surface2)', fontSize: 10, fontWeight: 700,
-            color: 'var(--muted)', textTransform: 'uppercase',
-            borderBottom: '1px solid var(--border)',
-          }}>
-            <div>PR #</div>
-            <div>Status</div>
-            <div>Vendors</div>
-            <div style={{ textAlign: 'right' }}>Lines</div>
-            <div style={{ textAlign: 'right' }}>Est total</div>
-            <div>Created</div>
-            <div>ETA</div>
-            <div></div>
+        <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r)', overflow: 'hidden', boxShadow: '0 1px 3px rgba(15,23,42,0.06)' }}>
+          {/* Header */}
+          <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, padding: '0 14px', height: 38, alignItems: 'center', background: 'var(--surface2)', borderBottom: '1px solid var(--border)' }}>
+            <span className="eyebrow">PR #</span>
+            <span className="eyebrow">Status</span>
+            <span className="eyebrow">Vendors</span>
+            <span className="eyebrow" style={{ textAlign: 'right' }}>Lines</span>
+            <span className="eyebrow" style={{ textAlign: 'right' }}>Est total</span>
+            <span className="eyebrow">Created</span>
+            <span className="eyebrow">ETA</span>
+            <span></span>
           </div>
 
           {rows.map((pr, i) => {
@@ -142,38 +124,33 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
                 key={pr.id}
                 onClick={() => setShowSheet({ mode: 'detail', prId: pr.id })}
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: '130px 90px 1.2fr 70px 100px 130px 100px 50px',
-                  gap: 8, padding: '10px 12px', alignItems: 'center',
-                  fontSize: 13, cursor: 'pointer',
-                  background: 'var(--surface)',
-                  borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : 'none',
+                  display: 'grid', gridTemplateColumns: GRID, gap: 8, padding: '10px 14px', alignItems: 'center',
+                  fontSize: 13, cursor: 'pointer', background: 'var(--surface)',
+                  borderBottom: i < rows.length - 1 ? '1px solid var(--row-divider)' : 'none',
                   transition: 'background 0.15s',
                 }}
                 onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface2)' }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface)' }}
               >
-                <div style={{ fontWeight: 700, color: 'var(--orange)' }}>{pr.pr_number}</div>
-                <div>
-                  <span style={statusPill(pr.status)}>{pr.status}</span>
-                </div>
+                <div className="mono" style={{ fontWeight: 600, color: 'var(--accent-dk)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pr.pr_number}</div>
+                <div><span style={statusPill(pr.status)}>{pr.status}</span></div>
                 <div style={{ color: pr.vendors.length === 0 ? 'var(--hint)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {vendorStr}
                 </div>
-                <div style={{ textAlign: 'right', fontWeight: 600 }}>{pr.lineCount}</div>
-                <div style={{ textAlign: 'right', fontWeight: 600 }}>
+                <div className="mono" style={{ textAlign: 'right', fontWeight: 600 }}>{pr.lineCount}</div>
+                <div className="mono" style={{ textAlign: 'right', fontWeight: 600 }}>
                   {pr.estTotal > 0 ? `$${pr.estTotal.toFixed(2)}` : '—'}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                  {pr.created_by_user?.name || '—'}
-                  <div style={{ fontSize: 10, color: 'var(--hint)' }}>
-                    {pr.date_requested}
-                  </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', minWidth: 0 }}>
+                  <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pr.created_by_user?.name || '—'}</div>
+                  <div className="mono" style={{ fontSize: 10, color: 'var(--hint)' }}>{pr.date_requested}</div>
                 </div>
-                <div style={{ fontSize: 12, color: pr.expected_at ? 'var(--text)' : 'var(--hint)' }}>
+                <div className="mono" style={{ fontSize: 12, color: pr.expected_at ? 'var(--text)' : 'var(--hint)' }}>
                   {pr.expected_at || '—'}
                 </div>
-                <div style={{ textAlign: 'right', color: 'var(--muted)' }}>›</div>
+                <div style={{ textAlign: 'right', color: 'var(--hint)', display: 'flex', justifyContent: 'flex-end' }}>
+                  <Icon name="chevron-right" size={16} />
+                </div>
               </div>
             )
           })}
@@ -193,17 +170,31 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
   )
 }
 
+// Console filter chip — active reads as a dark chip.
+function chipStyle(selected) {
+  return {
+    display: 'inline-flex', alignItems: 'center',
+    height: 30, padding: '0 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+    whiteSpace: 'nowrap', cursor: 'pointer',
+    background: selected ? 'var(--dark-bar)' : 'var(--surface)',
+    color: selected ? '#fff' : 'var(--muted)',
+    border: `1px solid ${selected ? 'var(--dark-bar)' : 'var(--border2)'}`,
+  }
+}
+
+// Status pill — semantic colors kept (pending amber, ordered emerald,
+// received grey, cancelled red).
 function statusPill(status) {
   const colors = {
-    pending: { fg: 'var(--amber)', bg: 'var(--amber-lt)', border: 'var(--amber)' },
-    ordered: { fg: 'var(--teal-dk)', bg: 'var(--teal-lt)', border: 'var(--teal)' },
-    received: { fg: 'var(--muted)', bg: 'var(--gray-lt)', border: 'var(--border)' },
-    cancelled: { fg: 'var(--red)', bg: 'var(--red-lt)', border: 'var(--red)' },
+    pending:   { fg: 'var(--amber)',     bg: 'var(--amber-lt)', border: 'var(--amber)' },
+    ordered:   { fg: 'var(--accent-dk)', bg: 'var(--accent-lt)', border: 'var(--accent)' },
+    received:  { fg: 'var(--muted)',     bg: 'var(--gray-lt)',  border: 'var(--border2)' },
+    cancelled: { fg: 'var(--red)',       bg: 'var(--red-lt)',   border: 'var(--red)' },
   }
   const c = colors[status] || colors.pending
   return {
-    padding: '2px 8px', borderRadius: 999,
-    fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+    padding: '2px 9px', borderRadius: 999,
+    fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.03em',
     color: c.fg, background: c.bg, border: `1px solid ${c.border}`,
     whiteSpace: 'nowrap',
   }
