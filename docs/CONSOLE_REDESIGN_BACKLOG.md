@@ -19,7 +19,10 @@ Direction: dark/orange-teal + emoji → **light / emerald-slate + line icons**, 
 | Inventory chrome | `InventoryView.jsx` — toolbar + secondary sub-nav + desktop actions strip / phone actions sheet |
 | **Stock flagship** | `InventoryStockTab.jsx` — desktop data table + phone cards, filter chips, search, **dark bulk-select bar**, status badges. Verified on real data (220 parts). |
 | Inventory read tabs | **Parts**, **Activity**, **Purchase Requests**, **Audit** — Console list/table + chips + status pills + mono data + dark bulk bar (Parts). Verified live. |
+| Locations (chrome) | **Locations** — icon tiles, elevated rows, unified action chips, Add button. Deep bin/aisle sub-rows + form/retire overlays still recolored-only (polish). |
 | (back button) | Desktop top-level tab Back enabled in the new shell |
+
+**→ The entire Inventory section is now Console (all 6 sub-tabs).**
 
 The whole manager app already navigates + looks like Console; un-redesigned screens are recolored (token cascade) but keep their old layouts until their turn.
 
@@ -27,10 +30,11 @@ The whole manager app already navigates + looks like Console; un-redesigned scre
 
 ## ⏭️ Next up (ordered — each inherits the Stock recipe)
 
-### A. Remaining inventory sub-tab
-1. **Locations** — warehouse → bin tree (the heaviest; nested disclosure + add-bin/edit/retire-with-recovery + the `LocationDetailPanel` drill-in). `InventoryLocationsTab.jsx`. *Not yet redesigned — its row chrome is still the old layout (recolored via tokens). Best done as its own focused pass with verification, given its CRUD surface.*
-
-   ~~Parts · Activity · Purchase Requests · Audit~~ — ✅ done (see the Done table).
+### A. Inventory sub-tabs — ✅ COMPLETE (all 6)
+Stock · Parts · Activity · Purchase Requests · Audit · Locations all on Console.
+Remaining inventory polish (deferred, low priority): Locations' nested bin/aisle
+sub-rows + inline form/retire overlays; leftover emoji in collapsed-filter
+summary strings; the action/detail **sheets** (see C).
 
 ### B. Cycle count
 6. Full-screen scanner flow — its own chrome. `cycleCount/CountTab.jsx` (+ `cycleCount/*`)
