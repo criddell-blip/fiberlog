@@ -1,17 +1,10 @@
 import { useState, useEffect } from 'react'
 import { getTodaySessions, db, nextChannelSuffix } from '../../lib/supabase'
 import { useApp } from '../../AppContext'
-
-const CREW_TYPE_ICON = {
-  aerial: '🏗️', underground: '⛏️', splice: '🔌',
-  drop: '🏠', locator: '📡', contractor: '🔧',
-  // Infrastructure crew (towers, business installs, MDU equipment closets).
-  // Install techs render with the house emoji distinct from drop crews.
-  infrastructure: '🛠️', install: '🏘️',
-}
+import Icon from '../shared/Icon'
 
 const STATUS_CONFIG = {
-  'in-progress': { color: 'var(--teal)', bg: 'var(--teal-lt)', label: 'In progress' },
+  'in-progress': { color: 'var(--accent-dk)', bg: 'var(--accent-lt)', label: 'In progress' },
   'started': { color: 'var(--blue)', bg: 'var(--blue-lt)', label: 'Started' },
   'submitted': { color: 'var(--gray)', bg: 'var(--gray-lt)', label: 'Submitted' },
   'none': { color: 'var(--hint)', bg: 'var(--bg)', label: 'Not started' },
@@ -120,16 +113,17 @@ export default function CrewStatus() {
             minmax(120px, 1fr) means each card needs ≥120px or it wraps. */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
           {[
-            { label: 'Active', value: active.length, color: 'var(--teal)' },
+            { label: 'Active', value: active.length, color: 'var(--accent-dk)' },
             { label: 'Footage', value: `${totalFootage.toLocaleString()} ft`, color: 'var(--blue)' },
             { label: 'Log entries', value: totalEntries, color: 'var(--purple)' },
           ].map(s => (
             <div key={s.label} style={{
               background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 'var(--r-sm)', padding: '12px', textAlign: 'center'
+              borderRadius: 'var(--r)', padding: '12px', textAlign: 'center',
+              boxShadow: '0 1px 3px rgba(15,23,42,0.06)',
             }}>
-              <div style={{ fontSize: 20, fontWeight: 800, color: s.color }}>{s.value}</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.label}</div>
+              <div className="mono" style={{ fontSize: 20, fontWeight: 600, color: s.color }}>{s.value}</div>
+              <div className="eyebrow" style={{ marginTop: 2 }}>{s.label}</div>
             </div>
           ))}
         </div>
@@ -147,7 +141,7 @@ export default function CrewStatus() {
             display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap',
           }}>
             <span>
-              👀 Showing your <strong>{scopedSessions.length}</strong> direct report{scopedSessions.length === 1 ? '' : 's'}.
+              Showing your <strong>{scopedSessions.length}</strong> direct report{scopedSessions.length === 1 ? '' : 's'}.
               {scopedSessions.length === 0 && (
                 <> No one's reporting to you yet — assign reports via <strong>Admin → Users → Reports to</strong>.</>
               )}
@@ -181,12 +175,12 @@ export default function CrewStatus() {
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>{s.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                        {CREW_TYPE_ICON[s.crew_type]} {s.current_task || 'No task selected'}
+                      <div style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <Icon name="users" size={12} /> {s.current_task || 'No task selected'}
                       </div>
                       {s.current_project && (
-                        <div style={{ fontSize: 11, color: 'var(--hint)' }}>
-                          📍 {s.current_project}
+                        <div style={{ fontSize: 11, color: 'var(--hint)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <Icon name="pin" size={12} /> {s.current_project}
                         </div>
                       )}
                     </div>
@@ -226,8 +220,8 @@ export default function CrewStatus() {
                 </div>
                 <div>
                   <div style={{ fontWeight: 600, fontSize: 13 }}>{s.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--hint)' }}>
-                    {CREW_TYPE_ICON[s.crew_type]} {s.crew_type}
+                  <div style={{ fontSize: 11, color: 'var(--hint)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <Icon name="users" size={12} /> {s.crew_type}
                   </div>
                 </div>
               </div>
