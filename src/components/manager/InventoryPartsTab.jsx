@@ -6,6 +6,7 @@ import BulkMoveSheet from './BulkMoveSheet'
 import PurchaseRequestSheet from './PurchaseRequestSheet'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 const COMMON_UNITS = ['ea', 'ft', 'm', 'in', 'lb', 'kg', 'box', 'roll', 'spool', 'pair', 'pack', 'kit']
 
@@ -310,36 +311,37 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
         </button>
       </div>
 
-      <input
-        type="text"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        placeholder="Search parts by name, SKU, or category…"
-        style={{
-          width: '100%', padding: '8px 12px',
-          border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)',
-          fontSize: 13, background: 'var(--bg)', marginBottom: 6
-        }}
-      />
+      <div style={{ position: 'relative', marginBottom: 8 }}>
+        <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--hint)', display: 'flex', pointerEvents: 'none' }}>
+          <Icon name="search" size={16} />
+        </span>
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search parts by name, SKU, or category…"
+          style={{
+            width: '100%', height: 38, padding: '0 12px 0 36px',
+            border: '1px solid var(--border2)', borderRadius: 'var(--r-sm)',
+            fontSize: 14, background: 'var(--surface)',
+          }}
+        />
+      </div>
 
       {/* Compressed stats row — single line, smaller font. Tip text moves
           to the select-all button's title attribute so it doesn't eat a row. */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 }}>
-        <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+        <div className="mono" style={{ fontSize: 12, color: 'var(--hint)' }}>
           {filtered.length.toLocaleString()} of {parts.length.toLocaleString()} parts
           {filter === 'draft' && counts.draft > 0 && (
-            <span style={{ color: 'var(--amber)', marginLeft: 6 }}>· sorted by stock</span>
+            <span style={{ marginLeft: 6 }}>· sorted by stock</span>
           )}
         </div>
         {filtered.length > 0 && (
           <button
             onClick={allVisibleSelected ? clearSelection : selectAllVisible}
             title="Tip: shift-click a part to select a range"
-            style={{
-              fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 'var(--r-sm)',
-              border: '1.5px solid var(--border2)', background: 'var(--bg)', color: 'var(--muted)', cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
+            style={pillStyle(false)}
           >
             {allVisibleSelected ? 'Deselect all' : `Select all ${filtered.length}`}
           </button>
@@ -351,7 +353,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           {parts.length === 0 ? 'No parts yet' : 'No parts match your filters'}
         </div>
       ) : (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', overflow: 'hidden', boxShadow: '0 1px 3px rgba(15,23,42,0.06)' }}>
           {filtered.map((p, i) => {
             const stockQty = stockTotals.get(p.id) || 0
             const isSelected = selectedIds.has(p.id)
@@ -362,12 +364,12 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                 ref={el => { partRowRefs.current[p.id] = el }}
                 style={{
                   display: 'flex', alignItems: 'center', padding: '10px 14px', gap: 10,
-                  borderBottom: i < filtered.length - 1 ? '1px solid var(--border)' : 'none',
-                  background: isHighlighted ? 'var(--teal-lt)'
-                    : isSelected ? 'var(--orange-lt)'
+                  borderBottom: i < filtered.length - 1 ? '1px solid var(--row-divider)' : 'none',
+                  background: isHighlighted ? 'var(--accent-lt)'
+                    : isSelected ? 'var(--selected-row)'
                     : 'transparent',
-                  boxShadow: isHighlighted ? 'inset 0 0 0 2px var(--teal)' : 'none',
-                  transition: 'background 0.3s, box-shadow 0.3s',
+                  boxShadow: isHighlighted ? 'inset 0 0 0 2px var(--accent)' : 'none',
+                  transition: 'background 0.25s, box-shadow 0.25s',
                 }}
               >
                 {/*
@@ -383,25 +385,20 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                   style={{ cursor: 'pointer', flexShrink: 0 }}
                 />
 
-                <div style={{
-                  fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 6,
-                  background: p.is_active ? 'var(--teal-lt)' : 'var(--amber-lt)',
-                  color: p.is_active ? 'var(--teal)' : 'var(--amber)',
-                  whiteSpace: 'nowrap', flexShrink: 0,
-                }}>
+                <span className={`status ${p.is_active ? 'status-instock' : 'status-draft'}`} style={{ flexShrink: 0, width: 56 }}>
                   {p.is_active ? 'ACTIVE' : 'DRAFT'}
-                </div>
+                </span>
 
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div style={{ fontWeight: 600, fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {p.name}
                     {p.nickname && (
-                      <span style={{ fontWeight: 400, color: 'var(--orange)', marginLeft: 6, fontStyle: 'italic', fontSize: 12 }}>
+                      <span style={{ fontWeight: 400, color: 'var(--accent-dk)', marginLeft: 6, fontStyle: 'italic', fontSize: 12 }}>
                         aka {p.nickname}
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--hint)' }}>
+                  <div className="mono" style={{ fontSize: 12, color: 'var(--hint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {p.id} · {p.unit || 'ea'} · {p.category || 'Uncategorized'}
                   </div>
                 </div>
@@ -409,22 +406,16 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                 <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 60 }}>
                   {isQtyPaused ? (
                     stockQty > 0 ? (
-                      <span style={{
-                        fontSize: 10, fontWeight: 700,
-                        padding: '2px 8px', borderRadius: 10,
-                        background: 'var(--teal-lt)', color: 'var(--teal-dk)',
-                        border: '1px solid var(--teal)',
-                        whiteSpace: 'nowrap',
-                      }}>stocked</span>
+                      <span className="pill pill-success pill-sm">stocked</span>
                     ) : (
                       <span style={{ fontSize: 10, color: 'var(--hint)' }}>—</span>
                     )
                   ) : (
                     <>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: stockQty > 0 ? 'var(--orange)' : 'var(--hint)' }}>
+                      <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: stockQty > 0 ? 'var(--text)' : 'var(--hint)' }}>
                         {stockQty.toLocaleString()}
                       </div>
-                      <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>in stock</div>
+                      <div className="eyebrow" style={{ fontSize: 9 }}>in stock</div>
                     </>
                   )}
                 </div>
@@ -453,12 +444,11 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
       {selectedCount > 0 && (
         <div style={{
           position: 'sticky', bottom: 0, marginTop: 10,
-          background: 'var(--surface)', border: '1.5px solid var(--orange)',
-          borderRadius: 'var(--r-sm)', padding: '10px 14px',
+          background: 'var(--dark-bar)', borderRadius: 'var(--r)', padding: '10px 14px',
           display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-          boxShadow: '0 -4px 12px rgba(0,0,0,0.1)',
+          boxShadow: '0 -6px 20px rgba(15,23,42,0.20)',
         }}>
-          <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--orange)', flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#fff', flex: 1 }}>
             {selectedCount} selected
           </div>
           <button onClick={() => setBulkEditing(true)} style={bulkActionBtn('orange')}>✎ Bulk edit</button>
@@ -716,43 +706,44 @@ function PartLocationsPanel({ part, locations, currentUser, onClose, onJumpToLoc
   )
 }
 
-function pillStyle(selected, color = 'orange') {
-  if (color === 'amber') {
-    return {
-      padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-      background: selected ? 'var(--amber)' : 'var(--gray-lt)',
-      color: selected ? 'white' : 'var(--amber)',
-      border: 'none', cursor: 'pointer',
-    }
-  }
+// Console filter chip — active reads as a dark chip (amber variant for the
+// drafts filter). Inactive is a white hairline chip.
+function pillStyle(selected, color = 'accent') {
+  const activeBg = color === 'amber' ? 'var(--amber)' : 'var(--dark-bar)'
   return {
-    padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-    background: selected ? 'var(--orange)' : 'var(--gray-lt)',
-    color: selected ? 'white' : 'var(--muted)',
-    border: 'none', cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    height: 30, padding: '0 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+    whiteSpace: 'nowrap', cursor: 'pointer',
+    background: selected ? activeBg : 'var(--surface)',
+    color: selected ? '#fff' : 'var(--muted)',
+    border: `1px solid ${selected ? activeBg : 'var(--border2)'}`,
   }
 }
 
+// Small per-row action button (outline chip).
 function quickBtnStyle(variant) {
   const base = {
-    padding: '5px 8px', borderRadius: 'var(--r-sm)',
-    fontSize: 10, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    padding: '5px 9px', borderRadius: 8, fontSize: 11, fontWeight: 600,
+    cursor: 'pointer', whiteSpace: 'nowrap', background: 'var(--surface)',
+    border: '1px solid var(--border2)',
   }
-  if (variant === 'teal')  return { ...base, border: '1.5px solid var(--teal)',  background: 'var(--teal-lt)',  color: 'var(--teal)' }
-  if (variant === 'amber') return { ...base, border: '1.5px solid var(--amber)', background: 'var(--amber-lt)', color: 'var(--amber)' }
-  return                       { ...base, border: '1.5px solid var(--border2)', background: 'var(--bg)',     color: 'var(--muted)' }
+  if (variant === 'teal')  return { ...base, color: 'var(--accent-dk)', borderColor: 'var(--accent)' }
+  if (variant === 'amber') return { ...base, color: 'var(--amber)', borderColor: 'var(--amber)' }
+  return { ...base, color: 'var(--muted)' }
 }
 
+// Buttons inside the dark bulk-select bar: emerald primary, ghost cancel, or
+// outlined-on-dark for the rest.
 function bulkActionBtn(variant) {
   const base = {
-    padding: '7px 12px', borderRadius: 'var(--r-sm)',
-    fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    padding: '8px 13px', borderRadius: 8, fontSize: 13, fontWeight: 700,
+    cursor: 'pointer', whiteSpace: 'nowrap',
   }
-  if (variant === 'orange') return { ...base, border: 'none', background: 'var(--orange)', color: 'white' }
-  if (variant === 'teal')   return { ...base, border: '1.5px solid var(--teal)',  background: 'var(--teal-lt)',  color: 'var(--teal)' }
-  if (variant === 'amber')  return { ...base, border: '1.5px solid var(--amber)', background: 'var(--amber-lt)', color: 'var(--amber)' }
-  if (variant === 'purple') return { ...base, border: '1.5px solid var(--purple)', background: 'var(--purple-lt)', color: 'var(--purple)' }
-  return                         { ...base, border: '1.5px solid var(--border2)', background: 'var(--bg)',     color: 'var(--muted)' }
+  if (variant === 'orange') return { ...base, border: 'none', background: 'var(--accent)', color: '#fff' }
+  if (variant === 'ghost')  return { ...base, border: 'none', background: 'transparent', color: 'rgba(255,255,255,0.7)', fontWeight: 600 }
+  return { ...base, border: '1px solid rgba(255,255,255,0.3)', background: 'transparent', color: '#fff' }
 }
 
 // ─── Single-part edit sheet ─────────────────────────────────────────────────
