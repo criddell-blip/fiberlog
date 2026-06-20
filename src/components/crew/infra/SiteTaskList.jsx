@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useApp } from '../../../AppContext'
 import { addInfraTask } from '../../../lib/supabase'
 import { useBackClose } from '../../../lib/backStack'
+import Icon from '../../shared/Icon'
 
 // SiteTaskList — leaf layer of the infra navigation. Shows the tasks for a
 // given site and lets the crew create a new one. Mirrors TaskList.jsx from
@@ -97,7 +98,7 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
               fontWeight: 800, fontSize: 11,
               display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
             }}
-          >👤</button>
+          ><Icon name="users" size={15} /></button>
         )}
       </div>
 
@@ -106,9 +107,9 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
         <button
           className="btn btn-primary"
           onClick={() => setShowNewTask(true)}
-          style={{ width: '100%', padding: '10px 14px', fontSize: 13 }}
+          style={{ width: '100%', padding: '10px 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
         >
-          ＋ New task at this site
+          <Icon name="plus" size={15} /> New task at this site
         </button>
       </div>
 
@@ -143,7 +144,7 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
                 fontSize: 12, color: 'var(--muted)', fontWeight: 600, textAlign: 'left'
               }}
             >
-              {showPast ? '▾' : '▸'} {completedTasks.length} completed task{completedTasks.length === 1 ? '' : 's'}
+              <Icon name={showPast ? 'chevron-down' : 'chevron-right'} size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />{completedTasks.length} completed task{completedTasks.length === 1 ? '' : 's'}
             </button>
             {showPast && completedTasks.map(t => (
               // Tappable — routes through onSelect which the parent
@@ -255,7 +256,7 @@ function TaskCard({ task, onClick, muted }) {
         opacity: muted ? 0.7 : 1,
       }}
     >
-      <span style={{ fontSize: 16 }}>🛠️</span>
+      <span style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: 'var(--surface2)', color: 'var(--accent-dk)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="box" size={16} /></span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {task.name}
@@ -276,7 +277,7 @@ function TaskCard({ task, onClick, muted }) {
         }}>Pending</span>
       )}
       {onClick && (
-        <span style={{ fontSize: 16, color: 'var(--hint)' }}>›</span>
+        <Icon name="chevron-right" size={16} color="var(--hint)" />
       )}
     </div>
   )

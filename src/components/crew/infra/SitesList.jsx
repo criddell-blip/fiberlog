@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import Icon from '../../shared/Icon'
 
 // SitesList — middle layer of the infra navigation. Given an infra project
 // (which carries its sites pre-loaded via getInfraTree), renders a searchable,
@@ -9,9 +10,9 @@ import { useState, useMemo } from 'react'
 // a "% complete" concept the way phases do (a tower is binary done/not-done,
 // not partial).
 
-const SITE_TYPE_ICONS = {
-  wireless: '📡',
-  fiber:    '🏢',
+const SITE_TYPE_ICON_NAME = {
+  wireless: 'pin',
+  fiber:    'warehouse',
 }
 const SITE_TYPE_LABELS = {
   wireless: 'Wireless',
@@ -79,7 +80,7 @@ export default function SitesList({ project, onSelect, onBack, onUserTap }) {
               fontWeight: 800, fontSize: 11,
               display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
             }}
-          >👤</button>
+          ><Icon name="users" size={15} /></button>
         )}
       </div>
 
@@ -111,7 +112,7 @@ export default function SitesList({ project, onSelect, onBack, onUserTap }) {
                 onClick={() => setTypeFilter(t)}
                 style={pillStyle(typeFilter === t)}
               >
-                {SITE_TYPE_ICONS[t] || '📍'} {SITE_TYPE_LABELS[t] || t}
+                <Icon name={SITE_TYPE_ICON_NAME[t] || 'pin'} size={13} /> {SITE_TYPE_LABELS[t] || t}
               </button>
             ))}
           </div>
@@ -128,7 +129,6 @@ export default function SitesList({ project, onSelect, onBack, onUserTap }) {
         {filtered.map(s => {
           const open  = s.tasks.filter(isActiveCrewTask).length
           const total = s.tasks.length
-          const icon  = SITE_TYPE_ICONS[s.type] || '📍'
           return (
             <button
               key={s.id}
@@ -143,10 +143,9 @@ export default function SitesList({ project, onSelect, onBack, onUserTap }) {
             >
               <div style={{
                 width: 36, height: 36, borderRadius: 8, flexShrink: 0,
-                background: 'var(--gray-lt)',
+                background: 'var(--surface2)', color: 'var(--accent-dk)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 16,
-              }}>{icon}</div>
+              }}><Icon name={SITE_TYPE_ICON_NAME[s.type] || 'pin'} size={18} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {s.name}
@@ -157,16 +156,16 @@ export default function SitesList({ project, onSelect, onBack, onUserTap }) {
                   </div>
                 )}
                 <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 2 }}>
-                  {open} open / {total} task{total === 1 ? '' : 's'}
+                  <span className="mono">{open}</span> open / <span className="mono">{total}</span> task{total === 1 ? '' : 's'}
                 </div>
               </div>
               {open > 0 && (
                 <span style={{
                   fontSize: 11, fontWeight: 700, padding: '2px 8px',
-                  borderRadius: 20, background: 'var(--orange-lt)', color: 'var(--orange)', flexShrink: 0
+                  borderRadius: 20, background: 'var(--accent-lt)', color: 'var(--accent-dk)', flexShrink: 0
                 }}>{open}</span>
               )}
-              <span style={{ fontSize: 16, color: 'var(--hint)' }}>›</span>
+              <Icon name="chevron-right" size={18} color="var(--hint)" />
             </button>
           )
         })}
@@ -177,9 +176,10 @@ export default function SitesList({ project, onSelect, onBack, onUserTap }) {
 
 function pillStyle(active) {
   return {
-    padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-    background: active ? 'var(--orange)' : 'var(--gray-lt)',
-    color: active ? 'white' : 'var(--muted)',
-    border: 'none', cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    height: 28, padding: '0 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+    background: active ? 'var(--dark-bar)' : 'var(--surface)',
+    color: active ? '#fff' : 'var(--muted)',
+    border: `1px solid ${active ? 'var(--dark-bar)' : 'var(--border2)'}`, cursor: 'pointer',
   }
 }
