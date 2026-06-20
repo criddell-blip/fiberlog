@@ -48,9 +48,9 @@ summary strings; the action/detail **sheets** (see C).
 8. ✅ **Submissions / Approvals** (`SubmissionsQueue.jsx`) — done
 9. ✅ **Crew status** (`CrewStatus.jsx`) — done
 10. **Projects** (`ProjectManager.jsx`) — ✅ list view done (elevation, mono %, INFRA badge, chevron). **Remaining:** project detail + fiber phases + infra sites + edit/decommission + the form overlays (recolored-only for now).
-11. **Reports** (`ReportsView.jsx`) — filters + grouped results table + BoxHero stock + PDF
+11. **Reports** (`ReportsView.jsx`) — ✅ header/chrome done (chips, mono stats, icon empty state). **Remaining:** the expandable result rows (PartRow/PersonGroup/ProjectGroup) recolored-only.
 12. **Assemblies** (`AssemblyEditor.jsx`)
-13. **Admin** (`AdminPanel.jsx`, `AdminUsersView.jsx`, `CrewTypePermissionsView.jsx`)
+13. **Admin** (`AdminPanel.jsx`, `AdminUsersView.jsx` [direct-reports picker readability already fixed], `CrewTypePermissionsView.jsx`)
 
 ### E. Crew app (field) — biggest chunk, currently only recolored
 14. Crew shell + My Stock (`CrewApp.jsx`, `MyStockView.jsx`, `CrewMovementSheet.jsx`)
