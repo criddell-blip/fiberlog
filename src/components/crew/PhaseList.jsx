@@ -1,6 +1,7 @@
 // PhaseList.jsx
 import { useApp } from '../../AppContext'
 import { t } from '../../lib/i18n'
+import Icon from '../shared/Icon'
 
 const isCompletedTask = t => t.status === 'done' || t.status === 'approved'
 
@@ -42,15 +43,15 @@ export default function PhaseList({ project, onSelect, onBack, onUserTap }) {
                     so the two screens read the same when stacked back to back. */}
                 <div style={{ marginTop: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
-                    <span>{pct}% {t('pctComplete', lang)}</span>
-                    <span>{done}/{total} {t('tasksDone', lang)}</span>
+                    <span><span className="mono">{pct}%</span> {t('pctComplete', lang)}</span>
+                    <span><span className="mono">{done}/{total}</span> {t('tasksDone', lang)}</span>
                   </div>
                   <div className="prog-bar">
                     <div className="prog-fill" style={{ width: `${pct}%` }} />
                   </div>
                 </div>
               </div>
-              <div style={{ fontSize: 20, color: 'var(--border2)', flexShrink: 0 }}>›</div>
+              <Icon name="chevron-right" size={20} color="var(--border2)" />
             </div>
           )
         })}

@@ -1,5 +1,6 @@
 import { useApp } from '../../AppContext'
 import { t } from '../../lib/i18n'
+import Icon from '../shared/Icon'
 
 const PROJECT_ICONS = ['🏔️', '🌄', '🏕️', '📡', '🌲']
 const PROJECT_COLORS = ['ip-teal', 'ip-blue', 'ip-amber', 'ip-purple', 'ip-orange']
@@ -42,9 +43,8 @@ export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
           >
             <div className="icon-pill ip-orange" style={{
               border: '1.5px solid var(--orange-dk)',
-              fontSize: 24,
             }}>
-              📦
+              <Icon name="box" size={22} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 16 }}>My Stock</div>
@@ -52,7 +52,7 @@ export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
                 What's on your truck — load and return
               </div>
             </div>
-            <div style={{ fontSize: 20, color: 'var(--border2)', flexShrink: 0 }}>›</div>
+            <Icon name="chevron-right" size={20} color="var(--border2)" />
           </div>
         )}
 
@@ -60,7 +60,7 @@ export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
 
         {projects.length === 0 && (
           <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--hint)' }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10, color: 'var(--gray-mid)' }}><Icon name="folder" size={32} /></div>
             <div>{t('noProjects', lang)}</div>
           </div>
         )}
@@ -88,15 +88,15 @@ export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
                 </div>
                 <div style={{ marginTop: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
-                    <span>{pct}% {t('pctComplete', lang)}</span>
-                    <span>{doneTasks}/{totalTasks} {t('tasksDone', lang)}</span>
+                    <span><span className="mono">{pct}%</span> {t('pctComplete', lang)}</span>
+                    <span><span className="mono">{doneTasks}/{totalTasks}</span> {t('tasksDone', lang)}</span>
                   </div>
                   <div className="prog-bar">
                     <div className="prog-fill" style={{ width: `${pct}%` }} />
                   </div>
                 </div>
               </div>
-              <div style={{ fontSize: 20, color: 'var(--border2)', flexShrink: 0 }}>›</div>
+              <Icon name="chevron-right" size={20} color="var(--border2)" />
             </div>
           )
         })}

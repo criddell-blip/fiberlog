@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { db, addTask, subscribeToTasks } from '../../lib/supabase'
 import { t } from '../../lib/i18n'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 const JOB_TYPES = [
   { id: 'aerial', label: 'Aerial Construction', icon: '🏗️' },
@@ -236,7 +237,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
                   )}
                 </div>
               </div>
-              <div style={{ fontSize: 20, color: 'var(--border2)' }}>›</div>
+              <Icon name="chevron-right" size={20} color="var(--border2)" />
             </div>
           )
         })}
@@ -279,7 +280,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
                           tell the crew this is pending — no redundant pill. */}
                     </div>
                   </div>
-                  <div style={{ fontSize: 20, color: 'var(--border2)' }}>›</div>
+                  <Icon name="chevron-right" size={20} color="var(--border2)" />
                 </div>
               )
             })}
@@ -302,7 +303,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
                 {lang === 'es' ? 'Completadas' : 'Completed'}
                 <span style={{ marginLeft: 6, color: 'var(--muted)' }}>· {approvedTasks.length}</span>
               </span>
-              <span style={{ fontSize: 14, color: 'var(--hint)', display: 'inline-block', transform: showPast ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}>›</span>
+              <span style={{ color: 'var(--hint)', display: 'inline-flex', transform: showPast ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}><Icon name="chevron-right" size={15} /></span>
             </button>
 
             {showPast && approvedTasks.map((task, i) => {
@@ -339,8 +340,8 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
                       </div>
                     )}
                   </div>
-                  <span className="pill pill-success pill-sm" style={{ flexShrink: 0 }}>✓</span>
-                  <span style={{ fontSize: 14, color: 'var(--hint)', flexShrink: 0 }}>›</span>
+                  <span className="pill pill-success pill-sm" style={{ flexShrink: 0, display: 'inline-flex' }}><Icon name="check" size={11} /></span>
+                  <Icon name="chevron-right" size={15} color="var(--hint)" />
                 </div>
               )
             })}
