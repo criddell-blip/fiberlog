@@ -47,7 +47,7 @@ summary strings; the action/detail **sheets** (see C).
 ### D. The rest of the manager app (per the rollout tracker)
 8. ✅ **Submissions / Approvals** (`SubmissionsQueue.jsx`) — done
 9. ✅ **Crew status** (`CrewStatus.jsx`) — done
-10. **Projects** (`ProjectManager.jsx`) — fiber phases + infra sites + edit/decommission *(large — project list view is the high-value first slice; detail/phase/site overlays after)*
+10. **Projects** (`ProjectManager.jsx`) — ✅ list view done (elevation, mono %, INFRA badge, chevron). **Remaining:** project detail + fiber phases + infra sites + edit/decommission + the form overlays (recolored-only for now).
 11. **Reports** (`ReportsView.jsx`) — filters + grouped results table + BoxHero stock + PDF
 12. **Assemblies** (`AssemblyEditor.jsx`)
 13. **Admin** (`AdminPanel.jsx`, `AdminUsersView.jsx`, `CrewTypePermissionsView.jsx`)
