@@ -53,11 +53,11 @@ summary strings; the action/detail **sheets** (see C).
 13. **Admin** (`AdminPanel.jsx`, `AdminUsersView.jsx` [direct-reports picker readability already fixed], `CrewTypePermissionsView.jsx`) — *owner-only; verify needs an owner login.*
 
 ### E. Crew app (field) — biggest chunk
-14. ✅ **List screens** — ProjectList / PhaseList / TaskList (line icons, chevrons, mono stats). *Job-type glyphs kept as emoji (deliberate — no clean line-icon equivalents).*
-15. **My Stock** + crew shell chrome (`MyStockView.jsx`, `CrewSidebar` in `CrewApp.jsx`, `CrewMovementSheet.jsx`)
-16. **Task workspace** (`TaskWorkspace.jsx` + `workspace/*`) — the big logging UI
-17. Submit-day flow + read-only summaries (`TaskSummaryView.jsx`)
-18. Infra crew shell + workspace variant (`infra/*` — `InfraCrewApp`, `SitesList`, `SiteTaskList`)
+14. ✅ **Fiber list screens** — ProjectList / PhaseList / TaskList (line icons, chevrons, mono stats).
+15. ✅ **My Stock** (`MyStockView.jsx`) — Load/Return/Refresh icons, truck/box empty states, mono qty.
+16. ✅ **Task workspace** (`TaskWorkspace.jsx`) — Console via cascade + icon cleanup; contrast-verified. *Tally-row sub-components (`workspace/*`) cascade-fine; deep restyle deferred.*
+17. ✅ **Infra list screens** — `SitesList` / `SiteTaskList`.
+18. **Remaining crew chrome:** wide-layout `CrewSidebar` (in `CrewApp.jsx`) + `InfraSidebar` (in `InfraCrewApp.jsx`) still have emoji; `TaskSummaryView.jsx` (read-only summary); `CrewMovementSheet.jsx` (load/return sheet). *Job-type / pole / infra-job glyphs kept as emoji throughout (deliberate exception — no clean line-icon equivalents).*
 
 > **Preview note:** the long-lived preview screenshot tool degraded mid-session; the crew list screens were verified via DOM (render + no errors). Do a fresh `npm run dev` for a clean visual pass.
 
