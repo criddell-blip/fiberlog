@@ -4,6 +4,7 @@ import { getMyTruckStock, getMyCrewPermissions } from '../../lib/inventory'
 import CrewMovementSheet from './CrewMovementSheet'
 import PausedBanner from '../shared/PausedBanner'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
+import Icon from '../shared/Icon'
 
 // Crew-facing "what's on my truck" view. Read-only stock list scoped to
 // the caller's personal truck (auto-created at user setup), plus action
@@ -122,21 +123,21 @@ export default function MyStockView({ onBack, onUserTap }) {
           {canLoad && (
             <button
               className="btn btn-primary"
-              style={{ flex: 1 }}
+              style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
               onClick={() => setSheetMode('load')}
               disabled={!truck || loading}
             >
-              ⬇ Load
+              <Icon name="download" size={16} /> Load
             </button>
           )}
           {canReturn && (
             <button
               className="btn btn-ghost"
-              style={{ flex: 1 }}
+              style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
               onClick={() => setSheetMode('return')}
               disabled={!truck || loading || stock.length === 0}
             >
-              ↩ Return
+              <Icon name="upload" size={16} /> Return
             </button>
           )}
           {!canLoad && !canReturn && (
@@ -155,10 +156,10 @@ export default function MyStockView({ onBack, onUserTap }) {
               borderRadius: 'var(--r-sm)',
               cursor: loading ? 'wait' : 'pointer',
               color: 'var(--muted)',
-              fontSize: 16,
+              display: 'inline-flex', alignItems: 'center',
             }}
           >
-            ↻
+            <Icon name="rotate" size={16} />
           </button>
         </div>
       </div>
@@ -195,7 +196,7 @@ export default function MyStockView({ onBack, onUserTap }) {
             textAlign: 'center', padding: 40, color: 'var(--hint)',
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
           }}>
-            <div style={{ fontSize: 36 }}>⚠️</div>
+            <div style={{ color: 'var(--gray-mid)' }}><Icon name="truck" size={34} /></div>
             <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
               No truck assigned yet
             </div>
@@ -210,7 +211,7 @@ export default function MyStockView({ onBack, onUserTap }) {
             textAlign: 'center', padding: 40, color: 'var(--hint)',
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
           }}>
-            <div style={{ fontSize: 36 }}>📭</div>
+            <div style={{ color: 'var(--gray-mid)' }}><Icon name="box" size={34} /></div>
             <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
               {truck._isShared ? `${truck.name} is empty` : 'Your truck is empty'}
             </div>
@@ -258,10 +259,10 @@ export default function MyStockView({ onBack, onUserTap }) {
                   </span>
                 ) : (
                   <>
-                    <div style={{ fontSize: 17, fontWeight: 800, color: qty < 0 ? 'var(--red)' : 'var(--text)' }}>
+                    <div className="mono" style={{ fontSize: 17, fontWeight: 600, color: qty < 0 ? 'var(--red)' : 'var(--text)' }}>
                       {qty.toLocaleString()}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    <div style={{ fontSize: 11, color: 'var(--hint)' }}>
                       {pc?.unit || 'ea'}
                     </div>
                   </>
@@ -292,7 +293,7 @@ export default function MyStockView({ onBack, onUserTap }) {
 function Stat({ label, value, color }) {
   return (
     <div className="metric" style={{ flex: 1, background: 'var(--surface2)', border: '1px solid var(--border)' }}>
-      <div className="metric-value" style={{ color }}>{value}</div>
+      <div className="metric-value mono" style={{ color }}>{value}</div>
       <div className="metric-label">{label}</div>
     </div>
   )
