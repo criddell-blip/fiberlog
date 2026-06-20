@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { db, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabase'
 import { useIsWide } from '../../lib/useIsWide'
+import Icon from '../shared/Icon'
 
 async function fetchBoxHeroStock() {
   try {
@@ -588,19 +589,17 @@ export default function ReportsView() {
           <div style={{ fontWeight: 800, fontSize: 17, color: 'var(--text)' }}>Reports</div>
           <button
             onClick={() => setShowFilters(v => !v)}
-            className="btn btn-ghost"
-            style={{ padding: '5px 12px', fontSize: 12, fontWeight: 600 }}
+            className={`chip${showFilters ? ' chip-active' : ''}`}
             title={showFilters ? 'Hide filter controls' : 'Show date range, project, crew filters'}
           >
-            {showFilters ? '▴ Hide filters' : '▾ Filters'}
+            <Icon name="filter" size={14} /> {showFilters ? 'Hide filters' : 'Filters'}
           </button>
           <div style={{ flex: 1 }} />
           <button onClick={exportCSV} disabled={rows.length === 0}
-            style={{ padding: '5px 12px', background: rows.length > 0 ? 'var(--orange)' : 'var(--gray-lt)',
-              color: rows.length > 0 ? 'white' : 'var(--hint)', border: 'none',
-              borderRadius: 20, fontSize: 12, fontWeight: 700,
-              cursor: rows.length > 0 ? 'pointer' : 'not-allowed' }}>
-            ⇪ CSV
+            className="btn btn-primary"
+            style={{ height: 30, padding: '0 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6,
+              opacity: rows.length > 0 ? 1 : 0.5, cursor: rows.length > 0 ? 'pointer' : 'not-allowed' }}>
+            <Icon name="download" size={14} /> CSV
           </button>
         </div>
 
@@ -622,9 +621,9 @@ export default function ReportsView() {
             being filtered so they don't have to expand to find out. */}
         {!showFilters && (
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.4 }}>
-            📅 {presetLabel} · {projectLabel} · {userLabel}
+            {presetLabel} · {projectLabel} · {userLabel}
             {rows.length > 0 && (
-              <span style={{ marginLeft: 8, color: 'var(--text)', fontWeight: 600 }}>
+              <span className="mono" style={{ marginLeft: 8, color: 'var(--text)', fontWeight: 600 }}>
                 · {totalParts.toLocaleString()} parts · {uniqueSKUs} SKUs · {uniquePeople} crew
               </span>
             )}
@@ -683,23 +682,16 @@ export default function ReportsView() {
             {/* Secondary actions — less-used (per-session) buttons live in
                 the expanded panel so they don't crowd the always-visible row. */}
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <button onClick={loadStock}
-                style={{ padding: '5px 12px', background: 'var(--surface2)',
-                  color: stockLoading ? 'var(--muted)' : 'var(--teal-mid)',
-                  border: '1.5px solid var(--teal)', borderRadius: 20, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
-                {stockLoading ? 'Loading…' : '📦 Stock levels'}
+              <button onClick={loadStock} className="chip">
+                <Icon name="box" size={14} /> {stockLoading ? 'Loading…' : 'Stock levels'}
               </button>
               {/* Progress PDF is fiber-only — disabled for infra-only projects */}
               <button onClick={generateProjectReport}
                 disabled={isInfraOnly}
                 title={isInfraOnly ? 'Progress PDF is fiber-only (organized by phases). Infra projects don’t use phases yet.' : ''}
-                style={{ padding: '5px 12px',
-                  background: isInfraOnly ? 'var(--gray-lt)' : 'var(--surface2)',
-                  color: isInfraOnly ? 'var(--hint)' : 'var(--orange)',
-                  border: `1.5px solid ${isInfraOnly ? 'var(--border)' : 'var(--orange)'}`,
-                  borderRadius: 20, fontSize: 11, fontWeight: 700,
-                  cursor: isInfraOnly ? 'not-allowed' : 'pointer' }}>
-                📄 Progress PDF
+                className="chip"
+                style={{ opacity: isInfraOnly ? 0.5 : 1, cursor: isInfraOnly ? 'not-allowed' : 'pointer' }}>
+                <Icon name="receipt" size={14} /> Progress PDF
               </button>
             </div>
           </div>
@@ -712,7 +704,7 @@ export default function ReportsView() {
 
         {!loading && rows.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--hint)' }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10, color: 'var(--gray-mid)' }}><Icon name="chart" size={32} /></div>
             <div>No approved submissions in this range</div>
           </div>
         )}
@@ -725,11 +717,11 @@ export default function ReportsView() {
             padding: '8px 0', fontSize: 12, color: 'var(--muted)',
             borderBottom: '1px solid var(--border)',
           }}>
-            <span><strong style={{ color: 'var(--orange)' }}>{totalParts.toLocaleString()}</strong> parts</span>
+            <span><strong className="mono" style={{ color: 'var(--accent-dk)' }}>{totalParts.toLocaleString()}</strong> parts</span>
             <span>·</span>
-            <span><strong style={{ color: 'var(--orange)' }}>{uniqueSKUs}</strong> SKUs</span>
+            <span><strong className="mono" style={{ color: 'var(--accent-dk)' }}>{uniqueSKUs}</strong> SKUs</span>
             <span>·</span>
-            <span><strong style={{ color: 'var(--orange)' }}>{uniquePeople}</strong> crew</span>
+            <span><strong className="mono" style={{ color: 'var(--accent-dk)' }}>{uniquePeople}</strong> crew</span>
           </div>
         )}
 
