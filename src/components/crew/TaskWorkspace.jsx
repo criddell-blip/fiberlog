@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { startSession, saveEntry, db } from '../../lib/supabase'
 import { t } from '../../lib/i18n'
 import PartSearch from './workspace/PartSearch'
+import Icon from '../shared/Icon'
 
 // Tab list is now crew-type aware. Fiber crews see the 4-tab fiber build
 // strip (aerial / footage / splice / underground) — that's the original
@@ -408,7 +409,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       {/* "Continued from X" indicator — visible when picking up someone else's draft */}
       {lastWorkedInfo && (
         <div className="banner banner-success" style={{ padding: '6px var(--space-4)' }}>
-          <span className="banner-icon" style={{ fontSize: 'var(--fs-xs)' }}>↻</span>
+          <span className="banner-icon" style={{ display: 'inline-flex' }}><Icon name="rotate" size={13} /></span>
           <span className="banner-body" style={{ fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-semibold)' }}>
             {lang === 'es' ? 'Continuando desde ' : 'Continuing from '}
             {lastWorkedInfo.name}
@@ -463,7 +464,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                 whiteSpace: 'nowrap', padding: '0 2px',
               }}
             >
-              ↺ {lang === 'es' ? 'Restablecer' : 'Reset'}
+<Icon name="rotate" size={11} style={{ verticalAlign: 'middle', marginRight: 2 }} /> {lang === 'es' ? 'Restablecer' : 'Reset'}
             </button>
           )}
         </div>
