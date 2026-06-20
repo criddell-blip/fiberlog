@@ -52,11 +52,14 @@ summary strings; the action/detail **sheets** (see C).
 12. **Assemblies** (`AssemblyEditor.jsx`) — ✅ list done (chips, mono, icons). Editor form + delete dialog recolored-only.
 13. **Admin** (`AdminPanel.jsx`, `AdminUsersView.jsx` [direct-reports picker readability already fixed], `CrewTypePermissionsView.jsx`) — *owner-only; verify needs an owner login.*
 
-### E. Crew app (field) — biggest chunk, currently only recolored
-14. Crew shell + My Stock (`CrewApp.jsx`, `MyStockView.jsx`, `CrewMovementSheet.jsx`)
-15. Task workspace (`TaskWorkspace.jsx` + `workspace/*`)
-16. Submit-day flow + read-only summaries (`TaskSummaryView.jsx`)
-17. Infra crew shell + workspace variant (`infra/*`)
+### E. Crew app (field) — biggest chunk
+14. ✅ **List screens** — ProjectList / PhaseList / TaskList (line icons, chevrons, mono stats). *Job-type glyphs kept as emoji (deliberate — no clean line-icon equivalents).*
+15. **My Stock** + crew shell chrome (`MyStockView.jsx`, `CrewSidebar` in `CrewApp.jsx`, `CrewMovementSheet.jsx`)
+16. **Task workspace** (`TaskWorkspace.jsx` + `workspace/*`) — the big logging UI
+17. Submit-day flow + read-only summaries (`TaskSummaryView.jsx`)
+18. Infra crew shell + workspace variant (`infra/*` — `InfraCrewApp`, `SitesList`, `SiteTaskList`)
+
+> **Preview note:** the long-lived preview screenshot tool degraded mid-session; the crew list screens were verified via DOM (render + no errors). Do a fresh `npm run dev` for a clean visual pass.
 
 ### F. Polish & QA (whole app)
 18. Responsive sweep · empty/loading/error states · accessibility (focus/labels/contrast)
