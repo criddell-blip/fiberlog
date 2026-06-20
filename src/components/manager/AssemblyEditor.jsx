@@ -2,6 +2,17 @@ import { useState, useEffect } from 'react'
 import { db, saveAssembly, deleteAssembly, getAssembliesRaw, searchPartsCatalog } from '../../lib/supabase'
 import { useApp } from '../../AppContext'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
+
+// Unified Console action chip for the assembly row buttons.
+function asmChip() {
+  return {
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    fontSize: 12, fontWeight: 600, color: 'var(--muted)',
+    background: 'var(--surface)', border: '1px solid var(--border2)',
+    borderRadius: 8, padding: '5px 10px', cursor: 'pointer', whiteSpace: 'nowrap',
+  }
+}
 
 // All crew types now show as tabs. The new install/infrastructure tabs will
 // be empty until the manager builds out their kits — Chris will see them
@@ -363,8 +374,8 @@ export default function AssemblyEditor() {
             <div style={{ fontWeight: 800, fontSize: 17 }}>Assembly Editor</div>
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>{assemblies.length} assemblies total</div>
           </div>
-          <button onClick={startNew} style={{ padding: '7px 16px', background: 'var(--orange)', color: 'white', border: 'none', borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-            + New
+          <button onClick={startNew} className="btn btn-primary" style={{ height: 34, padding: '0 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+            <Icon name="plus" size={15} /> New
           </button>
         </div>
 
@@ -376,9 +387,9 @@ export default function AssemblyEditor() {
             value={selTab}
             onChange={e => setSelTab(e.target.value)}
             style={{
-              padding: '6px 12px', fontSize: 13, fontWeight: 700,
-              border: '1.5px solid var(--orange)', borderRadius: 20,
-              background: 'var(--orange-lt)', color: 'var(--orange)',
+              padding: '7px 12px', fontSize: 13, fontWeight: 600,
+              border: '1px solid var(--border2)', borderRadius: 999,
+              background: 'var(--surface)', color: 'var(--text)',
               cursor: 'pointer', minWidth: 220,
             }}
           >
@@ -398,7 +409,7 @@ export default function AssemblyEditor() {
         {loading && <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Loading...</div>}
         {!loading && tabAsms.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--hint)' }}>
-            <div style={{ fontSize: 28, marginBottom: 6 }}>{(CREW_TYPES.find(ct => ct.id === selTab) || {}).icon || '📦'}</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8, color: 'var(--gray-mid)' }}><Icon name="nut" size={30} /></div>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>No {(CREW_TYPES.find(ct => ct.id === selTab) || {}).label || selTab} assemblies yet</div>
             {selTab === 'infrastructure' ? (
               <div style={{ fontSize: 12, maxWidth: 360, margin: '0 auto', lineHeight: 1.5 }}>
@@ -414,27 +425,24 @@ export default function AssemblyEditor() {
           </div>
         )}
         {tabAsms.map(asm => (
-          <div key={asm.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div key={asm.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: '12px 14px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8, boxShadow: '0 1px 3px rgba(15,23,42,0.06)' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 14 }}>{asm.label}</div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
                 {asm.sub_label && `${asm.sub_label} · `}
-                {(asm.assembly_parts || []).length} parts
+                <span className="mono">{(asm.assembly_parts || []).length}</span> parts
                 {!asm.is_active && <span style={{ marginLeft: 8, color: 'var(--hint)' }}>· hidden</span>}
               </div>
             </div>
-            <button onClick={() => startEdit(asm)}
-              style={{ fontSize: 12, color: 'var(--orange)', fontWeight: 700, background: 'none', border: '1px solid var(--orange)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer' }}>
-              Edit
-            </button>
+            <button onClick={() => startEdit(asm)} style={asmChip()}>Edit</button>
             <button onClick={() => startDuplicate(asm)}
               title="Duplicate to a new assembly (e.g. clone for a different crew type)"
-              style={{ fontSize: 12, color: 'var(--teal)', fontWeight: 700, background: 'var(--teal-lt)', border: 'none', borderRadius: 20, padding: '4px 10px', cursor: 'pointer' }}>
-              ⎘ Copy
+              style={asmChip()}>
+              <Icon name="layers" size={13} /> Copy
             </button>
-            <button onClick={() => setConfirm(asm)}
-              style={{ fontSize: 12, color: 'var(--red)', background: 'var(--red-lt)', border: 'none', borderRadius: 20, padding: '4px 10px', cursor: 'pointer' }}>
-              🗑
+            <button onClick={() => setConfirm(asm)} title="Delete assembly"
+              style={{ ...asmChip(), color: 'var(--red)' }}>
+              <Icon name="x" size={14} />
             </button>
           </div>
         ))}
