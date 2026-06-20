@@ -978,14 +978,17 @@ function DirectReportsPicker({ user, existingUsers, search, setSearch, selectedI
           return (
             <label key={u.id} style={{
               display: 'flex', alignItems: 'center', gap: 10,
-              padding: '6px 10px', cursor: 'pointer',
-              borderBottom: '1px solid var(--border)',
-              background: checked ? 'var(--orange-lt)' : 'transparent',
+              padding: '9px 12px', margin: 0, cursor: 'pointer',
+              borderBottom: '1px solid var(--row-divider)',
+              background: checked ? 'var(--accent-lt)' : 'transparent',
             }}>
-              <input type="checkbox" checked={checked} onChange={() => toggle(u.id)} style={{ cursor: 'pointer' }} />
+              <input type="checkbox" checked={checked} onChange={() => toggle(u.id)} style={{ accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 'var(--fw-semibold)' }}>{u.name}</div>
-                <div style={{ fontSize: 10, color: 'var(--hint)' }}>
+                {/* Explicit color + size: the row is a <label>, and the global
+                    `.field label` rule otherwise leaks muted grey / small type
+                    into these names, making them hard to read on the light theme. */}
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{u.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>
                   {u.role}{u.crew_type ? ` · ${u.crew_type}` : ''}
                   {isMovingFromAnother && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>· will move from current manager</span>}
                 </div>
