@@ -8,6 +8,7 @@ import {
 } from '../../lib/supabase'
 import { getLocations } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 const SITE_TYPES = [
   { id: 'wireless', label: 'Wireless', icon: '📡' },
@@ -1682,9 +1683,9 @@ export default function ProjectManager() {
       <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div style={{ fontWeight: 800, fontSize: 17 }}>Projects</div>
-          <button onClick={() => setShowAddProject(true)}
-            style={{ padding: '7px 14px', background: 'var(--orange)', color: 'white', border: 'none', borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-            + New project
+          <button className="btn btn-primary" onClick={() => setShowAddProject(true)}
+            style={{ height: 34, padding: '0 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+            <Icon name="plus" size={15} /> New project
           </button>
         </div>
       </div>
@@ -1706,24 +1707,27 @@ export default function ProjectManager() {
 
           return (
             <div key={p.id} onClick={() => setSelProject(p)}
-              style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: 16, marginBottom: 10, cursor: 'pointer' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: 16 }}>
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: 16, marginBottom: 10, cursor: 'pointer', boxShadow: '0 1px 3px rgba(15,23,42,0.06)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                     {p.name}
                     {siteCount > 0 && phaseCount === 0 && (
                       <span style={{
-                        marginLeft: 8, padding: '2px 8px', borderRadius: 20,
-                        background: 'var(--teal-lt)', color: 'var(--teal-mid)',
-                        fontSize: 10, fontWeight: 700, verticalAlign: 'middle',
+                        padding: '2px 8px', borderRadius: 6,
+                        background: 'var(--accent-lt)', color: 'var(--accent-dk)',
+                        fontSize: 10, fontWeight: 700, letterSpacing: '.04em',
                       }}>INFRA</span>
                     )}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                  <div className="mono" style={{ fontSize: 12, color: 'var(--hint)', marginTop: 3 }}>
                     {parts.join(' · ')}
                   </div>
                 </div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--orange)' }}>{pct}%</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                  <div className="mono" style={{ fontSize: 16, fontWeight: 600, color: 'var(--accent-dk)' }}>{pct}%</div>
+                  <Icon name="chevron-right" size={18} color="var(--hint)" />
+                </div>
               </div>
               <div className="prog-bar">
                 <div className="prog-fill" style={{ width: `${pct}%` }} />
