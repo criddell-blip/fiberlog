@@ -57,7 +57,10 @@ summary strings; the action/detail **sheets** (see C).
 15. ✅ **My Stock** (`MyStockView.jsx`) — Load/Return/Refresh icons, truck/box empty states, mono qty.
 16. ✅ **Task workspace** (`TaskWorkspace.jsx`) — Console via cascade + icon cleanup; contrast-verified. *Tally-row sub-components (`workspace/*`) cascade-fine; deep restyle deferred.*
 17. ✅ **Infra list screens** — `SitesList` / `SiteTaskList`.
-18. **Remaining crew chrome:** wide-layout `CrewSidebar` (in `CrewApp.jsx`) + `InfraSidebar` (in `InfraCrewApp.jsx`) still have emoji; `TaskSummaryView.jsx` (read-only summary); `CrewMovementSheet.jsx` (load/return sheet). *Job-type / pole / infra-job glyphs kept as emoji throughout (deliberate exception — no clean line-icon equivalents).*
+18. ✅ **Crew wide sidebars** (CrewSidebar + InfraSidebar) + infra projects screen — line icons, gear/box/chevrons.
+19. ✅ **TaskSummaryView** (status dot) + **CrewMovementSheet** (header/toggle icons; in-`<option>` glyphs kept — native limitation).
+
+**→ The crew app is now Console end-to-end** (all daily screens + chrome). Job-type / pole / infra-job glyphs kept as emoji throughout (deliberate exception). Deep tally-row restyle (`workspace/*`) deferred — cascade-fine + readable.
 
 > **Preview note:** the long-lived preview screenshot tool degraded mid-session; the crew list screens were verified via DOM (render + no errors). Do a fresh `npm run dev` for a clean visual pass.
 
