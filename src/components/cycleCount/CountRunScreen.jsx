@@ -942,78 +942,120 @@ function BinsCountedList({ sessions, onResume }) {
   )
 }
 
+// Group bins by the "Aisle X" prefix on their name (same parsing as the
+// Locations tab). Numbered aisles ascending, then "Other" last. With 165+
+// bins under one warehouse, a flat list is the picker's biggest pain point —
+// grouping mirrors the physical warehouse so the counter scans the aisle
+// they're standing in.
+function groupBinsByAisle(bins) {
+  const map = new Map()
+  for (const bin of bins) {
+    const m = (bin.name || '').match(/^Aisle\s+(\S+?)\s*[,/]/i)
+    const key = m ? m[1] : 'other'
+    const label = m ? `Aisle ${m[1]}` : 'Other'
+    if (!map.has(key)) map.set(key, { key, label, bins: [], sortKey: m ? (parseInt(m[1], 10) || 999) : 9999 })
+    map.get(key).bins.push(bin)
+  }
+  return Array.from(map.values()).sort((a, b) => a.sortKey - b.sortKey)
+}
+
 function BinPickerSheet({ bins, statusByBinId = {}, onPick, onClose }) {
   const [q, setQ] = useState('')
-  const filtered = q.trim()
-    ? bins.filter(b => b.name.toLowerCase().includes(q.trim().toLowerCase()))
-    : bins
-  // Sort: fresh bins first, in-progress next, already-submitted last. Keeps
-  // the actionable rows at the top so the counter doesn't have to scroll
-  // past 80 already-counted bins to find the next one.
-  const sorted = [...filtered].sort((a, b) => {
-    const order = { undefined: 0, in_progress: 1, submitted: 2 }
-    const oa = order[statusByBinId[a.id]] ?? 0
-    const ob = order[statusByBinId[b.id]] ?? 0
-    if (oa !== ob) return oa - ob
-    return compareNamesNatural(a.name, b.name)
+  useBackClose(1, onClose)
+
+  const statusOf = (b) => statusByBinId[b.id]            // undefined | in_progress | submitted
+  const isDone = (b) => statusOf(b) === 'submitted'
+
+  // The next uncounted bin in natural order — the "just give me the next one"
+  // path so the counter never has to hunt.
+  const nextBin = [...bins].sort((a, b) => compareNamesNatural(a.name, b.name))
+    .find(b => statusOf(b) !== 'submitted')
+
+  // Default-expand only the aisle holding the next uncounted bin; everything
+  // else collapsed so the list isn't a wall.
+  const [expanded, setExpanded] = useState(() => {
+    if (!nextBin) return new Set()
+    const g = groupBinsByAisle([nextBin])[0]
+    return new Set(g ? [g.key] : [])
   })
+  const toggle = (key) => setExpanded(prev => {
+    const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n
+  })
+
+  const query = q.trim().toLowerCase()
+  const isSearching = !!query
+  const filtered = query ? bins.filter(b => (b.name || '').toLowerCase().includes(query)) : bins
+
+  const groups = groupBinsByAisle(filtered)
+  for (const g of groups) {
+    g.bins.sort((a, b) => {
+      const order = { undefined: 0, in_progress: 1, submitted: 2 }
+      const oa = order[statusOf(a)] ?? 0, ob = order[statusOf(b)] ?? 0
+      if (oa !== ob) return oa - ob
+      return compareNamesNatural(a.name, b.name)
+    })
+    g.remaining = g.bins.filter(b => !isDone(b)).length
+  }
+
+  function binRow(b) {
+    const status = statusOf(b)
+    const isSubmitted = status === 'submitted'
+    const isInProgress = status === 'in_progress'
+    return (
+      <button key={b.id} onClick={() => { if (!isSubmitted) onPick(b) }} disabled={isSubmitted}
+        title={isSubmitted ? 'Already submitted in this run' : ''}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+          padding: '10px 12px', marginBottom: 4,
+          background: isSubmitted ? 'var(--surface2)' : 'var(--surface)',
+          border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+          cursor: isSubmitted ? 'not-allowed' : 'pointer', fontSize: 'var(--fs-base)',
+          color: isSubmitted ? 'var(--hint)' : 'var(--text)', opacity: isSubmitted ? 0.6 : 1,
+        }}>
+        <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</span>
+        {isSubmitted && <span className="pill pill-sm pill-success"><Icon name="check" size={11} style={{ verticalAlign: '-2px', marginRight: 3, display: 'inline-block' }} />counted</span>}
+        {isInProgress && <span className="pill pill-sm pill-warning">… in progress</span>}
+      </button>
+    )
+  }
+
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="overlay-sheet" style={{ maxWidth: 480 }}>
-        <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 10 }}>
-          Pick a bin
-        </div>
+        <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 10 }}>Pick a bin</div>
         <input
-          type="text"
-          placeholder="Search…"
-          value={q}
-          onChange={e => setQ(e.target.value)}
-          autoFocus
-          autoComplete="off"
-          name="bin-search"
-          style={{
-            width: '100%', padding: '10px 12px',
-            border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)',
-            background: 'var(--surface2)', fontSize: 14, marginBottom: 10, color: 'var(--text)',
-          }}
+          type="text" placeholder="Search bins…" value={q} onChange={e => setQ(e.target.value)}
+          autoFocus autoComplete="off" name="bin-search"
+          style={{ width: '100%', padding: '10px 12px', border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--surface2)', fontSize: 14, marginBottom: 10, color: 'var(--text)' }}
         />
-        <div style={{ maxHeight: '60vh', overflowY: 'auto', marginBottom: 12 }}>
-          {sorted.length === 0 && (
-            <div style={{ padding: 24, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>
-              No matching bins
-            </div>
+
+        {/* One-tap "give me the next uncounted bin" */}
+        {!isSearching && nextBin && (
+          <button onClick={() => onPick(nextBin)} className="btn btn-primary"
+            style={{ width: '100%', padding: '12px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <Icon name="arrow" size={16} /> Next uncounted — {nextBin.name}
+          </button>
+        )}
+
+        <div style={{ maxHeight: '52vh', overflowY: 'auto', marginBottom: 12 }}>
+          {groups.length === 0 && (
+            <div style={{ padding: 24, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>No matching bins</div>
           )}
-          {sorted.map(b => {
-            const status = statusByBinId[b.id]
-            const isSubmitted = status === 'submitted'
-            const isInProgress = status === 'in_progress'
+          {groups.map(g => {
+            const open = isSearching || expanded.has(g.key)
+            const allDone = g.remaining === 0
             return (
-              <button
-                key={b.id}
-                onClick={() => { if (!isSubmitted) onPick(b) }}
-                disabled={isSubmitted}
-                title={isSubmitted ? 'Already submitted in this run' : ''}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  width: '100%', textAlign: 'left',
-                  padding: '10px 12px', marginBottom: 4,
-                  background: isSubmitted ? 'var(--surface2)' : 'var(--surface)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--r-sm)',
-                  cursor: isSubmitted ? 'not-allowed' : 'pointer',
-                  fontSize: 'var(--fs-base)',
-                  color: isSubmitted ? 'var(--hint)' : 'var(--text)',
-                  opacity: isSubmitted ? 0.6 : 1,
-                }}
-              >
-                <span style={{ flex: 1 }}>{b.name}</span>
-                {isSubmitted && (
-                  <span className="pill pill-sm pill-success"><Icon name="check" size={11} style={{ verticalAlign: '-2px', marginRight: 3, display: 'inline-block' }} />counted</span>
-                )}
-                {isInProgress && (
-                  <span className="pill pill-sm pill-warning">… in progress</span>
-                )}
-              </button>
+              <div key={g.key} style={{ marginBottom: 6 }}>
+                <button onClick={() => toggle(g.key)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '8px 10px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', cursor: 'pointer' }}>
+                  <span style={{ display: 'inline-flex', color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}><Icon name="chevron-right" size={14} /></span>
+                  <span style={{ flex: 1, fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-sm)' }}>{g.label}</span>
+                  {allDone
+                    ? <span className="pill pill-sm pill-success"><Icon name="check" size={11} style={{ verticalAlign: '-2px', marginRight: 3, display: 'inline-block' }} />done</span>
+                    : <span className="mono" style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)' }}>{g.remaining} left</span>}
+                </button>
+                {open && <div style={{ padding: '6px 0 2px 8px' }}>{g.bins.map(binRow)}</div>}
+              </div>
             )
           })}
         </div>
