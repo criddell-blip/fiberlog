@@ -173,9 +173,8 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
               </button>
               <button
                 className="btn btn-primary"
-                style={{ flex: 2 }}
                 onClick={() => setShowLabelSheet(true)}
-                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                style={{ flex: 2, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
               >
                 <Icon name="tag" size={16} /> Print labels
               </button>
