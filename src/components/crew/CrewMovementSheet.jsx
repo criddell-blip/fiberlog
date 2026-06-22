@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement, getMyAllowedLoadDestinations, compareNamesNatural } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 // Unified sheet for crew-initiated movements. Modes covered today:
 //   'load'    — warehouse/bucket → my truck     (pick source, then part)
@@ -346,8 +347,9 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
       <div className="overlay-sheet" style={{ maxWidth: 480 }}>
         {/* Header */}
         <div style={{ marginBottom: 12 }}>
-          <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 2 }}>
-            {isLoad ? '⬇ Load from warehouse' : '↩ Return to warehouse'}
+          <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Icon name={isLoad ? 'download' : 'upload'} size={18} />
+            {isLoad ? 'Load from warehouse' : 'Return to warehouse'}
           </div>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>
             {isLoad
@@ -364,14 +366,14 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
               onClick={() => setViewMode('by-part')}
               style={modeBtnStyle(viewMode === 'by-part')}
             >
-              🔍 Find a part
+              <Icon name="search" size={14} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Find a part
             </button>
             <button
               type="button"
               onClick={() => setViewMode('by-location')}
               style={modeBtnStyle(viewMode === 'by-location')}
             >
-              📍 Pick a location
+              <Icon name="pin" size={14} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Pick a location
             </button>
           </div>
         )}

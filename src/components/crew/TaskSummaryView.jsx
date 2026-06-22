@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import { getTaskSummary } from '../../lib/supabase'
+import Icon from '../shared/Icon'
 
 // Read-only inspection of a submitted task. Shows the crew what they
 // turned in (hours, parts, footage totals if any) plus the manager's
@@ -89,7 +90,7 @@ export default function TaskSummaryView({ project, phase, task, onBack, onUserTa
               fontWeight: 800, fontSize: 11,
               display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
             }}>
-            {currentUser?.initials || '👤'}
+            {currentUser?.initials || <Icon name="users" size={15} />}
           </button>
         )}
       </div>
@@ -107,7 +108,7 @@ export default function TaskSummaryView({ project, phase, task, onBack, onUserTa
 
         {!loading && !error && !summary && (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--hint)' }}>
-            <div style={{ fontSize: 32, marginBottom: 6 }}>📭</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8, color: 'var(--gray-mid)' }}><Icon name="layers" size={30} /></div>
             <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>No submission yet</div>
             <div style={{ fontSize: 12 }}>This task is marked “{task.status}” but doesn’t have a submission attached.</div>
           </div>
@@ -126,7 +127,7 @@ export default function TaskSummaryView({ project, phase, task, onBack, onUserTa
                 borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 14,
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 14 }}>
-                  <span>{subStatus.icon}</span>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'currentColor', flexShrink: 0 }} />
                   <span>{subStatus.label}</span>
                 </div>
                 <div style={{ fontSize: 11, marginTop: 4, opacity: 0.85 }}>
