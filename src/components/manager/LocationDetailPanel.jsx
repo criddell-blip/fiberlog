@@ -11,6 +11,7 @@ import AisleSignSheet from './AisleSignSheet'
 import SkuLabelSheet from './SkuLabelSheet'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 // Overlay-sheet that opens when a location row is tapped in the Locations
 // tab. Centralizes everything you might want to do with a location:
@@ -139,7 +140,7 @@ export default function LocationDetailPanel({
           {/* Header */}
           <div style={{ flexShrink: 0, marginBottom: 12 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <span style={{ fontSize: 24 }}>{TYPE_ICONS[location.type] || '📦'}</span>
+              <span style={{ display: 'inline-flex', color: 'var(--accent-dk)' }}><Icon name={TYPE_ICON_NAMES[location.type] || 'box'} size={22} /></span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', wordBreak: 'break-word' }}>
                   {location.assigned_user?.name || location.name}
@@ -155,8 +156,8 @@ export default function LocationDetailPanel({
               <button
                 onClick={onClose}
                 disabled={busy}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--muted)', padding: 4 }}
-              >✕</button>
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4, display: 'inline-flex' }}
+              ><Icon name="x" size={17} /></button>
             </div>
           </div>
 
@@ -169,7 +170,7 @@ export default function LocationDetailPanel({
                 className="btn btn-primary"
                 style={{ padding: '8px 14px', fontSize: 'var(--fs-sm)' }}
               >
-                🔢 {activeRun ? 'Add to active count run' : 'Start count of this bin'}
+                <Icon name="scan" size={14} style={{ verticalAlign: '-2px', marginRight: 6, display: 'inline-block' }} />{activeRun ? 'Add to active count run' : 'Start count of this bin'}
               </button>
             )}
             <button
@@ -179,7 +180,7 @@ export default function LocationDetailPanel({
               style={{ padding: '8px 14px', fontSize: 'var(--fs-sm)' }}
               title="Download audit-format CSV for this location"
             >
-              📥 Export CSV
+              <Icon name="download" size={14} style={{ verticalAlign: '-2px', marginRight: 6, display: 'inline-block' }} />Export CSV
             </button>
             {onJumpToStock && stock.length > 0 && (
               <button
@@ -188,7 +189,7 @@ export default function LocationDetailPanel({
                 style={{ padding: '8px 14px', fontSize: 'var(--fs-sm)' }}
                 title="Open the full Stock tab scoped to this location"
               >
-                📦 View in Stock tab
+                <Icon name="box" size={14} style={{ verticalAlign: '-2px', marginRight: 6, display: 'inline-block' }} />View in Stock tab
               </button>
             )}
             {isWarehouse && (
@@ -198,14 +199,14 @@ export default function LocationDetailPanel({
                   className="btn btn-ghost"
                   style={{ padding: '8px 14px', fontSize: 'var(--fs-sm)', borderColor: 'var(--purple)', color: 'var(--purple)' }}
                 >
-                  🏷 Bin labels
+                  <Icon name="tag" size={14} style={{ verticalAlign: '-2px', marginRight: 6, display: 'inline-block' }} />Bin labels
                 </button>
                 <button
                   onClick={() => setShowAisleSigns(true)}
                   className="btn btn-ghost"
                   style={{ padding: '8px 14px', fontSize: 'var(--fs-sm)', borderColor: 'var(--blue)', color: 'var(--blue)' }}
                 >
-                  🏷 Aisle signs
+                  <Icon name="tag" size={14} style={{ verticalAlign: '-2px', marginRight: 6, display: 'inline-block' }} />Aisle signs
                 </button>
               </>
             )}
@@ -215,7 +216,7 @@ export default function LocationDetailPanel({
                 className="btn btn-ghost"
                 style={{ padding: '8px 14px', fontSize: 'var(--fs-sm)', borderColor: 'var(--purple)', color: 'var(--purple)' }}
               >
-                🏷 SKU labels
+                <Icon name="tag" size={14} style={{ verticalAlign: '-2px', marginRight: 6, display: 'inline-block' }} />SKU labels
               </button>
             )}
             <button
@@ -223,7 +224,7 @@ export default function LocationDetailPanel({
               className="btn btn-ghost"
               style={{ padding: '8px 14px', fontSize: 'var(--fs-sm)' }}
             >
-              ✎ Edit
+              <Icon name="edit" size={14} style={{ verticalAlign: '-2px', marginRight: 6, display: 'inline-block' }} />Edit
             </button>
             {isOwner && onRetire && (
               <button
@@ -392,11 +393,11 @@ const TYPE_LABELS = {
   bin:       'Bin',
 }
 
-const TYPE_ICONS = {
-  warehouse: '🏭',
-  truck:     '🚚',
-  job_site:  '📍',
-  vendor:    '🏢',
-  scrap:     '🗑️',
-  bin:       '📥',
+const TYPE_ICON_NAMES = {
+  warehouse: 'warehouse',
+  truck:     'truck',
+  job_site:  'pin',
+  vendor:    'warehouse',
+  scrap:     'trash',
+  bin:       'box',
 }

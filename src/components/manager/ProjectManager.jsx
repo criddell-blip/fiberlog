@@ -11,8 +11,8 @@ import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 
 const SITE_TYPES = [
-  { id: 'wireless', label: 'Wireless', icon: '📡' },
-  { id: 'fiber',    label: 'Fiber',    icon: '🏢' },
+  { id: 'wireless', label: 'Wireless', iconName: 'pin' },
+  { id: 'fiber',    label: 'Fiber',    iconName: 'warehouse' },
 ]
 
 const JOB_TYPES = [
@@ -626,7 +626,7 @@ export default function ProjectManager() {
                   borderRadius: 20, fontSize: 12, fontWeight: 700,
                   textDecoration: 'none', flexShrink: 0,
                 }}>
-                📄 Permit
+                <Icon name="clipboard" size={13} /> Permit
               </a>
             )}
           </div>
@@ -640,7 +640,7 @@ export default function ProjectManager() {
             borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 14,
             display: 'flex', alignItems: 'center', gap: 10
           }}>
-            <span style={{ fontSize: 16 }}>📄</span>
+            <span style={{ display: 'inline-flex', color: 'var(--muted)' }}><Icon name="clipboard" size={16} /></span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 2 }}>PERMIT</div>
               {editingPermit ? (
@@ -663,7 +663,7 @@ export default function ProjectManager() {
                     {permitSaving ? '...' : 'Save'}
                   </button>
                   <button onClick={() => setEditingPermit(false)}
-                    style={{ padding: '4px 8px', background: 'var(--gray-lt)', color: 'var(--muted)', border: 'none', borderRadius: 'var(--r-xs)', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>✕</button>
+                    style={{ padding: '4px 8px', background: 'var(--gray-lt)', color: 'var(--muted)', border: 'none', borderRadius: 'var(--r-xs)', fontSize: 12, cursor: 'pointer', flexShrink: 0, display: 'inline-flex' }}><Icon name="x" size={12} /></button>
                 </div>
               ) : selPhase.permit_url ? (
                 <div style={{ fontSize: 12, color: 'var(--orange)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -675,8 +675,8 @@ export default function ProjectManager() {
             </div>
             <button
               onClick={() => { setEditingPermit(true); setEditPermitVal(selPhase.permit_url || '') }}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, color: 'var(--muted)', flexShrink: 0 }}>
-              ✏️
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', flexShrink: 0, display: 'inline-flex' }}>
+              <Icon name="edit" size={15} />
             </button>
           </div>
 
@@ -691,12 +691,12 @@ export default function ProjectManager() {
           >
             <div className="sec-label" style={{ margin: 0 }}>
               <span style={{
-                display: 'inline-block', transform: phaseTargetsOpen ? 'rotate(90deg)' : 'none',
-                transition: 'transform .15s', marginRight: 6, color: 'var(--muted)',
-              }}>▸</span>
+                display: 'inline-flex', transform: phaseTargetsOpen ? 'rotate(90deg)' : 'none',
+                transition: 'transform .15s', marginRight: 6, color: 'var(--muted)', verticalAlign: '-2px',
+              }}><Icon name="chevron-right" size={12} /></span>
               Phase targets
             </div>
-            <span style={{ fontSize: 11, color: 'var(--hint)' }}>{phaseTargetsOpen ? 'tap to edit · ▴ hide' : '▾ show'}</span>
+            <span style={{ fontSize: 11, color: 'var(--hint)' }}>{phaseTargetsOpen ? 'tap to edit · hide' : 'show'}</span>
           </button>
           {phaseTargetsOpen && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 16 }}>
@@ -720,7 +720,7 @@ export default function ProjectManager() {
                           {editSaving ? '...' : 'Save'}
                         </button>
                         <button onClick={() => setEditingTarget(null)}
-                          style={{ padding: '3px 6px', background: 'var(--gray-lt)', color: 'var(--muted)', border: 'none', borderRadius: 4, fontSize: 11, cursor: 'pointer' }}>✕</button>
+                          style={{ padding: '3px 6px', background: 'var(--gray-lt)', color: 'var(--muted)', border: 'none', borderRadius: 4, fontSize: 11, cursor: 'pointer', display: 'inline-flex' }}><Icon name="x" size={11} /></button>
                       </div>
                     </div>
                   ) : (
@@ -785,7 +785,7 @@ export default function ProjectManager() {
                       <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--gray-lt)', color: 'var(--muted)' }}>Open</span>
                       <button onClick={() => setConfirmDeleteTask(t)}
                         style={{ background: 'var(--red-lt)', border: 'none', borderRadius: 'var(--r-xs)', padding: '4px 8px', cursor: 'pointer', fontSize: 13, color: 'var(--red)' }}>
-                        🗑
+                        <Icon name="trash" size={14} />
                       </button>
                     </div>
                   )
@@ -810,7 +810,7 @@ export default function ProjectManager() {
                       <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--amber-lt)', color: 'var(--amber)' }}>Pending</span>
                       <button onClick={() => setConfirmDeleteTask(t)}
                         style={{ background: 'var(--red-lt)', border: 'none', borderRadius: 'var(--r-xs)', padding: '4px 8px', cursor: 'pointer', fontSize: 13, color: 'var(--red)' }}>
-                        🗑
+                        <Icon name="trash" size={14} />
                       </button>
                     </div>
                   )
@@ -822,7 +822,7 @@ export default function ProjectManager() {
                     borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 6,
                     display: 'flex', alignItems: 'center', gap: 10, opacity: 0.6
                   }}>
-                    <span style={{ fontSize: 14, color: 'var(--teal-mid)' }}>✓</span>
+                    <span style={{ display: 'inline-flex', color: 'var(--teal-mid)' }}><Icon name="check" size={14} /></span>
                     <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--muted)', flex: 1, minWidth: 0 }}>
                       {t.name}
                       <CreatorChip task={t} />
@@ -832,7 +832,7 @@ export default function ProjectManager() {
                     </span>
                     <button onClick={() => setConfirmDeleteTask(t)}
                       style={{ background: 'var(--red-lt)', border: 'none', borderRadius: 'var(--r-xs)', padding: '4px 8px', cursor: 'pointer', fontSize: 13, color: 'var(--red)' }}>
-                      🗑
+                      <Icon name="trash" size={14} />
                     </button>
                   </div>
                 ))}
@@ -990,7 +990,7 @@ export default function ProjectManager() {
                       {editProjSaving ? '...' : 'Save'}
                     </button>
                     <button onClick={() => setEditingProjTarget(null)}
-                      style={{ padding: '6px 10px', background: 'var(--gray-lt)', color: 'var(--muted)', border: 'none', borderRadius: 'var(--r-xs)', fontSize: 13, cursor: 'pointer' }}>✕</button>
+                      style={{ padding: '6px 10px', background: 'var(--gray-lt)', color: 'var(--muted)', border: 'none', borderRadius: 'var(--r-xs)', fontSize: 13, cursor: 'pointer', display: 'inline-flex' }}><Icon name="x" size={13} /></button>
                   </div>
                 ) : (
                   <button onClick={() => { setEditingProjTarget(f.key); setEditProjVal(String(current)) }}
@@ -1065,7 +1065,7 @@ export default function ProjectManager() {
                               color: siteTypeFilter === tval ? 'white' : 'var(--muted)',
                               border: 'none', cursor: 'pointer',
                             }}>
-                            {tval === 'all' ? 'All' : (tval === 'wireless' ? '📡 Wireless' : '🏢 Fiber')}
+                            {tval === 'all' ? 'All' : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name={tval === 'wireless' ? 'pin' : 'warehouse'} size={12} /> {tval === 'wireless' ? 'Wireless' : 'Fiber'}</span>}
                           </button>
                         ))}
                       </div>
@@ -1091,7 +1091,7 @@ export default function ProjectManager() {
                         borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 6,
                         display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
                       }}>
-                      <span style={{ fontSize: 16 }}>{s.type === 'wireless' ? '📡' : '🏢'}</span>
+                      <span style={{ display: 'inline-flex', color: 'var(--accent-dk)' }}><Icon name={s.type === 'wireless' ? 'pin' : 'warehouse'} size={16} /></span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {s.name}
@@ -1154,8 +1154,8 @@ export default function ProjectManager() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ fontWeight: 700 }}>{ph.name}</span>
                       {ph.permit_url && (
-                        <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10, background: 'var(--orange)', color: 'white' }}>
-                          📄 Permit
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10, background: 'var(--orange)', color: 'white' }}>
+                          <Icon name="clipboard" size={10} /> Permit
                         </span>
                       )}
                     </div>
@@ -1211,7 +1211,7 @@ export default function ProjectManager() {
                         color: siteType === st.id ? 'white' : 'var(--muted)',
                         border: 'none', cursor: 'pointer',
                       }}>
-                      {st.icon} {st.label}
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}><Icon name={st.iconName} size={14} /> {st.label}</span>
                     </button>
                   ))}
                 </div>
@@ -1268,7 +1268,7 @@ export default function ProjectManager() {
                         color: editSiteType === st.id ? 'white' : 'var(--muted)',
                         border: 'none', cursor: 'pointer',
                       }}>
-                      {st.icon} {st.label}
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}><Icon name={st.iconName} size={14} /> {st.label}</span>
                     </button>
                   ))}
                 </div>
@@ -1321,8 +1321,9 @@ export default function ProjectManager() {
                     background: 'var(--surface2)', color: 'var(--text)',
                     border: '1px solid var(--border2)', borderRadius: 8,
                     fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                   }}>
-                  🛠️ View tasks ({siteTaskCounts[editSite.id] || 0})
+                  <Icon name="clipboard" size={14} /> View tasks ({siteTaskCounts[editSite.id] || 0})
                 </button>
                 <button
                   onClick={() => openSiteMaterials(editSite)}
@@ -1331,8 +1332,9 @@ export default function ProjectManager() {
                     background: 'var(--surface2)', color: 'var(--text)',
                     border: '1px solid var(--border2)', borderRadius: 8,
                     fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                   }}>
-                  📦 View materials
+                  <Icon name="box" size={14} /> View materials
                 </button>
               </div>
 
