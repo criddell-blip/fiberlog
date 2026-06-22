@@ -80,8 +80,8 @@ export default function MyStockView({ onBack, onUserTap }) {
       <div className="topbar">
         {onBack && <button className="back-btn" onClick={onBack}>←</button>}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.5px', lineHeight: 1 }}>
-            📦 <span style={{ color: 'var(--text)' }}>My</span>{' '}
+          <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.5px', lineHeight: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Icon name="box" size={19} /><span style={{ color: 'var(--text)' }}>My</span>{' '}
             <span style={{ color: 'var(--orange)' }}>Stock</span>
           </div>
           <div className="topbar-sub" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

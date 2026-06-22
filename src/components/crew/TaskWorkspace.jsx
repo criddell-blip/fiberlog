@@ -393,7 +393,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
           reason so the crew knows what to fix. */}
       {flagInfo && (
         <div className="banner banner-danger" style={{ alignItems: 'flex-start' }}>
-          <span className="banner-icon">⚠️</span>
+          <span className="banner-icon" style={{ display: 'inline-flex' }}><Icon name="alert" size={16} /></span>
           <div className="banner-body" style={{ fontSize: 'var(--fs-xs)' }}>
             <span style={{ fontWeight: 'var(--fw-bold)' }}>
               {lang === 'es' ? 'Marcado' : 'Flagged'}

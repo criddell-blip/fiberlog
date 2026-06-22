@@ -183,9 +183,9 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
             target="_blank"
             rel="noopener noreferrer"
             className="pill pill-solid-accent"
-            style={{ padding: '5px 10px', textDecoration: 'none', flexShrink: 0 }}
+            style={{ padding: '5px 10px', textDecoration: 'none', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 5 }}
           >
-            📄 Permit
+            <Icon name="clipboard" size={13} /> Permit
           </a>
         )}
         {onUserTap && <button className="user-btn" onClick={onUserTap}>{currentUser?.initials || 'Me'}</button>}
@@ -231,8 +231,8 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
                   {/* Default "open" state needs no pill — being in the Active Tasks
                       section is the signal. Only render a pill for non-default states. */}
                   {isFlagged && (
-                    <span className="pill pill-danger">
-                      ⚠️ {lang === 'es' ? 'Marcado' : 'Flagged'}
+                    <span className="pill pill-danger" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <Icon name="alert" size={12} /> {lang === 'es' ? 'Marcado' : 'Flagged'}
                     </span>
                   )}
                 </div>
