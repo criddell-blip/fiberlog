@@ -5,6 +5,7 @@ import {
   getWarehousesForCount,
   startCountRun,
 } from '../../lib/cycleCount'
+import Icon from '../shared/Icon'
 
 // Entry to the counter flow. Two paths:
 //   1. If the caller has an in-progress run, offer "Resume" (keeps notes,
@@ -168,7 +169,7 @@ export default function CountStartSheet({ onClose, onStarted }) {
                 />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-sm)', color: isFirstBinning ? 'var(--orange)' : 'var(--text)' }}>
-                    📦 Bin distribution mode
+                    <Icon name="box" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Bin distribution mode
                   </div>
                   <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', marginTop: 4, lineHeight: 1.4 }}>
                     Counts at each bin become <strong>transfer movements</strong>

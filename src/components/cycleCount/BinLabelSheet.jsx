@@ -4,6 +4,7 @@ import QRCode from 'qrcode'
 import { formatBinCode } from '../../lib/cycleCount'
 import { getBinsForWarehouse } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 // Print bin labels for stuck-on-the-shelf scanning. Generates a QR code
 // encoding `BIN:<uuid>` per bin, plus the bin name in large readable type
@@ -201,7 +202,7 @@ export default function BinLabelSheet({ warehouse, onClose }) {
               borderRadius: 'var(--r-sm)', borderBottom: 'none',
               border: '1px solid var(--danger-border)', marginBottom: 14,
             }}>
-              <span className="banner-icon">⚠️</span>
+              <span className="banner-icon" style={{ display: 'inline-flex' }}><Icon name="alert" size={16} /></span>
               <div className="banner-body">{error}</div>
             </div>
           )}
@@ -261,7 +262,7 @@ export default function BinLabelSheet({ warehouse, onClose }) {
                   onClick={handlePrint}
                   disabled={labelsToPrint.length === 0}
                 >
-                  🖨 Print {labelsToPrint.length} label{labelsToPrint.length === 1 ? '' : 's'}
+                  <Icon name="printer" size={15} style={{ display: 'inline-block', verticalAlign: '-3px', marginRight: 6 }} />Print {labelsToPrint.length} label{labelsToPrint.length === 1 ? '' : 's'}
                 </button>
               </div>
             </>

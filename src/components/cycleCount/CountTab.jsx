@@ -5,6 +5,7 @@ import CountRunScreen from './CountRunScreen'
 import CountRunReviewSheet from './CountRunReviewSheet'
 import CountRunHistorySheet from './CountRunHistorySheet'
 import { getMyActiveRun, getPendingCountRuns } from '../../lib/cycleCount'
+import Icon from '../shared/Icon'
 
 // Lives inside InventoryView's "Count" sub-tab. InventoryView passes
 // `onExitTab` and suppresses its own chrome (action buttons + sub-tab
@@ -116,7 +117,7 @@ export default function CountTab({ onExitTab, jumpTo }) {
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: 18 }}>⚠️</span>
+                      <span style={{ display: 'inline-flex', color: 'var(--warning-fg)' }}><Icon name="alert" size={18} /></span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-base)' }}>
                           {run.counter?.name || 'Unknown counter'}
@@ -145,7 +146,7 @@ export default function CountTab({ onExitTab, jumpTo }) {
               margin: pendingRuns.length > 0 ? '16px auto 0' : '0 auto',
               maxWidth: 540,
             }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>🔢</div>
+              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'center', color: 'var(--gray-mid)' }}><Icon name="scan" size={34} /></div>
               <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-md)', marginBottom: 6 }}>
                 {pendingRuns.length > 0 ? 'Start another count' : 'Cycle count'}
               </div>

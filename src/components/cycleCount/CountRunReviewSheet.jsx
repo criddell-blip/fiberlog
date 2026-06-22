@@ -6,6 +6,7 @@ import {
   discardCountResolution,
   discardCountRun,
 } from '../../lib/cycleCount'
+import Icon from '../shared/Icon'
 
 // Overlay sheet that opens when a manager taps a pending count run in the
 // CountTab queue. Lets them review per-line variances and either approve
@@ -129,7 +130,7 @@ export default function CountRunReviewSheet({ runId, onClose, onChanged }) {
               borderRadius: 'var(--r-sm)', borderBottom: 'none',
               border: '1px solid var(--danger-border)',
             }}>
-              <span className="banner-icon">⚠️</span>
+              <span className="banner-icon" style={{ display: 'inline-flex' }}><Icon name="alert" size={16} /></span>
               <div className="banner-body">{error}</div>
             </div>
             <button className="btn btn-ghost" onClick={onClose} style={{ marginTop: 16 }}>Close</button>
@@ -168,7 +169,7 @@ export default function CountRunReviewSheet({ runId, onClose, onChanged }) {
                 border: `1px solid ${pending.length > 0 ? 'var(--warning-fg)' : 'var(--success-border)'}`,
                 marginBottom: 14, padding: 'var(--space-3) var(--space-4)',
               }}>
-                <span className="banner-icon">{pending.length > 0 ? '⚠️' : '✓'}</span>
+                <span className="banner-icon" style={{ display: 'inline-flex' }}><Icon name={pending.length > 0 ? 'alert' : 'check'} size={16} /></span>
                 <div className="banner-body" style={{ fontSize: 'var(--fs-sm)' }}>
                   <div style={{ fontWeight: 'var(--fw-bold)' }}>
                     {submittedBins} bin{submittedBins === 1 ? '' : 's'} counted ·{' '}
@@ -238,7 +239,7 @@ export default function CountRunReviewSheet({ runId, onClose, onChanged }) {
                       style={{ width: '100%', padding: '8px 12px', fontSize: 'var(--fs-sm)', marginBottom: 8 }}
                       disabled={busy}
                     >
-                      ✓ Approve all {pending.length}
+                      <Icon name="check" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Approve all {pending.length}
                     </button>
                   )}
                   {pending.map(r => (
@@ -265,8 +266,8 @@ export default function CountRunReviewSheet({ runId, onClose, onChanged }) {
                       padding: '6px 12px', fontSize: 'var(--fs-sm)',
                       color: 'var(--muted)', opacity: 0.7,
                     }}>
-                      <span className={`pill pill-sm ${r.status === 'approved' ? 'pill-success' : 'pill-muted'}`}>
-                        {r.status === 'approved' ? '✓' : '✗'}
+                      <span className={`pill pill-sm ${r.status === 'approved' ? 'pill-success' : 'pill-muted'}`} style={{ display: 'inline-flex' }}>
+                        <Icon name={r.status === 'approved' ? 'check' : 'x'} size={11} />
                       </span>
                       <span style={{ flex: 1, fontSize: 'var(--fs-xs)' }}>
                         {r.part?.name || r.part_id} — {r.resolution_type === 'net_gain' ? '+' : '-'}{Number(r.quantity)}
@@ -421,7 +422,7 @@ function ResolutionRow({ resolution, onApprove, onDiscard, busy }) {
           className="btn btn-primary"
           style={{ flex: 2, padding: '6px 10px', fontSize: 'var(--fs-sm)' }}
         >
-          ✓ Approve {isGain ? 'gain' : 'loss'}
+          <Icon name="check" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Approve {isGain ? 'gain' : 'loss'}
         </button>
         <button
           onClick={onDiscard}

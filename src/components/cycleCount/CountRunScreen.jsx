@@ -17,6 +17,7 @@ import {
 } from '../../lib/cycleCount'
 import { getBinsForWarehouse, getLocations, createPart, compareNamesNatural } from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
+import Icon from '../shared/Icon'
 
 // The active count run screen. Built around a persistent scan input at top
 // that handles both bin codes (BIN:<uuid>) and part SKUs. Scanning a bin
@@ -292,7 +293,9 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
         <button className="back-btn" onClick={onExit}>←</button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="topbar-title">
-            {run.is_first_binning ? '📦 Bin distribution' : 'Cycle count'}
+            {run.is_first_binning
+              ? <><Icon name="box" size={16} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Bin distribution</>
+              : 'Cycle count'}
           </div>
           <div className="topbar-sub" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {run.scope_warehouse?.name || 'Cross-warehouse'} ·
@@ -317,7 +320,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
           borderBottom: '1px solid var(--orange)',
           fontSize: 'var(--fs-xs)', color: 'var(--orange)', fontWeight: 'var(--fw-semibold)',
         }}>
-          ⚠️ Bin distribution — counts at each bin will MOVE stock from{' '}
+          <Icon name="alert" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Bin distribution — counts at each bin will MOVE stock from{' '}
           <strong>{run.scope_warehouse?.name}</strong> to the bin.
           Not a discovery / variance.
         </div>
@@ -335,7 +338,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
         />
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           <button onClick={openBinPicker} className="btn btn-ghost" style={{ flex: 1, padding: '6px 10px', fontSize: 'var(--fs-sm)' }}>
-            🗂 Pick bin
+            <Icon name="box" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Pick bin
           </button>
           <button
             onClick={() => setShowPartPicker(true)}
@@ -343,7 +346,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
             style={{ flex: 1, padding: '6px 10px', fontSize: 'var(--fs-sm)' }}
             disabled={!activeSession}
           >
-            🔎 Pick part
+            <Icon name="search" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Pick part
           </button>
         </div>
       </div>
@@ -352,7 +355,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
       <div className="scroll-body" style={{ padding: '14px 14px 40px' }}>
         {!activeSession && (
           <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--hint)' }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>📦</div>
+            <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'center', color: 'var(--gray-mid)' }}><Icon name="box" size={34} /></div>
             <div style={{ fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-md)', color: 'var(--text)', marginBottom: 6 }}>
               Scan a bin to start
             </div>
@@ -557,7 +560,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
               )}
               {activeSession && uncountedCount > 0 && (
                 <div style={{ color: 'var(--amber)', marginTop: 8, fontWeight: 'var(--fw-bold)' }}>
-                  ⚠️ You still have an open bin with {uncountedCount} uncounted lines — finish it first.
+                  <Icon name="alert" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />You still have an open bin with {uncountedCount} uncounted lines — finish it first.
                 </div>
               )}
             </div>
@@ -768,7 +771,7 @@ function BinsCountedList({ sessions, onResume }) {
               borderRadius: 'var(--r-sm)',
               opacity: 0.85,
             }}>
-              <span className="pill pill-sm pill-success">✓</span>
+              <span className="pill pill-sm pill-success" style={{ display: 'inline-flex' }}><Icon name="check" size={11} /></span>
               <div style={{ flex: 1, fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
                 {s.location?.name || s.location_id}
               </div>
@@ -861,7 +864,7 @@ function BinPickerSheet({ bins, statusByBinId = {}, onPick, onClose }) {
               >
                 <span style={{ flex: 1 }}>{b.name}</span>
                 {isSubmitted && (
-                  <span className="pill pill-sm pill-success">✓ counted</span>
+                  <span className="pill pill-sm pill-success"><Icon name="check" size={11} style={{ verticalAlign: '-2px', marginRight: 3, display: 'inline-block' }} />counted</span>
                 )}
                 {isInProgress && (
                   <span className="pill pill-sm pill-warning">… in progress</span>
@@ -1114,8 +1117,8 @@ function EndResultScreen({ run, onDone }) {
   const isBinning = run.is_first_binning
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
-      <div style={{ fontSize: 56, marginBottom: 12 }}>
-        {isBinning ? '📦' : (isPending ? '⚠️' : '✅')}
+      <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'center' }}>
+        <Icon name={isBinning ? 'box' : (isPending ? 'alert' : 'check')} size={48} />
       </div>
       <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 6 }}>
         {isBinning ? 'Bin distribution complete' : (isPending ? 'Reconciled — review needed' : 'Reconciled cleanly')}

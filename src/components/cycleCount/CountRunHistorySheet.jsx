@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getCompletedCountRuns } from '../../lib/cycleCount'
 import CountRunReviewSheet from './CountRunReviewSheet'
+import Icon from '../shared/Icon'
 
 // Read-only history of closed + discarded count runs. Lets a manager
 // review what was counted, when, and (for closed runs) drill into the
@@ -53,7 +54,7 @@ export default function CountRunHistorySheet({ onClose }) {
               borderRadius: 'var(--r-sm)', borderBottom: 'none',
               border: '1px solid var(--danger-border)',
             }}>
-              <span className="banner-icon">⚠️</span>
+              <span className="banner-icon" style={{ display: 'inline-flex' }}><Icon name="alert" size={16} /></span>
               <div className="banner-body">{error}</div>
             </div>
           )}
