@@ -313,7 +313,7 @@ export default function LocationDetailPanel({
                     <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-semibold)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {pc?.name || pc?.id || 'Unknown'}
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: '"DM Mono", monospace' }}>
+                    <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'var(--font-mono)' }}>
                       {pc?.id}{pc?.category ? ` · ${pc.category}` : ''}
                     </div>
                   </div>

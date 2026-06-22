@@ -1145,7 +1145,7 @@ function PartPickerSheet({ onPick, onClose }) {
               }}
             >
               <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 'var(--fs-base)' }}>{p.name}</div>
-              <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: '"DM Mono", monospace', marginTop: 2 }}>
+              <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
                 {p.id}
               </div>
             </button>
@@ -1224,7 +1224,7 @@ function CreatePartPanel({ initialQuery, onCreated, onCancel, onClose }) {
             disabled={submitting}
             autoComplete="off"
             name="new-part-sku"
-            style={{ fontFamily: '"DM Mono", monospace' }}
+            style={{ fontFamily: 'var(--font-mono)' }}
           />
         </div>
 

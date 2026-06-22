@@ -562,7 +562,7 @@ function PartLocationsPanel({ part, locations, currentUser, onClose, onJumpToLoc
         <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 2 }}>
           {part.name}
         </div>
-        <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: '"DM Mono", monospace', marginBottom: 12 }}>
+        <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginBottom: 12 }}>
           {part.id}{part.unit ? ` · ${part.unit}` : ''}
         </div>
 

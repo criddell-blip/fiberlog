@@ -453,7 +453,7 @@ function ResolutionRow({ resolution, onApprove, onDiscard, busy }) {
           <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 'var(--fs-base)' }}>
             {resolution.part?.name || resolution.part_id}
           </div>
-          <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: '"DM Mono", monospace', marginTop: 2 }}>
+          <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
             {resolution.part_id} · at {binName}
           </div>
         </div>

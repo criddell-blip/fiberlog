@@ -105,7 +105,7 @@ export default function ScanInput({
             background: disabled ? 'var(--gray-lt)' : 'var(--surface2)',
             color: 'var(--text)',
             fontSize: 16,
-            fontFamily: '"DM Mono", monospace',
+            fontFamily: 'var(--font-mono)',
             outline: 'none',
           }}
           onFocus={e => e.target.style.borderColor = 'var(--orange)'}

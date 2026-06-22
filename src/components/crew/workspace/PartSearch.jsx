@@ -63,7 +63,7 @@ export default function PartSearch({ onSelect, onClose, filter }) {
           >
             <div>
               <div style={{ fontWeight: 600, fontSize: 14 }}>{p.name}</div>
-              <div style={{ fontSize: 11, color: 'var(--hint)', fontFamily: 'DM Mono, monospace', marginTop: 2 }}>
+              <div style={{ fontSize: 11, color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
                 {p.id}
               </div>
             </div>

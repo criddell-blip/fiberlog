@@ -428,7 +428,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: '"DM Mono", monospace' }}>
+                    <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'var(--font-mono)' }}>
                       {group.partId} · {group.totalQty.toLocaleString()} {group.unit || 'ea'} across {group.locations.length} location{group.locations.length === 1 ? '' : 's'}
                     </div>
                   </div>

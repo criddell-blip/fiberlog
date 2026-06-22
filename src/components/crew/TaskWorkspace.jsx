@@ -618,7 +618,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                 summary.vaults > 0 && { label: 'Vaults', value: summary.vaults },
               ].filter(Boolean).map(s => (
                 <div key={s.label} className="metric">
-                  <div className="metric-value">{s.value}</div>
+                  <div className="metric-value mono">{s.value}</div>
                   <div className="metric-label">{s.label}</div>
                 </div>
               ))}
@@ -666,8 +666,8 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                   <button
                     onClick={() => setExtraParts(prev => prev.filter(ep => ep.id !== p.id))}
                     className="tally-btn tally-sm"
-                    style={{ background: 'var(--danger-bg)', color: 'var(--danger-fg)', fontSize: 14 }}
-                  >×</button>
+                    style={{ background: 'var(--danger-bg)', color: 'var(--danger-fg)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                  ><Icon name="x" size={14} /></button>
                 </div>
               ))}
             </div>
@@ -693,7 +693,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>{t('hoursWorked', lang)}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <button className="tally-btn tally-minus" onClick={() => setHoursWorked(h => Math.max(0, Math.round((h-.5)*2)/2))}>−</button>
-                <div style={{ fontSize: 'var(--fs-2xl)', fontWeight: 'var(--fw-black)', flex: 1, textAlign: 'center' }}>{hoursWorked.toFixed(1)}</div>
+                <div className="mono" style={{ fontSize: 'var(--fs-2xl)', fontWeight: 'var(--fw-black)', flex: 1, textAlign: 'center' }}>{hoursWorked.toFixed(1)}</div>
                 <button className="tally-btn tally-plus" onClick={() => setHoursWorked(h => Math.min(16, Math.round((h+.5)*2)/2))}>+</button>
                 <span style={{ color: 'var(--muted)' }}>hrs</span>
               </div>

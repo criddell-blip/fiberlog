@@ -288,7 +288,7 @@ select option {
 .tally-minus { background: var(--gray-lt); color: var(--gray); }
 .tally-plus { background: var(--orange-lt); color: var(--orange); border: 1px solid var(--orange-dk); }
 .tally-plus-big { background: var(--orange); color: white; width: 40px; height: 40px; font-size: 24px; }
-.tally-count { font-size: 18px; font-weight: 700; min-width: 28px; text-align: center; color: var(--text); }
+.tally-count { font-size: 18px; font-weight: 700; min-width: 28px; text-align: center; color: var(--text); font-family: var(--font-mono); }
 
 /* ── Parts list ── */
 .parts-row {
@@ -297,14 +297,15 @@ select option {
 }
 .parts-row:last-child { border-bottom: none; }
 .part-name { font-size: 13px; font-weight: 600; color: var(--text); }
-.part-id { font-size: 11px; color: var(--hint); margin-top: 1px; font-family: 'DM Mono', monospace; }
-.part-qty { font-size: 16px; font-weight: 700; color: var(--orange); }
+.part-id { font-size: 11px; color: var(--hint); margin-top: 1px; font-family: var(--font-mono); }
+.part-qty { font-size: 16px; font-weight: 700; color: var(--orange); font-family: var(--font-mono); }
 .part-unit { font-size: 11px; color: var(--muted); }
 
 /* ── Footage input ── */
 .footage-block {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--r-sm); padding: 14px; margin-bottom: 8px;
+  box-shadow: 0 1px 3px rgba(15,23,42,0.06);
 }
 .footage-label { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
 .footage-input-row { display: flex; align-items: center; gap: 8px; }
@@ -312,6 +313,7 @@ select option {
   flex: 1; padding: 10px 12px; border: 1.5px solid var(--border2);
   border-radius: var(--r-xs); font-size: 22px; font-weight: 700;
   text-align: center; background: var(--surface2); color: var(--text);
+  font-family: var(--font-mono);
 }
 .footage-unit { font-size: 14px; color: var(--muted); font-weight: 600; }
 
