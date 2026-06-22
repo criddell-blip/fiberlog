@@ -38,8 +38,11 @@ Remaining inventory polish (deferred, low priority): Locations' nested bin/aisle
 sub-rows + inline form/retire overlays; leftover emoji in collapsed-filter
 summary strings; the action/detail **sheets** (see C).
 
-### B. Cycle count
-6. Full-screen scanner flow — its own chrome. `cycleCount/CountTab.jsx` (+ `cycleCount/*`)
+### B. Cycle count — ✅ COMPLETE (Phase F)
+6. ✅ All 6 `cycleCount/*` files (CountTab / CountRunScreen / review / history / start / BinLabel): warnings→alert, count empty→scan, bin→box, pick-part→search, print→printer, approve/counted→check, reject→x, status ternaries→conditional icons. Smoke-tested live (Cycle Count tab, 10 icons, no warnings).
+
+### B2. Shared / shell states — ✅ COMPLETE (Phase F)
+- App.jsx + ManagerApp + both crew shells connect-error ⚠️ → alert; crew wide empty 👈 → flipped arrow; PausedBanner 📵 → eye; ScanInput 📷 → new `camera` icon. Login confirmed emoji-free.
 
 ### C. Action / detail sheets (~12) — ✅ COMPLETE (Phase F)
 7. ✅ Record movement, Receive PO, Reconcile, Sonar, Fiber jobs, Import CSV, Sage export, Bulk move, PR composer, SKU/bin labels, Location detail, Aisle signs, Bulk Sonar projects — all emoji → line icons. Added `alert/trash/printer/mail/edit/key/lock/eye` to Icon.jsx. Kept emoji in `<select>` options (native), currency, placeholder strings, loading spinner, prose. Build clean; Record Movement smoke-tested live.
