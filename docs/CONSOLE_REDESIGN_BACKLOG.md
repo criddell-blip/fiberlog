@@ -70,6 +70,15 @@ summary strings; the action/detail **sheets** (see C).
 
 ---
 
+## 🐞 Bugs to investigate
+
+- **Crew Load/Return submit can kick the user out of the app.** Reported live: doing a **Return** (truck → warehouse) — "from Braden to the warehouse" — in `CrewMovementSheet`, then tapping submit, exited the app entirely (browser navigated away, not just closed the sheet).
+  - **Leading hypothesis:** the back-button coordinator (`src/lib/backStack.js`). On a successful submit the sheet closes via `onComplete` (a UI-initiated unmount, not a Back press); its `useBackClose` cleanup spends the synthetic history entry via `history.back()`. If the armed-entry accounting is off by one for this flow (sheet opened over the My Stock screen + the load/return mode state), that `history.back()` can over-consume past the app's root → exits the app. Less likely: an unhandled error in the submit path (`recordCrewMovement`) crashing the tree.
+  - **Triage note — need to confirm first:** does it reproduce on the **deployed/live** app (production, no React StrictMode) or only via `npm run dev` (StrictMode double-invokes effects, which can drift the synthetic-entry count and is a known dev-only artifact)? If live-only-no → it's a dev artifact; if it happens on the deployed app → it's a real back-stack accounting bug to fix. Repro to capture: My Stock → Return → pick warehouse + part(s) → submit; watch whether `history` exits.
+  - **Affects both branches** (`feat/back-button-nav` is live; `redesign/console` inherits the same back-button code).
+
+---
+
 ## 🚩 Flagged decisions & known gaps
 
 - **Low-stock status has no data behind it yet.** The schema has no reorder threshold, so the Stock "LOW" badge currently means **zero/negative** (the actionable state). A real LOW needs a reorder-point field on parts + a tweak to `stockStatus()` in `InventoryStockTab.jsx`. *(Presentation-only scope guard: flagged, not built.)*
