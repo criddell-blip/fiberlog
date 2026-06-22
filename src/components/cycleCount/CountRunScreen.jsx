@@ -17,6 +17,8 @@ import {
 } from '../../lib/cycleCount'
 import { getBinsForWarehouse, getLocations, createPart, compareNamesNatural } from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
+import { useBackClose } from '../../lib/backStack'
+import { scanFeedback, unlockAudio } from '../../lib/scanFeedback'
 import Icon from '../shared/Icon'
 
 // The active count run screen. Built around a persistent scan input at top
@@ -53,6 +55,27 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
   // Track which line should pulse / scroll into view (most recent scan).
   const [highlightedLineKey, setHighlightedLineKey] = useState(null)
   const lineRefs = useRef({})
+
+  // Camera-first scanning: bumping cameraSignal opens ScanInput's continuous
+  // camera. lastScanned drives a transient confirmation card. qtySheetLine
+  // is the line currently open in the bottom qty-override sheet.
+  const [cameraSignal, setCameraSignal] = useState(0)
+  const [lastScanned, setLastScanned] = useState(null)
+  const lastScannedTimer = useRef(null)
+  const [qtySheetLine, setQtySheetLine] = useState(null)
+
+  useEffect(() => () => { if (lastScannedTimer.current) clearTimeout(lastScannedTimer.current) }, [])
+
+  function flashLastScanned(part, qty) {
+    setLastScanned({ name: part.name || part.id, qty, unit: part.unit || 'ea' })
+    if (lastScannedTimer.current) clearTimeout(lastScannedTimer.current)
+    lastScannedTimer.current = setTimeout(() => setLastScanned(null), 1600)
+  }
+
+  function openCamera() {
+    unlockAudio()           // must run inside this user gesture
+    setCameraSignal(n => n + 1)
+  }
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -118,44 +141,71 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
   async function loadPart(sku) {
     if (!activeSession) {
       showToast('Scan a bin first')
+      scanFeedback('error')
       return
     }
     const part = await getPartBySku(sku)
     if (!part) {
       showToast(`Unknown SKU: ${sku}`)
+      scanFeedback('error')
       return
     }
     // Find existing line — if found, increment counted_qty by 1.
     // If not found, add as new unexpected (expected=0, counted=1).
     const existing = lines.find(l => l.part_id === part.id)
     const newQty = existing ? (Number(existing.counted_qty) || 0) + 1 : 1
-    const updated = await recordCountLine({
-      sessionId: activeSession.id,
-      partId: part.id,
-      countedQty: newQty,
-    })
-    await refreshLines(activeSession.id)
+
+    // Optimistic local update so the scan feels instant (no round-trip flash).
+    if (existing) {
+      setLines(prev => prev.map(l => l.part_id === part.id ? { ...l, counted_qty: newQty } : l))
+    } else {
+      setLines(prev => [...prev, {
+        id: `temp-${part.id}`, session_id: activeSession.id, part_id: part.id,
+        expected_qty: 0, counted_qty: 1, part, _temp: true,
+      }])
+    }
+    flashLastScanned(part, newQty)
     setHighlightedLineKey(part.id)
-    // Scroll into view
+    scanFeedback('ok')
     setTimeout(() => {
       const el = lineRefs.current[part.id]
       if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
     }, 50)
+
+    try {
+      await recordCountLine({ sessionId: activeSession.id, partId: part.id, countedQty: newQty })
+      // New unexpected line needs the real row id/ordering for remove + submit.
+      if (!existing) await refreshLines(activeSession.id)
+    } catch (e) {
+      console.error('Record count failed:', e)
+      scanFeedback('error')
+      showToast('Save failed: ' + e.message)
+      await refreshLines(activeSession.id)
+    }
   }
 
-  // Manual qty edit (when worker types a number directly instead of scanning)
-  async function handleQtyChange(line, newVal) {
-    const numeric = newVal === '' ? null : Number(newVal)
-    if (numeric !== null && (isNaN(numeric) || numeric < 0)) return
-    // Optimistic update
-    setLines(prev => prev.map(l => l.id === line.id ? { ...l, counted_qty: numeric } : l))
-    if (numeric === null) return  // don't save NULL — wait for actual entry
+  // Mark an expected-but-not-found part as counted ZERO (clears it from the
+  // "still missing" list and creates the shortage variance at end of run).
+  async function handleCountZero(line) {
+    setLines(prev => prev.map(l => l.id === line.id ? { ...l, counted_qty: 0 } : l))
     try {
-      await recordCountLine({
-        sessionId: activeSession.id,
-        partId: line.part_id,
-        countedQty: numeric,
-      })
+      await recordCountLine({ sessionId: activeSession.id, partId: line.part_id, countedQty: 0 })
+    } catch (e) {
+      console.error('Count-zero failed:', e)
+      showToast('Save failed: ' + e.message)
+      await refreshLines(activeSession.id)
+    }
+  }
+
+  // Save an exact quantity from the bottom qty-override sheet (for stacks, or
+  // adjusting a found count). Keys on part_id so temp/optimistic rows work.
+  async function handleQtySave(line, qty) {
+    const numeric = Number(qty)
+    if (isNaN(numeric) || numeric < 0) { setQtySheetLine(null); return }
+    setLines(prev => prev.map(l => l.id === line.id ? { ...l, counted_qty: numeric } : l))
+    setQtySheetLine(null)
+    try {
+      await recordCountLine({ sessionId: activeSession.id, partId: line.part_id, countedQty: numeric })
     } catch (e) {
       console.error('Save qty failed:', e)
       showToast('Save failed: ' + e.message)
@@ -326,29 +376,20 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
         </div>
       )}
 
-      {/* Persistent scan input */}
+      {/* HID scan input — kept (minimized) for scanner guns + manual typing.
+          The big camera button lives in the bottom action bar (camera-first). */}
       <div style={{
-        padding: '12px 14px', borderBottom: '1px solid var(--border)',
+        padding: '10px 14px', borderBottom: '1px solid var(--border)',
         background: 'var(--surface)', flexShrink: 0,
       }}>
         <ScanInput
           onScan={handleScan}
+          continuous
+          cameraOpenSignal={cameraSignal}
+          showCameraButton={false}
           placeholder={activeSession ? 'Scan a part SKU…' : 'Scan a bin (BIN:…) to start'}
           disabled={busy}
         />
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <button onClick={openBinPicker} className="btn btn-ghost" style={{ flex: 1, padding: '6px 10px', fontSize: 'var(--fs-sm)' }}>
-            <Icon name="box" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Pick bin
-          </button>
-          <button
-            onClick={() => setShowPartPicker(true)}
-            className="btn btn-ghost"
-            style={{ flex: 1, padding: '6px 10px', fontSize: 'var(--fs-sm)' }}
-            disabled={!activeSession}
-          >
-            <Icon name="search" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Pick part
-          </button>
-        </div>
       </div>
 
       {/* Body */}
@@ -369,134 +410,171 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
           </div>
         )}
 
-        {activeSession && (
+        {activeSession && (() => {
+          // Semi-blind: split the lines into Missing / Found / Unexpected.
+          // We never render expected_qty or variance here — those are revealed
+          // only in the pre-submit confirm + manager review.
+          const expectedLines = lines.filter(l => Number(l.expected_qty) !== 0)
+          const missing = expectedLines.filter(l => l.counted_qty == null)
+          const found = expectedLines.filter(l => l.counted_qty != null)
+          const unexpected = lines.filter(l => Number(l.expected_qty) === 0)
+          const totalExpected = expectedLines.length
+          const foundCount = found.length
+          const allCounted = totalExpected > 0 && missing.length === 0
+
+          const rowBase = {
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--r-sm)', padding: '10px 12px', marginBottom: 6,
+            display: 'flex', alignItems: 'center', gap: 10,
+          }
+          return (
           <>
-            {/* Active bin header */}
-            <div className="banner banner-accent" style={{
-              borderRadius: 'var(--r-sm)', borderBottom: 'none',
-              border: '1px solid var(--accent-border)', marginBottom: 14,
-              padding: 'var(--space-3) var(--space-4)',
-            }}>
-              <div className="banner-body">
-                <div style={{ fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-md)' }}>
-                  {activeSession.location.name}
-                </div>
-                <div style={{ fontSize: 'var(--fs-xs)', marginTop: 2 }}>
-                  {lines.length} part type{lines.length === 1 ? '' : 's'}
-                  {uncountedCount > 0 && ` · ${uncountedCount} uncounted`}
+            {/* Sticky bin header — progress as part-TYPE counts only (never qty) */}
+            <div style={{ position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg)', paddingBottom: 10, marginBottom: 2 }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                background: 'var(--surface)', border: '1px solid var(--accent-border)',
+                borderRadius: 'var(--r-sm)', padding: '10px 14px',
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-md)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {activeSession.location.name}
+                  </div>
+                  <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', marginTop: 2 }}>
+                    {totalExpected > 0
+                      ? <><span className="mono">{foundCount}</span> of <span className="mono">{totalExpected}</span> found</>
+                      : 'No expected stock here'}
+                  </div>
                 </div>
               </div>
-              <button
-                onClick={() => setConfirmSubmitBin(true)}
-                className="btn btn-primary"
-                style={{ padding: '8px 14px', fontSize: 'var(--fs-sm)' }}
-                disabled={busy || uncountedCount > 0}
-                title={uncountedCount > 0 ? `${uncountedCount} parts not yet counted` : 'Review counts and submit'}
-              >
-                Submit bin
-              </button>
             </div>
 
-            {/* Lines */}
-            {lines.length === 0 && (
+            {allCounted && (
+              <div className="banner banner-success" style={{ borderRadius: 'var(--r-sm)', marginBottom: 12 }}>
+                <span className="banner-icon" style={{ display: 'inline-flex' }}><Icon name="check" size={16} /></span>
+                <div className="banner-body" style={{ fontSize: 'var(--fs-sm)' }}>All expected parts counted — review &amp; submit below.</div>
+              </div>
+            )}
+
+            {/* STILL MISSING */}
+            {missing.length > 0 && (
+              <>
+                <div className="sec-label" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--amber)', marginBottom: 8 }}>
+                  <Icon name="alert" size={13} /> Still missing ({missing.length})
+                </div>
+                {missing.map(line => {
+                  const part = line.part || {}
+                  return (
+                    <div key={line.id} ref={el => { lineRefs.current[line.part_id] = el }}
+                      style={{ ...rowBase, borderLeft: '3px solid var(--amber)' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 'var(--fs-base)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{part.name || line.part_id}</div>
+                        <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>{line.part_id}</div>
+                      </div>
+                      <button onClick={() => setQtySheetLine(line)} className="btn btn-primary" style={{ padding: '8px 14px', fontSize: 'var(--fs-sm)', flexShrink: 0 }}>Count</button>
+                      <button onClick={() => handleCountZero(line)} title="Found none" style={{ width: 40, height: 36, flexShrink: 0, border: '1px solid var(--border2)', background: 'var(--surface2)', color: 'var(--muted)', borderRadius: 'var(--r-xs)', fontWeight: 800, cursor: 'pointer' }}>0</button>
+                    </div>
+                  )
+                })}
+              </>
+            )}
+
+            {/* FOUND */}
+            {found.length > 0 && (
+              <>
+                <div className="sec-label" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--teal-mid)', margin: '14px 0 8px' }}>
+                  <Icon name="check" size={13} /> Found ({found.length})
+                </div>
+                {found.map(line => {
+                  const part = line.part || {}
+                  const isHi = highlightedLineKey === line.part_id
+                  return (
+                    <div key={line.id} ref={el => { lineRefs.current[line.part_id] = el }}
+                      onClick={() => setQtySheetLine(line)}
+                      style={{ ...rowBase, borderLeft: `3px solid ${isHi ? 'var(--orange)' : 'transparent'}`, cursor: 'pointer', transition: 'border-color 0.3s' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 'var(--fs-base)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{part.name || line.part_id}</div>
+                        <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>{line.part_id}</div>
+                      </div>
+                      <div className="mono" style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>{line.counted_qty}</div>
+                      <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', minWidth: 18 }}>{part.unit || 'ea'}</span>
+                    </div>
+                  )
+                })}
+              </>
+            )}
+
+            {/* UNEXPECTED — found, not on this bin's list */}
+            {unexpected.length > 0 && (
+              <>
+                <div className="sec-label" style={{ margin: '14px 0 8px' }}>Not on this bin's list ({unexpected.length})</div>
+                {unexpected.map(line => {
+                  const part = line.part || {}
+                  return (
+                    <div key={line.id} ref={el => { lineRefs.current[line.part_id] = el }}
+                      style={{ ...rowBase, background: 'var(--accent-bg)' }}>
+                      <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => setQtySheetLine(line)}>
+                        <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 'var(--fs-base)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{part.name || line.part_id}</div>
+                        <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>{line.part_id}</div>
+                      </div>
+                      <div className="mono" style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>{line.counted_qty}</div>
+                      <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', minWidth: 18 }}>{part.unit || 'ea'}</span>
+                      <button type="button" onClick={() => handleRemoveLine(line)} title="Remove — scanned by mistake"
+                        style={{ width: 28, height: 28, padding: 0, background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 'var(--r-xs)', cursor: 'pointer', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Icon name="x" size={13} />
+                      </button>
+                    </div>
+                  )
+                })}
+              </>
+            )}
+
+            {totalExpected === 0 && unexpected.length === 0 && (
               <div style={{ textAlign: 'center', padding: 30, color: 'var(--hint)', fontSize: 'var(--fs-sm)' }}>
                 No expected stock at this bin. Scan parts as you find them.
               </div>
             )}
-            {lines.map(line => {
-              const part = line.part || {}
-              const counted = line.counted_qty
-              const expected = Number(line.expected_qty)
-              const variance = (counted ?? 0) - expected
-              const isUnexpected = expected === 0
-              const isUncounted = counted == null
-              const isHighlighted = highlightedLineKey === line.part_id
-              return (
-                <div
-                  key={line.id}
-                  ref={el => { lineRefs.current[line.part_id] = el }}
-                  style={{
-                    background: isUnexpected ? 'var(--accent-bg)' : 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    borderLeft: isHighlighted ? '3px solid var(--orange)'
-                              : variance !== 0 && counted != null ? '3px solid var(--amber)'
-                              : '3px solid transparent',
-                    borderRadius: 'var(--r-sm)',
-                    padding: '10px 14px',
-                    marginBottom: 6,
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    transition: 'border-color 0.3s',
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 'var(--fs-base)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {part.name || line.part_id}
-                      {isUnexpected && <span className="pill pill-accent pill-sm" style={{ marginLeft: 6 }}>found</span>}
-                    </div>
-                    <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: '"DM Mono", monospace', marginTop: 2 }}>
-                      {line.part_id}
-                      {!isUnexpected && <> · expected {expected}</>}
-                    </div>
-                  </div>
-                  <input
-                    type="number"
-                    value={counted ?? ''}
-                    placeholder={isUncounted ? '–' : '0'}
-                    onChange={e => handleQtyChange(line, e.target.value)}
-                    inputMode="numeric"
-                    style={{
-                      width: 72,
-                      padding: '6px 8px',
-                      border: `1.5px solid ${variance !== 0 && counted != null ? 'var(--amber)' : 'var(--border2)'}`,
-                      borderRadius: 'var(--r-xs)',
-                      fontSize: 18,
-                      fontWeight: 'var(--fw-bold)',
-                      textAlign: 'center',
-                      background: 'var(--bg)',
-                      color: variance > 0 ? 'var(--success-fg)' : variance < 0 ? 'var(--danger-fg)' : 'var(--text)',
-                    }}
-                  />
-                  <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', minWidth: 18 }}>
-                    {part.unit || 'ea'}
-                  </span>
-                  {/* Remove × — only for unexpected (ad-hoc) lines.
-                      Expected lines must stay required-to-count so the
-                      audit covers every system-known part. */}
-                  {isUnexpected && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveLine(line)}
-                      title="Remove — scanned this by mistake"
-                      style={{
-                        width: 28, height: 28, padding: 0,
-                        background: 'transparent', color: 'var(--muted)',
-                        border: '1px solid var(--border)',
-                        borderRadius: 'var(--r-xs)',
-                        fontSize: 16, lineHeight: 1, cursor: 'pointer',
-                        flexShrink: 0,
-                      }}
-                      onMouseEnter={e => {
-                        e.currentTarget.style.color = 'var(--amber)'
-                        e.currentTarget.style.borderColor = 'var(--amber)'
-                      }}
-                      onMouseLeave={e => {
-                        e.currentTarget.style.color = 'var(--muted)'
-                        e.currentTarget.style.borderColor = 'var(--border)'
-                      }}
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              )
-            })}
+          </>
+          )
+        })()}
+      </div>
+
+      {/* Last-scanned transient confirmation — camera-first feedback without
+          having to read the list. */}
+      {lastScanned && <LastScannedCard data={lastScanned} />}
+
+      {/* Bottom action bar — camera-first, big one-handed targets. */}
+      <div style={{
+        padding: '10px 14px', borderTop: '1px solid var(--border)',
+        flexShrink: 0, display: 'flex', gap: 8, background: 'var(--surface)',
+      }}>
+        <button onClick={openCamera} className="btn btn-primary"
+          style={{ flex: 2, padding: '14px', fontSize: 'var(--fs-md)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+          disabled={busy}>
+          <Icon name="camera" size={20} /> Scan
+        </button>
+        {!activeSession ? (
+          <button onClick={openBinPicker} className="btn btn-ghost" style={{ flex: 1, padding: '14px', fontSize: 'var(--fs-sm)' }}>
+            Pick bin
+          </button>
+        ) : (
+          <>
+            <button onClick={() => setShowPartPicker(true)} className="btn btn-ghost" style={{ flex: 1, padding: '14px', fontSize: 'var(--fs-sm)' }}>
+              Pick part
+            </button>
+            <button onClick={() => setConfirmSubmitBin(true)} className="btn btn-primary"
+              style={{ flex: 1, padding: '14px', fontSize: 'var(--fs-sm)' }}
+              disabled={busy || uncountedCount > 0}
+              title={uncountedCount > 0 ? `${uncountedCount} still missing` : 'Review & submit'}>
+              Submit
+            </button>
           </>
         )}
       </div>
 
-      {/* Discard button (subtle, at bottom) */}
+      {/* Discard (subtle) */}
       <div style={{
-        padding: '10px 14px', borderTop: '1px solid var(--border)',
+        padding: '8px 14px', borderTop: '1px solid var(--border)',
         flexShrink: 0, display: 'flex', justifyContent: 'center',
         background: 'var(--bg)',
       }}>
@@ -534,6 +612,16 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
         <PartPickerSheet
           onPick={async (p) => { setShowPartPicker(false); await loadPart(p.id) }}
           onClose={() => setShowPartPicker(false)}
+        />
+      )}
+
+      {/* Qty override / count-entry sheet (from "Count" on a missing row, or
+          tapping any found/unexpected row to adjust) */}
+      {qtySheetLine && (
+        <QtyOverrideSheet
+          line={qtySheetLine}
+          onSave={handleQtySave}
+          onClose={() => setQtySheetLine(null)}
         />
       )}
 
@@ -712,6 +800,62 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Qty override / count-entry sheet ────────────────────────────────────
+// Bottom sheet for entering an exact count (a stack you didn't scan one-by-
+// one, or adjusting a found row). Big steppers for one-handed use. Saves on
+// part_id so it works for optimistic/temp rows too.
+function QtyOverrideSheet({ line, onSave, onClose }) {
+  const part = line.part || {}
+  const [val, setVal] = useState(line.counted_qty == null ? '' : String(line.counted_qty))
+  useBackClose(1, onClose)
+  const num = val === '' ? 0 : Number(val)
+  const stepper = { width: 52, height: 52, padding: 0, fontSize: 24, fontWeight: 700, flexShrink: 0 }
+  return (
+    <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="overlay-sheet" style={{ maxWidth: 380 }}>
+        <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {part.name || line.part_id}
+        </div>
+        <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginBottom: 18 }}>
+          {line.part_id}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, marginBottom: 6 }}>
+          <button className="btn btn-ghost" style={stepper} onClick={() => setVal(String(Math.max(0, num - 1)))}>−</button>
+          <input
+            type="number" inputMode="numeric" value={val} autoFocus
+            onChange={e => setVal(e.target.value)}
+            className="mono"
+            style={{ width: 110, textAlign: 'center', fontSize: 34, fontWeight: 800, padding: '8px', border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--surface2)', color: 'var(--text)' }}
+          />
+          <button className="btn btn-ghost" style={stepper} onClick={() => setVal(String(num + 1))}>+</button>
+        </div>
+        <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', textAlign: 'center', marginBottom: 18 }}>
+          {part.unit || 'ea'} found
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" style={{ flex: 2 }} onClick={() => onSave(line, num)}>Save count</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Transient "✓ <part> <qty>" pill near the bottom after each scan — eyes-free
+// confirmation so the counter doesn't have to find the row in the list.
+function LastScannedCard({ data }) {
+  return (
+    <div style={{ position: 'fixed', left: 0, right: 0, bottom: 132, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 60 }}>
+      <div style={{ background: 'var(--dark-bar, #0F172A)', color: '#fff', borderRadius: 999, padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 6px 20px rgba(15,23,42,0.28)', maxWidth: '90%' }}>
+        <Icon name="check" size={16} color="var(--mint, #5EEAB0)" />
+        <span style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200 }}>{data.name}</span>
+        <span className="mono" style={{ fontWeight: 800, fontSize: 16 }}>{data.qty}</span>
+        <span style={{ fontSize: 11, opacity: 0.7 }}>{data.unit}</span>
+      </div>
     </div>
   )
 }

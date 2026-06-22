@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { BrowserMultiFormatReader } from '@zxing/browser'
 import Icon from './Icon'
+import { useBackClose } from '../../lib/backStack'
+import { scanFeedback, unlockAudio } from '../../lib/scanFeedback'
 
 // Unified scan-input primitive. Handles both:
 //   • USB/Bluetooth scanners (HID — they type into a focused text input and
@@ -21,9 +23,31 @@ export default function ScanInput({
   showCameraButton = true,
   autoFocus = true,
   disabled = false,
+  // Continuous mode: the camera stays open across decodes (scan-and-keep-
+  // scanning) with a beep/haptic + green flash per hit, instead of the
+  // default one-shot "scan once and close" behavior. Opt-in so existing
+  // callers are unaffected.
+  continuous = false,
+  scanDedupeMs = 1200,
+  // Bump this counter (e.g. from a parent "Scan" button) to open the camera
+  // without rendering ScanInput's own camera button.
+  cameraOpenSignal = 0,
+  onCameraStateChange,
 }) {
   const inputRef = useRef(null)
   const [cameraOpen, setCameraOpen] = useState(false)
+
+  // Open the camera when the parent bumps cameraOpenSignal (the bump happens
+  // inside a user-gesture click, so audio is already unlocked there).
+  useEffect(() => {
+    if (cameraOpenSignal > 0) setCameraOpen(true)
+  }, [cameraOpenSignal])
+
+  // Phone Back / hardware Back closes the camera instead of leaving the app.
+  useBackClose(cameraOpen ? 1 : 0, () => setCameraOpen(false))
+
+  // Let the parent react to camera open/close (e.g. pause its own scan input).
+  useEffect(() => { onCameraStateChange?.(cameraOpen) }, [cameraOpen, onCameraStateChange])
 
   // Auto-focus + refocus on blur. Tiny setTimeout so other intentional
   // focus changes (e.g. user clicked another input) win over our refocus.
@@ -90,7 +114,7 @@ export default function ScanInput({
         {showCameraButton && (
           <button
             type="button"
-            onClick={() => setCameraOpen(true)}
+            onClick={() => { unlockAudio(); setCameraOpen(true) }}
             disabled={disabled}
             title="Scan with phone camera"
             className="btn btn-ghost"
@@ -102,7 +126,18 @@ export default function ScanInput({
       </div>
       {cameraOpen && (
         <CameraScanner
-          onScan={code => { onScan(code); setCameraOpen(false) }}
+          continuous={continuous}
+          scanDedupeMs={scanDedupeMs}
+          onScan={code => {
+            if (continuous) {
+              // Camera stays open — parent handles the scan; feedback fired
+              // inside CameraScanner so it's instant.
+              onScan(code)
+            } else {
+              onScan(code)
+              setCameraOpen(false)
+            }
+          }}
           onClose={() => setCameraOpen(false)}
         />
       )}
@@ -113,11 +148,21 @@ export default function ScanInput({
 // Fullscreen camera viewport that runs continuous barcode detection.
 // Stops + releases the camera stream on unmount (the controls.stop() from
 // ZXing's API), so a "scan and close" interaction doesn't leak the camera.
-function CameraScanner({ onScan, onClose }) {
+function CameraScanner({ onScan, onClose, continuous = false, scanDedupeMs = 1200 }) {
   const videoRef = useRef(null)
   const controlsRef = useRef(null)
   const [error, setError] = useState(null)
   const [starting, setStarting] = useState(true)
+  const [flash, setFlash] = useState(false)
+
+  // Latest props in refs so the decode effect can run ONCE (deps []) without
+  // restarting the camera every render — critical for continuous mode where
+  // the parent passes a fresh onScan closure on each scan.
+  const onScanRef = useRef(onScan); onScanRef.current = onScan
+  const continuousRef = useRef(continuous); continuousRef.current = continuous
+  const dedupeRef = useRef(scanDedupeMs); dedupeRef.current = scanDedupeMs
+  const lastCodeRef = useRef(null)
+  const lastTimeRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -127,20 +172,30 @@ function CameraScanner({ onScan, onClose }) {
       try {
         // undefined deviceId = let the browser pick the default camera.
         // On most phones the default is the back-facing camera, which is
-        // what we want for scanning. Worker-facing camera selection can
-        // be added later if needed.
+        // what we want for scanning.
         const controls = await reader.decodeFromVideoDevice(
           undefined,
           videoRef.current,
           (result, err) => {
-            if (cancelled) return
-            if (result) {
-              // Stop the camera immediately to avoid double-fire on the
-              // next decode pass — parent will unmount us anyway.
+            if (cancelled || !result) return  // err fires per no-code frame — ignore
+            const text = result.getText()
+            if (continuousRef.current) {
+              // Dedupe: a held barcode decodes many times/sec. Ignore the
+              // same code within the dedupe window so one physical scan = +1.
+              const now = Date.now()
+              if (text === lastCodeRef.current && now - lastTimeRef.current < dedupeRef.current) return
+              lastCodeRef.current = text
+              lastTimeRef.current = now
+              scanFeedback('ok')
+              setFlash(true)
+              setTimeout(() => setFlash(false), 220)
+              onScanRef.current(text)
+              // Camera stays open — keep scanning.
+            } else {
+              // One-shot: stop immediately to avoid a double-fire, then report.
               if (controlsRef.current) controlsRef.current.stop()
-              onScan(result.getText())
+              onScanRef.current(text)
             }
-            // err is fired per-frame when no code is detected — ignore.
           }
         )
         if (cancelled) {
@@ -164,7 +219,7 @@ function CameraScanner({ onScan, onClose }) {
         try { controlsRef.current.stop() } catch {}
       }
     }
-  }, [onScan])
+  }, [])
 
   return (
     <div
@@ -203,8 +258,9 @@ function CameraScanner({ onScan, onClose }) {
             {/* Targeting reticle — visual hint for where to point the barcode */}
             <div style={{
               position: 'absolute', top: '25%', bottom: '25%', left: '10%', right: '10%',
-              border: '2px solid var(--orange)', borderRadius: 8, pointerEvents: 'none',
+              border: `2px solid ${flash ? '#22c55e' : 'var(--orange)'}`, borderRadius: 8, pointerEvents: 'none',
               boxShadow: '0 0 0 9999px rgba(0,0,0,0.3)',
+              transition: 'border-color 0.12s',
             }} />
             {starting && (
               <div style={{
@@ -217,14 +273,14 @@ function CameraScanner({ onScan, onClose }) {
             )}
           </div>
           <div style={{ color: 'white', marginTop: 16, fontSize: 13, textAlign: 'center' }}>
-            Point the camera at a barcode
+            {continuous ? 'Keep scanning parts — tap Done when finished' : 'Point the camera at a barcode'}
           </div>
           <button
             onClick={onClose}
             className="btn btn-ghost"
             style={{ marginTop: 16, background: 'white', color: 'var(--text)' }}
           >
-            Cancel
+            {continuous ? 'Done' : 'Cancel'}
           </button>
         </>
       )}
