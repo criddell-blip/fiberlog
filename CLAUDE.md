@@ -467,6 +467,14 @@ npx supabase login                             # auth supabase CLI (first time)
 
 15. ✅ ~~**Part-first Crew Load mode**~~ — shipped (commit `ca1fffd`). Default is "🔍 Find a part"; toggle to "📍 Pick a location" for the original flow. `getAllStockGrouped({excludeLocationId})` powers the search across active stock; per-sheet-open mode state.
 
+16. **Submit-is-permanent warning on task submission** — add a small inline note/warning in the submit confirmation (crew `TaskWorkspace` submit flow) telling the crew that submitting is permanent / can't be edited afterward. Low effort. NOTE: relates to backlog #2 (the `is_closed` task-status redesign) — if multi-submit-per-open-task lands, the "permanent" framing softens to "this passdown is final once submitted." Word it so it's still accurate under either model (the *submission* is the permanent record either way).
+
+17. **Allow negative quantities** — crew/manager flows should permit negative quantities somewhere they're currently blocked. `inventory_stock` already tolerates negative on-hand (MyStockView renders qty < 0 in red), so this is about an *input* path rejecting negatives. **Open question — which flow:** stock adjustments / corrections, the Record Movement sheet, cycle-count entry, or the crew load/return qty field? Confirm the exact screen before building; the `adjust` movement type already supports one-sided negative, so a correction path is the likely target.
+
+18. **Default the Hours field on task submission** — pre-fill the crew `TaskWorkspace` hours input instead of starting blank, so the common case is one tap. **Open question — default value:** a flat standard workday (8?) vs. remember the crew member's last-entered hours vs. per-crew-type default. Lowest-friction is probably 8 with the field still editable.
+
+19. **BUG — boring/drilling conduit footage logged but conduit material not moved.** When a task for boring & drilling is submitted, the conduit *footage* increments the project (phase actuals) correctly, but the conduit *material* is never moved (no truck → project bucket deduction), so the activity / movements feed shows no conduit movement. Symptom: project footage rises with no matching material consumption. **Hypothesis (unverified):** auto-deduct in `approve_submission` only moves parts explicitly on the submission (assembly kits + extra parts); footage-derived conduit consumption isn't translated into a material line, so nothing deducts. Needs investigation — decide whether conduit footage should auto-generate a conduit material movement (and at what ft→qty ratio), or whether crew are expected to add conduit as an explicit part. Check `calculations.js` (footage→material maps) + the boring/drilling workspace's parts assembly.
+
 ---
 
 ## Gotchas worth knowing
