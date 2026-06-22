@@ -41,16 +41,17 @@ summary strings; the action/detail **sheets** (see C).
 ### B. Cycle count
 6. Full-screen scanner flow — its own chrome. `cycleCount/CountTab.jsx` (+ `cycleCount/*`)
 
-### C. Action / detail sheets (~12) — restyle on a shared Console sheet look
-7. Record movement, Receive PO, Reconcile, Sonar, Fiber jobs, Import CSV, Sage export, Bulk move, PR composer, SKU/bin labels, Location detail, Aisle signs. (All are already Back-wired + functional; this is visual only.)
+### C. Action / detail sheets (~12) — ✅ COMPLETE (Phase F)
+7. ✅ Record movement, Receive PO, Reconcile, Sonar, Fiber jobs, Import CSV, Sage export, Bulk move, PR composer, SKU/bin labels, Location detail, Aisle signs, Bulk Sonar projects — all emoji → line icons. Added `alert/trash/printer/mail/edit/key/lock/eye` to Icon.jsx. Kept emoji in `<select>` options (native), currency, placeholder strings, loading spinner, prose. Build clean; Record Movement smoke-tested live.
 
 ### D. The rest of the manager app (per the rollout tracker)
 8. ✅ **Submissions / Approvals** (`SubmissionsQueue.jsx`) — done
 9. ✅ **Crew status** (`CrewStatus.jsx`) — done
-10. **Projects** (`ProjectManager.jsx`) — ✅ list view done (elevation, mono %, INFRA badge, chevron). **Remaining:** project detail + fiber phases + infra sites + edit/decommission + the form overlays (recolored-only for now).
-11. **Reports** (`ReportsView.jsx`) — ✅ header/chrome done (chips, mono stats, icon empty state). **Remaining:** the expandable result rows (PartRow/PersonGroup/ProjectGroup) recolored-only.
-12. **Assemblies** (`AssemblyEditor.jsx`) — ✅ list done (chips, mono, icons). Editor form + delete dialog recolored-only.
-13. **Admin** (`AdminPanel.jsx`, `AdminUsersView.jsx` [direct-reports picker readability already fixed], `CrewTypePermissionsView.jsx`) — *owner-only; verify needs an owner login.*
+10. **Projects** (`ProjectManager.jsx`) — ✅ list + **project detail + fiber phases + infra sites + Sites admin + edit/decommission** done (Phase F): site-type pin/warehouse icons, permit→clipboard, caret→chevron, edit/trash/check, drilldowns. Site-type filter pills + pickers converted. Smoke-tested live (PERMIT + PHASE TARGETS render). Form-overlay deep layout still recolored-only (low priority).
+11. **Reports** (`ReportsView.jsx`) — ✅ header/chrome done. **Remaining:** the expandable result rows (PartRow/PersonGroup/ProjectGroup) recolored-only.
+12. **Assemblies** (`AssemblyEditor.jsx`) — ✅ list + delete-dialog done. Editor form fields recolored-only.
+13. **Admin** (`AdminPanel.jsx`, `AdminUsersView.jsx`, `CrewTypePermissionsView.jsx`) — ✅ emoji → line icons done (Phase F): home cards (eye/lock/trash/chevron), users (key/check/x/alert/box/truck), ops map → iconName, permissions matrix check. Build clean, names verified, no Icon warnings. **NOT live-verified — Admin tab is owner-gated; needs owner-eyes pass (Chris).** Direct-reports picker readability already fixed earlier.
+13a. **LocationDetailPanel** (`LocationDetailPanel.jsx`) — ✅ done (Phase F): type tiles, count/export/stock/labels/edit buttons. Build+name-verified; live-open resisted scripted clicks — spot-check.
 
 ### E. Crew app (field) — biggest chunk
 14. ✅ **Fiber list screens** — ProjectList / PhaseList / TaskList (line icons, chevrons, mono stats).
