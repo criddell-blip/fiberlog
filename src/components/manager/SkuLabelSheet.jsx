@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 // Printable labels for parts. Each label = name + SKU + QR encoding the SKU
 // directly. Stick on product packaging when received; scan during cycle
@@ -244,7 +245,7 @@ export default function SkuLabelSheet({ parts, title = 'Print SKU labels', onClo
                   onClick={handlePrint}
                   disabled={labelsToPrint.length === 0}
                 >
-                  🖨 Print {labelsToPrint.length} label{labelsToPrint.length === 1 ? '' : 's'}
+                  <Icon name="printer" size={15} style={{ display: 'inline-block', verticalAlign: '-3px', marginRight: 6 }} />Print {labelsToPrint.length} label{labelsToPrint.length === 1 ? '' : 's'}
                 </button>
               </div>
             </>

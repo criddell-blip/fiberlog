@@ -8,6 +8,7 @@ import {
 } from '../../lib/inventory'
 import { downloadTextAsFile } from '../../lib/csvImport'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 // Prototype Sage Intacct export. Pick a date range, preview what would
 // export, download the CSV, and stamp every included row's exported_at
@@ -118,8 +119,8 @@ export default function SageExportSheet({ onClose }) {
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && !submitting && onClose()}>
       <div className="overlay-sheet" style={{ maxWidth: 1000, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4 }}>
-          🧾 Sage Intacct export <span style={{ fontSize: 12, color: 'var(--orange)', marginLeft: 6 }}>prototype</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4 }}>
+          <Icon name="receipt" size={20} /> Sage Intacct export <span style={{ fontSize: 12, color: 'var(--orange)', marginLeft: 6 }}>prototype</span>
         </div>
         <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 14 }}>
           Builds a Sage Inventory Transactions CSV from FiberLog movements in the picked range.
@@ -280,7 +281,11 @@ export default function SageExportSheet({ onClose }) {
           >
             {submitting
               ? 'Exporting…'
-              : `🧾 Download CSV + mark ${exportable.length} exported`}
+              : (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <Icon name="receipt" size={16} /> Download CSV + mark {exportable.length} exported
+                </span>
+              )}
           </button>
         </div>
       </div>

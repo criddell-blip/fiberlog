@@ -16,6 +16,7 @@ import {
   createDraftParts,
 } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 const STAGES = {
   pick:      'pick',
@@ -332,7 +333,7 @@ export default function InventoryImportSheet({ locations, currentUser, onClose, 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div style={{ fontWeight: 800, fontSize: 17 }}>Import inventory CSV</div>
           {stage !== STAGES.importing && (
-            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--muted)' }}>✕</button>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', display: 'inline-flex' }}><Icon name="x" size={18} /></button>
           )}
         </div>
 
@@ -512,8 +513,9 @@ function MappingStage({
                     padding: '6px 10px', borderRadius: 'var(--r-sm)',
                     border: '1.5px solid var(--teal)', background: 'var(--teal-lt)',
                     color: 'var(--teal)', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
                   }}
-                >＋ New</button>
+                ><Icon name="plus" size={12} /> New</button>
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -559,8 +561,8 @@ function MappingStage({
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             marginBottom: 8, gap: 8, flexWrap: 'wrap',
           }}>
-            <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--amber)' }}>
-              ⚠ {unmatchedSkus.length} SKUs not in parts catalog
+            <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--amber)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Icon name="alert" size={13} /> {unmatchedSkus.length} SKUs not in parts catalog
             </div>
             <button
               onClick={downloadUnmatchedCsv}
@@ -568,8 +570,9 @@ function MappingStage({
                 padding: '5px 10px', borderRadius: 'var(--r-sm)',
                 border: '1.5px solid var(--amber)', background: 'var(--amber-lt)',
                 color: 'var(--amber)', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 4,
               }}
-            >⬇ Download CSV</button>
+            ><Icon name="download" size={12} /> Download CSV</button>
           </div>
 
           <label style={{
@@ -632,15 +635,15 @@ function ImportingStage({ progress }) {
           {progress.done.toLocaleString()} of {progress.total.toLocaleString()} movements ({pct}%)
         </div>
         {draftsAttempted > 0 && (
-          <div style={{ fontSize: 11, marginTop: 4, color: draftErrCount > 0 ? 'var(--amber)' : 'var(--teal)' }}>
+          <div style={{ fontSize: 11, marginTop: 4, color: draftErrCount > 0 ? 'var(--amber)' : 'var(--teal)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             {draftErrCount === 0
-              ? `✓ ${progress.draftsCreated || 0} draft parts created`
-              : `⚠ ${progress.draftsCreated || 0} of ${draftsAttempted} drafts created (${draftErrCount} failed)`}
+              ? <><Icon name="check" size={11} /> {`${progress.draftsCreated || 0} draft parts created`}</>
+              : <><Icon name="alert" size={11} /> {`${progress.draftsCreated || 0} of ${draftsAttempted} drafts created (${draftErrCount} failed)`}</>}
           </div>
         )}
         {progress.draftFatalError && (
-          <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>
-            ⚠ Draft creation hit a fatal error — see final report
+          <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Icon name="alert" size={11} /> Draft creation hit a fatal error — see final report
           </div>
         )}
       </div>
@@ -658,7 +661,9 @@ function DoneStage({ results, unmatchedSkus, downloadUnmatchedCsv }) {
   return (
     <div style={{ padding: '12px 0' }}>
       <div style={{ textAlign: 'center', marginBottom: 18 }}>
-        <div style={{ fontSize: 36, marginBottom: 4 }}>{hasProblem ? '⚠' : '✅'}</div>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 4, color: hasProblem ? 'var(--amber)' : 'var(--teal)' }}>
+          <Icon name={hasProblem ? 'alert' : 'check'} size={36} />
+        </div>
         <div style={{ fontWeight: 800, fontSize: 16 }}>Import complete</div>
         <div style={{ fontSize: 10, color: 'var(--hint)', marginTop: 2, fontFamily: 'monospace' }}>build v3</div>
       </div>
@@ -685,7 +690,7 @@ function DoneStage({ results, unmatchedSkus, downloadUnmatchedCsv }) {
           background: 'var(--red-lt)', border: '1px solid var(--red)',
           borderRadius: 'var(--r-sm)', fontSize: 12, color: 'var(--red)',
         }}>
-          <div style={{ fontWeight: 800, marginBottom: 4 }}>⚠ Draft creation hit a fatal error</div>
+          <div style={{ fontWeight: 800, marginBottom: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="alert" size={13} /> Draft creation hit a fatal error</div>
           <div style={{ fontFamily: 'monospace', fontSize: 11 }}>{results.draftFatalError}</div>
         </div>
       )}
@@ -696,8 +701,8 @@ function DoneStage({ results, unmatchedSkus, downloadUnmatchedCsv }) {
           background: 'var(--amber-lt)', border: '1px solid var(--amber)',
           borderRadius: 'var(--r-sm)', fontSize: 12, color: 'var(--amber)',
         }}>
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>
-            ⚠ {draftErrCount} draft part{draftErrCount === 1 ? '' : 's'} failed to create
+          <div style={{ fontWeight: 800, marginBottom: 6, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Icon name="alert" size={13} /> {draftErrCount} draft part{draftErrCount === 1 ? '' : 's'} failed to create
           </div>
           <div style={{
             maxHeight: 160, overflowY: 'auto',
@@ -753,8 +758,9 @@ function DoneStage({ results, unmatchedSkus, downloadUnmatchedCsv }) {
               padding: '6px 12px', borderRadius: 'var(--r-sm)',
               border: '1.5px solid var(--amber)', background: 'var(--amber-lt)',
               color: 'var(--amber)', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 4,
             }}
-          >⬇ Download unmatched-SKUs CSV</button>
+          ><Icon name="download" size={13} /> Download unmatched-SKUs CSV</button>
         </div>
       )}
 

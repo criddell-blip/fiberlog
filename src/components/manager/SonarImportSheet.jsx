@@ -15,6 +15,7 @@ import {
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
 import BulkSonarProjectsSheet from './BulkSonarProjectsSheet'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 // Sonar daily-install-report importer (backlog #3).
 //
@@ -860,7 +861,9 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     // Backdrop tap does NOT dismiss — prevents mid-edit data loss. Cancel button below.
     <div className="overlay open">
       <div className="overlay-sheet" style={{ maxWidth: 1000, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 2 }}>⚡ Sonar daily install import</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 17, marginBottom: 2 }}>
+          <Icon name="zap" size={18} /> Sonar daily install import
+        </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
           Each install row becomes one <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>transfer</code> movement from the crew's truck → a FiberLog bucket. Routing priority: <strong>Sonar Project column</strong> (when set, authoritative) → part-level policy (region/gigwave/none). Buckets accumulate until Sage export drains them.
         </div>
@@ -893,10 +896,10 @@ export default function SonarImportSheet({ onClose, onApplied }) {
           <button
             onClick={() => setShowBulkProjects(true)}
             className="btn btn-ghost"
-            style={{ padding: '6px 12px', fontSize: 12, flexShrink: 0 }}
+            style={{ padding: '6px 12px', fontSize: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}
             title="Bulk-add Sonar projects as phases under FiberLog regions"
           >
-            📦 Bulk-add projects
+            <Icon name="box" size={14} /> Bulk-add projects
           </button>
         </div>
 
@@ -909,10 +912,11 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             borderRadius: 'var(--r-sm)',
           }}>
             <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
               fontSize: 12, fontWeight: 800, color: 'var(--accent-fg)',
               textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6,
             }}>
-              📥 Auto-delivered from Sonar ({pendingImports.length})
+              <Icon name="download" size={14} /> Auto-delivered from Sonar ({pendingImports.length})
             </div>
             {/* Scroll the list itself, not the whole sheet — a long backlog
                 otherwise buries the part-mapping section below the fold. */}
@@ -954,6 +958,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                   <button
                     onClick={() => handleDiscardPending(p)}
                     style={{
+                      display: 'inline-flex', alignItems: 'center',
                       padding: '5px 8px', fontSize: 11,
                       background: 'transparent',
                       color: isActive ? 'rgba(255,255,255,0.8)' : 'var(--muted)',
@@ -962,7 +967,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                     title="Discard this delivery"
                     disabled={parsing || submitting}
                   >
-                    ✕
+                    <Icon name="x" size={13} />
                   </button>
                 </div>
               )
@@ -979,12 +984,14 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             <button
               onClick={toggleProcessed}
               style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
                 background: 'none', border: 'none', cursor: 'pointer',
                 color: 'var(--muted)', fontSize: 12,
                 padding: '4px 0', textDecoration: 'underline',
               }}
             >
-              {showProcessed ? '▾ Hide' : '▸ Show'} recent webhook deliveries (audit)
+              <Icon name={showProcessed ? 'chevron-down' : 'chevron-right'} size={13} />
+              {showProcessed ? 'Hide' : 'Show'} recent webhook deliveries (audit)
             </button>
             {showProcessed && (
               <div style={{
@@ -1017,9 +1024,13 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                         }}>
                           <span
                             className={isImported ? 'pill pill-success pill-sm' : isAutoDiscard ? 'pill pill-danger pill-sm' : 'pill pill-muted pill-sm'}
-                            style={{ flexShrink: 0 }}
+                            style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}
                           >
-                            {isImported ? '✓ imported' : isAutoDiscard ? '⚠ auto-discarded' : 'discarded'}
+                            {isImported
+                              ? <><Icon name="check" size={12} /> imported</>
+                              : isAutoDiscard
+                                ? <><Icon name="alert" size={12} /> auto-discarded</>
+                                : 'discarded'}
                           </span>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontWeight: 'var(--fw-semibold)' }}>
@@ -1303,7 +1314,9 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead style={{ background: 'var(--surface2)' }}>
                     <tr>
-                      <th style={thStyle({ width: 32 })}>✓</th>
+                      <th style={thStyle({ width: 32 })}>
+                        <span style={{ display: 'inline-flex' }}><Icon name="check" size={13} /></span>
+                      </th>
                       <th style={thStyle({ textAlign: 'left' })}>Date</th>
                       <th style={thStyle({ textAlign: 'left' })}>Customer / City</th>
                       <th style={thStyle({ textAlign: 'left' })}>Part</th>
@@ -1360,7 +1373,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                           <td style={tdStyle()}>
                             <div style={{ fontWeight: 600 }}>
                               {r.sourceIsWarehouse
-                                ? <span style={{ color: 'var(--teal-mid)' }}>🏭 {r.sonarLoc}</span>
+                                ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--teal-mid)' }}><Icon name="warehouse" size={13} /> {r.sonarLoc}</span>
                                 : (r.userName || <em style={{ color: 'var(--amber)' }}>{r.sonarLoc}</em>)
                               }
                             </div>

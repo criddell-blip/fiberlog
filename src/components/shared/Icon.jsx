@@ -51,6 +51,11 @@ const ICONS = {
   sparkle:   { sw: 1.7, p: '<path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>' },
   rotate:    { sw: 1.8, p: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 3.5V8h-4.5"/>' },
   users:     { sw: 1.6, p: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 5.2a3.2 3.2 0 0 1 0 5.6"/><path d="M17.5 14.2A5.5 5.5 0 0 1 20.5 19"/>' },
+  alert:     { sw: 1.7, p: '<path d="M12 3.5L21 19H3z"/><line x1="12" y1="9" x2="12" y2="14"/><circle cx="12" cy="16.8" r="0.4" fill="currentColor"/>' },
+  trash:     { sw: 1.7, p: '<path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>' },
+  printer:   { sw: 1.7, p: '<path d="M6 9V3h12v6"/><path d="M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2"/><rect x="6" y="15" width="12" height="6"/>' },
+  mail:      { sw: 1.7, p: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 6.5l8.5 6 8.5-6"/>' },
+  edit:      { sw: 1.7, p: '<path d="M4 20h4l10-10-4-4L4 16z"/><line x1="13.5" y1="6.5" x2="17.5" y2="10.5"/>' },
 }
 
 export default function Icon({ name, size = 19, color, style, className, title }) {

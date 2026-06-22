@@ -8,6 +8,7 @@ import {
   getSonarProjectMap,
 } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 // Bulk-bootstrap (or top-up) the Sonar project → FiberLog phase map.
 // Paste a CSV with a "Project" column (the format Sonar emits in the
@@ -201,8 +202,8 @@ export default function BulkSonarProjectsSheet({ onClose, onDone }) {
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && !submitting && onClose()}>
       <div className="overlay-sheet" style={{ maxWidth: 920, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4 }}>
-          📦 Bulk-add Sonar projects as phases
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4 }}>
+          <Icon name="box" size={20} /> Bulk-add Sonar projects as phases
         </div>
         <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 14 }}>
           Paste or upload Sonar's project list (CSV with a <code>Project</code> column).

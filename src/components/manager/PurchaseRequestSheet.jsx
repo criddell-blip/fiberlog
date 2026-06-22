@@ -11,6 +11,7 @@ import {
 import { searchPartsCatalog } from '../../lib/supabase'
 import { downloadTextAsFile } from '../../lib/csvImport'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 // Purchase Request composition + detail/edit sheet.
 //
@@ -410,8 +411,8 @@ export default function PurchaseRequestSheet({
       <div className="overlay-sheet" style={{ maxWidth: 1100, maxHeight: '94vh', display: 'flex', flexDirection: 'column' }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 4 }}>
-          <div style={{ fontWeight: 800, fontSize: 18 }}>
-            📋 Purchase Request
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 18 }}>
+            <Icon name="clipboard" size={18} /> Purchase Request
             {pr?.pr_number && <span style={{ marginLeft: 8, color: 'var(--orange)' }}>{pr.pr_number}</span>}
           </div>
           {mode === 'detail' && (
@@ -572,12 +573,13 @@ export default function PurchaseRequestSheet({
                     disabled={submitting}
                     title="Remove"
                     style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       width: 24, height: 24, padding: 0,
                       background: 'transparent', color: 'var(--muted)',
                       border: '1px solid var(--border)', borderRadius: 4,
-                      cursor: 'pointer', fontSize: 14,
+                      cursor: 'pointer',
                     }}
-                  >×</button>
+                  ><Icon name="x" size={14} /></button>
                 )}
               </div>
             )
@@ -611,9 +613,9 @@ export default function PurchaseRequestSheet({
                 onClick={addFreeformRow}
                 className="btn btn-ghost"
                 disabled={submitting}
-                style={{ padding: '6px 12px', fontSize: 12, whiteSpace: 'nowrap' }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 12px', fontSize: 12, whiteSpace: 'nowrap' }}
               >
-                ＋ Freeform row
+                <Icon name="plus" size={13} /> Freeform row
               </button>
             </div>
             {partResults.length > 0 && (
@@ -670,11 +672,11 @@ export default function PurchaseRequestSheet({
                 <button
                   type="button"
                   className="btn btn-primary"
-                  style={{ padding: '8px 14px', fontSize: 13 }}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 14px', fontSize: 13 }}
                   onClick={() => changeStatus('ordered')}
                   disabled={submitting}
                 >
-                  ✓ Mark ordered
+                  <Icon name="check" size={14} /> Mark ordered
                 </button>
               </div>
             )}
@@ -687,11 +689,11 @@ export default function PurchaseRequestSheet({
                 <button
                   type="button"
                   className="btn btn-primary"
-                  style={{ padding: '8px 14px', fontSize: 13 }}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 14px', fontSize: 13 }}
                   onClick={() => changeStatus('received')}
                   disabled={submitting}
                 >
-                  📦 Mark received
+                  <Icon name="box" size={14} /> Mark received
                 </button>
               </div>
             )}
@@ -702,9 +704,9 @@ export default function PurchaseRequestSheet({
                   onClick={() => changeStatus('cancelled')}
                   disabled={submitting}
                   className="btn btn-ghost"
-                  style={{ padding: '6px 10px', fontSize: 11, color: 'var(--red)' }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 10px', fontSize: 11, color: 'var(--red)' }}
                 >
-                  ⊗ Cancel PR
+                  <Icon name="x" size={12} /> Cancel PR
                 </button>
                 {isOwner && (
                   <button
@@ -712,9 +714,9 @@ export default function PurchaseRequestSheet({
                     onClick={handleDelete}
                     disabled={submitting}
                     className="btn btn-ghost"
-                    style={{ padding: '6px 10px', fontSize: 11, color: 'var(--red)' }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 10px', fontSize: 11, color: 'var(--red)' }}
                   >
-                    🗑 Delete (owner only)
+                    <Icon name="trash" size={12} /> Delete (owner only)
                   </button>
                 )}
               </div>
@@ -741,35 +743,37 @@ export default function PurchaseRequestSheet({
             <>
               <button
                 className="btn btn-ghost"
-                style={{ flex: '1 1 110px' }}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, flex: '1 1 110px' }}
                 onClick={() => saveAndDo()}
                 disabled={submitting || lines.length === 0}
               >
-                {submitting ? 'Saving…' : (mode === 'new' ? '💾 Save draft' : '💾 Save changes')}
+                {submitting
+                  ? 'Saving…'
+                  : <><Icon name="download" size={14} /> {mode === 'new' ? 'Save draft' : 'Save changes'}</>}
               </button>
               <button
                 className="btn btn-ghost"
-                style={{ flex: '1 1 110px' }}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, flex: '1 1 110px' }}
                 onClick={() => saveAndDo(exportCsv)}
                 disabled={submitting || lines.length === 0}
               >
-                ⬇ Save & CSV
+                <Icon name="download" size={14} /> Save & CSV
               </button>
               <button
                 className="btn btn-ghost"
-                style={{ flex: '1 1 110px' }}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, flex: '1 1 110px' }}
                 onClick={() => saveAndDo(printPdf)}
                 disabled={submitting || lines.length === 0}
               >
-                📄 Save & PDF
+                <Icon name="clipboard" size={14} /> Save & PDF
               </button>
               <button
                 className="btn btn-primary"
-                style={{ flex: '1 1 150px' }}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, flex: '1 1 150px' }}
                 onClick={() => saveAndDo(copyEmail)}
                 disabled={submitting || lines.length === 0}
               >
-                ✉ Save & copy email
+                <Icon name="mail" size={14} /> Save & copy email
               </button>
             </>
           )}
@@ -777,36 +781,36 @@ export default function PurchaseRequestSheet({
             <>
               <button
                 className="btn btn-ghost"
-                style={{ flex: '1 1 130px' }}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, flex: '1 1 130px' }}
                 onClick={async () => {
                   const fresh = await getPurchaseRequest(prId)
                   if (fresh) exportCsv(fresh)
                 }}
                 disabled={submitting}
               >
-                ⬇ Download CSV
+                <Icon name="download" size={14} /> Download CSV
               </button>
               <button
                 className="btn btn-ghost"
-                style={{ flex: '1 1 130px' }}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, flex: '1 1 130px' }}
                 onClick={async () => {
                   const fresh = await getPurchaseRequest(prId)
                   if (fresh) printPdf(fresh)
                 }}
                 disabled={submitting}
               >
-                📄 Print PDF
+                <Icon name="clipboard" size={14} /> Print PDF
               </button>
               <button
                 className="btn btn-primary"
-                style={{ flex: '1 1 130px' }}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, flex: '1 1 130px' }}
                 onClick={async () => {
                   const fresh = await getPurchaseRequest(prId)
                   if (fresh) await copyEmail(fresh)
                 }}
                 disabled={submitting}
               >
-                ✉ Copy email
+                <Icon name="mail" size={14} /> Copy email
               </button>
             </>
           )}

@@ -6,6 +6,7 @@ import {
 import { searchPartsCatalog } from '../../lib/supabase'
 import SkuLabelSheet from './SkuLabelSheet'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 // Receive PO / vendor delivery sheet (backlog #12 MVP).
 //
@@ -156,7 +157,9 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
       <>
         <div className="overlay open" onClick={e => e.target === e.currentTarget && finish()}>
           <div className="overlay-sheet" style={{ maxWidth: 480, textAlign: 'center' }}>
-            <div style={{ fontSize: 48, marginBottom: 10 }}>✅</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10, color: 'var(--teal)' }}>
+              <Icon name="check" size={48} />
+            </div>
             <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 6 }}>
               Received {justReceived.length} item{justReceived.length === 1 ? '' : 's'}
             </div>
@@ -172,8 +175,9 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
                 className="btn btn-primary"
                 style={{ flex: 2 }}
                 onClick={() => setShowLabelSheet(true)}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
               >
-                🏷 Print labels
+                <Icon name="tag" size={16} /> Print labels
               </button>
             </div>
           </div>
@@ -193,7 +197,10 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
     // Backdrop tap does NOT dismiss — prevents mid-edit data loss. Cancel button below.
     <div className="overlay open">
       <div className="overlay-sheet" style={{ maxWidth: 760, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 2 }}>📥 Receive PO / vendor delivery</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+          <Icon name="download" size={18} />
+          <span style={{ fontWeight: 800, fontSize: 17 }}>Receive PO / vendor delivery</span>
+        </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
           Each line becomes its own <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>receive</code> movement, all sharing the PO ref and destination.
         </div>
@@ -285,8 +292,9 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
               border: '1.5px dashed var(--border2)', background: 'transparent',
               borderRadius: 'var(--r-sm)', cursor: 'pointer',
               fontSize: 12, fontWeight: 700, color: 'var(--muted)',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             }}
-          >＋ Add line</button>
+          ><Icon name="plus" size={14} /> Add line</button>
 
           {total > 0 && (
             <div style={{
@@ -435,8 +443,10 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
         border: `1.5px solid ${isCreate ? 'var(--teal)' : 'var(--orange)'}`,
         borderRadius: 'var(--r-sm)',
       }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: isCreate ? 'var(--teal-dk)' : 'var(--orange)', marginBottom: 8 }}>
-          {isCreate ? '＋ Create new part' : `✎ Edit attributes — ${line.part?.name}`}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 700, color: isCreate ? 'var(--teal-dk)' : 'var(--orange)', marginBottom: 8 }}>
+          {isCreate
+            ? <><Icon name="plus" size={13} /> Create new part</>
+            : <><Icon name="edit" size={13} /> Edit attributes — {line.part?.name}</>}
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: isCreate ? '1fr 2fr 80px' : '1fr 2fr 80px', gap: 6, marginBottom: 6 }}>
@@ -601,9 +611,10 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
                     background: 'var(--teal-lt)', color: 'var(--teal-dk)',
                     fontWeight: 700, fontSize: 12,
                     borderTop: results.length > 0 ? '1px solid var(--border)' : 'none',
+                    display: 'flex', alignItems: 'center', gap: 5,
                   }}
                 >
-                  ＋ Create new part {query.trim() && <span style={{ fontWeight: 400 }}>— "{query.trim()}"</span>}
+                  <Icon name="plus" size={13} /> Create new part {query.trim() && <span style={{ fontWeight: 400 }}>— "{query.trim()}"</span>}
                 </div>
               </div>
             )}

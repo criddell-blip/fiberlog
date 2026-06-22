@@ -7,14 +7,15 @@ import {
   compareNamesNatural,
 } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 const TYPES = [
-  { id: 'receive',  label: 'Receive',  icon: '⬇',  hint: 'New stock from a vendor' },
-  { id: 'transfer', label: 'Transfer', icon: '↔',  hint: 'Warehouse → truck or vice versa' },
-  { id: 'return',   label: 'Return',   icon: '↩',  hint: 'Truck → warehouse' },
-  { id: 'issue',    label: 'Issue',    icon: '⬆',  hint: 'Used in field' },
-  { id: 'scrap',    label: 'Scrap',    icon: '✕',  hint: 'Damaged or written off' },
-  { id: 'adjust',   label: 'Adjust',   icon: '±',  hint: 'Count correction' },
+  { id: 'receive',  label: 'Receive',  iconName: 'download', hint: 'New stock from a vendor' },
+  { id: 'transfer', label: 'Transfer', iconName: 'move',     hint: 'Warehouse → truck or vice versa' },
+  { id: 'return',   label: 'Return',   iconName: 'rotate',   hint: 'Truck → warehouse' },
+  { id: 'issue',    label: 'Issue',    iconName: 'upload',   hint: 'Used in field' },
+  { id: 'scrap',    label: 'Scrap',    iconName: 'trash',    hint: 'Damaged or written off' },
+  { id: 'adjust',   label: 'Adjust',   iconName: 'sliders',  hint: 'Count correction' },
 ]
 
 const ENDPOINTS = {
@@ -348,7 +349,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                 color: type === t.id ? 'var(--orange)' : 'var(--muted)',
                 cursor: 'pointer', textAlign: 'center'
               }}>
-                <div style={{ fontSize: 16, marginBottom: 2 }}>{t.icon}</div>
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 3 }}><Icon name={t.iconName} size={17} /></div>
                 <div style={{ fontSize: 12, fontWeight: 700 }}>{t.label}</div>
               </button>
             ))}
@@ -410,9 +411,9 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                     <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 22 }}>{l.unit}</span>
                     {warn && (
                       <span title="No logged stock at the picked From location" style={{
-                        fontSize: 10, color: 'var(--amber)', fontWeight: 700,
+                        color: 'var(--amber)', display: 'inline-flex',
                       }}>
-                        ⚠
+                        <Icon name="alert" size={14} />
                       </span>
                     )}
                     <button

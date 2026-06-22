@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getBinsForWarehouse } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 // Big readable signs for warehouse navigation — one sign per aisle,
 // extracted from existing bin names via the same prefix-parse the
@@ -141,7 +142,7 @@ export default function AisleSignSheet({ warehouse, onClose }) {
               borderRadius: 'var(--r-sm)', borderBottom: 'none',
               border: '1px solid var(--danger-border)', marginBottom: 14,
             }}>
-              <span className="banner-icon">⚠️</span>
+              <span className="banner-icon" style={{ display: 'inline-flex' }}><Icon name="alert" size={16} /></span>
               <div className="banner-body">{error}</div>
             </div>
           )}
@@ -186,7 +187,7 @@ export default function AisleSignSheet({ warehouse, onClose }) {
                   onClick={handlePrint}
                   disabled={signsToPrint.length === 0}
                 >
-                  🖨 Print {signsToPrint.length} sign{signsToPrint.length === 1 ? '' : 's'}
+                  <Icon name="printer" size={15} style={{ display: 'inline-block', verticalAlign: '-3px', marginRight: 6 }} />Print {signsToPrint.length} sign{signsToPrint.length === 1 ? '' : 's'}
                 </button>
               </div>
             </>

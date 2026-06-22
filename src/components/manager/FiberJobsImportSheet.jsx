@@ -11,6 +11,7 @@ import {
 } from '../../lib/inventory'
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 // Importer for Sonar's "All fiber all jobs" report — the companion to
 // SonarImportSheet which handles asset-tagged consumption.
@@ -513,8 +514,8 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     // Backdrop tap does NOT dismiss — prevents mid-edit data loss. Cancel button below.
     <div className="overlay open">
       <div className="overlay-sheet" style={{ maxWidth: 1080, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4 }}>
-          🧵 Sonar fiber jobs import
+        <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Icon name="download" size={19} /> Sonar fiber jobs import
         </div>
         <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 14 }}>
           Each row is a fiber install / drop / fix. Materials are parsed from the descriptive
@@ -558,8 +559,9 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             <div style={{
               fontSize: 12, fontWeight: 800, color: 'var(--accent-fg)',
               textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6,
+              display: 'flex', alignItems: 'center', gap: 8,
             }}>
-              📥 Auto-delivered from Sonar ({pendingImports.length})
+              <Icon name="download" size={14} /> Auto-delivered from Sonar ({pendingImports.length})
             </div>
             {/* Scroll the list itself, not the whole sheet — otherwise a long
                 backlog (we saw 13) buries the part-mapping section below the
@@ -609,7 +611,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
                     title="Discard"
                     disabled={parsing || submitting}
                   >
-                    ✕
+                    <span style={{ display: 'inline-flex' }}><Icon name="x" size={12} /></span>
                   </button>
                 </div>
               )
@@ -629,7 +631,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
                 padding: '4px 0', textDecoration: 'underline',
               }}
             >
-              {showProcessed ? '▾ Hide' : '▸ Show'} recent fiber-jobs deliveries (audit)
+              <Icon name={showProcessed ? 'chevron-down' : 'chevron-right'} size={12} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 3 }} />{showProcessed ? 'Hide' : 'Show'} recent fiber-jobs deliveries (audit)
             </button>
             {showProcessed && processedImports && (
               <div style={{
@@ -651,8 +653,8 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
                       padding: '5px 6px', marginBottom: 2,
                       fontSize: 11, borderBottom: '1px solid var(--border)',
                     }}>
-                      <span className={isImported ? 'pill pill-success pill-sm' : 'pill pill-muted pill-sm'} style={{ flexShrink: 0 }}>
-                        {isImported ? '✓ imported' : 'discarded'}
+                      <span className={isImported ? 'pill pill-success pill-sm' : 'pill pill-muted pill-sm'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        {isImported ? <><Icon name="check" size={11} /> imported</> : 'discarded'}
                       </span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 'var(--fw-semibold)' }}>
@@ -949,7 +951,7 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride }) {
                 </span>
               )}
               {line.status === 'pair-missing' && (
-                <span style={{ color: 'var(--amber)' }}>⚠ {line.reason}</span>
+                <span style={{ color: 'var(--amber)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="alert" size={12} /> {line.reason}</span>
               )}
             </div>
           ))}

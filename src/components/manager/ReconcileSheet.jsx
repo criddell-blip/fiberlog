@@ -4,6 +4,7 @@ import { db } from '../../lib/supabase'
 import { recordMovementsBatch } from '../../lib/inventory'
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 // Reconcile sheet (backlog #1).
 //
@@ -170,7 +171,10 @@ export default function ReconcileSheet({ onClose, onApplied }) {
     // Backdrop tap does NOT dismiss — prevents mid-edit data loss. Cancel button below.
     <div className="overlay open">
       <div className="overlay-sheet" style={{ maxWidth: 920, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 2 }}>🔄 Reconcile inventory</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+          <Icon name="refresh" size={18} />
+          <span style={{ fontWeight: 800, fontSize: 17 }}>Reconcile inventory</span>
+        </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
           Upload your filled-in Audit CSV. Each row with an Actual Qty becomes one <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>adjust</code> movement to bring the system in line with what you counted.
         </div>
@@ -244,7 +248,9 @@ export default function ReconcileSheet({ onClose, onApplied }) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead style={{ background: 'var(--surface2)', position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr>
-                    <th style={thStyle({ width: 36 })}>✓</th>
+                    <th style={thStyle({ width: 36 })}>
+                      <span style={{ display: 'inline-flex', verticalAlign: 'middle' }}><Icon name="check" size={13} /></span>
+                    </th>
                     <th style={thStyle({ textAlign: 'left' })}>Part</th>
                     <th style={thStyle({ textAlign: 'left' })}>Location</th>
                     <th style={thStyle({ textAlign: 'right' })}>Counted</th>

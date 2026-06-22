@@ -1,9 +1,13 @@
 import { useState, useMemo, useEffect } from 'react'
 import { recordMovementsBatch, getBinsForWarehouse } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 const CHUNK_SIZE = 100
 
+// Emoji glyphs kept here are consumed inside native <option> elements
+// (which can't render SVG); leave them as text. The structural source/dest
+// chips outside <select> use the <Icon> line set via TYPE_ICON_NAMES below.
 const TYPE_ICONS = {
   warehouse: '🏭',
   truck:     '🚚',
@@ -11,6 +15,15 @@ const TYPE_ICONS = {
   vendor:    '🏢',
   scrap:     '🗑️',
   bin:       '📥',
+}
+
+const TYPE_ICON_NAMES = {
+  warehouse: 'warehouse',
+  truck:     'truck',
+  job_site:  'pin',
+  vendor:    'warehouse',
+  scrap:     'trash',
+  bin:       'download',
 }
 
 export default function BulkMoveSheet({
@@ -182,11 +195,14 @@ export default function BulkMoveSheet({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, flexShrink: 0 }}>
           <div style={{ fontWeight: 800, fontSize: 17 }}>Bulk move stock</div>
           {!submitting && (
-            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--muted)' }}>✕</button>
+            <button onClick={onClose} style={{ display: 'inline-flex', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)' }}><Icon name="x" size={18} /></button>
           )}
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14, flexShrink: 0 }}>
-          From <strong>{TYPE_ICONS[sourceLocation?.type] || '📦'} {sourceDisplayName}</strong>
+          From <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 4, verticalAlign: 'middle' }}>
+            <Icon name={TYPE_ICON_NAMES[sourceLocation?.type] || 'box'} size={14} />
+            {sourceDisplayName}
+          </strong>
           {' '}· One transfer movement created per part
         </div>
 
@@ -241,8 +257,8 @@ export default function BulkMoveSheet({
                 Parts to move ({validMovements.length} of {selectedRows.length})
               </div>
               {overdrawCount > 0 && (
-                <div style={{ fontSize: 11, color: 'var(--amber)', fontWeight: 700 }}>
-                  ⚠ {overdrawCount} row{overdrawCount === 1 ? '' : 's'} over available
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--amber)', fontWeight: 700 }}>
+                  <Icon name="alert" size={13} /> {overdrawCount} row{overdrawCount === 1 ? '' : 's'} over available
                 </div>
               )}
             </div>
