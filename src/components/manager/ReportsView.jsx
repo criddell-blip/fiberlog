@@ -775,12 +775,12 @@ function PartRow({ part, rows, stock, barcode }) {
           </div>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 12 }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--orange)' }}>{part.qty.toLocaleString()}</div>
+          <div className="mono" style={{ fontSize: 18, fontWeight: 800, color: 'var(--orange)' }}>{part.qty.toLocaleString()}</div>
           <div style={{ fontSize: 10, color: 'var(--muted)' }}>{part.unit} used</div>
           {stock !== undefined && (
             <div style={{ fontSize: 11, fontWeight: 700, marginTop: 2,
               color: stock <= 0 ? 'var(--red)' : stock < part.qty * 2 ? 'var(--amber)' : 'var(--teal-mid)' }}>
-              {stock <= 0 ? '⚠ Out of stock' : `${stock.toLocaleString()} in stock`}
+              {stock <= 0 ? <><Icon name="alert" size={11} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 3 }} />Out of stock</> : <><span className="mono">{stock.toLocaleString()}</span> in stock</>}
             </div>
           )}
         </div>
@@ -794,7 +794,7 @@ function PartRow({ part, rows, stock, barcode }) {
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{r.userName}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.date} · {r.projectName} › {r.taskName}</div>
               </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--orange)', flexShrink: 0, marginLeft: 8 }}>
+              <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--orange)', flexShrink: 0, marginLeft: 8 }}>
                 {r.qty.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>{r.unit}</span>
               </div>
             </div>
@@ -822,7 +822,7 @@ function PersonGroup({ person }) {
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>{skus} SKUs · {total.toLocaleString()} total parts</div>
           </div>
         </div>
-        <span style={{ fontSize: 16, color: 'var(--muted)', transform: expanded ? 'rotate(90deg)' : 'none', display: 'inline-block', transition: 'transform .2s' }}>›</span>
+        <span style={{ color: 'var(--muted)', transform: expanded ? 'rotate(90deg)' : 'none', display: 'inline-flex', transition: 'transform .2s' }}><Icon name="chevron-right" size={15} /></span>
       </div>
       {expanded && (
         <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 8px 8px' }}>
@@ -837,7 +837,7 @@ function PersonGroup({ person }) {
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
                 <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'monospace' }}>{id}</div>
               </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--orange)', flexShrink: 0, marginLeft: 8 }}>
+              <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--orange)', flexShrink: 0, marginLeft: 8 }}>
                 {p.qty.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>{p.unit}</span>
               </div>
             </div>
@@ -866,7 +866,7 @@ function ProjectGroup({ proj }) {
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>{skus} SKUs · {total.toLocaleString()} total parts</div>
           </div>
         </div>
-        <span style={{ fontSize: 16, color: 'var(--muted)', transform: expanded ? 'rotate(90deg)' : 'none', display: 'inline-block', transition: 'transform .2s' }}>›</span>
+        <span style={{ color: 'var(--muted)', transform: expanded ? 'rotate(90deg)' : 'none', display: 'inline-flex', transition: 'transform .2s' }}><Icon name="chevron-right" size={15} /></span>
       </div>
       {expanded && (
         <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 8px 8px' }}>
@@ -881,7 +881,7 @@ function ProjectGroup({ proj }) {
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
                 <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'monospace' }}>{id}</div>
               </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--orange)', flexShrink: 0, marginLeft: 8 }}>
+              <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--orange)', flexShrink: 0, marginLeft: 8 }}>
                 {p.qty.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>{p.unit}</span>
               </div>
             </div>
