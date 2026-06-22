@@ -23,6 +23,10 @@ export default function MyStockView({ onBack, onUserTap }) {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [sheetMode, setSheetMode] = useState(null)   // 'load' | 'return' | null
+  // When the crew taps "Return" on a specific truck part, prefill the return
+  // sheet with it (skips the part picker). Null = the top Return button's
+  // normal flow.
+  const [returnPartId, setReturnPartId] = useState(null)
   // Set of operation strings the caller is *denied* (per crew_operation_permissions).
   // Empty by default = everything allowed. RPC enforces server-side too.
   const [deniedOps, setDeniedOps] = useState(() => new Set())
@@ -70,6 +74,7 @@ export default function MyStockView({ onBack, onUserTap }) {
 
   function handleMovementComplete() {
     setSheetMode(null)
+    setReturnPartId(null)
     load()
   }
 
@@ -124,7 +129,7 @@ export default function MyStockView({ onBack, onUserTap }) {
             <button
               className="btn btn-primary"
               style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
-              onClick={() => setSheetMode('load')}
+              onClick={() => { setReturnPartId(null); setSheetMode('load') }}
               disabled={!truck || loading}
             >
               <Icon name="download" size={16} /> Load
@@ -134,7 +139,7 @@ export default function MyStockView({ onBack, onUserTap }) {
             <button
               className="btn btn-ghost"
               style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
-              onClick={() => setSheetMode('return')}
+              onClick={() => { setReturnPartId(null); setSheetMode('return') }}
               disabled={!truck || loading || stock.length === 0}
             >
               <Icon name="upload" size={16} /> Return
@@ -268,6 +273,16 @@ export default function MyStockView({ onBack, onUserTap }) {
                   </>
                 )}
               </div>
+              {canReturn && qty > 0 && (
+                <button
+                  onClick={() => { setReturnPartId(pc?.id); setSheetMode('return') }}
+                  title="Return this part to a warehouse"
+                  className="btn btn-ghost"
+                  style={{ flexShrink: 0, padding: '8px 10px', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}
+                >
+                  <Icon name="upload" size={15} /> Return
+                </button>
+              )}
             </div>
           )
         })}
@@ -279,7 +294,8 @@ export default function MyStockView({ onBack, onUserTap }) {
           mode={sheetMode}
           myTruck={truck}
           myStock={stock}
-          onClose={() => setSheetMode(null)}
+          prefillPartId={sheetMode === 'return' ? returnPartId : null}
+          onClose={() => { setSheetMode(null); setReturnPartId(null) }}
           onComplete={handleMovementComplete}
         />
       )}

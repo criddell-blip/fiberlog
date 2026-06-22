@@ -17,7 +17,10 @@ import Icon from '../shared/Icon'
 //   myStock    array of {quantity, parts_catalog} rows at the truck (for return)
 //   onClose()  user dismissed the sheet
 //   onComplete() movement saved successfully — parent should refetch
-export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onComplete }) {
+//   prefillPartId  (return only) a truck part tapped from My Stock — pre-selects
+//                  it + defaults qty to the full on-truck amount, so the crew
+//                  skips the part picker and just confirms where it goes.
+export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onComplete, prefillPartId = null }) {
   const { showToast } = useApp()
 
   // The "other" side of the move: source for load, destination for return.
@@ -30,8 +33,14 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   const [loadingOtherStock, setLoadingOtherStock] = useState(false)
 
   // The part the crew is moving + how much.
-  const [selectedPartId, setSelectedPartId] = useState(null)
-  const [quantity, setQuantity] = useState('')
+  const [selectedPartId, setSelectedPartId] = useState(prefillPartId || null)
+  // Prefill the qty to the full on-truck amount — "I'm done with this, send it
+  // all back" is the common case; the crew can still edit it down.
+  const [quantity, setQuantity] = useState(() => {
+    if (!prefillPartId) return ''
+    const row = (myStock || []).find(r => r.parts_catalog?.id === prefillPartId)
+    return row ? String(row.quantity) : ''
+  })
   const [notes, setNotes] = useState('')
   const [partSearch, setPartSearch] = useState('')
 
@@ -184,13 +193,17 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
     return () => { cancelled = true }
   }, [isLoad, otherLocationId])
 
-  // Reset part selection when the source/destination changes — what they
-  // picked may not be available at the new location.
+  // Load-only: reset the picked part when the SOURCE changes — what they
+  // picked may not exist at the new location. Return picks from the truck
+  // (source is fixed), so changing the destination must NOT clear the part —
+  // that also lets a prefilled return part (from My Stock) survive picking a
+  // destination.
   useEffect(() => {
+    if (!isLoad) return
     setSelectedPartId(null)
     setQuantity('')
     setPartSearch('')
-  }, [otherLocationId])
+  }, [otherLocationId, isLoad])
 
   // The list of parts the crew can pick from. For 'load' it's stock at
   // the source; for 'return' it's their own truck stock. Filtered by
@@ -459,6 +472,26 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                   })}
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Prefilled return — the part was tapped from My Stock, so show it up
+            front; the crew just picks where it goes + confirms qty. */}
+        {isReturn && prefillPartId && selectedPart && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14,
+            padding: '10px 12px', background: 'var(--accent-bg)',
+            border: '1px solid var(--accent-border)', borderRadius: 'var(--r-sm)',
+          }}>
+            <Icon name="box" size={16} color="var(--accent-dk)" />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {selectedPart.parts_catalog?.name || prefillPartId}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                <span className="mono">{availableQty.toLocaleString()}</span> on your truck · pick where it goes
+              </div>
             </div>
           </div>
         )}
