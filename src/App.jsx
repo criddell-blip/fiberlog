@@ -3,6 +3,7 @@ import CrewApp from './components/crew/CrewApp'
 import InfraCrewApp from './components/crew/infra/InfraCrewApp'
 import ManagerApp from './components/manager/ManagerApp'
 import Login from './Login'
+import Icon from './components/shared/Icon'
 import { VALID_FIELD_CREW_TYPES } from './lib/crewTypes'
 import './styles/global.css'
 
@@ -27,7 +28,7 @@ function RootRouter() {
       height: '100%', flexDirection: 'column', gap: 12, padding: 24,
       background: 'var(--bg)', color: 'var(--text)',
     }}>
-      <div style={{ fontSize: 32 }}>⚠️</div>
+      <div style={{ color: 'var(--red)' }}><Icon name="alert" size={32} /></div>
       <div style={{ fontWeight: 700, fontSize: 16 }}>Could not connect</div>
       <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center', maxWidth: 360 }}>
         FiberLog couldn't reach the server. Check your network and try again.

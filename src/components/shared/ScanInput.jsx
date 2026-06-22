@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { BrowserMultiFormatReader } from '@zxing/browser'
+import Icon from './Icon'
 
 // Unified scan-input primitive. Handles both:
 //   • USB/Bluetooth scanners (HID — they type into a focused text input and
@@ -93,9 +94,9 @@ export default function ScanInput({
             disabled={disabled}
             title="Scan with phone camera"
             className="btn btn-ghost"
-            style={{ padding: '10px 14px', fontSize: 20, flexShrink: 0 }}
+            style={{ padding: '10px 14px', flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}
           >
-            📷
+            <Icon name="camera" size={20} />
           </button>
         )}
       </div>
@@ -176,7 +177,7 @@ function CameraScanner({ onScan, onClose }) {
     >
       {error ? (
         <div style={{ color: 'white', textAlign: 'center', maxWidth: 320 }}>
-          <div style={{ fontSize: 36, marginBottom: 10 }}>📷</div>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10 }}><Icon name="camera" size={34} /></div>
           <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6 }}>Camera unavailable</div>
           <div style={{ fontSize: 13, color: 'var(--hint)', marginBottom: 20, lineHeight: 1.4 }}>
             {error}

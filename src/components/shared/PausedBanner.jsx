@@ -1,4 +1,5 @@
 import { useApp } from '../../AppContext'
+import Icon from './Icon'
 
 // Slim sticky banner that appears at the top of any inventory-displaying
 // surface (manager Inventory section, crew shells) when the org-wide
@@ -39,7 +40,7 @@ export default function PausedBanner() {
         flexShrink: 0,
       }}
     >
-      <span style={{ fontSize: 14 }}>📵</span>
+      <span style={{ display: 'inline-flex' }}><Icon name="eye" size={14} /></span>
       <div style={{ flex: 1, minWidth: 0 }}>
         Stock display paused — Sage is authoritative for counts.
         {qtyDisplayUpdatedAt && (

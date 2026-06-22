@@ -499,7 +499,7 @@ export default function InfraCrewApp() {
 
   if (treeError) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 12, padding: 24 }}>
-      <div style={{ fontSize: 32 }}>⚠️</div>
+      <div style={{ color: 'var(--red)' }}><Icon name="alert" size={32} /></div>
       <div style={{ fontWeight: 700 }}>Could not load sites</div>
       <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center' }}>{treeError}</div>
       <button className="btn btn-primary" onClick={loadTree}>Retry</button>
@@ -558,7 +558,7 @@ export default function InfraCrewApp() {
                 height: '100%', flexDirection: 'column', gap: 12, color: 'var(--muted)',
                 padding: 20,
               }}>
-                <div style={{ fontSize: 40 }}>👈</div>
+                <div style={{ color: 'var(--gray-mid)', display: 'flex', justifyContent: 'center' }}><Icon name="arrow" size={34} style={{ transform: 'scaleX(-1)' }} /></div>
                 <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>Pick a project from the sidebar</div>
                 <div style={{ fontSize: 13 }}>Expand a project → site → task to start logging</div>
 

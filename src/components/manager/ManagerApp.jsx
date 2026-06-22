@@ -176,7 +176,7 @@ export default function ManagerApp() {
 
   if (error) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 12, padding: 24 }}>
-      <div style={{ fontSize: 32 }}>⚠️</div>
+      <div style={{ color: 'var(--red)' }}><Icon name="alert" size={32} /></div>
       <div style={{ fontWeight: 700 }}>Could not connect</div>
       <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center' }}>{error}</div>
       <button className="btn btn-primary" onClick={reload}>Retry</button>
