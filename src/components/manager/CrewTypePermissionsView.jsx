@@ -6,6 +6,7 @@ import {
   removeCrewTypePartRestriction,
   getActivePartDepartments,
 } from '../../lib/admin'
+import Icon from '../shared/Icon'
 
 // Crew-type × department whitelist editor. Each cell represents whether
 // a given crew_type can move parts from a given department.
@@ -219,9 +220,10 @@ export default function CrewTypePermissionsView({ onBack }) {
                                 cursor: busy ? 'wait' : 'pointer',
                                 opacity: busy ? 0.5 : 1,
                                 transition: 'all .12s',
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                               }}
                             >
-                              {checked ? '✓' : ''}
+                              {checked ? <Icon name="check" size={16} /> : ''}
                             </button>
                           </td>
                         )

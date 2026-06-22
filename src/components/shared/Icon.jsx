@@ -56,6 +56,9 @@ const ICONS = {
   printer:   { sw: 1.7, p: '<path d="M6 9V3h12v6"/><path d="M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2"/><rect x="6" y="15" width="12" height="6"/>' },
   mail:      { sw: 1.7, p: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 6.5l8.5 6 8.5-6"/>' },
   edit:      { sw: 1.7, p: '<path d="M4 20h4l10-10-4-4L4 16z"/><line x1="13.5" y1="6.5" x2="17.5" y2="10.5"/>' },
+  key:       { sw: 1.7, p: '<circle cx="8" cy="8" r="4.5"/><path d="M11.2 11.2L20 20"/><line x1="17" y1="17" x2="19.5" y2="14.5"/><line x1="14.5" y1="14.5" x2="16.5" y2="12.5"/>' },
+  lock:      { sw: 1.7, p: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>' },
+  eye:       { sw: 1.7, p: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>' },
 }
 
 export default function Icon({ name, size = 19, color, style, className, title }) {

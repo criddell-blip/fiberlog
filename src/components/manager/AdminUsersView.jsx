@@ -12,6 +12,7 @@ import {
   getLocations, bulkAssignPullLocation,
   getCrewLoadDestinations, setCrewLoadDestinations,
 } from '../../lib/inventory'
+import Icon from '../shared/Icon'
 
 const ROLE_OPTIONS = [
   { id: 'crew',       label: 'Crew',       desc: 'Field worker' },
@@ -197,12 +198,12 @@ export default function AdminUsersView({ onBack }) {
                 border: '1.5px solid var(--teal)',
                 borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: 'pointer',
               }}
-            >🚚 Bulk assign</button>
+            ><Icon name="truck" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Bulk assign</button>
           )}
           <button
             onClick={() => setEditing({ mode: 'new' })}
             style={{ padding: '7px 14px', background: 'var(--orange)', color: 'white', border: 'none', borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
-          >＋ Add user</button>
+          ><Icon name="plus" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Add user</button>
         </div>
       </div>
 
@@ -213,7 +214,7 @@ export default function AdminUsersView({ onBack }) {
             All ({counts.all})
           </button>
           <button onClick={() => setFilter('active')} style={pillStyle(filter === 'active', 'teal')}>
-            ✓ Active ({counts.active})
+            <Icon name="check" size={12} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Active ({counts.active})
           </button>
           <button onClick={() => setFilter('inactive')} style={pillStyle(filter === 'inactive', 'amber')}>
             ⊘ Inactive ({counts.inactive})
@@ -286,14 +287,14 @@ export default function AdminUsersView({ onBack }) {
 
                   <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
                     <button onClick={() => setEditing(u)} style={tinyBtn('default')}>Edit</button>
-                    <button onClick={() => setResettingPwFor(u)} style={tinyBtn('default')}>🔑 Pw</button>
+                    <button onClick={() => setResettingPwFor(u)} style={tinyBtn('default')}><Icon name="key" size={12} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 4 }} />Pw</button>
                     <button
                       onClick={() => handleToggleActive(u)}
                       disabled={isSelf}
                       title={isSelf ? `Can't deactivate yourself` : ''}
                       style={tinyBtn(u.is_active ? 'amber' : 'teal', isSelf)}
                     >
-                      {u.is_active ? '⊘' : '✓'}
+                      {u.is_active ? '⊘' : <Icon name="check" size={12} style={{ display: 'inline-block', verticalAlign: '-2px' }} />}
                     </button>
                   </div>
                 </div>
@@ -537,7 +538,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
             {isNew ? 'Add user' : `Edit ${user?.name || 'user'}`}
           </div>
           {!submitting && (
-            <button onClick={onCancel} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--muted)' }}>✕</button>
+            <button onClick={onCancel} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', display: 'inline-flex' }}><Icon name="x" size={18} /></button>
           )}
         </div>
 
@@ -569,7 +570,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
               />
               <div style={{ fontSize: 11, color: usernameConflict ? 'var(--red)' : 'var(--hint)', marginTop: 4 }}>
                 Email: <code style={{ fontFamily: 'monospace' }}>{emailPreview}</code>
-                {usernameConflict && <span style={{ marginLeft: 8 }}>⚠ already taken</span>}
+                {usernameConflict && <span style={{ marginLeft: 8 }}><Icon name="alert" size={12} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 4 }} />already taken</span>}
               </div>
             </div>
           )}
@@ -652,7 +653,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
                 />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 13 }}>
-                    📦 Warehouse-only manager
+                    <Icon name="box" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Warehouse-only manager
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 2, lineHeight: 1.4 }}>
                     Hides every tab except <strong>Inventory</strong>. They keep full inventory
@@ -739,7 +740,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
                     border: '1px solid var(--amber)', borderRadius: 'var(--r-xs)',
                     fontSize: 11, fontWeight: 600,
                   }}>
-                    ⚠️ <strong>{loc.name}</strong> sounds like a <strong>{trailerTypes.join(' / ')}</strong> trailer,
+                    <Icon name="alert" size={12} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 4 }} /><strong>{loc.name}</strong> sounds like a <strong>{trailerTypes.join(' / ')}</strong> trailer,
                     but this user's crew type is <strong>{crewType}</strong>. Assign anyway?
                   </div>
                 )
@@ -1089,11 +1090,11 @@ function ResetPasswordSheet({ user, onCancel, onSubmit }) {
 // form has a different lifecycle.
 
 const OPERATION_LABELS = {
-  load:     { icon: '⬇', label: 'Load',     desc: 'Warehouse → my truck' },
-  return:   { icon: '↩', label: 'Return',   desc: 'My truck → warehouse' },
-  issue:    { icon: '⬆', label: 'Issue',    desc: 'Consumed in field (manual)' },
-  scrap:    { icon: '✕', label: 'Scrap',    desc: 'Damaged / written off' },
-  transfer: { icon: '↔', label: 'Transfer', desc: 'My truck → another crew' },
+  load:     { iconName: 'download', label: 'Load',     desc: 'Warehouse → my truck' },
+  return:   { iconName: 'rotate',   label: 'Return',   desc: 'My truck → warehouse' },
+  issue:    { iconName: 'upload',   label: 'Issue',    desc: 'Consumed in field (manual)' },
+  scrap:    { iconName: 'trash',    label: 'Scrap',    desc: 'Damaged / written off' },
+  transfer: { iconName: 'move',     label: 'Transfer', desc: 'My truck → another crew' },
 }
 
 function CrewPermissionsSection({ userId }) {
@@ -1189,7 +1190,7 @@ function CrewPermissionsSection({ userId }) {
                 onChange={e => setDenied(op, !e.target.checked)}
                 style={{ cursor: 'pointer' }}
               />
-              <span style={{ fontSize: 16, width: 18, textAlign: 'center' }}>{meta.icon}</span>
+              <span style={{ width: 18, display: 'inline-flex', justifyContent: 'center' }}><Icon name={meta.iconName} size={16} /></span>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: denied ? 'var(--red)' : 'var(--text)' }}>
                   {meta.label} {denied && <span style={{ fontWeight: 400, fontSize: 11 }}>— blocked</span>}
@@ -1324,7 +1325,7 @@ function LoadDestinationsSection({ userId }) {
         fontSize: 12, fontWeight: 700, color: 'var(--muted)',
         textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6,
       }}>
-        🚚 Load destinations
+        <Icon name="truck" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Load destinations
       </div>
       <div style={{ fontSize: 11, color: 'var(--hint)', marginBottom: 8 }}>
         Allowed Load targets besides this user's own truck. Empty = truck-only (default).
@@ -1370,9 +1371,10 @@ function LoadDestinationsSection({ userId }) {
               border: '1px solid var(--red)', borderRadius: 'var(--r-xs)',
               cursor: isOwner && !saving ? 'pointer' : 'not-allowed',
               opacity: isOwner ? 1 : 0.5,
+              display: 'inline-flex', alignItems: 'center',
             }}
           >
-            ×
+            <Icon name="x" size={13} />
           </button>
         </div>
       ))}
@@ -1478,7 +1480,7 @@ function BulkAssignPullLocationSheet({ users, truckLocations, onCancel, onComple
       <div className="overlay-sheet" style={{ maxWidth: 560, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ flexShrink: 0, marginBottom: 12 }}>
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 2 }}>
-            🚚 Bulk assign pull location
+            <Icon name="truck" size={17} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 8 }} />Bulk assign pull location
           </div>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>
             Assign N users to a shared trailer at once. Each user's personal-truck stock

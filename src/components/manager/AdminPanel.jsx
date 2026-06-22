@@ -4,6 +4,7 @@ import { db } from '../../lib/supabase'
 import AdminUsersView from './AdminUsersView'
 import CrewTypePermissionsView from './CrewTypePermissionsView'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 
 export default function AdminPanel() {
   const {
@@ -158,7 +159,7 @@ export default function AdminPanel() {
             {saving ? '...' : 'Save'}
           </button>
           <button onClick={() => setEditingName(null)}
-            style={{ padding: '6px 10px', background: 'var(--gray-lt)', color: 'var(--muted)', border: 'none', borderRadius: 'var(--r-xs)', fontSize: 12, cursor: 'pointer' }}>✕</button>
+            style={{ padding: '6px 10px', background: 'var(--gray-lt)', color: 'var(--muted)', border: 'none', borderRadius: 'var(--r-xs)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}><Icon name="x" size={14} /></button>
         </div>
       )
     }
@@ -167,7 +168,7 @@ export default function AdminPanel() {
         <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{value}</span>
         <button onClick={() => { setEditingName(id); setEditVal(value) }}
           style={{ fontSize: 11, color: 'var(--orange)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
-          ✎ rename
+          <Icon name="edit" size={11} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 4 }} />rename
         </button>
       </div>
     )
@@ -199,7 +200,7 @@ export default function AdminPanel() {
             <button
               onClick={() => setConfirm({ label: `Delete entire project "${selProject.name}" and ALL its data?`, action: () => deleteProject(selProject) })}
               style={{ fontSize: 12, color: 'var(--red)', fontWeight: 700, background: 'none', border: '1px solid var(--red)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer' }}>
-              🗑 Delete project
+              <Icon name="trash" size={12} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Delete project
             </button>
           </div>
 
@@ -213,12 +214,12 @@ export default function AdminPanel() {
                 <button
                   onClick={() => setConfirm({ label: `Clear all test data from "${ph.name}"? Tasks will be reset to open.`, action: () => clearPhaseData(ph) })}
                   style={{ flex: 1, padding: '7px', background: 'var(--amber-lt)', color: 'var(--amber)', border: '1px solid var(--amber)', borderRadius: 'var(--r-xs)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                  🧹 Clear data
+                  <Icon name="trash" size={13} style={{ verticalAlign: '-2px', marginRight: 5, display: 'inline-block' }} />Clear data
                 </button>
                 <button
                   onClick={() => setConfirm({ label: `Delete phase "${ph.name}" and ALL its tasks and submissions?`, action: () => deletePhase(ph) })}
                   style={{ flex: 1, padding: '7px', background: 'var(--red-lt)', color: 'var(--red)', border: '1px solid var(--red)', borderRadius: 'var(--r-xs)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                  🗑 Delete phase
+                  <Icon name="trash" size={12} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Delete phase
                 </button>
               </div>
             </div>
@@ -228,7 +229,7 @@ export default function AdminPanel() {
         {confirm && (
           <div className="overlay open" onClick={e => e.target === e.currentTarget && setConfirm(null)}>
             <div className="overlay-sheet">
-              <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 12, color: 'var(--red)' }}>⚠️ Are you sure?</div>
+              <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 12, color: 'var(--red)' }}><Icon name="alert" size={17} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 8 }} />Are you sure?</div>
               <div style={{ fontSize: 14, color: 'var(--text)', marginBottom: 24, lineHeight: 1.5 }}>{confirm.label}</div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 20 }}>This cannot be undone.</div>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -261,12 +262,12 @@ export default function AdminPanel() {
           onClick={() => setView('users')}
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 8, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>👤 Manage users</div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}><Icon name="users" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Manage users</div>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
               Add new users, edit roles & permissions, deactivate accounts
             </div>
           </div>
-          <span style={{ fontSize: 16, color: 'var(--muted)' }}>›</span>
+          <span style={{ display: 'inline-flex', color: 'var(--muted)' }}><Icon name="chevron-right" size={16} /></span>
         </div>
 
         {/* Inventory section */}
@@ -282,7 +283,7 @@ export default function AdminPanel() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>📵 Stock display mode</div>
+              <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 7 }}><Icon name="eye" size={15} /> Stock display mode</div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, lineHeight: 1.4 }}>
                 {qtyDisplayMode === 'paused'
                   ? <>Paused — qty numbers are hidden and replaced with last-seen recency.
@@ -342,12 +343,12 @@ export default function AdminPanel() {
           onClick={() => setView('crewperms')}
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 16, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>🔒 Crew × Department permissions</div>
+            <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 7 }}><Icon name="lock" size={15} /> Crew × Department permissions</div>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
               Restrict which part departments each crew type can move (leave empty for unrestricted)
             </div>
           </div>
-          <span style={{ fontSize: 16, color: 'var(--muted)' }}>›</span>
+          <span style={{ display: 'inline-flex', color: 'var(--muted)' }}><Icon name="chevron-right" size={16} /></span>
         </div>
 
         {/* Projects section */}
@@ -360,7 +361,7 @@ export default function AdminPanel() {
               <div style={{ fontWeight: 700, fontSize: 14 }}>{p.name}</div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{p.phases?.length || 0} phases</div>
             </div>
-            <span style={{ fontSize: 16, color: 'var(--muted)' }}>›</span>
+            <span style={{ display: 'inline-flex', color: 'var(--muted)' }}><Icon name="chevron-right" size={16} /></span>
           </div>
         ))}
       </div>
