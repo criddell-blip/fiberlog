@@ -473,8 +473,6 @@ npx supabase login                             # auth supabase CLI (first time)
 
 18. **Default the Hours field on task submission** — pre-fill the crew `TaskWorkspace` hours input instead of starting blank, so the common case is one tap. **Open question — default value:** a flat standard workday (8?) vs. remember the crew member's last-entered hours vs. per-crew-type default. Lowest-friction is probably 8 with the field still editable.
 
-19. **BUG — boring/drilling conduit footage logged but conduit material not moved.** When a task for boring & drilling is submitted, the conduit *footage* increments the project (phase actuals) correctly, but the conduit *material* is never moved (no truck → project bucket deduction), so the activity / movements feed shows no conduit movement. Symptom: project footage rises with no matching material consumption. **Hypothesis (unverified):** auto-deduct in `approve_submission` only moves parts explicitly on the submission (assembly kits + extra parts); footage-derived conduit consumption isn't translated into a material line, so nothing deducts. Needs investigation — decide whether conduit footage should auto-generate a conduit material movement (and at what ft→qty ratio), or whether crew are expected to add conduit as an explicit part. Check `calculations.js` (footage→material maps) + the boring/drilling workspace's parts assembly.
-
 ---
 
 ## Gotchas worth knowing
