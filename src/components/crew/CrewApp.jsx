@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
 import { useBackClose } from '../../lib/backStack'
+import Icon from '../shared/Icon'
 import ProjectList from './ProjectList'
 import PhaseList from './PhaseList'
 import TaskList from './TaskList'
@@ -26,7 +27,7 @@ function BackToManagerButton({ exitCrewMode, compact = false }) {
       title="Return to the manager portal"
       className={`settings-pill mode${compact ? ' compact' : ''}`}
     >
-      <span style={{ fontSize: compact ? 12 : 14, lineHeight: 1 }}>⚙️</span>
+      <span style={{ display: 'inline-flex', lineHeight: 1 }}><Icon name="gear" size={compact ? 13 : 15} /></span>
       <span>Manager</span>
     </button>
   )
@@ -179,7 +180,7 @@ function CrewSidebar({
           flexShrink: 0,
         }}
       >
-        <span style={{ fontSize: 16 }}>📦</span>
+        <Icon name="box" size={17} />
         <span>My Stock</span>
       </button>
 
@@ -235,10 +236,9 @@ function CrewSidebar({
                   </div>
                 </div>
                 <span style={{
-                  fontSize: 12, color: 'var(--muted)', flexShrink: 0,
-                  display: 'inline-block',
+                  color: 'var(--muted)', flexShrink: 0, display: 'inline-flex',
                   transform: isExpP ? 'rotate(90deg)' : 'none', transition: 'transform .15s'
-                }}>›</span>
+                }}><Icon name="chevron-right" size={14} /></span>
               </div>
 
               {isExpP && p.phases.map(ph => {
@@ -265,10 +265,9 @@ function CrewSidebar({
                         <span className="pill pill-accent pill-sm" style={{ flexShrink: 0 }}>{openTasks.length}</span>
                       )}
                       <span style={{
-                        fontSize: 11, color: 'var(--hint)', flexShrink: 0,
-                        display: 'inline-block',
+                        color: 'var(--hint)', flexShrink: 0, display: 'inline-flex',
                         transform: isExpPh ? 'rotate(90deg)' : 'none', transition: 'transform .15s'
-                      }}>›</span>
+                      }}><Icon name="chevron-right" size={13} /></span>
                     </div>
 
                     {isExpPh && ph.tasks.filter(isActiveCrewTask).map(t => {

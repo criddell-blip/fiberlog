@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useApp } from '../../../AppContext'
 import { useIsWide } from '../../../lib/useIsWide'
 import { useBackClose } from '../../../lib/backStack'
+import Icon from '../../shared/Icon'
 import { getInfraTree, subscribeToAllTaskChanges } from '../../../lib/supabase'
 import MyStockView from '../MyStockView'
 import TaskWorkspace from '../TaskWorkspace'
@@ -22,7 +23,7 @@ function BackToManagerButton({ exitCrewMode, compact = false }) {
       title="Return to the manager portal"
       className={`settings-pill mode${compact ? ' compact' : ''}`}
     >
-      <span style={{ fontSize: compact ? 12 : 14, lineHeight: 1 }}>⚙️</span>
+      <span style={{ display: 'inline-flex', lineHeight: 1 }}><Icon name="gear" size={compact ? 13 : 15} /></span>
       <span>Manager</span>
     </button>
   )
@@ -61,9 +62,9 @@ function ThemeToggle({ darkMode, onToggle, compact = false }) {
 // getInfraTree() — a sites-shaped variant of getFullTree() that only returns
 // projects which actually have sites.
 
-const SITE_TYPE_ICONS = {
-  wireless: '📡',
-  fiber:    '🏢',
+const SITE_TYPE_ICON_NAME = {
+  wireless: 'pin',
+  fiber:    'warehouse',
 }
 
 const isActiveCrewTask = t => t.status !== 'done' && t.status !== 'approved' && t.status !== 'pending'
@@ -175,7 +176,7 @@ function InfraSidebar({
           flexShrink: 0,
         }}
       >
-        <span style={{ fontSize: 16 }}>📦</span>
+        <Icon name="box" size={17} />
         <span>My Stock</span>
       </button>
 
@@ -237,16 +238,15 @@ function InfraSidebar({
                   </div>
                 </div>
                 <span style={{
-                  fontSize: 12, color: 'var(--muted)', flexShrink: 0,
-                  display: 'inline-block',
+                  color: 'var(--muted)', flexShrink: 0, display: 'inline-flex',
                   transform: isExpP ? 'rotate(90deg)' : 'none', transition: 'transform .15s'
-                }}>›</span>
+                }}><Icon name="chevron-right" size={14} /></span>
               </div>
 
               {isExpP && p.sites.map(s => {
                 const isExpS = expandedSite === s.id
                 const openTasks = s.tasks.filter(isActiveCrewTask)
-                const icon = SITE_TYPE_ICONS[s.type] || '📍'
+                const iconName = SITE_TYPE_ICON_NAME[s.type] || 'pin'
 
                 return (
                   <div key={s.id}>
@@ -261,7 +261,7 @@ function InfraSidebar({
                         background: isExpS ? 'var(--surface2)' : 'transparent',
                       }}
                     >
-                      <span style={{ fontSize: 12, flexShrink: 0 }}>{icon}</span>
+                      <span style={{ flexShrink: 0, display: 'inline-flex', color: 'var(--accent-dk)' }}><Icon name={iconName} size={14} /></span>
                       <div style={{ fontSize: 11, color: 'var(--muted)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {s.name}
                       </div>
@@ -269,10 +269,9 @@ function InfraSidebar({
                         <span className="pill pill-accent pill-sm" style={{ flexShrink: 0 }}>{openTasks.length}</span>
                       )}
                       <span style={{
-                        fontSize: 11, color: 'var(--hint)', flexShrink: 0,
-                        display: 'inline-block',
+                        color: 'var(--hint)', flexShrink: 0, display: 'inline-flex',
                         transform: isExpS ? 'rotate(90deg)' : 'none', transition: 'transform .15s'
-                      }}>›</span>
+                      }}><Icon name="chevron-right" size={13} /></span>
                     </div>
 
                     {isExpS && s.tasks.filter(isActiveCrewTask).map(t => {
@@ -289,7 +288,7 @@ function InfraSidebar({
                             borderLeft: isActive ? '3px solid var(--orange)' : '3px solid transparent',
                           }}
                         >
-                          <span style={{ fontSize: 13, flexShrink: 0 }}>🛠️</span>
+                          <span style={{ flexShrink: 0, display: 'inline-flex', color: 'var(--hint)' }}><Icon name="box" size={13} /></span>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{
                               fontSize: 12, fontWeight: isActive ? 700 : 500,
@@ -742,9 +741,9 @@ function InfraProjectsScreen({ projects, onSelectProject, onOpenMyStock, onUserT
         <button
           className="btn btn-ghost"
           onClick={onOpenMyStock}
-          style={{ padding: '6px 10px', fontSize: 12 }}
+          style={{ padding: '6px 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
         >
-          📦 My Stock
+          <Icon name="box" size={14} /> My Stock
         </button>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
@@ -778,10 +777,10 @@ function InfraProjectsScreen({ projects, onSelectProject, onOpenMyStock, onUserT
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{p.name}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-                  {p.sites.length} site{p.sites.length === 1 ? '' : 's'} · {openTasks} open / {totalTasks} total task{totalTasks === 1 ? '' : 's'}
+                  <span className="mono">{p.sites.length}</span> site{p.sites.length === 1 ? '' : 's'} · <span className="mono">{openTasks}</span> open / <span className="mono">{totalTasks}</span> total task{totalTasks === 1 ? '' : 's'}
                 </div>
               </div>
-              <span style={{ fontSize: 16, color: 'var(--hint)' }}>›</span>
+              <Icon name="chevron-right" size={16} color="var(--hint)" />
             </button>
           )
         })}
