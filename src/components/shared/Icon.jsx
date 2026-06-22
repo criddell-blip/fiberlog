@@ -60,6 +60,7 @@ const ICONS = {
   lock:      { sw: 1.7, p: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>' },
   eye:       { sw: 1.7, p: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>' },
   camera:    { sw: 1.7, p: '<path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L19 6h0a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/>' },
+  flag:      { sw: 1.7, p: '<line x1="5" y1="21" x2="5" y2="3"/><path d="M5 4h11l-2 3.5L16 11H5z"/>' },
 }
 
 export default function Icon({ name, size = 19, color, style, className, title }) {

@@ -428,10 +428,10 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                   )}
                   <button
                     onClick={() => setViewingLocationsFor(p)}
-                    style={quickBtnStyle('default')}
+                    style={{ ...quickBtnStyle('default'), display: 'inline-flex', alignItems: 'center', gap: 5 }}
                     title="See which locations have logged stock of this part"
                   >
-                    📍 Locations
+                    <Icon name="pin" size={13} /> Locations
                   </button>
                   <button onClick={() => setEditing(p)} style={quickBtnStyle('default')}>Edit</button>
                 </div>

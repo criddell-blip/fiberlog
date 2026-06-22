@@ -451,8 +451,8 @@ export default function SubmissionsQueue() {
 
             {selected.status === 'pending' ? (
               <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-danger" style={{ flex: 1 }} onClick={() => handleFlag(selected)} disabled={acting}>🚩 Flag</button>
-                <button className="btn btn-primary" style={{ flex: 2 }} onClick={() => handleApprove(selected)} disabled={acting}>{acting ? 'Saving...' : '✅ Approve'}</button>
+                <button className="btn btn-danger" style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={() => handleFlag(selected)} disabled={acting}><Icon name="flag" size={14} /> Flag</button>
+                <button className="btn btn-primary" style={{ flex: 2, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={() => handleApprove(selected)} disabled={acting}>{acting ? 'Saving...' : <><Icon name="check" size={14} /> Approve</>}</button>
               </div>
             ) : (
               <div style={{ textAlign: 'center', padding: 12, borderRadius: 'var(--r-sm)', fontWeight: 700, background: STATUS_COLORS[selected.status]?.bg, color: STATUS_COLORS[selected.status]?.text }}>

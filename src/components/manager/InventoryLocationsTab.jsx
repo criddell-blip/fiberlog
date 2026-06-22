@@ -565,14 +565,14 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                             onClick={stop(() => setLabelsFor(loc))}
                             title="Print scannable BIN: QR labels for this warehouse"
                             style={locActionChip()}
-                          >🏷 Bins</button>
+                          ><Icon name="tag" size={12} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 4 }} />Bins</button>
                         )}
                         {type === 'warehouse' && bins.length > 0 && (
                           <button
                             onClick={stop(() => setAisleSignsFor(loc))}
                             title="Print full-page aisle signs for warehouse navigation"
                             style={locActionChip()}
-                          >🏷 Aisles</button>
+                          ><Icon name="tag" size={12} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 4 }} />Aisles</button>
                         )}
                         <button
                           onClick={stop(() => setEditing(loc))}
