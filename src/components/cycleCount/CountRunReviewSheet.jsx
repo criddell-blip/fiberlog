@@ -115,6 +115,32 @@ export default function CountRunReviewSheet({ runId, onClose, onChanged }) {
     }
   }
 
+  // "What went missing" export — every net_loss resolution for this run
+  // (stock that was expected somewhere in scope and not found anywhere). This
+  // is the count's shrinkage/missing record the owner wanted to pull.
+  function downloadMissing(missing, run) {
+    const esc = (v) => {
+      const s = v == null ? '' : String(v)
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const header = ['SKU', 'Part', 'Qty short', 'Bin', 'Status', 'Reviewed at', 'Notes']
+    const rows = missing.map(r => [
+      r.part_id, r.part?.name || '', Number(r.quantity),
+      r.from_session?.location?.name || '', r.status,
+      r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : '',
+      r.manager_notes || '',
+    ])
+    const csv = [header, ...rows].map(row => row.map(esc).join(',')).join('\r\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const stamp = run.completed_at || run.started_at
+    a.href = url
+    a.download = `count-missing-${(run.scope_warehouse?.name || 'all').replace(/\s+/g, '-')}-${stamp ? new Date(stamp).toISOString().slice(0, 10) : 'run'}.csv`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && !busy && onClose()}>
       <div className="overlay-sheet" style={{ maxWidth: 640 }}>
@@ -143,19 +169,34 @@ export default function CountRunReviewSheet({ runId, onClose, onChanged }) {
           const transfers = resolutions.filter(r => r.resolution_type === 'internal_transfer')
           const approved = resolutions.filter(r => r.status === 'approved')
           const discarded = resolutions.filter(r => r.status === 'discarded')
+          const missing = resolutions.filter(r => r.resolution_type === 'net_loss')
           const submittedBins = sessions.filter(s => s.status === 'submitted').length
 
           return (
             <>
               {/* Header */}
+              <div style={{ marginBottom: 14, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4 }}>
+                    Cycle count review
+                  </div>
+                  <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)' }}>
+                    {run.counter?.name || 'Unknown counter'} · {fmtWhen(run.started_at)}
+                    {run.scope_warehouse?.name && <> · {run.scope_warehouse.name}</>}
+                  </div>
+                </div>
+                {missing.length > 0 && (
+                  <button
+                    onClick={() => downloadMissing(missing, run)}
+                    className="btn btn-ghost"
+                    title="Download what went missing on this count (CSV)"
+                    style={{ flexShrink: 0, padding: '8px 12px', fontSize: 'var(--fs-sm)', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <Icon name="download" size={14} /> Missing report
+                  </button>
+                )}
+              </div>
               <div style={{ marginBottom: 14 }}>
-                <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4 }}>
-                  Cycle count review
-                </div>
-                <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)' }}>
-                  {run.counter?.name || 'Unknown counter'} · {fmtWhen(run.started_at)}
-                  {run.scope_warehouse?.name && <> · {run.scope_warehouse.name}</>}
-                </div>
                 {run.notes && (
                   <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text)', marginTop: 6, fontStyle: 'italic' }}>
                     “{run.notes}”
@@ -178,6 +219,11 @@ export default function CountRunReviewSheet({ runId, onClose, onChanged }) {
                     {approved.length > 0 && ` · ${approved.length} approved`}
                     {discarded.length > 0 && ` · ${discarded.length} discarded`}
                   </div>
+                  {missing.length > 0 && (
+                    <div style={{ marginTop: 4, color: 'var(--danger-fg)', fontWeight: 'var(--fw-semibold)' }}>
+                      {missing.length} item{missing.length === 1 ? '' : 's'} went missing — use “Missing report” to export
+                    </div>
+                  )}
                 </div>
               </div>
 
