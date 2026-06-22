@@ -12,6 +12,29 @@ export function compareNamesNatural(a, b) {
   return (a || '').localeCompare(b || '', undefined, { numeric: true, sensitivity: 'base' })
 }
 
+// Group locations by their "Aisle N" name prefix for a tidy picker: numbered
+// aisles ascending (1,2,…10 via numeric sortKey), then an "Other" group for
+// non-aisle bins + warehouses/trucks/buckets. Each item gets `shelfLabel` =
+// its name minus the "Aisle N," prefix, so rows under an aisle header read just
+// "shelf e2". Tolerates inconsistent bin names ("Aisle 1, E4" vs "…, shelf c1")
+// by grouping/sorting on the remainder. Mirrors the cycle-count bin picker.
+export function groupLocationsByAisle(locations) {
+  const map = new Map()
+  for (const loc of locations || []) {
+    const name = loc.name || ''
+    const m = name.match(/^Aisle\s+(\S+?)\s*[,/]\s*(.*)$/i)
+    const key = m ? `aisle-${m[1].toLowerCase()}` : 'other'
+    const label = m ? `Aisle ${m[1]}` : 'Other'
+    const sortKey = m ? (parseInt(m[1], 10) || 9998) : 9999
+    const shelfLabel = m ? (m[2].trim() || name) : (loc.displayLabel || name)
+    if (!map.has(key)) map.set(key, { key, label, sortKey, items: [] })
+    map.get(key).items.push({ ...loc, shelfLabel })
+  }
+  const groups = Array.from(map.values())
+  for (const g of groups) g.items.sort((a, b) => compareNamesNatural(a.shelfLabel, b.shelfLabel))
+  return groups.sort((a, b) => a.sortKey - b.sortKey)
+}
+
 // ─── LOCATIONS ───────────────────────────────────────────────────────────────
 
 // Get top-level locations (warehouses, trucks, job sites, etc.). By default
@@ -189,7 +212,11 @@ export async function getAllStockGrouped({ excludeLocationId = null } = {}) {
       type: loc.type,
       hasOwner: !!loc.assigned_to,
       parentName,
-      displayLabel: parentName ? `${parentName} · ${loc.name}` : loc.name,
+      // Bin labels show their own name only ("Aisle 4, shelf e2"). The
+      // warehouse prefix is redundant — only one warehouse has aisle bins, so
+      // the aisle implies it. (Restore `parentName · name` here if a second
+      // aisle-bearing warehouse is ever added, for disambiguation.)
+      displayLabel: loc.name,
       qty,
     })
     entry.totalQty += qty
@@ -242,7 +269,8 @@ export async function getPartLocations(partId) {
       isActive: !!loc.is_active,
       parentLocationId: loc.parent_location_id || null,
       parentName,
-      displayLabel: parentName ? `${parentName} · ${loc.name}` : loc.name,
+      // Bin name only — warehouse prefix dropped (one aisle-warehouse; aisle implies it).
+      displayLabel: loc.name,
       qty,
       lastMovementAt: r.last_movement_at || null,
     })

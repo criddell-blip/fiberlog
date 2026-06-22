@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useApp } from '../../AppContext'
-import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement, getMyAllowedLoadDestinations, compareNamesNatural } from '../../lib/inventory'
+import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement, getMyAllowedLoadDestinations, compareNamesNatural, groupLocationsByAisle } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 
@@ -43,6 +43,10 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   })
   const [notes, setNotes] = useState('')
   const [partSearch, setPartSearch] = useState('')
+  // By-location picker (searchable + aisle-grouped). locSearch filters; expanded
+  // tracks which aisle groups are open.
+  const [locSearch, setLocSearch] = useState('')
+  const [expandedAisles, setExpandedAisles] = useState(() => new Set())
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -223,31 +227,13 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   // alphabetically. Each bin's display label shows "Warehouse · Bin" so
   // the crew can tell which warehouse the bin belongs to without losing
   // selection accuracy.
-  const sortedLocations = useMemo(() => {
-    const byId = new Map(otherLocations.map(l => [l.id, l]))
-    const groupName = l => {
-      if (l.parent_location_id) {
-        const parent = byId.get(l.parent_location_id)
-        if (parent) return parent.name || l.name
-      }
-      return l.name || ''
-    }
-    return otherLocations.slice().sort((a, b) => {
-      const gcmp = compareNamesNatural(groupName(a), groupName(b))
-      if (gcmp !== 0) return gcmp
-      // Same group: parent first, then bins by name (natural order so A2 < A10)
-      if ((a.parent_location_id || null) !== (b.parent_location_id || null)) {
-        return a.parent_location_id ? 1 : -1
-      }
-      return compareNamesNatural(a.name, b.name)
-    }).map(l => {
-      const parent = l.parent_location_id ? byId.get(l.parent_location_id) : null
-      return {
-        ...l,
-        displayLabel: parent ? `${parent.name} · ${l.name}` : l.name,
-      }
-    })
-  }, [otherLocations])
+  // Locations for the by-location picker. Label is the bare name (no warehouse
+  // prefix); grouping + ordering is handled by groupLocationsByAisle in the
+  // picker render below.
+  const sortedLocations = useMemo(
+    () => otherLocations.map(l => ({ ...l, displayLabel: l.name })),
+    [otherLocations]
+  )
 
   // Filter partGroups by the same search input as the by-location flow.
   // Matches name, nickname, SKU, material group, department, and ANY
@@ -341,7 +327,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
       if (isLoad && destForLoad) {
         const d = allowedDestinations.find(x => x.id === destForLoad)
         if (d) {
-          target = ' to ' + (d.parentName ? `${d.parentName} · ${d.name}` : d.name)
+          target = ' to ' + d.name
         }
       }
       showToast(`${isLoad ? 'Loaded' : 'Returned'} ${quantity} × ${partName}${target}`)
@@ -496,30 +482,77 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
           </div>
         )}
 
-        {/* ── By-location view (Load + Return) ──────────────────────────── */}
+        {/* ── By-location view (Load + Return): searchable, aisle-grouped ──── */}
         {viewMode === 'by-location' && (
           <div className="field">
             <label>{isLoad ? 'Source' : 'Destination'}</label>
-            <select
-              value={otherLocationId}
-              onChange={e => setOtherLocationId(e.target.value)}
-              disabled={loadingLocations}
-              autoComplete="off"
-              name="crew-movement-other-location"
-            >
-              <option value="">
-                {loadingLocations
-                  ? 'Loading…'
-                  : (otherLocations.length === 0
-                      ? `No ${isLoad ? 'sources' : 'warehouses'} available`
-                      : `— pick ${isLoad ? 'source' : 'warehouse'} —`)}
-              </option>
-              {sortedLocations.map(l => (
-                <option key={l.id} value={l.id}>
-                  {locationIcon(l.type, !!l.assigned_to)} {l.displayLabel}
-                </option>
-              ))}
-            </select>
+            {otherLocationId ? (() => {
+              // Selected — compact chip + Change (reopens the picker).
+              const sel = sortedLocations.find(l => l.id === otherLocationId)
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', border: '1.5px solid var(--orange)', borderRadius: 'var(--r-sm)', background: 'var(--orange-lt)' }}>
+                  <span style={{ display: 'inline-flex' }}>{locationIcon(sel?.type, !!sel?.assigned_to)}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--orange-dk)' }}>
+                    {sel?.name || '—'}
+                  </span>
+                  <button type="button" onClick={() => { setOtherLocationId(''); setLocSearch('') }}
+                    style={{ background: 'none', border: 'none', color: 'var(--orange-dk)', fontWeight: 700, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
+                    Change
+                  </button>
+                </div>
+              )
+            })() : loadingLocations ? (
+              <div style={{ padding: 16, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
+            ) : otherLocations.length === 0 ? (
+              <div style={{ padding: 16, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>No {isLoad ? 'sources' : 'warehouses'} available</div>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  placeholder={`Search ${isLoad ? 'sources' : 'warehouses'}…`}
+                  value={locSearch}
+                  onChange={e => setLocSearch(e.target.value)}
+                  autoComplete="off"
+                  name="crew-movement-loc-search"
+                  style={{ width: '100%', padding: '8px 12px', border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--bg)', fontSize: 14, marginBottom: 8 }}
+                />
+                {(() => {
+                  const q = locSearch.trim().toLowerCase()
+                  const filtered = q ? sortedLocations.filter(l => (l.name || '').toLowerCase().includes(q)) : sortedLocations
+                  const groups = groupLocationsByAisle(filtered)
+                  const searching = !!q
+                  if (groups.length === 0) {
+                    return <div style={{ padding: 16, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>No matching locations</div>
+                  }
+                  return (
+                    <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)' }}>
+                      {groups.map(g => {
+                        const open = searching || groups.length === 1 || expandedAisles.has(g.key)
+                        return (
+                          <div key={g.key}>
+                            <button type="button"
+                              onClick={() => setExpandedAisles(prev => { const n = new Set(prev); n.has(g.key) ? n.delete(g.key) : n.add(g.key); return n })}
+                              style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '9px 12px', background: 'var(--surface2)', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}>
+                              <span style={{ display: 'inline-flex', color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}><Icon name="chevron-right" size={14} /></span>
+                              <span style={{ flex: 1, fontWeight: 700, fontSize: 13 }}>{g.label}</span>
+                              <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{g.items.length}</span>
+                            </button>
+                            {open && g.items.map(l => (
+                              <button key={l.id} type="button"
+                                onClick={() => setOtherLocationId(l.id)}
+                                style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '9px 12px 9px 22px', background: 'var(--surface)', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, color: 'var(--text)' }}>
+                                <span style={{ display: 'inline-flex' }}>{locationIcon(l.type, !!l.assigned_to)}</span>
+                                <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.shelfLabel}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+              </>
+            )}
           </div>
         )}
 
@@ -647,7 +680,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                 <option key={d.id} value={d.id}>
                   {d.isOwnTruck
                     ? `🚚 My truck (${d.name})`
-                    : `${locationIcon(d.type, false)} ${d.parentName ? `${d.parentName} · ${d.name}` : d.name}`}
+                    : `${locationIcon(d.type, false)} ${d.name}`}
                 </option>
               ))}
             </select>
