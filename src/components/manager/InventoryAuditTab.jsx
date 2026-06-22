@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
+import Icon from '../shared/Icon'
 import {
   getStockForAudit,
   getPartsCatalogTaxonomy,
@@ -282,11 +283,11 @@ export default function InventoryAuditTab({ locations, refreshKey }) {
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {[
             { id: 'active', label: '✓ Active' },
-            { id: 'draft',  label: '⚠ Drafts' },
+            { id: 'draft',  label: 'Drafts' },
             { id: 'all',    label: 'All' },
           ].map(opt => (
             <button key={opt.id} onClick={() => setPartStatus(opt.id)} style={pillStyle(partStatus === opt.id)}>
-              {opt.label}
+              {opt.id === 'draft' && <Icon name="alert" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />}{opt.label}
             </button>
           ))}
         </div>

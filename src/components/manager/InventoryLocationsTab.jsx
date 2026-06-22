@@ -917,7 +917,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                 borderRadius: 'var(--r-xs)', padding: '8px 10px',
                 marginBottom: 14,
               }}>
-                ⚠️ Retiring with stock still here leaves it orphaned. The location won't appear in the UI anymore but the inventory_stock rows remain pinned to it. Prefer to move stock out first.
+                <Icon name="alert" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Retiring with stock still here leaves it orphaned. The location won't appear in the UI anymore but the inventory_stock rows remain pinned to it. Prefer to move stock out first.
               </div>
             )}
 
@@ -1212,7 +1212,7 @@ function BinFormSheet({ bin, parentWarehouse, existingBins = [], saving, onCance
                 autoFocus
               />
               <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
-                ⚠️ Bins not starting with "Aisle N" will group under "Other" in the tree.
+                <Icon name="alert" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Bins not starting with "Aisle N" will group under "Other" in the tree.
               </div>
             </div>
             <button

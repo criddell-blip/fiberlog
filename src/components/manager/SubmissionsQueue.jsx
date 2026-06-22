@@ -465,7 +465,7 @@ export default function SubmissionsQueue() {
                 onClick={() => handleArchive(selected)}
                 style={{ width: '100%', marginTop: 8, padding: 10, background: 'var(--gray-lt)', border: '1px solid var(--border2)', borderRadius: 'var(--r-sm)', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
               >
-                📦 Archive this submission
+                <Icon name="box" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Archive this submission
               </button>
             )}
             <button style={{ width: '100%', marginTop: 10, padding: 12, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 14 }} onClick={() => setSelected(null)}>Close</button>

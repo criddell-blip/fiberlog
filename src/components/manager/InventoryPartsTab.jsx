@@ -307,7 +307,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           Active ({counts.active})
         </button>
         <button onClick={() => setFilter('draft')} style={pillStyle(filter === 'draft', 'amber')}>
-          ⚠ Drafts ({counts.draft})
+          <Icon name="alert" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Drafts ({counts.draft})
         </button>
       </div>
 
@@ -451,10 +451,10 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           <div style={{ fontWeight: 700, fontSize: 14, color: '#fff', flex: 1 }}>
             {selectedCount} selected
           </div>
-          <button onClick={() => setBulkEditing(true)} style={bulkActionBtn('orange')}>✎ Bulk edit</button>
-          <button onClick={() => setShowLabelSheet(true)} style={bulkActionBtn('purple')}>🏷 Labels</button>
-          <button onClick={() => setShowPrSheet(true)} style={bulkActionBtn('orange')}>📋 Create PR</button>
-          <button onClick={handleBulkActivate} style={bulkActionBtn('teal')}>✓ Activate</button>
+          <button onClick={() => setBulkEditing(true)} style={bulkActionBtn('orange')}><Icon name="edit" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Bulk edit</button>
+          <button onClick={() => setShowLabelSheet(true)} style={bulkActionBtn('purple')}><Icon name="tag" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Labels</button>
+          <button onClick={() => setShowPrSheet(true)} style={bulkActionBtn('orange')}><Icon name="clipboard" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Create PR</button>
+          <button onClick={handleBulkActivate} style={bulkActionBtn('teal')}><Icon name="check" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Activate</button>
           <button onClick={handleBulkDeactivate} style={bulkActionBtn('amber')}>⊘ Deactivate</button>
           <button onClick={clearSelection} style={bulkActionBtn('ghost')}>Cancel</button>
         </div>
@@ -944,10 +944,10 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
                 <button
                   type="button"
                   onClick={() => removeAttrRow(idx)}
-                  style={{ padding: '4px 10px', fontSize: 12, background: 'transparent', border: '1px solid var(--border)', borderRadius: 'var(--r-xs)', cursor: 'pointer', color: 'var(--muted)' }}
+                  style={{ padding: '4px 10px', fontSize: 12, background: 'transparent', border: '1px solid var(--border)', borderRadius: 'var(--r-xs)', cursor: 'pointer', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center' }}
                   title="Remove this attribute"
                 >
-                  ✕
+                  <Icon name="x" size={13} />
                 </button>
               </div>
             ))}

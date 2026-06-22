@@ -451,7 +451,7 @@ export default function AssemblyEditor() {
       {confirm && (
         <div className="overlay open" onClick={e => e.target === e.currentTarget && setConfirm(null)}>
           <div className="overlay-sheet">
-            <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 8, color: 'var(--red)' }}>⚠️ Delete assembly?</div>
+            <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 8, color: 'var(--red)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="alert" size={16} /> Delete assembly?</div>
             <div style={{ fontSize: 14, color: 'var(--text)', marginBottom: 20 }}>"{confirm.label}" will be permanently removed. Historical log entries are unaffected.</div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setConfirm(null)}>Cancel</button>
