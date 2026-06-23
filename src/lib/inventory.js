@@ -1970,7 +1970,7 @@ export async function createPurchaseRequest({
 
 // List PRs with their line counts + totals. Filters by status; defaults
 // to "active" set (pending + ordered).
-export async function getPurchaseRequests({ statuses = ['pending', 'ordered'], limit = 100 } = {}) {
+export async function getPurchaseRequests({ statuses = ['pending', 'ordered', 'partial'], limit = 100 } = {}) {
   let q = db
     .from('purchase_requests')
     .select(`
@@ -2087,62 +2087,137 @@ export async function deletePurchaseRequest(prId) {
   if (error) throw error
 }
 
-// Mark a PR received — also fans out receive movements per line so the
-// goods actually book into stock at the PR's target location. Lines
-// without a part_id (freeform — SKU not yet in catalog) get skipped
-// with a count returned in the result so the UI can warn the manager.
+// Receive a single PR line — books one `receive` movement into the PR's
+// target location and advances the line's running `received_qty`. Supports
+// partial quantities (receive some now, the rest later) so partial vendor
+// deliveries / backorders book accurately.
 //
-// Returns: {
-//   movementsWritten: int,           // receive movements actually inserted
-//   skippedFreeformLines: array      // lines we couldn't auto-receive (no part_id)
-// }
+// Freeform lines (no catalog part_id) require the caller to resolve a
+// `partId` first — either by linking an existing SKU or creating a new part
+// (via createPart). The resolved id is persisted onto the line so it stops
+// being freeform.
+//
+// After the line updates, the PR status is recomputed from the full line
+// set: all lines fully received → 'received'; some received → 'partial'.
+//
+// Returns the reloaded PR (header + lines) so the caller can re-render.
+export async function receivePurchaseRequestLine({ lineId, partId = null, quantity, createdBy } = {}) {
+  if (!lineId) throw new Error('lineId required')
+  if (!createdBy) throw new Error('createdBy required')
+  const qty = Number(quantity)
+  if (!qty || qty <= 0) throw new Error('quantity must be > 0')
+
+  // Load the line (+ catalog part for the unit).
+  const { data: line, error: lineErr } = await db
+    .from('purchase_request_lines')
+    .select('*, part:parts_catalog(id, name, unit)')
+    .eq('id', lineId)
+    .maybeSingle()
+  if (lineErr) throw lineErr
+  if (!line) throw new Error('PR line not found')
+
+  // Header gives us the target location + pr_number for the movement note.
+  const { data: header, error: hErr } = await db
+    .from('purchase_requests')
+    .select('id, pr_number, status, target_location_id, received_at')
+    .eq('id', line.request_id)
+    .maybeSingle()
+  if (hErr) throw hErr
+  if (!header) throw new Error('PR not found')
+  if (header.status === 'cancelled') throw new Error('PR is cancelled')
+  if (!header.target_location_id) {
+    throw new Error('PR has no "Deliver to" location set — open the PR and pick one before receiving')
+  }
+
+  // A movement needs a real catalog part. Freeform lines must bring one in.
+  const effectivePartId = line.part_id || partId
+  if (!effectivePartId) {
+    throw new Error('This freeform line has no catalog part — link or create one before receiving')
+  }
+
+  const already = Number(line.received_qty || 0)
+  const remaining = Number(line.quantity || 0) - already
+  if (remaining <= 0) throw new Error('This line is already fully received')
+  if (qty - remaining > 1e-9) throw new Error(`Can only receive up to ${remaining} more on this line`)
+
+  // Persist the resolved part_id so a freeform line is no longer freeform.
+  if (!line.part_id && partId) {
+    const { error: pErr } = await db
+      .from('purchase_request_lines')
+      .update({ part_id: partId })
+      .eq('id', lineId)
+    if (pErr) throw pErr
+  }
+
+  // Book the receive movement (trigger increments inventory_stock).
+  await recordMovement({
+    movement_type: 'receive',
+    part_id: effectivePartId,
+    quantity: qty,
+    unit: line.part?.unit || null,
+    from_location_id: null,
+    to_location_id: header.target_location_id,
+    vendor_invoice: line.vendor || null,
+    unit_cost: line.unit_cost != null ? Number(line.unit_cost) : null,
+    notes: `Received from ${header.pr_number}` + (line.project_reason ? ` · ${line.project_reason}` : ''),
+    created_by: createdBy,
+  })
+
+  // Advance the line's running received counter.
+  const { error: uErr } = await db
+    .from('purchase_request_lines')
+    .update({ received_qty: already + qty, received_at: new Date().toISOString() })
+    .eq('id', lineId)
+  if (uErr) throw uErr
+
+  // Recompute PR status from the (now-updated) full line set.
+  const fresh = await getPurchaseRequest(header.id)
+  const allLines = fresh.lines || []
+  const allReceived = allLines.length > 0 &&
+    allLines.every(l => Number(l.received_qty || 0) >= Number(l.quantity || 0))
+  const anyReceived = allLines.some(l => Number(l.received_qty || 0) > 0)
+  const nextStatus = allReceived ? 'received' : (anyReceived ? 'partial' : fresh.status)
+  if (nextStatus !== fresh.status || (allReceived && !fresh.received_at)) {
+    const patch = { status: nextStatus }
+    if (allReceived && !fresh.received_at) patch.received_at = new Date().toISOString()
+    await updatePurchaseRequest(header.id, patch)
+    fresh.status = nextStatus
+    if (patch.received_at) fresh.received_at = patch.received_at
+  }
+  return fresh
+}
+
+// Receive all *remaining* catalog lines on a PR in one shot (the bulk
+// convenience action). Loops the per-line receive for every line that has a
+// part_id and still has quantity outstanding. Freeform lines can't be
+// auto-received (no SKU) — they're returned in `skippedFreeform` so the UI
+// can prompt the manager to link/create a part and receive them one-by-one.
+//
+// Returns: { linesReceived: int, skippedFreeform: array }
 export async function markPurchaseRequestReceived(prId, { createdBy } = {}) {
   if (!prId) throw new Error('prId required')
   if (!createdBy) throw new Error('createdBy required')
 
-  // Pull the PR + lines in one go.
   const pr = await getPurchaseRequest(prId)
   if (!pr) throw new Error('PR not found')
   if (pr.status === 'received') throw new Error('PR is already received')
   if (!pr.target_location_id) {
-    throw new Error('PR has no "Deliver to" location set — open the PR and pick one before marking received')
+    throw new Error('PR has no "Deliver to" location set — open the PR and pick one before receiving')
   }
 
-  // Split lines into the receivable (has part_id) and skipped (freeform).
-  const receivable = []
-  const skipped = []
+  const skippedFreeform = []
+  let linesReceived = 0
   for (const l of pr.lines || []) {
-    if (l.part_id) receivable.push(l)
-    else skipped.push(l)
+    const remaining = Number(l.quantity || 0) - Number(l.received_qty || 0)
+    if (remaining <= 0) continue                         // already fully received
+    if (!l.part_id) { skippedFreeform.push(l); continue } // freeform → manual resolve
+    // Each call re-reads the line, so looping stays consistent. Status is
+    // recomputed inside, so by the last line the PR settles to received.
+    await receivePurchaseRequestLine({ lineId: l.id, quantity: remaining, createdBy })
+    linesReceived++
   }
 
-  // Build the receive movements. Existing inventory_stock trigger will
-  // increment stock at the destination as each insert lands.
-  let movementsWritten = 0
-  if (receivable.length > 0) {
-    const payloads = receivable.map(l => ({
-      movement_type: 'receive',
-      part_id: l.part_id,
-      quantity: Number(l.quantity),
-      unit: l.part?.unit || null,
-      from_location_id: null,
-      to_location_id: pr.target_location_id,
-      vendor_invoice: l.vendor || null,
-      unit_cost: l.unit_cost != null ? Number(l.unit_cost) : null,
-      notes: `Auto-received from ${pr.pr_number}` + (l.project_reason ? ` · ${l.project_reason}` : ''),
-      created_by: createdBy,
-    }))
-    await recordMovementsBatch(payloads)
-    movementsWritten = payloads.length
-  }
-
-  // Flip status + stamp received_at. Trigger maintains updated_at.
-  await updatePurchaseRequest(prId, {
-    status: 'received',
-    received_at: new Date().toISOString(),
-  })
-
-  return { movementsWritten, skippedFreeformLines: skipped }
+  return { linesReceived, skippedFreeform }
 }
 
 // Build a CSV that matches Utah Broadband's PR spreadsheet column order

@@ -4,7 +4,7 @@ import { useApp } from '../../AppContext'
 import {
   createPurchaseRequest, getPurchaseRequest,
   updatePurchaseRequest, replacePurchaseRequestLines, deletePurchaseRequest,
-  markPurchaseRequestReceived,
+  markPurchaseRequestReceived, receivePurchaseRequestLine, createPart,
   getLastUnitCost, getRecentVendors,
   buildPurchaseRequestCsv, buildPurchaseRequestEmail,
 } from '../../lib/inventory'
@@ -32,6 +32,7 @@ export default function PurchaseRequestSheet({
   locations = [],
   onClose,
   onSaved,
+  onChanged,
 }) {
   const { currentUser, showToast, projects } = useApp()
   const isOwner = currentUser?.role === 'owner'
@@ -323,41 +324,12 @@ export default function PurchaseRequestSheet({
     setTimeout(() => window.print(), 80)
   }
 
+  // Receiving (full or partial) is handled per-line by ReceivePanel; this
+  // only drives the pending→ordered and *→cancelled transitions.
   async function changeStatus(nextStatus) {
     setSubmitting(true)
     setError(null)
     try {
-      if (nextStatus === 'received') {
-        // Mark Received also fans out receive movements so the goods
-        // actually book into stock. Confirm first because this writes
-        // to the inventory ledger.
-        const lineCount = (pr?.lines || []).length
-        const freeformCount = (pr?.lines || []).filter(l => !l.part_id).length
-        const catalogCount = lineCount - freeformCount
-        const msg = [
-          `Mark ${pr?.pr_number} received?`,
-          '',
-          `This writes ${catalogCount} receive movement${catalogCount === 1 ? '' : 's'} into ${pr?.target_location?.name || 'the target location'}, increasing stock there.`,
-          freeformCount > 0
-            ? `\n${freeformCount} freeform line${freeformCount === 1 ? '' : 's'} (no catalog SKU) will be SKIPPED — add the SKU via Parts admin if you need it booked.`
-            : '',
-        ].filter(Boolean).join('\n')
-        if (!window.confirm(msg)) {
-          setSubmitting(false)
-          return
-        }
-        const { movementsWritten, skippedFreeformLines } =
-          await markPurchaseRequestReceived(prId, { createdBy: currentUser?.id })
-        const reloaded = await getPurchaseRequest(prId)
-        setPr(reloaded)
-        onSaved?.(reloaded)
-        if (skippedFreeformLines.length > 0) {
-          showToast(`Received ${movementsWritten} line${movementsWritten === 1 ? '' : 's'} · ${skippedFreeformLines.length} freeform skipped`)
-        } else {
-          showToast(`Received ${movementsWritten} line${movementsWritten === 1 ? '' : 's'} into ${reloaded?.target_location?.name || 'stock'}`)
-        }
-        return
-      }
       const patch = { status: nextStatus }
       if (nextStatus === 'ordered') {
         if (poNumber) patch.po_number = poNumber
@@ -374,6 +346,16 @@ export default function PurchaseRequestSheet({
     } finally {
       setSubmitting(false)
     }
+  }
+
+  // ReceivePanel hands back the reloaded PR after a line (or all lines) is
+  // received. Update local state but DON'T call onSaved — that closes the
+  // sheet, and partial receiving needs the sheet to stay open across lines.
+  // onChanged refreshes the parent list in the background instead.
+  function handleReceived(fresh) {
+    if (!fresh) return
+    setPr(fresh)
+    onChanged?.(fresh)
   }
 
   async function handleDelete() {
@@ -680,24 +662,20 @@ export default function PurchaseRequestSheet({
                 </button>
               </div>
             )}
-            {status === 'ordered' && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, fontSize: 12 }}>
-                  <div><strong>PO #:</strong> {pr?.po_number || '—'}</div>
-                  <div><strong>ETA:</strong> {pr?.expected_at || '—'}</div>
+            {(status === 'ordered' || status === 'partial') && (
+              <>
+                <div style={{ fontSize: 12, marginBottom: 10 }}>
+                  <span style={{ marginRight: 16 }}><strong>PO #:</strong> {pr?.po_number || '—'}</span>
+                  <span><strong>ETA:</strong> {pr?.expected_at || '—'}</span>
                 </div>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 14px', fontSize: 13 }}
-                  onClick={() => changeStatus('received')}
-                  disabled={submitting}
-                >
-                  <Icon name="box" size={14} /> Mark received
-                </button>
-              </div>
+                <ReceivePanel
+                  pr={pr}
+                  onReceived={handleReceived}
+                  onError={setError}
+                />
+              </>
             )}
-            {(status === 'pending' || status === 'ordered') && (
+            {(status === 'pending' || status === 'ordered' || status === 'partial') && (
               <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
                 <button
                   type="button"
@@ -982,6 +960,305 @@ function PrintablePR({ pr }) {
   )
 }
 
+// ─── RECEIVE PANEL ─────────────────────────────────────────────────────────
+// Per-line receiving for an ordered/partial PR. Each line can be received in
+// full or in part; freeform lines (no catalog SKU) first resolve a part by
+// linking an existing one or creating a new one. "Receive all remaining"
+// books every outstanding catalog line at once (freeform skipped).
+function ReceivePanel({ pr, onReceived, onError }) {
+  const { currentUser, showToast } = useApp()
+  const [busy, setBusy] = useState(false)
+  const lines = pr?.lines || []
+
+  const remainingOf = l => Number(l.quantity || 0) - Number(l.received_qty || 0)
+  const catalogRemaining = lines.filter(l => l.part_id && remainingOf(l) > 0)
+  const freeformRemaining = lines.filter(l => !l.part_id && remainingOf(l) > 0)
+  const allDone = lines.length > 0 && lines.every(l => remainingOf(l) <= 0)
+
+  async function receiveAll() {
+    if (catalogRemaining.length === 0) return
+    const msg = `Receive all ${catalogRemaining.length} remaining catalog line${catalogRemaining.length === 1 ? '' : 's'} into ${pr?.target_location?.name || 'the target location'}?`
+      + (freeformRemaining.length > 0
+        ? `\n\n${freeformRemaining.length} freeform line${freeformRemaining.length === 1 ? '' : 's'} will be skipped — link or create a part to receive ${freeformRemaining.length === 1 ? 'it' : 'them'}.`
+        : '')
+    if (!window.confirm(msg)) return
+    setBusy(true)
+    onError?.(null)
+    try {
+      const { linesReceived, skippedFreeform } = await markPurchaseRequestReceived(pr.id, { createdBy: currentUser?.id })
+      const fresh = await getPurchaseRequest(pr.id)
+      onReceived?.(fresh)
+      showToast(skippedFreeform.length > 0
+        ? `Received ${linesReceived} line${linesReceived === 1 ? '' : 's'} · ${skippedFreeform.length} freeform skipped`
+        : `Received ${linesReceived} line${linesReceived === 1 ? '' : 's'} into ${fresh?.target_location?.name || 'stock'}`)
+    } catch (e) {
+      onError?.(e.message || 'Receive failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>Receive items</div>
+        {catalogRemaining.length > 0 && (
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: 12 }}
+            onClick={receiveAll}
+            disabled={busy}
+          >
+            <Icon name="box" size={13} /> Receive all remaining
+          </button>
+        )}
+      </div>
+      {allDone && (
+        <div style={{ fontSize: 12, color: 'var(--muted)', padding: '4px 0' }}>All lines received.</div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {lines.map(l => (
+          <ReceiveLineRow
+            key={l.id}
+            line={l}
+            pr={pr}
+            disabled={busy}
+            onReceived={onReceived}
+            onError={onError}
+          />
+        ))}
+      </div>
+      {freeformRemaining.length > 0 && (
+        <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 8 }}>
+          Freeform lines (no SKU) are received individually — link an existing part or create one.
+        </div>
+      )}
+    </div>
+  )
+}
+
+// One receivable PR line. Collapsed = progress + a Receive button. Expanded =
+// a qty field (defaults to the remaining amount, capped at it) and, for
+// freeform lines, a resolve-part step (link existing via catalog search, or
+// create a new part inline) before the qty field appears.
+function ReceiveLineRow({ line, disabled, onReceived, onError }) {
+  const { currentUser, showToast } = useApp()
+  const received = Number(line.received_qty || 0)
+  const total = Number(line.quantity || 0)
+  const remaining = total - received
+  const done = remaining <= 0
+  const isFreeform = !line.part_id
+
+  const [open, setOpen] = useState(false)
+  const [qty, setQty] = useState(String(remaining > 0 ? remaining : ''))
+  const [busy, setBusy] = useState(false)
+
+  // Freeform part resolution
+  const [resolvedPart, setResolvedPart] = useState(null)   // { id, name }
+  const [resolveMode, setResolveMode] = useState('link')   // 'link' | 'create'
+  const [search, setSearch] = useState('')
+  const [results, setResults] = useState([])
+  const searchTimer = useRef(null)
+  const [newSku, setNewSku] = useState('')
+  const [newName, setNewName] = useState(line.description || '')
+  const [newUnit, setNewUnit] = useState('ea')
+  const [creating, setCreating] = useState(false)
+
+  useEffect(() => {
+    if (resolveMode !== 'link' || !search || search.length < 2) { setResults([]); return }
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(async () => {
+      try { setResults(await searchPartsCatalog(search, { limit: 10 }) || []) }
+      catch (e) { console.warn('part search:', e) }
+    }, 200)
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current) }
+  }, [search, resolveMode])
+
+  function startReceive() {
+    setQty(String(remaining))
+    setResolvedPart(null)
+    setOpen(true)
+  }
+
+  async function createAndUse() {
+    if (!newSku.trim() || !newName.trim()) { onError?.('SKU and name are required to create a part'); return }
+    setCreating(true)
+    onError?.(null)
+    try {
+      const p = await createPart({ id: newSku.trim(), name: newName.trim(), unit: newUnit.trim() || 'ea', is_active: true })
+      setResolvedPart({ id: p?.id || newSku.trim(), name: p?.name || newName.trim() })
+    } catch (e) {
+      onError?.(e.message || 'Could not create part')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function confirmReceive() {
+    const q = Number(qty)
+    if (!q || q <= 0) { onError?.('Enter a quantity greater than 0'); return }
+    if (q - remaining > 1e-9) { onError?.(`Can only receive up to ${remaining} more on this line`); return }
+    const partId = isFreeform ? resolvedPart?.id : line.part_id
+    if (!partId) { onError?.('Resolve a catalog part first'); return }
+    setBusy(true)
+    onError?.(null)
+    try {
+      const fresh = await receivePurchaseRequestLine({ lineId: line.id, partId, quantity: q, createdBy: currentUser?.id })
+      onReceived?.(fresh)
+      showToast(`Received ${q}${line.part?.unit ? ' ' + line.part.unit : ''} · ${line.description || partId}`)
+      setOpen(false)
+    } catch (e) {
+      onError?.(e.message || 'Receive failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const label = line.description || line.item_number || line.part_id || '(line)'
+  const skuLabel = line.part_id || line.item_number
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', background: 'var(--surface)', padding: '8px 10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {label}
+            {isFreeform && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: 'var(--amber)', textTransform: 'uppercase' }}>freeform</span>}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--hint)' }}>
+            {skuLabel ? `${skuLabel} · ` : ''}{received} / {total} received
+          </div>
+        </div>
+        {done ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>
+            <Icon name="check" size={14} /> Received
+          </span>
+        ) : !open ? (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 11px', fontSize: 12 }}
+            onClick={startReceive}
+            disabled={disabled}
+          >
+            <Icon name="box" size={13} /> Receive
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            style={{ padding: '5px 10px', fontSize: 12 }}
+            onClick={() => setOpen(false)}
+            disabled={busy || creating}
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+
+      {open && !done && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+          {isFreeform && !resolvedPart && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
+                No catalog SKU on this line. Link an existing part or create a new one.
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                <button type="button" onClick={() => setResolveMode('link')} style={miniToggle(resolveMode === 'link')}>Link existing</button>
+                <button type="button" onClick={() => setResolveMode('create')} style={miniToggle(resolveMode === 'create')}>Create new</button>
+              </div>
+              {resolveMode === 'link' ? (
+                <div>
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder="🔍 Search the catalog…"
+                    autoComplete="off"
+                    name="pr-resolve-search"
+                    style={{ width: '100%' }}
+                  />
+                  {results.length > 0 && (
+                    <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', marginTop: 4 }}>
+                      {results.map(p => (
+                        <div
+                          key={p.id}
+                          onClick={() => setResolvedPart({ id: p.id, name: p.name })}
+                          style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border)', fontSize: 13 }}
+                        >
+                          <div style={{ fontWeight: 600 }}>{p.name}</div>
+                          <div style={{ fontSize: 11, color: 'var(--hint)' }}>{p.id}{p.category ? ` · ${p.category}` : ''}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 70px auto', gap: 6, alignItems: 'end' }}>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>SKU</label>
+                    <input value={newSku} onChange={e => setNewSku(e.target.value)} placeholder="SKU" autoComplete="off" name="pr-new-sku" />
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>Name</label>
+                    <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Part name" autoComplete="off" name="pr-new-name" />
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>Unit</label>
+                    <input value={newUnit} onChange={e => setNewUnit(e.target.value)} placeholder="ea" autoComplete="off" name="pr-new-unit" />
+                  </div>
+                  <button type="button" className="btn btn-ghost" style={{ padding: '7px 12px', fontSize: 12 }} onClick={createAndUse} disabled={creating}>
+                    {creating ? 'Creating…' : 'Create'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {(!isFreeform || resolvedPart) && (
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+              {resolvedPart && (
+                <div style={{ flex: '1 1 160px', fontSize: 12, color: 'var(--muted)' }}>
+                  → <strong style={{ color: 'var(--text)' }}>{resolvedPart.name}</strong> <span style={{ color: 'var(--hint)' }}>({resolvedPart.id})</span>
+                  <button type="button" onClick={() => setResolvedPart(null)} style={{ marginLeft: 8, background: 'none', border: 'none', color: 'var(--blue)', cursor: 'pointer', fontSize: 11 }}>change</button>
+                </div>
+              )}
+              <div className="field" style={{ marginBottom: 0, width: 120 }}>
+                <label>Qty (max {remaining})</label>
+                <input
+                  type="number" min="0" step="any"
+                  value={qty}
+                  onChange={e => setQty(e.target.value)}
+                  style={{ textAlign: 'right' }}
+                />
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', fontSize: 13 }}
+                onClick={confirmReceive}
+                disabled={busy}
+              >
+                <Icon name="check" size={14} /> {busy ? 'Receiving…' : 'Receive'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function miniToggle(active) {
+  return {
+    padding: '5px 10px', fontSize: 11, fontWeight: 600, borderRadius: 999, cursor: 'pointer',
+    background: active ? 'var(--dark-bar)' : 'var(--surface)',
+    color: active ? '#fff' : 'var(--muted)',
+    border: `1px solid ${active ? 'var(--dark-bar)' : 'var(--border2)'}`,
+  }
+}
+
 function lineInputStyle() {
   return {
     width: '100%', padding: '4px 6px', fontSize: 12,
@@ -994,6 +1271,7 @@ function statusPill(status) {
   const colors = {
     pending: { fg: 'var(--amber)', bg: 'var(--amber-lt)', border: 'var(--amber)' },
     ordered: { fg: 'var(--teal-dk)', bg: 'var(--teal-lt)', border: 'var(--teal)' },
+    partial: { fg: 'var(--blue)', bg: 'var(--blue-lt)', border: 'var(--blue)' },
     received: { fg: 'var(--muted)', bg: 'var(--gray-lt)', border: 'var(--border)' },
     cancelled: { fg: 'var(--red)', bg: 'var(--red-lt)', border: 'var(--red)' },
   }

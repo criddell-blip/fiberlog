@@ -10,10 +10,11 @@ import Icon from '../shared/Icon'
 // cancelled hide behind filter pills. Replaces the "incoming product"
 // spreadsheet — managers see all open PRs and their ETAs at a glance.
 const STATUS_OPTIONS = [
-  { id: 'all',       label: 'All',        statuses: ['pending','ordered','received','cancelled'] },
-  { id: 'active',    label: 'Active',     statuses: ['pending','ordered'] },
+  { id: 'all',       label: 'All',        statuses: ['pending','ordered','partial','received','cancelled'] },
+  { id: 'active',    label: 'Active',     statuses: ['pending','ordered','partial'] },
   { id: 'pending',   label: 'Pending',    statuses: ['pending'] },
   { id: 'ordered',   label: 'Ordered',    statuses: ['ordered'] },
+  { id: 'partial',   label: 'Partial',    statuses: ['partial'] },
   { id: 'received',  label: 'Received',   statuses: ['received'] },
   { id: 'cancelled', label: 'Cancelled',  statuses: ['cancelled'] },
 ]
@@ -164,6 +165,7 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
           locations={locations || []}
           onClose={() => setShowSheet(null)}
           onSaved={onSheetSaved}
+          onChanged={() => setRefreshTick(t => t + 1)}
         />
       )}
     </div>
@@ -188,6 +190,7 @@ function statusPill(status) {
   const colors = {
     pending:   { fg: 'var(--amber)',     bg: 'var(--amber-lt)', border: 'var(--amber)' },
     ordered:   { fg: 'var(--accent-dk)', bg: 'var(--accent-lt)', border: 'var(--accent)' },
+    partial:   { fg: 'var(--blue)',      bg: 'var(--blue-lt)',  border: 'var(--blue)' },
     received:  { fg: 'var(--muted)',     bg: 'var(--gray-lt)',  border: 'var(--border2)' },
     cancelled: { fg: 'var(--red)',       bg: 'var(--red-lt)',   border: 'var(--red)' },
   }
