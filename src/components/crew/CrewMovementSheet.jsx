@@ -197,17 +197,21 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
     return () => { cancelled = true }
   }, [isLoad, otherLocationId])
 
-  // Load-only: reset the picked part when the SOURCE changes — what they
-  // picked may not exist at the new location. Return picks from the truck
-  // (source is fixed), so changing the destination must NOT clear the part —
-  // that also lets a prefilled return part (from My Stock) survive picking a
-  // destination.
+  // Reset the picked part when the SOURCE changes — only in by-LOCATION load
+  // mode, where the source is chosen independently and the old part may not
+  // exist at the new location. Skip it for:
+  //   • by-PART mode — pickPartAtLocation() sets the location AND the part in
+  //     one tap; resetting here would race-clobber that selection (and clearing
+  //     partSearch snaps the list back to the top). This was the "first tap
+  //     doesn't stick / list jumps up" bug.
+  //   • return mode — source is the fixed truck; changing the destination must
+  //     not clear the part (also lets a prefilled My-Stock return survive).
   useEffect(() => {
-    if (!isLoad) return
+    if (!isLoad || viewMode === 'by-part') return
     setSelectedPartId(null)
     setQuantity('')
     setPartSearch('')
-  }, [otherLocationId, isLoad])
+  }, [otherLocationId, isLoad, viewMode])
 
   // The list of parts the crew can pick from. For 'load' it's stock at
   // the source; for 'return' it's their own truck stock. Filtered by
