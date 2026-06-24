@@ -19,5 +19,6 @@ Thumbs.db
 # Supabase CLI temp state
 supabase/.temp/
 
-# Claude Code session data
-.claude/
+# Claude Code session data — ignore everything except shared project subagents
+.claude/*
+!.claude/agents/
