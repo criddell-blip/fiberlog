@@ -5,7 +5,12 @@ const AppContext = createContext(null)
 
 // LocalStorage key for the theme preference. Read once at first render so
 // there's no flash of dark mode for users who chose light.
-const THEME_STORAGE_KEY = 'fiberlog_dark_mode'
+// NOTE: bumped to *_v2 when dark Console shipped. The old `fiberlog_dark_mode`
+// key was written as 'true' on every load under the legacy dark-default (which
+// no-op'd visually) — so honoring it now would flip every existing user to dark
+// on first load. The new key starts everyone fresh on the light default; dark
+// is opt-in. (Old key is left orphaned; harmless.)
+const THEME_STORAGE_KEY = 'fiberlog_dark_mode_v2'
 // LocalStorage key for the manager↔crew view mode. Working managers (owner
 // or manager role who also field-work) flip into the crew shell to log
 // their own work; we persist so a reload doesn't bounce them back to the
@@ -19,7 +24,7 @@ function readInitialDarkMode() {
   } catch (e) {
     // localStorage unavailable (private mode etc.) — fall through to default
   }
-  return true   // default to dark, matching the original :root variables
+  return false   // Console is light-default; dark is opt-in via the toggle
 }
 
 function readInitialViewMode() {

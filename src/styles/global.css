@@ -109,12 +109,43 @@
 }
 
 
-/* Console is light-default. The previous dark-default `:root` + light override
-   split is retired here — both the no-theme default and the legacy
-   `data-theme="light"` resolve to the Console light palette above, so the
-   existing dark-mode toggle no-ops visually until dark Console is designed
-   (deferred to the Polish phase per the handoff). */
-[data-theme="light"], [data-theme="dark"] {}
+/* Light = the :root Console palette above (no overrides needed). */
+[data-theme="light"] {}
+
+/* ─── Dark-slate Console ──────────────────────────────────────────────────────
+   Same token NAMES, dark values — so every inline style + class flips with no
+   component changes. Surfaces layer bg < sidebar < surface < surface2 so cards
+   and inputs read above the base. The emerald accent is kept (brightened a
+   touch to pop on dark); the legacy --orange*/--teal* aliases and the semantic
+   --*-bg/--*-fg roles reference var(--accent*) / var(--*-lt) and so re-resolve
+   to these dark values automatically. -lt tints become dark washes; -mid stays
+   readable on them. Opt-in via the theme toggle; light remains the default. */
+[data-theme="dark"] {
+  --accent: #10B981;
+  --accent-dk: #34D399;
+  --accent-lt: #0F2A20;
+  --accent-mid: #34D399;
+
+  --amber: #E0A93B;  --amber-lt: #2A2210;  --amber-mid: #E8B94F;
+  --blue:  #5FA8F0;  --blue-lt:  #11243A;  --blue-mid:  #7CB8F5;
+  --red:   #F2706F;  --red-lt:   #2C1517;  --red-mid:   #F89B9B;
+  --gray:  #94A3B8;  --gray-lt:  #1C2436;  --gray-mid:  #44546B;
+  --purple: #9B92EC; --purple-lt: #1E1B33;
+
+  --bg:          #0B1120;
+  --surface:     #131C2E;
+  --surface2:    #1B2438;
+  --sidebar:     #0E1626;
+  --row-divider: #1E2A41;
+  --border:      #243048;
+  --border2:     #30405C;
+  --text:        #E8EDF5;
+  --muted:       #9FB0C8;
+  --hint:        #6B7C95;
+
+  --selected-row: #11301F;
+  --dark-bar:     #334155;   /* "dark" elements lift to a mid slate in dark mode */
+}
 
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
