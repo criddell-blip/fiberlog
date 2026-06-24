@@ -820,6 +820,11 @@ export async function recordMovementsBatch(movements) {
     notes: m.notes || null,
     task_id: m.task_id || null,
     submission_id: m.submission_id || null,
+    // Cost-center tag + crew attribution. The Sonar / fiber-jobs importers
+    // stamp these on each row (for Sage per-phase rollups + "by consumer"
+    // reporting); without forwarding them here they'd silently write NULL.
+    phase_id: m.phase_id || null,
+    consumed_by_user_id: m.consumed_by_user_id || null,
     created_by: m.created_by,
   }))
   const { data, error } = await db.from('inventory_movements').insert(payload).select('id')
