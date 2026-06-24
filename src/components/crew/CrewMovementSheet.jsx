@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useApp } from '../../AppContext'
-import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement, getMyAllowedLoadDestinations, compareNamesNatural, groupLocationsByAisle } from '../../lib/inventory'
+import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement, getMyAllowedLoadDestinations, groupLocationsByAisle } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 

@@ -3,7 +3,7 @@ import { useApp } from '../../AppContext'
 import {
   db, addTask,
   getSitesByProject, addSite, updateSite,
-  decommissionSite, decommissionSiteWithRecovery,
+  decommissionSiteWithRecovery,
   getTaskCountsBySite, getTasksBySite, getMaterialsAtSite,
 } from '../../lib/supabase'
 import { getLocations } from '../../lib/inventory'

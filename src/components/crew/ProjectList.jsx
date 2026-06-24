@@ -2,15 +2,7 @@ import { useApp } from '../../AppContext'
 import { t } from '../../lib/i18n'
 import Icon from '../shared/Icon'
 
-const PROJECT_ICONS = ['🏔️', '🌄', '🏕️', '📡', '🌲']
-const PROJECT_COLORS = ['ip-teal', 'ip-blue', 'ip-amber', 'ip-purple', 'ip-orange']
-
 const isCompletedTask = t => t.status === 'done' || t.status === 'approved'
-
-function getProjectStyle(name, index) {
-  const i = index % PROJECT_ICONS.length
-  return { icon: PROJECT_ICONS[i], cls: PROJECT_COLORS[i] }
-}
 
 export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
   const { projects, currentUser, lang } = useApp()
@@ -65,8 +57,7 @@ export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
           </div>
         )}
 
-        {projects.map((p, i) => {
-          const { icon, cls } = getProjectStyle(p.name, i)
+        {projects.map(p => {
           const totalTasks = p.phases.reduce((a, ph) => a + ph.tasks.length, 0)
           const doneTasks = p.phases.reduce((a, ph) => a + ph.tasks.filter(isCompletedTask).length, 0)
           const fiberK = ((p.fiber || 0) / 1000).toFixed(0)

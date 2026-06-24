@@ -52,13 +52,6 @@ function ThemeToggle({ darkMode, onToggle, compact = false }) {
   )
 }
 
-const JOB_COLORS = {
-  aerial:      { bg: 'var(--teal-lt)',   text: 'var(--teal-mid)' },
-  underground: { bg: 'var(--amber-lt)',  text: 'var(--amber)' },
-  splice:      { bg: 'var(--blue-lt)',   text: 'var(--blue)' },
-  fiber_pull:  { bg: 'var(--purple-lt)', text: 'var(--purple)' },
-  emergency:   { bg: 'var(--red-lt)',    text: 'var(--red)' },
-}
 const JOB_ICONS = { aerial: '🏗️', underground: '⛏️', splice: '🔌', fiber_pull: '📦', emergency: '⚡' }
 
 // Tasks the crew can still act on in the sidebar. Submitted (pending) tasks
