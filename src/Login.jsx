@@ -12,6 +12,15 @@ import { db } from './lib/supabase'
 
 const REMEMBERED_USERNAME_KEY = 'fiberlog_remembered_username'
 
+// Gate for the self-service "Forgot password?" email-reset flow. It only
+// works once custom SMTP (Google Workspace) + the reset redirect URL are
+// configured in the Supabase dashboard — until then a reset would say "check
+// your email" but send nothing, so the button stays hidden and crew are
+// pointed at their manager. Flip to true and redeploy once SMTP is live.
+// Everything else (real-email logins, manager reset, in-app change password)
+// works regardless of this flag.
+const PASSWORD_RESET_ENABLED = false
+
 // Match a typed login (full email OR email local-part) to a user record.
 // Exact full-email match wins first so prefix collisions can't misroute;
 // then fall back to local-part. Case-insensitive. Returns null if no match.
@@ -265,19 +274,21 @@ export default function Login() {
               </button>
             </form>
 
-            <div style={{ marginTop: 18, textAlign: 'center' }}>
-              <button
-                type="button"
-                onClick={openForgot}
-                style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  color: 'var(--teal-mid)', fontSize: 13, fontWeight: 600,
-                  textDecoration: 'underline', padding: 4,
-                }}
-              >
-                Forgot your password?
-              </button>
-            </div>
+            {PASSWORD_RESET_ENABLED && (
+              <div style={{ marginTop: 18, textAlign: 'center' }}>
+                <button
+                  type="button"
+                  onClick={openForgot}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--teal-mid)', fontSize: 13, fontWeight: 600,
+                    textDecoration: 'underline', padding: 4,
+                  }}
+                >
+                  Forgot your password?
+                </button>
+              </div>
+            )}
           </>
         ) : (
           /* ── Forgot-password panel ──────────────────────────────────── */
@@ -342,7 +353,9 @@ export default function Login() {
             marginTop: 16, fontSize: 11, color: 'var(--hint)',
             textAlign: 'center', lineHeight: 1.5,
           }}>
-            Still stuck? Ask your manager — they can reset it from the Admin panel.
+            {PASSWORD_RESET_ENABLED
+              ? 'Still stuck? Ask your manager — they can reset it from the Admin panel.'
+              : 'Forgot your password? Ask your manager — they can reset it from the Admin panel.'}
           </div>
         )}
       </div>
