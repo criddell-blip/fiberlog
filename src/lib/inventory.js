@@ -2418,3 +2418,51 @@ export async function rejectIntakeRequest(id, note = null) {
   if (error) throw error
   return data
 }
+
+// ─── FOOTAGE TYPE → PART MAP ──────────────────────────────────────────────────
+//
+// Ties a crew footage "type" pick (fiber strand count / conduit size) to the
+// canonical parts_catalog SKU that footage should consume. The crew workspace
+// resolves the selected fiberCount / conduitSize + footage into an entry_parts
+// row at submit; approve_submission then auto-deducts it like any other part.
+// Manager-curated (staff write). Mirrors the sonar_fiber_value_map pattern.
+
+// Returns { fiber: { '144ct': { partId, name, unit } }, conduit: { '2"': {…} } }.
+export async function getFootageTypePartMap() {
+  const { data, error } = await db
+    .from('footage_type_part_map')
+    .select('kind, type_value, part_id, part:parts_catalog!footage_type_part_map_part_id_fkey(id, name, unit)')
+  if (error) throw error
+  const out = { fiber: {}, conduit: {} }
+  for (const r of data || []) {
+    if (!out[r.kind]) out[r.kind] = {}
+    out[r.kind][r.type_value] = {
+      partId: r.part_id,
+      name: r.part?.name || r.part_id,
+      unit: r.part?.unit || 'ft',
+    }
+  }
+  return out
+}
+
+// Upsert one mapping (kind = 'fiber' | 'conduit'). Staff-only via RLS.
+export async function setFootageTypePart(kind, typeValue, partId) {
+  const { data: { user } } = await db.auth.getUser()
+  const { error } = await db
+    .from('footage_type_part_map')
+    .upsert(
+      { kind, type_value: typeValue, part_id: partId, updated_by: user?.id || null },
+      { onConflict: 'kind,type_value' }
+    )
+  if (error) throw error
+}
+
+// Remove a mapping (reverts that type to footage-only, no material).
+export async function clearFootageTypePart(kind, typeValue) {
+  const { error } = await db
+    .from('footage_type_part_map')
+    .delete()
+    .eq('kind', kind)
+    .eq('type_value', typeValue)
+  if (error) throw error
+}

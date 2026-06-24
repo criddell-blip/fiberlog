@@ -246,6 +246,9 @@ supabase/
 ### Submission routing override
 - `submissions.project_id_override` — nullable FK to projects. If set, `approve_submission` routes auto-deduct to this project's bucket instead of the task's natural project. Phase actuals stay on the natural phase. Persisted by `TaskWorkspace`'s in-task picker.
 
+### Footage type → part mapping
+- `footage_type_part_map(kind, type_value, part_id, updated_at, updated_by)` — PK `(kind, type_value)`. Maps a crew footage "type" pick to the canonical `parts_catalog` SKU that footage should consume. `kind text CHECK in ('fiber','conduit')`; `type_value` is the picked value (e.g. `'144ct'` strand count, `'2"'` conduit size); `part_id text NOT NULL → parts_catalog(id)`. RLS: auth read, staff write (mirrors `sonar_city_bucket_map` / `sonar_fiber_value_map`). Bump trigger `trg_ftpm_touch_updated_at` on `updated_at`. NOT in the realtime publication. No seed rows yet. Migration `20260624120000_footage_type_part_map.sql`.
+
 ### Parts catalog
 - `parts_catalog.id` is the SKU (text PK)
 - `parts_catalog.is_active = false` means it's a **draft** (auto-created during CSV imports for SKUs not yet in catalog)

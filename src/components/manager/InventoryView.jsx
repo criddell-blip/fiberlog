@@ -21,6 +21,7 @@ import SonarImportSheet from './SonarImportSheet'
 import FiberJobsImportSheet from './FiberJobsImportSheet'
 import InventoryImportSheet from './InventoryImportSheet'
 import SageExportSheet from './SageExportSheet'
+import FootageMapSheet from './FootageMapSheet'
 
 // Secondary nav for the Inventory section (Console line icons). The top-level
 // section nav lives in ManagerApp's sidebar; these are the inventory sub-views.
@@ -58,6 +59,7 @@ export default function InventoryView() {
   const [showFiberJobsSheet, setShowFiberJobsSheet] = useState(false)
   const [showImportSheet, setShowImportSheet] = useState(false)
   const [showSageSheet, setShowSageSheet] = useState(false)
+  const [showFootageMap, setShowFootageMap] = useState(false)
   // Bumped after a movement is recorded or part is updated, so child tabs re-fetch.
   const [refreshKey, setRefreshKey] = useState(0)
   // Cross-tab jumps (launcher + inline links). Each tab consumes its jump on
@@ -153,6 +155,7 @@ export default function InventoryView() {
     { id: 'fiber',     label: 'Fiber jobs',  sub: 'Cable & drops report',icon: 'layers',   onClick: () => setShowFiberJobsSheet(true), disabled: noLocations },
     { id: 'import',    label: 'Import CSV',  sub: 'BoxHero catalog',     icon: 'upload',   onClick: () => setShowImportSheet(true),    disabled: false },
     { id: 'sage',      label: 'Sage export', sub: 'Build the period CSV',icon: 'receipt',  onClick: () => setShowSageSheet(true),      disabled: false },
+    { id: 'footage',   label: 'Footage map', sub: 'Cable/conduit → SKU', icon: 'nut',     onClick: () => setShowFootageMap(true),     disabled: false },
   ]
 
   // Count sub-tab takes over the full panel — its body is a scanner-driven
@@ -369,6 +372,9 @@ export default function InventoryView() {
       )}
       {showSageSheet && (
         <SageExportSheet onClose={() => setShowSageSheet(false)} />
+      )}
+      {showFootageMap && (
+        <FootageMapSheet onClose={() => setShowFootageMap(false)} />
       )}
       {showImportSheet && (
         <InventoryImportSheet

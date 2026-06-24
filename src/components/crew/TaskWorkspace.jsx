@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useApp } from '../../AppContext'
 import { startSession, saveEntry, db } from '../../lib/supabase'
+import { getFootageTypePartMap } from '../../lib/inventory'
+import { FIBER_COUNTS, CONDUIT_SIZES } from '../../lib/footageTypes'
 import { t } from '../../lib/i18n'
 import PartSearch from './workspace/PartSearch'
 import Icon from '../shared/Icon'
@@ -62,6 +64,17 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
   const [extraParts, setExtraParts] = useState([])
   const [showPartSearch, setShowPartSearch] = useState(false)
   const [conduitSizes, setConduitSizes] = useState({ 'bore-ft': '', 'plow-ft': '' })
+  // Footage type → SKU map (fiber count / conduit size → canonical part). Lets
+  // logged fiber/conduit footage consume the matching material at submit.
+  // Empty until the manager maps a type; unmapped types stay footage-only.
+  const [footageMap, setFootageMap] = useState({ fiber: {}, conduit: {} })
+  useEffect(() => {
+    let cancelled = false
+    getFootageTypePartMap()
+      .then(m => { if (!cancelled) setFootageMap(m) })
+      .catch(e => console.warn('Footage type→part map load failed:', e))
+    return () => { cancelled = true }
+  }, [])
 
   // Project-routing override. NULL = use task's natural project. If the
   // crew picks a different project here, the submission saves the override
@@ -252,6 +265,32 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       .reduce((a, asm) => a + (counts[asm.id] || 0), 0)
   }, [counts, ALL_ASSEMBLIES])
 
+  // Material consumed from footage: resolve the crew's fiber-count / conduit-
+  // size pick + footage into the mapped SKU (qty = feet). Unmapped or untyped
+  // footage produces nothing (stays a stat, as before). These are merged into
+  // the submitted parts so they deduct like any other material at approval.
+  const footageParts = useMemo(() => {
+    const out = []
+    // Don't emit a footage SKU that's already an assembly part (e.g. if a
+    // conduit size is mis-mapped to the tracer-wire SKU the bore/plow assembly
+    // already derives) — that would double-count. Assembly part wins.
+    const assemblyIds = new Set(allParts.map(p => p.id))
+    const fiberFt = counts['fiber-ft'] || 0
+    const fiberHit = fiberCount && footageMap.fiber?.[fiberCount]
+    if (fiberFt > 0 && fiberHit && !assemblyIds.has(fiberHit.partId)) {
+      out.push({ id: fiberHit.partId, name: fiberHit.name, unit: fiberHit.unit || 'ft', qty: fiberFt, fromFootage: true })
+    }
+    for (const cid of ['bore-ft', 'plow-ft']) {
+      const ft = counts[cid] || 0
+      const sz = conduitSizes[cid]
+      const hit = sz && footageMap.conduit?.[sz]
+      if (ft > 0 && hit && !assemblyIds.has(hit.partId)) {
+        out.push({ id: hit.partId, name: hit.name, unit: hit.unit || 'ft', qty: ft, fromFootage: true })
+      }
+    }
+    return out
+  }, [counts, fiberCount, conduitSizes, footageMap, allParts])
+
   async function handleSubmit() {
     if (!currentUser?.id) { showToast(t('toastSelectUser', lang)); return }
     setSubmitting(true)
@@ -283,12 +322,16 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       // (entry_parts row count was 0 even though the UI showed them in the
       // summary). Especially noticeable for infra crew since there are no
       // real infra assemblies yet, so they ALL rely on the part search.
+      // Merge footage-derived material (cable/conduit) with the assembly +
+      // extra parts. Dedup by id summing so a SKU appearing in two sources
+      // doesn't write duplicate entry_parts rows.
+      const submitParts = mergePartsById([...allParts, ...footageParts, ...extraParts])
       let newEntryId = null
-      if (allParts.length > 0 || extraParts.length > 0) {
+      if (submitParts.length > 0) {
         const newEntry = await saveEntry(sid, currentUser.id, task.id, {
           type: 'material', qty: totalLogged,
           notes: note || null,
-          parts: [...allParts, ...extraParts],
+          parts: submitParts,
         })
         newEntryId = newEntry?.id || null
       }
@@ -542,7 +585,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                 <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
                   <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 6 }}>{t('conduitSize', lang)}</div>
                   <div className="select-row" style={{ marginTop: 0 }}>
-                    {['3/4"','1"','1-1/4"','1-1/2"','2"','3"'].map(sz => (
+                    {CONDUIT_SIZES.map(sz => (
                       <button
                         key={sz}
                         onClick={() => setConduitSizes(prev => ({ ...prev, [asm.id]: sz }))}
@@ -563,7 +606,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                 <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
                   <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 6 }}>{t('fiberCount', lang)}</div>
                   <div className="select-row" style={{ marginTop: 0 }}>
-                    {['12ct','24ct','48ct','72ct','144ct','288ct'].map(fc => (
+                    {FIBER_COUNTS.map(fc => (
                       <button
                         key={fc}
                         onClick={() => setFiberCount(fc)}
@@ -626,7 +669,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
 
             <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 6 }}>{t('partsAdjust', lang)}</div>
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', marginBottom: 10, maxHeight: 220, overflowY: 'auto', padding: '0 12px' }}>
-              {allParts.length === 0 && (
+              {allParts.length === 0 && footageParts.length === 0 && extraParts.length === 0 && (
                 <div style={{ padding: '14px', textAlign: 'center', fontSize: 12, color: 'var(--hint)' }}>{t('noPartsLogged', lang)}</div>
               )}
               {allParts.map(p => (
@@ -647,6 +690,22 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                     onClick={() => setPartQtyOverrides(prev => { const cur = prev[p.id] !== undefined ? prev[p.id] : p.qty; return { ...prev, [p.id]: cur + 1 } })}
                   >+</button>
                   <span className="part-unit" style={{ minWidth: 14 }}>{p.unit}</span>
+                </div>
+              ))}
+              {footageParts.map(p => (
+                <div
+                  key={'fp-'+p.id}
+                  className="parts-row"
+                  style={{ gap: 8, background: 'var(--accent-bg)', margin: '0 -12px', padding: '10px 12px' }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="part-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {p.name} <span className="pill pill-accent pill-sm" style={{ marginLeft: 4 }}>from footage</span>
+                    </div>
+                    <div className="part-id">{p.id}</div>
+                  </div>
+                  <span className="part-qty" style={{ minWidth: 28, textAlign: 'center' }}>{p.qty.toLocaleString()}</span>
+                  <span className="part-unit">{p.unit}</span>
                 </div>
               ))}
               {extraParts.map(p => (
@@ -727,4 +786,15 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       )}
     </div>
   )
+}
+
+// Dedup a list of {id, name, unit, qty} parts by id, summing quantities.
+function mergePartsById(list) {
+  const m = {}
+  for (const p of list) {
+    if (!p || !p.id) continue
+    if (!m[p.id]) m[p.id] = { ...p }
+    else m[p.id] = { ...m[p.id], qty: (m[p.id].qty || 0) + (p.qty || 0) }
+  }
+  return Object.values(m).filter(p => p.qty > 0)
 }
