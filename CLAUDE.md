@@ -487,6 +487,13 @@ npx supabase login                             # auth supabase CLI (first time)
     - **KEPT — intentional scaffolding (bucket C):** `clearSonarProjectPhase` / `clearSonarSourceLocation` / `clearFiberValueMap` (clear-siblings of used get/set pairs; relate to #14), `Icon` `ICON_NAMES`, `PartSearch` `filter` prop.
     - **Still open — decide intent (bucket D):** `getPartsByCategory`, `getPendingSubmissions` (SubmissionsQueue uses an inline query instead), `ProjectManager` `projFiber` state. Plus deferred-by-design: the no-op `ThemeToggle` pill (dark Console is a later phase) and `admin.js`'s reliance on the internal `db.supabaseUrl`.
 
+22. **Consolidate the "review queue" pattern (tech debt / usability).** The app has ~6 "provisional record → manager confirms" mechanisms with no shared abstraction; each is bespoke.
+    - **Tier A — real duplication, consolidate first:** `SubmissionsQueue.jsx` and `IntakeRequestsQueue.jsx` are near-identical copy-paste siblings (IntakeRequestsQueue's header says "Mirrors SubmissionsQueue") — same realtime channel + reconnect loop, `STATUS_COLORS`, status-`<select>` + pending-count badge, detail overlay + `note` textarea + approve/reject pair. Extract one config-driven `<ReviewQueue>` (realtime list + status filter + detail overlay + approve/reject-with-note) and migrate both. Risk: `SubmissionsQueue` is a core daily flow — migrate `IntakeRequestsQueue` onto the shared component first to prove it, then Submissions.
+    - **Tier B — later, partial:** cycle-count resolutions (`CountRunReviewSheet`/`approve_count_resolution`) and Sonar pending imports (`getPendingSonarImports`/`discardSonarPendingImport`) share the *approve/reject-with-reason + status* shape but have different chrome — share the data/action layer only, not the list/detail UI.
+    - **Tier C — leave distinct (do NOT force together):** Parts → Drafts (`is_active` metadata edit, no queue/reason), Purchase Requests (procurement lifecycle, manager-originated, no approve/reject buttons), Tasks status (the task-side mirror of submissions).
+    - **Adjacent workflow win (separable):** kill the **Found→Draft double-handling** — a found-new-part is touched twice (approve the intake, then fix unit/department in Parts → Drafts). Let the manager curate the part (SKU / unit / department, or merge into an existing SKU) inline at found-approval so the draft is "born clean." Relates to #10.
+    - Note: only 2 Tier-A queues exist today (borderline rule-of-three), but the "mirrors X" duplication + the steady drip of new approval flows make a shared abstraction pay off forward.
+
 ---
 
 ## Gotchas worth knowing
@@ -514,8 +521,8 @@ The inventory side has many entry points that all write to `inventory_movements`
 
 | Entry point | Writes movement type | From → To | Notes |
 |---|---|---|---|
-| Crew Load (`CrewMovementSheet` → `record_crew_movement` RPC) | `transfer` | warehouse → caller's truck | Permission-checked |
-| Crew Return (same RPC) | `return` | caller's truck → warehouse | Permission-checked |
+| Crew Load (`CrewMovementSheet` → `record_crew_movement` RPC) | `transfer` | warehouse → caller's truck | Permission-checked. **Multi-part:** a line cart lets the crew queue several parts (load can pull from different sources in one go) and submit them together — the sheet loops `record_crew_movement` per line (no crew batch RPC), keeping failed lines in the cart for retry on partial failure. |
+| Crew Return (same RPC) | `return` | caller's truck → warehouse | Permission-checked. Same multi-part cart (one shared destination warehouse, many truck parts). |
 | Crew Issue/Scrap/Transfer | (same RPC, UI not shipped) | caller's truck → (varies) | RPC ready, sheets deferred |
 | Manager Record movement (`RecordMovementSheet`) | any of 6 | any → any | Free-form, no permission filter |
 | Manager Receive PO (`ReceivePOSheet`) | `receive` (× N lines) | NULL → dest | Can create new parts inline |

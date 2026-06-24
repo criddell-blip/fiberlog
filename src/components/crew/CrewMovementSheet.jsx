@@ -43,6 +43,14 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   })
   const [notes, setNotes] = useState('')
   const [partSearch, setPartSearch] = useState('')
+  // Multi-part cart. Each line snapshots one recordCrewMovement call so the
+  // picker can move on without the queued lines drifting. For LOAD,
+  // otherLocationId is the per-line source; for RETURN it's the shared
+  // destination warehouse (re-derived from current state at submit time).
+  // The part being actively configured (selectedPartId + quantity) is NOT in
+  // here yet — it's folded in at Add or at Submit, so a one-part move never
+  // requires an explicit Add tap.
+  const [lines, setLines] = useState([])
   // By-location picker (searchable + aisle-grouped). locSearch filters; expanded
   // tracks which aisle groups are open.
   const [locSearch, setLocSearch] = useState('')
@@ -77,7 +85,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   // confirm before discarding a part/qty/notes the user has started entering.
   useBackClose(1, onClose, {
     confirm: () => {
-      const dirty = !!selectedPartId || quantity.trim() !== '' || notes.trim() !== ''
+      const dirty = !!selectedPartId || quantity.trim() !== '' || notes.trim() !== '' || lines.length > 0
       return !dirty || window.confirm('Discard this entry?')
     },
   })
@@ -302,47 +310,128 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
     return null
   }
 
-  async function handleSubmit() {
+  // ── Multi-part cart helpers ────────────────────────────────────────────────
+  const lineKey = l => `${l.partId}|${l.otherLocationId || ''}`
+
+  // Snapshot the part currently being configured as a cart line. Null if the
+  // current selection isn't a complete, valid line.
+  function currentLine() {
+    if (!selectedPartId) return null
+    const q = Number(quantity)
+    if (!q || q <= 0) return null
+    const pc = selectedPart?.parts_catalog
+    return {
+      partId: selectedPartId,
+      partName: pc?.name || selectedPartId,
+      unit: pc?.unit || null,
+      qty: q,
+      otherLocationId,                                   // load: source; return: shared dest
+      otherLabel: otherLocations.find(l => l.id === otherLocationId)?.name || '',
+      availableQty,
+    }
+  }
+
+  // Merge a line into a list by (part, location): sum qty, cap at availableQty.
+  function mergeLine(list, line) {
+    const idx = list.findIndex(l => lineKey(l) === lineKey(line))
+    if (idx < 0) return [...list, line]
+    const next = [...list]
+    const sum = next[idx].qty + line.qty
+    const cap = next[idx].availableQty != null ? next[idx].availableQty : sum
+    next[idx] = { ...next[idx], qty: Math.min(sum, cap) }
+    return next
+  }
+
+  // "+ Add another": validate the current pick, push it onto the cart, reset
+  // the picker for the next part.
+  function handleAddLine() {
     const v = validate()
     if (v) { setError(v); return }
     setError(null)
+    setLines(prev => mergeLine(prev, currentLine()))
+    setSelectedPartId(null)
+    setQuantity('')
+    setPartSearch('')
+    // by-part load picks a fresh source per part; by-location/return keep the
+    // shared source/destination so the next part lands in the same place.
+    if (isLoad && viewMode === 'by-part') setOtherLocationId('')
+  }
+
+  function removeLine(i) {
+    setLines(prev => prev.filter((_, idx) => idx !== i))
+  }
+
+  // Cart + the in-progress selection (if valid), merged. This is what Submit
+  // sends — so a single-part move never needs an explicit Add tap.
+  function buildEffectiveLines() {
+    const cur = validate() ? null : currentLine()
+    return cur ? mergeLine(lines, cur) : [...lines]
+  }
+
+  async function handleSubmit() {
+    const all = buildEffectiveLines()
+    if (all.length === 0) { setError(isLoad ? 'Add a part to load' : 'Add a part to return'); return }
+    setError(null)
     setSubmitting(true)
-    try {
-      // For Load: pass the picked destination through to the RPC. NULL
-      // / own-truck both default to the existing "load → truck" path
-      // server-side. Non-truck destinations are gated by the RPC's
-      // crew_load_destinations check.
-      const destForLoad = isLoad
-        ? (destinationLocationId && destinationLocationId !== myTruck?.id
-            ? destinationLocationId : null)
-        : null
-      await recordCrewMovement({
-        operation: mode,
-        partId: selectedPartId,
-        quantity: Number(quantity),
-        otherLocationId,
-        unit: selectedPart?.parts_catalog?.unit || null,
-        notes: notes.trim() || null,
-        destinationLocationId: destForLoad,
-      })
-      const partName = selectedPart?.parts_catalog?.name || selectedPartId
-      // Toast tells the user where it went if not the default truck.
+
+    // Load destination shared across all lines. NULL / own-truck = the default
+    // "load → truck" path server-side; non-truck dests are gated by the RPC.
+    const destForLoad = isLoad
+      ? (destinationLocationId && destinationLocationId !== myTruck?.id ? destinationLocationId : null)
+      : null
+
+    // No crew-side batch RPC exists (record_crew_movement is per-part +
+    // permission-checked), so loop. Each call commits independently — on a
+    // partial failure we keep the failed lines so the crew can retry just those.
+    const failed = []
+    for (const line of all) {
+      try {
+        await recordCrewMovement({
+          operation: mode,
+          partId: line.partId,
+          quantity: line.qty,
+          // Each line goes exactly where it was snapshotted — load: its source;
+          // return: the destination chosen when it was added. The shared
+          // source/destination picker is locked once the cart is non-empty
+          // (see the by-location "Change" guard), so every line's snapshot
+          // matches what's on screen — no silent misroute.
+          otherLocationId: line.otherLocationId,
+          unit: line.unit || null,
+          notes: notes.trim() || null,
+          destinationLocationId: destForLoad,
+        })
+      } catch (e) {
+        console.error('Movement failed:', line.partId, e)
+        failed.push({ line, msg: e.message || 'failed' })
+      }
+    }
+
+    setSubmitting(false)
+    const okCount = all.length - failed.length
+
+    if (failed.length === 0) {
       let target = ''
       if (isLoad && destForLoad) {
         const d = allowedDestinations.find(x => x.id === destForLoad)
-        if (d) {
-          target = ' to ' + d.name
-        }
+        if (d) target = ' to ' + d.name
       }
-      showToast(`${isLoad ? 'Loaded' : 'Returned'} ${quantity} × ${partName}${target}`)
+      showToast(`${isLoad ? 'Loaded' : 'Returned'} ${okCount} part${okCount === 1 ? '' : 's'}${target}`)
       onComplete()
-    } catch (e) {
-      console.error('Movement failed:', e)
-      setError(e.message || 'Movement failed')
-    } finally {
-      setSubmitting(false)
+    } else {
+      // Keep only the failed lines for retry; clear the in-progress selection.
+      setLines(failed.map(f => f.line))
+      setSelectedPartId(null)
+      setQuantity('')
+      setError(`${okCount} of ${all.length} done. Failed: ` +
+        failed.map(f => `${f.line.partName} (${f.msg})`).join('; '))
     }
   }
+
+  // Current-selection validity (string error | null) — reused by the Add
+  // button so validate() isn't re-run several times per render.
+  const curError = validate()
+  // What Submit will send: queued lines + the in-progress part (if valid).
+  const effectiveCount = buildEffectiveLines().length
 
   return (
     // Backdrop tap does NOT dismiss — prevents mid-edit data loss. Cancel button below.
@@ -499,8 +588,11 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                   <span style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--orange-dk)' }}>
                     {sel?.name || '—'}
                   </span>
-                  <button type="button" onClick={() => { setOtherLocationId(''); setLocSearch('') }}
-                    style={{ background: 'none', border: 'none', color: 'var(--orange-dk)', fontWeight: 700, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
+                  <button type="button"
+                    onClick={() => { if (lines.length === 0) { setOtherLocationId(''); setLocSearch('') } }}
+                    disabled={lines.length > 0}
+                    title={lines.length > 0 ? 'Finish or clear the list to change' : ''}
+                    style={{ background: 'none', border: 'none', color: 'var(--orange-dk)', fontWeight: 700, fontSize: 12, cursor: lines.length > 0 ? 'not-allowed' : 'pointer', opacity: lines.length > 0 ? 0.45 : 1, flexShrink: 0 }}>
                     Change
                   </button>
                 </div>
@@ -631,41 +723,90 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
 
         {/* Step 3: quantity (once part picked) */}
         {selectedPartId && (
-          <>
-            <div className="field">
-              <label>
-                Quantity
-                {availableQty > 0 && (
-                  <span style={{ marginLeft: 8, color: 'var(--muted)', fontWeight: 400, fontSize: 11 }}>
-                    (max {availableQty.toLocaleString()})
-                  </span>
-                )}
-              </label>
-              <input
-                type="number"
-                value={quantity}
-                onChange={e => setQuantity(e.target.value)}
-                min="0"
-                max={availableQty || undefined}
-                step="any"
-                autoComplete="off"
-                name="crew-movement-quantity"
-                style={{ fontSize: 16 }}
-              />
-            </div>
+          <div className="field">
+            <label>
+              Quantity
+              {availableQty > 0 && (
+                <span style={{ marginLeft: 8, color: 'var(--muted)', fontWeight: 400, fontSize: 11 }}>
+                  (max {availableQty.toLocaleString()})
+                </span>
+              )}
+            </label>
+            <input
+              type="number"
+              value={quantity}
+              onChange={e => setQuantity(e.target.value)}
+              min="0"
+              max={availableQty || undefined}
+              step="any"
+              autoComplete="off"
+              name="crew-movement-quantity"
+              style={{ fontSize: 16 }}
+            />
+          </div>
+        )}
 
-            <div className="field">
-              <label>Note (optional)</label>
-              <textarea
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                placeholder="Anything worth recording…"
-                style={{ minHeight: 44 }}
-                autoComplete="off"
-                name="crew-movement-notes"
-              />
+        {/* + Add another — fold the current part into the cart and keep picking.
+            Submitting also includes the in-progress part, so this is optional. */}
+        {selectedPartId && (
+          <button
+            type="button"
+            onClick={handleAddLine}
+            disabled={!!curError}
+            style={{
+              width: '100%', marginBottom: 12, padding: '9px 12px',
+              background: 'var(--surface2)', color: 'var(--text)',
+              border: '1px dashed var(--border2)', borderRadius: 'var(--r-sm)',
+              fontSize: 13, fontWeight: 600,
+              cursor: curError ? 'not-allowed' : 'pointer',
+              opacity: curError ? 0.5 : 1,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+            }}
+          >
+            <Icon name="plus" size={14} /> Add another part
+          </button>
+        )}
+
+        {/* Cart — the parts queued for this submit. */}
+        {lines.length > 0 && (
+          <div className="field">
+            <label>{isLoad ? 'Loading' : 'Returning'} · {lines.length} part{lines.length === 1 ? '' : 's'}</label>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', overflow: 'hidden', background: 'var(--surface)' }}>
+              {lines.map((l, i) => (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+                  borderBottom: i < lines.length - 1 ? '1px solid var(--border)' : 'none',
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.partName}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                      <span className="mono">{l.qty.toLocaleString()}</span> {l.unit || 'ea'}
+                      {isLoad && l.otherLabel ? ` · from ${l.otherLabel}` : ''}
+                    </div>
+                  </div>
+                  <button
+                    type="button" onClick={() => removeLine(i)} aria-label="Remove"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 20, lineHeight: 1, padding: '0 4px', flexShrink: 0 }}
+                  >×</button>
+                </div>
+              ))}
             </div>
-          </>
+          </div>
+        )}
+
+        {/* Note — shared across every line in this submit. */}
+        {(selectedPartId || lines.length > 0) && (
+          <div className="field">
+            <label>Note (optional)</label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Anything worth recording…"
+              style={{ minHeight: 44 }}
+              autoComplete="off"
+              name="crew-movement-notes"
+            />
+          </div>
         )}
 
         {/* Load-only: destination picker. Hidden when the user has only
@@ -721,15 +862,13 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
             className="btn btn-primary"
             style={{ flex: 2 }}
             onClick={handleSubmit}
-            disabled={submitting || !selectedPartId || !quantity}
+            disabled={submitting || effectiveCount === 0}
           >
             {submitting
               ? 'Saving…'
-              : (isLoad
-                  ? (destinationLocationId && destinationLocationId !== myTruck?.id
-                      ? 'Load to picked location'
-                      : 'Load to my truck')
-                  : 'Return to warehouse')}
+              : effectiveCount === 0
+                ? (isLoad ? 'Load' : 'Return')
+                : `${isLoad ? 'Load' : 'Return'} ${effectiveCount} part${effectiveCount === 1 ? '' : 's'}`}
           </button>
         </div>
       </div>
