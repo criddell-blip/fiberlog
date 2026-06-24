@@ -704,6 +704,18 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
               <textarea placeholder={t('noteplaceholder', lang)} value={note} onChange={e => setNote(e.target.value)} style={{ minHeight: 56 }} />
             </div>
 
+            {/* Submit is permanent — the submission is the final record even
+                if the task stays open for more passdowns later (backlog #2). */}
+            <div style={{
+              display: 'flex', alignItems: 'flex-start', gap: 7,
+              padding: '8px 10px', marginBottom: 10,
+              background: 'var(--amber-lt)', color: 'var(--amber)',
+              borderRadius: 'var(--r-sm)', fontSize: 12, fontWeight: 600, lineHeight: 1.4,
+            }}>
+              <Icon name="alert" size={14} style={{ marginTop: 1, flexShrink: 0 }} />
+              <span>{t('submitFinalNote', lang)}</span>
+            </div>
+
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => { setShowSummary(false); setPartQtyOverrides({}); setExtraParts([]); setShowPartSearch(false) }}>{t('keepLogging', lang)}</button>
               <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSubmit} disabled={submitting}>

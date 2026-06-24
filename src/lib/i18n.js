@@ -87,6 +87,8 @@ const strings = {
   keepLogging:        { en: 'Keep logging',               es: 'Seguir registrando' },
   submitDay:          { en: 'Submit day ✓',               es: 'Enviar día ✓' },
   submitting:         { en: 'Submitting...',              es: 'Enviando...' },
+  submitFinalNote:    { en: 'Once you submit, this passdown is final — you can\'t edit it after.',
+                        es: 'Una vez enviado, este reporte es definitivo — no se puede editar después.' },
   addPartNotInList:   { en: '＋ Add part not in list',    es: '＋ Añadir parte que no está en la lista' },
   searchPartPlaceholder: { en: 'Search by name or SKU...', es: 'Buscar por nombre o SKU...' },
 
