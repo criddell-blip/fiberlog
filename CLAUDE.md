@@ -521,7 +521,7 @@ The inventory side has many entry points that all write to `inventory_movements`
 
 | Entry point | Writes movement type | From → To | Notes |
 |---|---|---|---|
-| Crew Load (`CrewMovementSheet` → `record_crew_movement` RPC) | `transfer` | warehouse → caller's truck | Permission-checked. **Multi-part:** a line cart lets the crew queue several parts (load can pull from different sources in one go) and submit them together — the sheet loops `record_crew_movement` per line (no crew batch RPC), keeping failed lines in the cart for retry on partial failure. |
+| Crew Load (`CrewMovementSheet` → `record_crew_movement` RPC) | `transfer` | warehouse → caller's truck | Permission-checked. **Multi-part:** a line cart lets the crew queue several parts (load can pull from different sources in one go) and submit them together — the sheet loops `record_crew_movement` per line (no crew batch RPC), keeping failed lines in the cart for retry on partial failure. A **review-and-confirm step** precedes the commit for multi-part / any return / any non-truck load (single-part → own truck skips it). |
 | Crew Return (same RPC) | `return` | caller's truck → warehouse | Permission-checked. Same multi-part cart (one shared destination warehouse, many truck parts). |
 | Crew Issue/Scrap/Transfer | (same RPC, UI not shipped) | caller's truck → (varies) | RPC ready, sheets deferred |
 | Manager Record movement (`RecordMovementSheet`) | any of 6 | any → any | Free-form, no permission filter |

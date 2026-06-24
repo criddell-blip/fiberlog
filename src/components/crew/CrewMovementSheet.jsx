@@ -58,6 +58,14 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
+  // Review-and-confirm step. confirmLines is a frozen snapshot of the effective
+  // lines so the review screen + the commit use the exact same set. Shown for
+  // everything except the safe fast path (single part → own truck). NOTE: the
+  // shared `notes` is read live (not snapshotted) at commit — safe only because
+  // its textarea lives inside the {!confirming} body and can't change while the
+  // review is up. If a field is ever made editable during confirm, snapshot it.
+  const [confirming, setConfirming] = useState(false)
+  const [confirmLines, setConfirmLines] = useState([])
 
   const isLoad = mode === 'load'
   const isReturn = mode === 'return'
@@ -83,8 +91,14 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   // Back button: this sheet is mounted only while open (depth 1). Backdrop-tap
   // is already disabled to avoid losing input, so Back gets the same guard —
   // confirm before discarding a part/qty/notes the user has started entering.
-  useBackClose(1, onClose, {
+  // Two-level back: when the review step is open, Back returns to editing
+  // (no discard prompt); otherwise Back closes the sheet (with the dirty guard).
+  useBackClose(confirming ? 2 : 1, () => {
+    if (confirming) setConfirming(false)
+    else onClose()
+  }, {
     confirm: () => {
+      if (confirming) return true   // stepping back out of the review — never prompt
       const dirty = !!selectedPartId || quantity.trim() !== '' || notes.trim() !== '' || lines.length > 0
       return !dirty || window.confirm('Discard this entry?')
     },
@@ -368,17 +382,30 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
     return cur ? mergeLine(lines, cur) : [...lines]
   }
 
-  async function handleSubmit() {
+  // Load destination shared across all lines. NULL / own-truck = the default
+  // "load → truck" path server-side; non-truck dests are gated by the RPC.
+  const destForLoad = isLoad
+    ? (destinationLocationId && destinationLocationId !== myTruck?.id ? destinationLocationId : null)
+    : null
+
+  // Primary action. Decides whether the move needs the review step first.
+  function handlePrimary() {
     const all = buildEffectiveLines()
     if (all.length === 0) { setError(isLoad ? 'Add a part to load' : 'Add a part to return'); return }
+    // Confirm everything except the safe fast path (single part → own truck).
+    const needsConfirm = isReturn || all.length > 1 || (isLoad && !!destForLoad)
+    if (needsConfirm && !confirming) {
+      setConfirmLines(all)
+      setError(null)
+      setConfirming(true)
+      return
+    }
+    runMovements(all)
+  }
+
+  async function runMovements(all) {
     setError(null)
     setSubmitting(true)
-
-    // Load destination shared across all lines. NULL / own-truck = the default
-    // "load → truck" path server-side; non-truck dests are gated by the RPC.
-    const destForLoad = isLoad
-      ? (destinationLocationId && destinationLocationId !== myTruck?.id ? destinationLocationId : null)
-      : null
 
     // No crew-side batch RPC exists (record_crew_movement is per-part +
     // permission-checked), so loop. Each call commits independently — on a
@@ -418,13 +445,24 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
       showToast(`${isLoad ? 'Loaded' : 'Returned'} ${okCount} part${okCount === 1 ? '' : 's'}${target}`)
       onComplete()
     } else {
-      // Keep only the failed lines for retry; clear the in-progress selection.
+      // Drop back to editing with only the failed lines for retry.
       setLines(failed.map(f => f.line))
       setSelectedPartId(null)
       setQuantity('')
+      setConfirming(false)
       setError(`${okCount} of ${all.length} done. Failed: ` +
         failed.map(f => `${f.line.partName} (${f.msg})`).join('; '))
     }
+  }
+
+  // Human phrase for where the move is going (review screen + nowhere else).
+  function destinationPhrase() {
+    if (isReturn) return `to ${confirmLines[0]?.otherLabel || 'the warehouse'}`
+    if (destForLoad) {
+      const d = allowedDestinations.find(x => x.id === destForLoad)
+      return `to ${d?.name || 'the destination'}`
+    }
+    return 'onto your truck'
   }
 
   // Current-selection validity (string error | null) — reused by the Add
@@ -440,16 +478,66 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
         {/* Header */}
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Icon name={isLoad ? 'download' : 'upload'} size={18} />
-            {isLoad ? 'Load from warehouse' : 'Return to warehouse'}
+            <Icon name={confirming ? 'check' : (isLoad ? 'download' : 'upload')} size={18} />
+            {confirming
+              ? (isLoad ? 'Confirm load' : 'Confirm return')
+              : (isLoad ? 'Load from warehouse' : 'Return to warehouse')}
           </div>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-            {isLoad
-              ? 'Pick where you\'re grabbing parts from, then what you\'re taking.'
-              : 'Pick where you\'re dropping parts off, then what you\'re returning.'}
+            {confirming
+              ? 'Double-check what you\'re moving, then confirm.'
+              : (isLoad
+                  ? 'Pick where you\'re grabbing parts from, then what you\'re taking.'
+                  : 'Pick where you\'re dropping parts off, then what you\'re returning.')}
           </div>
         </div>
 
+        {/* ── Review step ──────────────────────────────────────────────────── */}
+        {confirming && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>
+              Move {confirmLines.length} part{confirmLines.length === 1 ? '' : 's'} {destinationPhrase()}
+            </div>
+
+            {isLoad && destForLoad && (
+              <div style={{
+                marginBottom: 10, padding: '8px 10px',
+                background: 'var(--amber-lt)', color: 'var(--amber)',
+                borderRadius: 'var(--r-sm)', fontSize: 11, fontWeight: 600,
+              }}>
+                This records a transfer — the material counts as moved, not staged on your truck.
+              </div>
+            )}
+
+            <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', overflow: 'hidden', background: 'var(--surface)' }}>
+              {confirmLines.map((l, i) => (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px',
+                  borderBottom: i < confirmLines.length - 1 ? '1px solid var(--border)' : 'none',
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.partName}</div>
+                    {isLoad && l.otherLabel && (
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>from {l.otherLabel}</div>
+                    )}
+                  </div>
+                  <div style={{ flexShrink: 0, fontWeight: 700, fontSize: 14 }}>
+                    <span className="mono">{l.qty.toLocaleString()}</span>{' '}
+                    <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 12 }}>{l.unit || 'ea'}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {notes.trim() && (
+              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>
+                Note: {notes.trim()}
+              </div>
+            )}
+          </div>
+        )}
+
+        {!confirming && (<>
         {/* Mode toggle — Load only. Return mode always picks a warehouse first. */}
         {isLoad && (
           <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
@@ -842,6 +930,8 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
           </div>
         )}
 
+        </>)}
+
         {/* Error */}
         {error && (
           <div style={{
@@ -854,23 +944,41 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
         )}
 
         {/* Footer buttons */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose} disabled={submitting}>
-            Cancel
-          </button>
-          <button
-            className="btn btn-primary"
-            style={{ flex: 2 }}
-            onClick={handleSubmit}
-            disabled={submitting || effectiveCount === 0}
-          >
-            {submitting
-              ? 'Saving…'
-              : effectiveCount === 0
-                ? (isLoad ? 'Load' : 'Return')
-                : `${isLoad ? 'Load' : 'Return'} ${effectiveCount} part${effectiveCount === 1 ? '' : 's'}`}
-          </button>
-        </div>
+        {confirming ? (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setConfirming(false)} disabled={submitting}>
+              ← Back
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ flex: 2 }}
+              onClick={() => runMovements(confirmLines)}
+              disabled={submitting}
+            >
+              {submitting
+                ? 'Saving…'
+                : `Confirm — ${isLoad ? 'load' : 'return'} ${confirmLines.length} part${confirmLines.length === 1 ? '' : 's'}`}
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose} disabled={submitting}>
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ flex: 2 }}
+              onClick={handlePrimary}
+              disabled={submitting || effectiveCount === 0}
+            >
+              {submitting
+                ? 'Saving…'
+                : effectiveCount === 0
+                  ? (isLoad ? 'Load' : 'Return')
+                  : `${isLoad ? 'Load' : 'Return'} ${effectiveCount} part${effectiveCount === 1 ? '' : 's'}`}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
