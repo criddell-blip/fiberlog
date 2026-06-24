@@ -433,7 +433,7 @@ export default function InfraCrewApp() {
               ...s,
               tasks: [...s.tasks, {
                 ...task,
-                type: task.task_type || 'aerial',
+                type: task.task_type || 'task',
                 notes: task.scope_notes || '',
                 creator: null,
               }]

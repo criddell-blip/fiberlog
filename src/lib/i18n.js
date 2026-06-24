@@ -5,15 +5,12 @@ const strings = {
   // ── App / Login ────────────────────────────────────────────────────────────
   appName:            { en: 'FiberLog',                   es: 'FiberLog' },
   company:            { en: 'Utah Broadband',             es: 'Utah Broadband' },
-  whoAreYou:          { en: 'Who are you?',               es: '¿Quién eres?' },
-  searchName:         { en: '🔍  Search name...',         es: '🔍  Buscar nombre...' },
   management:         { en: 'Management',                 es: 'Gerencia' },
   crew:               { en: 'Crew',                       es: 'Cuadrilla' },
   owner:              { en: 'Owner',                      es: 'Propietario' },
   manager:            { en: 'Manager',                    es: 'Gerente' },
   signOut:            { en: 'Sign out',                   es: 'Cerrar sesión' },
   close:              { en: 'Close',                      es: 'Cerrar' },
-  pinComingSoon:      { en: 'PIN login coming soon',      es: 'Acceso con PIN próximamente' },
 
   // ── Crew types ─────────────────────────────────────────────────────────────
   aerial:             { en: '🏗️ Aerial',                  es: '🏗️ Aéreo' },

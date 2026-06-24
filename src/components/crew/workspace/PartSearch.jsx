@@ -35,6 +35,10 @@ export default function PartSearch({ onSelect, onClose, filter }) {
             placeholder="Search by name or SKU..."
             value={query}
             onChange={e => handleSearch(e.target.value)}
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck="false"
+            name="part-search"
             autoFocus
           />
         </div>

@@ -19,7 +19,6 @@ async function fetchBoxHeroStock() {
       throw new Error('BoxHero fetch failed: ' + res.status)
     }
     const json = await res.json()
-    console.log('BoxHero stock response:', JSON.stringify(json).slice(0, 300))
     return json
   } catch(e) {
     console.warn('BoxHero stock fetch failed:', e)

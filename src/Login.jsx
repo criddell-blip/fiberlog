@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useApp } from './AppContext'
 import { db } from './lib/supabase'
 
-// Standard username + password login. Replaces the old UserPicker now that
-// crew rosters are growing past the point where a grid of avatars is useful.
+// Standard username + password login. Replaced the old avatar-grid picker
+// once crew rosters grew past the point where a grid of faces was useful.
 //
 // Users sign in with the local-part of their login email — historically the
 // synthetic "firstname.lastname" (@fiberlog.utahbroadband.com), now migrating

@@ -1144,7 +1144,7 @@ function ResetPasswordSheet({ user, onCancel, onSubmit }) {
           <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel} disabled={submitting}>Cancel</button>
           <button
             className="btn btn-primary" style={{ flex: 2 }}
-            onClick={handleSubmit} disabled={submitting || pw.length < 6}
+            onClick={handleSubmit} disabled={submitting || pw.length < 8}
           >
             {submitting ? 'Saving…' : 'Save password'}
           </button>

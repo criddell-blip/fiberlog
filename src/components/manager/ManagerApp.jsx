@@ -42,14 +42,19 @@ function ThemeToggle({ darkMode, onToggle }) {
 }
 
 function SwitchToCrewButton({ currentUser, enterCrewMode }) {
-  const canActAsCrew = VALID_FIELD_CREW_TYPES.includes(currentUser?.crew_type)
+  // Keep this guard in sync with App.jsx's canActAsCrew — a warehouse-only
+  // (restricted_to_inventory) manager can't act as crew even with a crew_type.
+  const isRestricted = currentUser?.restricted_to_inventory === true
+  const canActAsCrew = VALID_FIELD_CREW_TYPES.includes(currentUser?.crew_type) && !isRestricted
   return (
     <button
       onClick={canActAsCrew ? enterCrewMode : undefined}
       disabled={!canActAsCrew}
       title={canActAsCrew
         ? `Switch to ${currentUser.crew_type} crew view to log your own work`
-        : 'Set a field crew_type (aerial / underground / splice / infrastructure / drop / locator / install) on your user via Admin → Users to enable.'}
+        : isRestricted
+          ? 'Warehouse-only managers can\'t switch to crew mode.'
+          : 'Set a field crew_type (aerial / underground / splice / infrastructure / drop / locator / install) on your user via Admin → Users to enable.'}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px',
         borderRadius: 999, border: `1px solid ${canActAsCrew ? 'var(--accent)' : 'var(--border2)'}`,

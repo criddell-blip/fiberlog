@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react'
-import { db, getFullTree, getAssemblies, getUsers, subscribeToAllTaskChanges } from './lib/supabase'
+import { db, getFullTree, getAssemblies, getUsers, subscribeToAllTaskChanges, nextChannelSuffix } from './lib/supabase'
 
 const AppContext = createContext(null)
 
@@ -199,24 +199,32 @@ export function AppProvider({ children }) {
     }
     loadMode()
 
-    const channel = db
-      .channel('app_settings_inventory_qty_' + Math.random().toString(36).slice(2, 8))
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'app_settings', filter: 'key=eq.inventory_qty_display_mode' },
-        payload => {
-          const row = payload.new || payload.old
-          if (!row) return
-          setQtyDisplayMode(row.value === 'paused' ? 'paused' : 'tracking')
-          setQtyDisplayUpdatedAt(row.updated_at || null)
-          setQtyDisplayUpdatedBy(row.updated_by || null)
-        }
-      )
-      .subscribe()
+    // Defensively wrap the subscribe so a realtime throw degrades to "no live
+    // updates" instead of bubbling into the render. Channel name via
+    // nextChannelSuffix() (not Math.random) to match the project convention.
+    let channel = null
+    try {
+      channel = db
+        .channel('app_settings_inventory_qty_' + nextChannelSuffix())
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'app_settings', filter: 'key=eq.inventory_qty_display_mode' },
+          payload => {
+            const row = payload.new || payload.old
+            if (!row) return
+            setQtyDisplayMode(row.value === 'paused' ? 'paused' : 'tracking')
+            setQtyDisplayUpdatedAt(row.updated_at || null)
+            setQtyDisplayUpdatedBy(row.updated_by || null)
+          }
+        )
+        .subscribe()
+    } catch (e) {
+      console.warn('app_settings realtime subscribe failed:', e)
+    }
 
     return () => {
       cancelled = true
-      try { db.removeChannel(channel) } catch (e) { /* noop */ }
+      try { if (channel) db.removeChannel(channel) } catch (e) { /* noop */ }
     }
   }, [currentUser?.id])
 

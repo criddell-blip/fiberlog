@@ -70,30 +70,31 @@ export default function SubmissionsQueue() {
       // switch) doesn't collide with a stale channel that hasn't been GC'd
       // yet. nextChannelSuffix() guarantees uniqueness even when two
       // setupChannel calls land in the same millisecond.
-      channel = db.channel('manager_submissions_' + nextChannelSuffix())
-        .on('postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'submissions' },
-          payload => {
-            console.log('[Submissions] INSERT', payload.new?.id)
-            loadSubmissions()
-            showToast('New submission received')
-          }
-        )
-        .on('postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'submissions' },
-          payload => {
-            console.log('[Submissions] UPDATE', payload.new?.id, payload.new?.status)
-            loadSubmissions()
-          }
-        )
-        .subscribe(status => {
-          console.log('[Submissions] Channel status:', status)
-          // Reconnect if the channel drops for any reason
-          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-            if (reconnectTimer) clearTimeout(reconnectTimer)
-            reconnectTimer = setTimeout(setupChannel, 2000)
-          }
-        })
+      // Wrap so a realtime throw degrades to "no live updates" rather than
+      // bubbling into the render.
+      try {
+        channel = db.channel('manager_submissions_' + nextChannelSuffix())
+          .on('postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'submissions' },
+            () => {
+              loadSubmissions()
+              showToast('New submission received')
+            }
+          )
+          .on('postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'submissions' },
+            () => loadSubmissions()
+          )
+          .subscribe(status => {
+            // Reconnect if the channel drops for any reason
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+              if (reconnectTimer) clearTimeout(reconnectTimer)
+              reconnectTimer = setTimeout(setupChannel, 2000)
+            }
+          })
+      } catch (e) {
+        console.warn('Submissions realtime subscribe failed:', e)
+      }
     }
 
     loadSubmissions()

@@ -38,13 +38,20 @@ export default function CrewStatus() {
     // switch back to Crew) doesn't collide with the previous channel that's
     // still being torn down — the static 'crew_status_live' name caused
     // "cannot add postgres_changes callbacks after subscribe()" errors.
-    const channel = db.channel('crew_status_live_' + nextChannelSuffix())
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'work_sessions' },
-        () => load()
-      ).subscribe()
+    // Wrap subscribe so a realtime throw degrades to "no live updates"
+    // instead of killing the render.
+    let channel = null
+    try {
+      channel = db.channel('crew_status_live_' + nextChannelSuffix())
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'work_sessions' },
+          () => load()
+        ).subscribe()
+    } catch (e) {
+      console.warn('CrewStatus realtime subscribe failed:', e)
+    }
 
-    return () => { try { channel.unsubscribe() } catch {} }
+    return () => { try { channel?.unsubscribe() } catch {} }
   }, [])
 
   async function load() {

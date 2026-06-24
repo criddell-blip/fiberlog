@@ -59,7 +59,13 @@ function RootRouter() {
   // requires their crew_type to be one of {aerial, underground, splice,
   // infrastructure} (that's the RPC's guard, not enforced here).
   const isStaff = currentUser.role === 'manager' || currentUser.role === 'owner'
-  const canActAsCrew = isStaff && VALID_FIELD_CREW_TYPES.includes(currentUser.crew_type)
+  // A warehouse-only manager (restricted_to_inventory) must NOT be able to flip
+  // into the crew shell even if they happen to carry a field crew_type — that
+  // would bypass their inventory-only scoping. Mirror this guard in
+  // ManagerApp's SwitchToCrewButton.
+  const canActAsCrew = isStaff
+    && VALID_FIELD_CREW_TYPES.includes(currentUser.crew_type)
+    && !currentUser.restricted_to_inventory
   if (isStaff && viewMode === 'crew' && canActAsCrew) {
     return currentUser.crew_type === 'infrastructure' ? <InfraCrewApp /> : <CrewApp />
   }
