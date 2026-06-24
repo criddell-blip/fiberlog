@@ -38,6 +38,11 @@ export function AppProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [toast, setToast] = useState(null)
+  // True while the app is opened from a password-reset link. Supabase
+  // establishes a temporary recovery session and fires a PASSWORD_RECOVERY
+  // event; we gate the router on this so the user lands on the set-new-
+  // password screen instead of being dropped straight into the app.
+  const [recoveryMode, setRecoveryMode] = useState(false)
   // Org-wide inventory quantity display mode. 'tracking' shows the
   // numbers as today; 'paused' hides them and shows last-seen recency
   // instead (Sage is then the authoritative source). Loaded from
@@ -80,6 +85,18 @@ export function AppProvider({ children }) {
 
   useEffect(() => {
     loadAll()
+  }, [])
+
+  // Listen for the password-recovery auth event. When a user opens a reset
+  // link, supabase-js (detectSessionInUrl is on by default) consumes the
+  // token in the URL, signs them into a temporary recovery session, and
+  // emits PASSWORD_RECOVERY. Flip recoveryMode so the router shows the
+  // set-new-password screen. Registered once on mount.
+  useEffect(() => {
+    const { data: sub } = db.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true)
+    })
+    return () => { try { sub?.subscription?.unsubscribe() } catch (e) {} }
   }, [])
 
   // Keep the global project tree in sync with task changes happening anywhere
@@ -330,6 +347,22 @@ export function AppProvider({ children }) {
     }
   }
 
+  // Change the signed-in user's OWN password. Works for a normal session
+  // (in-app "Change password") and for the temporary recovery session.
+  async function changeOwnPassword(newPassword) {
+    const { error: err } = await db.auth.updateUser({ password: newPassword })
+    if (err) throw new Error(err.message)
+  }
+
+  // Finish a password reset opened from an email link: set the new password
+  // on the recovery session, clear recoveryMode, then reload so the now-valid
+  // session routes the user into the app signed in.
+  async function completePasswordReset(newPassword) {
+    await changeOwnPassword(newPassword)
+    setRecoveryMode(false)
+    await loadAll()
+  }
+
   // Owner-only: flip the org-wide inventory display mode. RLS enforces
   // owner-role on the write; non-owners hit a permission error.
   async function setInventoryQtyDisplayMode(nextMode) {
@@ -352,6 +385,8 @@ export function AppProvider({ children }) {
       users,
       currentUser, selectUser,
       login, logout,
+      // Self-service password: recovery-link reset + in-app change
+      recoveryMode, completePasswordReset, changeOwnPassword,
       lang: currentUser?.language || 'en',
       loading, error,
       toast, showToast,

@@ -69,8 +69,9 @@ export async function createUser({
 }
 
 // Update user metadata (name, role, crew_type, language, is_active, initials).
-// Email/username can't be changed once set — they're tied to the auth.users
-// row. Password resets go through the existing admin-set-password function.
+// The login email IS changeable by staff via setUserEmail() (it goes through
+// the admin-set-email Edge Function because changing auth.users requires
+// service_role). Password resets go through admin-set-password.
 export async function updateUserMetadata(userId, updates) {
   const allowed = {}
   for (const key of ['name', 'initials', 'role', 'crew_type', 'language', 'is_active', 'manager_id', 'restricted_to_inventory']) {
@@ -108,6 +109,30 @@ export async function resetUserPassword(userId, newPassword) {
         'Authorization': `Bearer ${session.access_token}`,
       },
       body: JSON.stringify({ userId, newPassword }),
+    }
+  )
+  const result = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`)
+  return result
+}
+
+// Change a user's login email (the Supabase Auth identity). Goes through the
+// admin-set-email Edge Function — same JWT/role guard as admin-set-password —
+// which updates auth.users AND mirrors public.users.email in one shot. Used to
+// migrate accounts off the old synthetic addresses onto real company mailboxes
+// so password-reset emails deliver.
+export async function setUserEmail(userId, newEmail) {
+  const { data: { session } } = await db.auth.getSession()
+  if (!session) throw new Error('Not signed in')
+  const res = await fetch(
+    `${db.supabaseUrl}/functions/v1/admin-set-email`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ userId, newEmail }),
     }
   )
   const result = await res.json().catch(() => ({}))

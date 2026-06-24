@@ -3,12 +3,17 @@ import CrewApp from './components/crew/CrewApp'
 import InfraCrewApp from './components/crew/infra/InfraCrewApp'
 import ManagerApp from './components/manager/ManagerApp'
 import Login from './Login'
+import SetNewPassword from './SetNewPassword'
 import Icon from './components/shared/Icon'
 import { VALID_FIELD_CREW_TYPES } from './lib/crewTypes'
 import './styles/global.css'
 
 function RootRouter() {
-  const { currentUser, loading, error, reload, viewMode } = useApp()
+  const { currentUser, loading, error, reload, viewMode, recoveryMode } = useApp()
+
+  // Opened from a password-reset link: force the set-new-password screen
+  // before anything else, even if a (recovery) session already exists.
+  if (recoveryMode) return <SetNewPassword />
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 12 }}>

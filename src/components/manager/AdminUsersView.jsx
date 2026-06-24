@@ -3,7 +3,7 @@ import { useApp } from '../../AppContext'
 import { useBackClose } from '../../lib/backStack'
 import {
   createUser, updateUserMetadata, deactivateUser, reactivateUser,
-  resetUserPassword, getAllUsers,
+  resetUserPassword, setUserEmail, getAllUsers,
   buildEmailFromUsername, generateInitials,
   CREW_OPERATIONS,
   getUserPermissions, setUserOperationPermission, clearUserOperationPermission,
@@ -177,6 +177,22 @@ export default function AdminUsersView({ onBack }) {
     }
   }
 
+  // Change a user's login email (auth identity). Goes through admin-set-email
+  // (service_role) which also mirrors public.users.email. Leaves the edit
+  // sheet open so the manager can keep working; the sheet shows its own
+  // inline confirmation.
+  async function handleChangeEmail(user, newEmail) {
+    try {
+      await setUserEmail(user.id, newEmail)
+      await load()
+      refreshUsers()
+      showToast(`Login email updated for ${user.name}`)
+    } catch (e) {
+      showToast('Email change failed: ' + e.message)
+      throw e
+    }
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -312,6 +328,7 @@ export default function AdminUsersView({ onBack }) {
           isOwner={isOwner}
           existingUsers={users}
           truckLocations={truckLocations}
+          onChangeEmail={handleChangeEmail}
           onCancel={() => setEditing(null)}
           onSubmit={async (payload) => {
             if (editing.mode === 'new') await handleCreate(payload)
@@ -381,7 +398,7 @@ function tinyBtn(variant, disabled) {
 
 // ─── User form sheet (add OR edit) ────────────────────────────────────────
 
-function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = [], onCancel, onSubmit }) {
+function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = [], onChangeEmail, onCancel, onSubmit }) {
   const isNew = mode === 'new'
 
   // For new users, "username" is the user-facing field. For existing users
@@ -422,6 +439,30 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
   const [reportsSearch, setReportsSearch] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  // Editable login email (existing users only). Changing it goes through the
+  // admin-set-email Edge Function via onChangeEmail — separate from the main
+  // metadata Save because it's a privileged auth-identity change that can fail
+  // independently. Has its own inline Save + confirmation.
+  const [companyEmail, setCompanyEmail] = useState(user?.email || '')
+  const [emailSaving, setEmailSaving] = useState(false)
+  const [emailMsg, setEmailMsg] = useState(null)   // { type: 'ok'|'err', text }
+
+  async function handleSaveEmail() {
+    const next = companyEmail.trim().toLowerCase()
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(next)) {
+      setEmailMsg({ type: 'err', text: 'Enter a valid email address' }); return
+    }
+    setEmailSaving(true); setEmailMsg(null)
+    try {
+      await onChangeEmail(user, next)
+      setEmailMsg({ type: 'ok', text: 'Login email updated' })
+    } catch (e) {
+      setEmailMsg({ type: 'err', text: e.message || 'Failed' })
+    } finally {
+      setEmailSaving(false)
+    }
+  }
 
   // Auto-generate initials from name when user hasn't manually overridden them.
   // We track whether the user has typed in the initials field — if not,
@@ -553,14 +594,16 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
             />
           </div>
 
-          {/* Username — only for new users */}
+          {/* Login email — only for new users. Enter the real company mailbox
+              so password-reset links deliver; a bare prefix still works and
+              auto-appends the domain (legacy path). */}
           {isNew && (
             <div className="field">
-              <label>Username *</label>
+              <label>Company email *</label>
               <input
                 type="text" value={username}
                 onChange={e => { setUsername(e.target.value.toLowerCase()); setError('') }}
-                placeholder="firstname.lastname"
+                placeholder="firstname.lastname@utahbroadband.com"
                 autoCapitalize="none" autoCorrect="off" spellCheck="false"
                 autoComplete="off"
                 name="new-user-username"
@@ -575,20 +618,52 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
             </div>
           )}
 
-          {/* Email (read-only) for existing users */}
+          {/* Login email — editable for existing users (auth identity). */}
           {!isNew && (
             <div className="field">
-              <label>Username (locked)</label>
-              <div style={{
-                padding: '10px 12px', borderRadius: 'var(--r-sm)',
-                border: '1.5px solid var(--border2)', background: 'var(--surface2)',
-                fontSize: 13, color: 'var(--muted)', fontFamily: 'monospace',
-              }}>
-                {user?.email}
+              <label>Login email</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  type="email"
+                  value={companyEmail}
+                  onChange={e => { setCompanyEmail(e.target.value); setEmailMsg(null) }}
+                  autoCapitalize="none" autoCorrect="off" spellCheck="false"
+                  autoComplete="off" name="company-email-field"
+                  style={{ flex: 1, fontFamily: 'monospace' }}
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveEmail}
+                  disabled={
+                    emailSaving ||
+                    !companyEmail.trim() ||
+                    companyEmail.trim().toLowerCase() === (user?.email || '').toLowerCase()
+                  }
+                  style={{
+                    padding: '8px 12px', borderRadius: 'var(--r-sm)',
+                    border: '1.5px solid var(--teal)', background: 'var(--surface2)',
+                    color: 'var(--teal-mid)', fontSize: 12, fontWeight: 700,
+                    cursor: 'pointer', whiteSpace: 'nowrap',
+                    opacity: (emailSaving || !companyEmail.trim() || companyEmail.trim().toLowerCase() === (user?.email || '').toLowerCase()) ? 0.5 : 1,
+                  }}
+                >{emailSaving ? 'Saving…' : 'Update'}</button>
               </div>
-              <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
-                Username/email can't be changed after creation. Use Reset password to change credentials.
+              <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4, lineHeight: 1.5 }}>
+                Used to sign in (name or this address) and to deliver password-reset links.
+                {companyEmail.trim() && !companyEmail.trim().toLowerCase().endsWith('@utahbroadband.com') && (
+                  <span style={{ display: 'block', color: 'var(--amber)', marginTop: 2 }}>
+                    <Icon name="alert" size={11} style={{ display: 'inline-block', verticalAlign: '-1px', marginRight: 4 }} />
+                    Not a @utahbroadband.com address — reset links won't deliver unless this inbox is real.
+                  </span>
+                )}
               </div>
+              {emailMsg && (
+                <div style={{
+                  marginTop: 6, padding: '6px 10px', borderRadius: 'var(--r-sm)', fontSize: 12, fontWeight: 600,
+                  background: emailMsg.type === 'ok' ? 'var(--teal-lt)' : 'var(--red-lt)',
+                  color: emailMsg.type === 'ok' ? 'var(--teal)' : 'var(--red)',
+                }}>{emailMsg.text}</div>
+              )}
             </div>
           )}
 

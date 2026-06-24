@@ -9,6 +9,7 @@ import TaskList from './TaskList'
 import TaskWorkspace from './TaskWorkspace'
 import TaskSummaryView from './TaskSummaryView'
 import MyStockView from './MyStockView'
+import SetNewPassword from '../../SetNewPassword'
 
 // Tasks in these states aren't editable from the crew workspace — they go
 // to the read-only TaskSummaryView so the crew can inspect what they
@@ -74,6 +75,7 @@ const isCompletedTask = t => t.status === 'done' || t.status === 'approved'
 // Also hosts the back-to-manager pill when applicable.
 function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode, exitCrewMode }) {
   const { currentUser } = useApp()
+  const [showChangePw, setShowChangePw] = useState(false)
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onCancel()}>
       <div className="overlay-sheet" style={{ textAlign: 'center' }}>
@@ -90,6 +92,16 @@ function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode, e
             {exitCrewMode && <BackToManagerButton exitCrewMode={exitCrewMode} />}
           </div>
         )}
+        <button
+          type="button"
+          onClick={() => setShowChangePw(true)}
+          style={{
+            width: '100%', marginBottom: 10, padding: '9px 12px',
+            background: 'var(--surface2)', color: 'var(--text)',
+            border: '1px solid var(--border2)', borderRadius: 'var(--r-sm)',
+            fontSize: 13, fontWeight: 600, cursor: 'pointer',
+          }}
+        >🔑 {lang === 'es' ? 'Cambiar contraseña' : 'Change password'}</button>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel}>
             {lang === 'es' ? 'Cancelar' : 'Cancel'}
@@ -99,6 +111,7 @@ function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode, e
           </button>
         </div>
       </div>
+      {showChangePw && <SetNewPassword asSheet onClose={() => setShowChangePw(false)} />}
     </div>
   )
 }

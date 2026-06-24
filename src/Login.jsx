@@ -1,16 +1,28 @@
 import { useState, useEffect, useRef } from 'react'
 import { useApp } from './AppContext'
-import { buildEmailFromUsername } from './lib/admin'
+import { db } from './lib/supabase'
 
 // Standard username + password login. Replaces the old UserPicker now that
 // crew rosters are growing past the point where a grid of avatars is useful.
 //
-// Username format: firstname.lastname (e.g. "francisco.molina"). The app
-// auto-appends @fiberlog.utahbroadband.com to form the synthetic email
-// stored in Supabase Auth (handled by buildEmailFromUsername in lib/admin).
-// If the user types a full email (anything with an "@"), it's used as-is.
+// Users sign in with the local-part of their login email — historically the
+// synthetic "firstname.lastname" (@fiberlog.utahbroadband.com), now migrating
+// to their real company mailbox prefix (e.g. "criddell"@utahbroadband.com).
+// A full email (anything with an "@") is matched as-is. See resolveUserByLogin.
 
 const REMEMBERED_USERNAME_KEY = 'fiberlog_remembered_username'
+
+// Match a typed login (full email OR email local-part) to a user record.
+// Exact full-email match wins first so prefix collisions can't misroute;
+// then fall back to local-part. Case-insensitive. Returns null if no match.
+export function resolveUserByLogin(users, typedRaw) {
+  const typed = String(typedRaw || '').trim().toLowerCase()
+  if (!typed) return null
+  const list = users || []
+  return list.find(u => (u.email || '').toLowerCase() === typed)
+    || list.find(u => (u.email || '').toLowerCase().split('@')[0] === typed)
+    || null
+}
 
 export default function Login() {
   const { users, login, darkMode } = useApp()
@@ -21,6 +33,14 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false)
   const [shake, setShake] = useState(false)
   const passwordRef = useRef(null)
+
+  // Forgot-password flow. 'login' = normal sign-in; 'forgot' = the reset-
+  // request panel. resetSent gates the confirmation message (shown for both
+  // hit and miss so we never leak whether an account exists).
+  const [mode, setMode] = useState('login')
+  const [resetId, setResetId] = useState('')
+  const [resetSubmitting, setResetSubmitting] = useState(false)
+  const [resetSent, setResetSent] = useState(false)
 
   // Restore remembered username from localStorage on first mount
   useEffect(() => {
@@ -47,14 +67,14 @@ export default function Login() {
       return
     }
 
-    const email = buildEmailFromUsername(trimmed)
-
-    // Find the local user record matching this email so we can pass the
-    // full user object to login() — login() does the actual auth call,
-    // we just need the user metadata.
-    const matchingUser = (users || []).find(
-      u => u.email && u.email.toLowerCase() === email
-    )
+    // Resolve the typed value to a user record so we can pass the full user
+    // object to login() (which does the actual auth call). Match on the full
+    // email first, then the email's local-part ("francisco.molina" or
+    // "fmolina"). Matching the local-part is what lets the email migration run
+    // gradually: un-migrated accounts still answer to their old synthetic
+    // prefix while migrated ones answer to their company-email prefix — both
+    // work at once, no lockstep cutover.
+    const matchingUser = resolveUserByLogin(users, trimmed)
     if (!matchingUser) {
       setError('Invalid login')
       setShake(true)
@@ -98,6 +118,48 @@ export default function Login() {
     // of redirecting to the right surface
   }
 
+  async function handleForgot(e) {
+    if (e) e.preventDefault()
+    if (resetSubmitting) return
+    setResetSubmitting(true)
+
+    // Resolve the typed name/email to the user's real login email. If it's a
+    // full email, send straight to it. We always show the same confirmation
+    // afterward (hit or miss) so the screen never reveals whether an account
+    // exists — matching the generic "Invalid login" convention.
+    const typed = resetId.trim()
+    const matched = resolveUserByLogin(users, typed)
+    const target = matched?.email || (typed.includes('@') ? typed.toLowerCase() : null)
+
+    if (target) {
+      try {
+        await db.auth.resetPasswordForEmail(target, {
+          // Full deployed URL incl. the GitHub Pages /fiberlog/ base — must be
+          // in Supabase Auth's redirect allow-list or the link errors.
+          redirectTo: window.location.origin + import.meta.env.BASE_URL,
+        })
+      } catch (err) {
+        // Swallow — still show the neutral confirmation (no enumeration).
+        console.warn('resetPasswordForEmail:', err)
+      }
+    }
+
+    setResetSubmitting(false)
+    setResetSent(true)
+  }
+
+  function openForgot() {
+    setMode('forgot')
+    setResetId(username)   // pre-fill with whatever they already typed
+    setResetSent(false)
+    setError('')
+  }
+
+  function backToLogin() {
+    setMode('login')
+    setResetSent(false)
+  }
+
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -135,78 +197,154 @@ export default function Login() {
           Utah Broadband
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className="field">
-            <label>Username</label>
-            <input
-              type="text"
-              value={username}
-              onChange={e => { setUsername(e.target.value); setError('') }}
-              placeholder="firstname.lastname"
-              autoCapitalize="none"
-              autoCorrect="off"
-              autoComplete="username"
-              spellCheck="false"
-              autoFocus={!username}
-            />
-            <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
-              Just your name — no email needed
+        {mode === 'login' ? (
+          <>
+            <form onSubmit={handleSubmit}>
+              <div className="field">
+                <label>Name or email</label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={e => { setUsername(e.target.value); setError('') }}
+                  placeholder="firstname.lastname"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  autoComplete="username"
+                  spellCheck="false"
+                  autoFocus={!username}
+                />
+                <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
+                  Your name or company email
+                </div>
+              </div>
+
+              <div className="field">
+                <label>Password</label>
+                <input
+                  ref={passwordRef}
+                  type="password"
+                  value={password}
+                  onChange={e => { setPassword(e.target.value); setError('') }}
+                  autoComplete="current-password"
+                  autoFocus={!!username}
+                />
+              </div>
+
+              <label style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                fontSize: 13, color: 'var(--muted)', cursor: 'pointer',
+                marginBottom: 16,
+              }}>
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={e => setRemember(e.target.checked)}
+                  style={{ cursor: 'pointer' }}
+                />
+                Remember my username on this device
+              </label>
+
+              {error && (
+                <div style={{
+                  padding: '10px 12px',
+                  background: 'var(--red-lt)', color: 'var(--red)',
+                  borderRadius: 'var(--r-sm)', fontSize: 13, marginBottom: 12,
+                  textAlign: 'center', fontWeight: 600,
+                }}>
+                  {error}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={submitting}
+                style={{ width: '100%' }}
+              >
+                {submitting ? 'Signing in…' : 'Sign in'}
+              </button>
+            </form>
+
+            <div style={{ marginTop: 18, textAlign: 'center' }}>
+              <button
+                type="button"
+                onClick={openForgot}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--teal-mid)', fontSize: 13, fontWeight: 600,
+                  textDecoration: 'underline', padding: 4,
+                }}
+              >
+                Forgot your password?
+              </button>
             </div>
-          </div>
+          </>
+        ) : (
+          /* ── Forgot-password panel ──────────────────────────────────── */
+          resetSent ? (
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>📧</div>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>Check your email</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.5, marginBottom: 20 }}>
+                If that account exists, we sent a password reset link to its company
+                email. Open the link on this device to set a new password.
+              </div>
+              <button className="btn btn-ghost" style={{ width: '100%' }} onClick={backToLogin}>
+                Back to sign in
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleForgot}>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Reset your password</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.5 }}>
+                Enter your name or company email. We'll send a reset link to your
+                company inbox.
+              </div>
+              <div className="field">
+                <label>Name or email</label>
+                <input
+                  type="text"
+                  value={resetId}
+                  onChange={e => setResetId(e.target.value)}
+                  placeholder="firstname.lastname"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  autoComplete="username"
+                  spellCheck="false"
+                  autoFocus
+                />
+              </div>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={resetSubmitting || !resetId.trim()}
+                style={{ width: '100%' }}
+              >
+                {resetSubmitting ? 'Sending…' : 'Send reset link'}
+              </button>
+              <button
+                type="button"
+                onClick={backToLogin}
+                style={{
+                  marginTop: 12, background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--muted)', fontSize: 13, fontWeight: 600,
+                  width: '100%', padding: 4,
+                }}
+              >
+                Cancel
+              </button>
+            </form>
+          )
+        )}
 
-          <div className="field">
-            <label>Password</label>
-            <input
-              ref={passwordRef}
-              type="password"
-              value={password}
-              onChange={e => { setPassword(e.target.value); setError('') }}
-              autoComplete="current-password"
-              autoFocus={!!username}
-            />
-          </div>
-
-          <label style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            fontSize: 13, color: 'var(--muted)', cursor: 'pointer',
-            marginBottom: 16,
+        {mode === 'login' && (
+          <div style={{
+            marginTop: 16, fontSize: 11, color: 'var(--hint)',
+            textAlign: 'center', lineHeight: 1.5,
           }}>
-            <input
-              type="checkbox"
-              checked={remember}
-              onChange={e => setRemember(e.target.checked)}
-              style={{ cursor: 'pointer' }}
-            />
-            Remember my username on this device
-          </label>
-
-          {error && (
-            <div style={{
-              padding: '10px 12px',
-              background: 'var(--red-lt)', color: 'var(--red)',
-              borderRadius: 'var(--r-sm)', fontSize: 13, marginBottom: 12,
-              textAlign: 'center', fontWeight: 600,
-            }}>
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={submitting}
-            style={{ width: '100%' }}
-          >
-            {submitting ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
-
-        <div style={{
-          marginTop: 20, fontSize: 11, color: 'var(--hint)',
-          textAlign: 'center', lineHeight: 1.5,
-        }}>
-          Forgot your password? Ask your manager — they can reset it from the Admin panel.
-        </div>
+            Still stuck? Ask your manager — they can reset it from the Admin panel.
+          </div>
+        )}
       </div>
     </div>
   )
