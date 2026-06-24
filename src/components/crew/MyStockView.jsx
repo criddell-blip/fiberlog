@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useApp } from '../../AppContext'
 import { getMyTruckStock, getMyCrewPermissions } from '../../lib/inventory'
 import CrewMovementSheet from './CrewMovementSheet'
+import FoundInventorySheet from './FoundInventorySheet'
 import PausedBanner from '../shared/PausedBanner'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
 import Icon from '../shared/Icon'
@@ -23,6 +24,7 @@ export default function MyStockView({ onBack, onUserTap }) {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [sheetMode, setSheetMode] = useState(null)   // 'load' | 'return' | null
+  const [showFound, setShowFound] = useState(false)  // "Report found inventory"
   // When the crew taps "Return" on a specific truck part, prefill the return
   // sheet with it (skips the part picker). Null = the top Return button's
   // normal flow.
@@ -167,6 +169,22 @@ export default function MyStockView({ onBack, onUserTap }) {
             <Icon name="rotate" size={16} />
           </button>
         </div>
+
+        {/* Found inventory — files a manager-approved request (no movement
+            here). Not gated on load/return perms since nothing moves until a
+            manager confirms. */}
+        <button
+          onClick={() => setShowFound(true)}
+          style={{
+            width: '100%', marginTop: 8, padding: '8px 12px',
+            background: 'var(--surface2)', color: 'var(--text)',
+            border: '1px dashed var(--border2)', borderRadius: 'var(--r-sm)',
+            fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+          }}
+        >
+          <Icon name="plus" size={15} /> Report found inventory
+        </button>
       </div>
 
       {/* ─── Search ────────────────────────────────────────────────────── */}
@@ -297,6 +315,14 @@ export default function MyStockView({ onBack, onUserTap }) {
           prefillPartId={sheetMode === 'return' ? returnPartId : null}
           onClose={() => { setSheetMode(null); setReturnPartId(null) }}
           onComplete={handleMovementComplete}
+        />
+      )}
+
+      {/* ─── Found-inventory request sheet ─────────────────────────────── */}
+      {showFound && (
+        <FoundInventorySheet
+          onClose={() => setShowFound(false)}
+          onComplete={() => setShowFound(false)}
         />
       )}
     </div>

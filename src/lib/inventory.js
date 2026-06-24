@@ -2326,3 +2326,90 @@ export function buildPurchaseRequestEmail(pr) {
     anyUnknownCost ? '\nNote: One or more lines have no unit price; fill in before sending.' : '',
   ].filter(Boolean).join('\n')
 }
+
+// ─── FOUND-INVENTORY INTAKE REQUESTS (backlog #19) ───────────────────────────
+//
+// A crew member physically holding a part the system doesn't show files a
+// PENDING request — NO stock moves yet. A manager approves it (approve_intake_
+// request RPC) which books a `receive` movement into a warehouse and, for parts
+// not yet in the catalog, creates a draft part inside the RPC (crew can't write
+// parts_catalog or receive/adjust movements — that's why this is gated through
+// approval, not record_crew_movement). Reject carries a reason.
+
+// Create a pending intake request. RLS scopes the insert to the caller
+// (requested_by = auth.uid()). For a part already in the catalog pass `partId`;
+// for one that isn't, pass `isDraft:true` + the draft fields and the part is
+// materialized (is_active=false) when the manager approves.
+export async function createIntakeRequest({
+  partId = null, isDraft = false,
+  draftName = null, draftUnit = null, draftDepartment = null, draftMaterialGroup = null,
+  quantity, targetLocationId, reason = null, requestedBy = null,
+} = {}) {
+  if (!requestedBy) throw new Error('requestedBy required')
+  if (!targetLocationId) throw new Error('Pick a destination warehouse')
+  const qty = Number(quantity)
+  if (!qty || qty <= 0) throw new Error('Quantity must be greater than 0')
+  if (!partId && !isDraft) throw new Error('Pick a part or add a new one')
+  if (isDraft && !String(draftName || '').trim()) throw new Error('New part needs a name')
+
+  const { data, error } = await db
+    .from('inventory_intake_requests')
+    .insert({
+      part_id: partId || null,
+      is_draft: !!isDraft,
+      draft_name: isDraft ? String(draftName).trim() : null,
+      draft_unit: isDraft ? (String(draftUnit || 'ea').trim() || 'ea') : null,
+      draft_department: isDraft ? (String(draftDepartment || '').trim() || null) : null,
+      draft_material_group: isDraft ? (String(draftMaterialGroup || '').trim() || null) : null,
+      quantity: qty,
+      target_location_id: targetLocationId,
+      reason: (reason || '').trim() || null,
+      requested_by: requestedBy,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+// List intake requests (manager queue). Defaults to pending. Joins the
+// requester, destination location, and (when set) the catalog part.
+export async function getIntakeRequests({ statuses = ['pending'], limit = 200 } = {}) {
+  let q = db
+    .from('inventory_intake_requests')
+    .select(`
+      *,
+      requested_by_user:users!inventory_intake_requests_requested_by_fkey(id, name, initials),
+      reviewed_by_user:users!inventory_intake_requests_reviewed_by_fkey(id, name),
+      target_location:inventory_locations!inventory_intake_requests_target_location_id_fkey(id, name, type),
+      part:parts_catalog!inventory_intake_requests_part_id_fkey(id, name, unit, is_active)
+    `)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (statuses && statuses.length > 0) q = q.in('status', statuses)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+// Approve → books the receive movement (+ creates the draft part if needed),
+// transactionally + idempotently inside the RPC. Manager identity comes from
+// auth.uid() server-side. Mirrors approveSubmission's wrapper shape.
+export async function approveIntakeRequest(id, note = null) {
+  const { data, error } = await db.rpc('approve_intake_request', {
+    p_request_id: id,
+    p_note: note || null,
+  })
+  if (error) throw error
+  return data
+}
+
+// Reject with an optional reason. No stock moves.
+export async function rejectIntakeRequest(id, note = null) {
+  const { data, error } = await db.rpc('reject_intake_request', {
+    p_request_id: id,
+    p_note: note || null,
+  })
+  if (error) throw error
+  return data
+}
