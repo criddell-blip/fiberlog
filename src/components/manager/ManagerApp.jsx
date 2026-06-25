@@ -23,20 +23,23 @@ const NAV_ITEMS = [
 ]
 
 // ─── Theme + crew-mode pills ────────────────────────────────────────────────
-// (Theme toggle currently no-ops visually — dark Console is a later phase — but
-// it's kept so the control doesn't disappear before dark mode returns.)
+// Dark-slate Console shipped, so the theme toggle is now a live control. Styled
+// with the accent (not muted) so it reads as obviously clickable and isn't
+// confused with the disabled "Crew mode" pill beside it. Label shows the mode
+// you'll switch TO; emoji flips sun/moon.
 function ThemeToggle({ darkMode, onToggle }) {
   return (
     <button
       onClick={onToggle}
       title={`Switch to ${darkMode ? 'light' : 'dark'} mode`}
       style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px',
-        borderRadius: 999, border: '1px solid var(--border2)', background: 'var(--surface)',
-        color: 'var(--muted)', cursor: 'pointer', fontSize: 11.5, fontWeight: 600, flexShrink: 0,
+        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px',
+        borderRadius: 999, border: '1.5px solid var(--accent)', background: 'var(--accent-lt)',
+        color: 'var(--accent-dk)', cursor: 'pointer', fontSize: 11.5, fontWeight: 700, flexShrink: 0,
       }}
     >
-      <Icon name="sparkle" size={13} /><span>Theme</span>
+      <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>{darkMode ? '☀️' : '🌙'}</span>
+      <span>{darkMode ? 'Light mode' : 'Dark mode'}</span>
     </button>
   )
 }
