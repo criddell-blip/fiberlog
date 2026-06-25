@@ -162,7 +162,7 @@ export const CREW_OPERATIONS = ['load', 'return', 'issue', 'scrap', 'transfer']
 // and CREW_TYPE_OPTIONS in AdminUsersView). Used by the
 // CrewTypePermissionsView matrix to render rows.
 export const CREW_TYPES = [
-  'aerial', 'underground', 'splice', 'drop',
+  'fiber_construction', 'splice', 'drop',
   'locator', 'install', 'infrastructure', 'contractor',
 ]
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { db } from '../../lib/supabase'
+import { crewTypeLabel } from '../../lib/crewTypes'
 import {
   recordMovementsBatch,
   getSonarProjectMap, setSonarProjectPhase, getPhasesWithBuckets,
@@ -725,7 +726,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
                       <option value="">— pick crew —</option>
                       {crewUsers.map(u => (
                         <option key={u.id} value={u.id}>
-                          {u.name}{u.crew_type ? ` (${u.crew_type})` : ''}{trucksByUser[u.id] ? '' : ' — no truck!'}
+                          {u.name}{u.crew_type ? ` (${crewTypeLabel(u.crew_type)})` : ''}{trucksByUser[u.id] ? '' : ' — no truck!'}
                         </option>
                       ))}
                     </select>

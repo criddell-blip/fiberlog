@@ -35,7 +35,6 @@ export default function LocationDetailPanel({
   onJumpToPart,
   onEdit,
   onRetire,
-  isOwner,
 }) {
   const { showToast, currentUser, isQtyPaused } = useApp()
   const [stock, setStock] = useState([])
@@ -226,7 +225,7 @@ export default function LocationDetailPanel({
             >
               <Icon name="edit" size={14} style={{ verticalAlign: '-2px', marginRight: 6, display: 'inline-block' }} />Edit
             </button>
-            {isOwner && onRetire && (
+            {onRetire && (
               <button
                 onClick={() => { onClose(); onRetire(location) }}
                 className="btn btn-danger"

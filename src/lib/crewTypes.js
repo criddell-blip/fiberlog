@@ -12,8 +12,7 @@
 // Keep in sync with public.users.crew_type CHECK constraint when adding
 // new field roles.
 export const VALID_FIELD_CREW_TYPES = [
-  'aerial',
-  'underground',
+  'fiber_construction',
   'splice',
   'drop',
   'locator',
@@ -21,3 +20,27 @@ export const VALID_FIELD_CREW_TYPES = [
   'fiber_tech',
   'infrastructure',
 ]
+
+// Display labels for users.crew_type. Single source of truth so the merged
+// 'fiber_construction' value never renders as the raw underscored string.
+// Falls back to a title-cased value for any crew_type not listed here.
+const CREW_TYPE_DISPLAY = {
+  fiber_construction: 'Fiber construction',
+  fiber_tech:         'Fiber tech',
+  aerial:             'Aerial',        // legacy — kept valid for back-compat
+  underground:        'Underground',   // legacy — kept valid for back-compat
+  splice:             'Splice',
+  drop:               'Drop',
+  locator:            'Locator',
+  install:            'Install',
+  infrastructure:     'Infrastructure',
+  contractor:         'Contractor',
+}
+
+export function crewTypeLabel(ct) {
+  if (!ct) return ''
+  if (CREW_TYPE_DISPLAY[ct]) return CREW_TYPE_DISPLAY[ct]
+  // Title-case an unknown value: 'some_role' → 'Some role'
+  const s = ct.replace(/_/g, ' ')
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}

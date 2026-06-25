@@ -8,11 +8,10 @@ import Icon from '../shared/Icon'
 
 export default function AdminPanel() {
   const {
-    projects, setProjects, showToast, reload, currentUser,
+    projects, setProjects, showToast, reload,
     qtyDisplayMode, qtyDisplayUpdatedAt, qtyDisplayUpdatedBy,
     setInventoryQtyDisplayMode, users,
   } = useApp()
-  const isOwner = currentUser?.role === 'owner'
   const [qtyToggling, setQtyToggling] = useState(false)
   const [selProject, setSelProject] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -303,8 +302,7 @@ export default function AdminPanel() {
             </div>
             <button
               type="button"
-              disabled={!isOwner || qtyToggling}
-              title={isOwner ? '' : 'Owner only'}
+              disabled={qtyToggling}
               onClick={async () => {
                 setQtyToggling(true)
                 try {
@@ -325,8 +323,8 @@ export default function AdminPanel() {
                 color: qtyDisplayMode === 'paused' ? 'var(--amber)' : 'var(--teal-dk)',
                 border: `1.5px solid ${qtyDisplayMode === 'paused' ? 'var(--amber)' : 'var(--teal)'}`,
                 fontWeight: 700, fontSize: 12,
-                cursor: isOwner && !qtyToggling ? 'pointer' : 'not-allowed',
-                opacity: isOwner ? 1 : 0.5,
+                cursor: qtyToggling ? 'not-allowed' : 'pointer',
+                opacity: qtyToggling ? 0.5 : 1,
                 whiteSpace: 'nowrap',
               }}
             >

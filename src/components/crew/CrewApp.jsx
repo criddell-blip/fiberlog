@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
+import { crewTypeLabel } from '../../lib/crewTypes'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 import ProjectList from './ProjectList'
@@ -153,7 +154,7 @@ function CrewSidebar({
             {currentUser?.name}
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
-            {currentUser?.crew_type || 'Crew'}
+            {crewTypeLabel(currentUser?.crew_type) || 'Crew'}
             {exitCrewMode && (
               <span style={{ marginLeft: 6, color: 'var(--teal-mid)', fontWeight: 700 }}>· acting as crew</span>
             )}

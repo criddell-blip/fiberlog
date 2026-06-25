@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { getTodaySessions, db, nextChannelSuffix } from '../../lib/supabase'
 import { useApp } from '../../AppContext'
 import Icon from '../shared/Icon'
+import { crewTypeLabel } from '../../lib/crewTypes'
 
 const STATUS_CONFIG = {
   'in-progress': { color: 'var(--accent-dk)', bg: 'var(--accent-lt)', label: 'In progress' },
@@ -228,7 +229,7 @@ export default function CrewStatus() {
                 <div>
                   <div style={{ fontWeight: 600, fontSize: 13 }}>{s.name}</div>
                   <div style={{ fontSize: 11, color: 'var(--hint)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <Icon name="users" size={12} /> {s.crew_type}
+                    <Icon name="users" size={12} /> {crewTypeLabel(s.crew_type)}
                   </div>
                 </div>
               </div>

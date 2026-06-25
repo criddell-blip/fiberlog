@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { useBackClose } from '../../lib/backStack'
+import { crewTypeLabel } from '../../lib/crewTypes'
 import {
   createUser, updateUserMetadata, deactivateUser, reactivateUser,
   resetUserPassword, setUserEmail, getAllUsers,
@@ -22,8 +23,7 @@ const ROLE_OPTIONS = [
 ]
 
 const CREW_TYPE_OPTIONS = [
-  { id: 'aerial',         label: '🏗️ Aerial' },
-  { id: 'underground',    label: '⛏️ Underground' },
+  { id: 'fiber_construction', label: '🏗️ Fiber construction' },
   { id: 'splice',         label: '🔌 Splice' },
   { id: 'drop',           label: '💧 Drop' },
   { id: 'locator',        label: '📍 Locator' },
@@ -46,9 +46,11 @@ const CREW_TYPE_OPTIONS = [
 // the only inferred type."
 function crewTypesFromName(lower) {
   const types = []
-  if (lower.includes('aerial'))         types.push('aerial')
-  if (lower.includes('underground') || /\bug\b/.test(lower) || lower.includes('/ug') || lower.includes('ug/'))
-                                        types.push('underground')
+  // aerial + underground merged into one worker class — a trailer named
+  // "Aerial/UG Shared" must yield a single 'fiber_construction' entry, not two.
+  if (lower.includes('aerial') || lower.includes('underground')
+      || /\bug\b/.test(lower) || lower.includes('/ug') || lower.includes('ug/'))
+                                        types.push('fiber_construction')
   if (lower.includes('splice'))         types.push('splice')
   if (lower.includes('drop'))           types.push('drop')
   if (lower.includes('locator'))        types.push('locator')
@@ -297,7 +299,7 @@ export default function AdminUsersView({ onBack }) {
                       }}>INACTIVE</span>}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {u.role}{u.crew_type ? ` · ${u.crew_type}` : ''} · {u.email}
+                      {u.role}{u.crew_type ? ` · ${crewTypeLabel(u.crew_type)}` : ''} · {u.email}
                     </div>
                   </div>
 
@@ -406,7 +408,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
   const [name, setName] = useState(user?.name || '')
   const [username, setUsername] = useState('')
   const [role, setRole] = useState(user?.role || 'crew')
-  const [crewType, setCrewType] = useState(user?.crew_type || 'aerial')
+  const [crewType, setCrewType] = useState(user?.crew_type || 'fiber_construction')
   // Who this user reports to. Drives CrewStatus filtering (managers see
   // only their direct reports). Empty string = unmanaged; we map to NULL
   // on save. Owners typically have no manager.
@@ -1065,7 +1067,7 @@ function DirectReportsPicker({ user, existingUsers, search, setSearch, selectedI
                     into these names, making them hard to read on the light theme. */}
                 <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{u.name}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>
-                  {u.role}{u.crew_type ? ` · ${u.crew_type}` : ''}
+                  {u.role}{u.crew_type ? ` · ${crewTypeLabel(u.crew_type)}` : ''}
                   {isMovingFromAnother && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>· will move from current manager</span>}
                 </div>
               </div>
@@ -1313,11 +1315,10 @@ function CrewPermissionsSection({ userId }) {
 // ─── Load-destinations whitelist section ──────────────────────────────────
 // Per-user list of locations this crew member can Load TO (in addition
 // to their own truck, which is always implicit). Empty list = today's
-// behavior (truck-only). Owner-only writes per RLS — for managers the
-// add/remove controls render disabled with a tooltip.
+// behavior (truck-only). Staff write per RLS (cld_staff_write = is_staff()),
+// so all managers can edit these — not just owners.
 function LoadDestinationsSection({ userId }) {
   const { currentUser } = useApp()
-  const isOwner = currentUser?.role === 'owner'
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -1358,7 +1359,6 @@ function LoadDestinationsSection({ userId }) {
   }, [allLocations, grantedIds, userId])
 
   async function persist(nextIds) {
-    if (!isOwner) return
     setSaving(true); setErr('')
     try {
       await setCrewLoadDestinations(userId, nextIds, { grantedBy: currentUser?.id || null })
@@ -1404,7 +1404,6 @@ function LoadDestinationsSection({ userId }) {
       </div>
       <div style={{ fontSize: 11, color: 'var(--hint)', marginBottom: 8 }}>
         Allowed Load targets besides this user's own truck. Empty = truck-only (default).
-        {!isOwner && ' (Owner only.)'}
       </div>
 
       {loading && (
@@ -1437,15 +1436,15 @@ function LoadDestinationsSection({ userId }) {
           </div>
           <button
             type="button"
-            disabled={!isOwner || saving}
+            disabled={saving}
             onClick={() => remove(loc.id)}
-            title={isOwner ? 'Remove' : 'Owner only'}
+            title="Remove"
             style={{
               padding: '4px 10px', fontSize: 11, fontWeight: 700,
               background: 'transparent', color: 'var(--red)',
               border: '1px solid var(--red)', borderRadius: 'var(--r-xs)',
-              cursor: isOwner && !saving ? 'pointer' : 'not-allowed',
-              opacity: isOwner ? 1 : 0.5,
+              cursor: saving ? 'not-allowed' : 'pointer',
+              opacity: saving ? 0.5 : 1,
               display: 'inline-flex', alignItems: 'center',
             }}
           >
@@ -1459,7 +1458,7 @@ function LoadDestinationsSection({ userId }) {
           <select
             value={addPickerId}
             onChange={e => setAddPickerId(e.target.value)}
-            disabled={!isOwner || saving || addOptions.length === 0}
+            disabled={saving || addOptions.length === 0}
             autoComplete="off"
             name={`load-dest-picker-${userId}`}
             style={{ flex: 1 }}
@@ -1473,11 +1472,10 @@ function LoadDestinationsSection({ userId }) {
           </select>
           <button
             type="button"
-            disabled={!isOwner || saving || !addPickerId}
+            disabled={saving || !addPickerId}
             onClick={() => add(addPickerId)}
-            title={isOwner ? '' : 'Owner only'}
             className="btn btn-ghost"
-            style={{ padding: '6px 12px', fontSize: 12, opacity: isOwner ? 1 : 0.5 }}
+            style={{ padding: '6px 12px', fontSize: 12 }}
           >
             Add
           </button>
@@ -1624,7 +1622,7 @@ function BulkAssignPullLocationSheet({ users, truckLocations, onCancel, onComple
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 13 }}>{u.name}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  {u.role}{u.crew_type ? ` · ${u.crew_type}` : ''}
+                  {u.role}{u.crew_type ? ` · ${crewTypeLabel(u.crew_type)}` : ''}
                   {u.default_pull_location_id && <> · currently assigned</>}
                 </div>
               </div>

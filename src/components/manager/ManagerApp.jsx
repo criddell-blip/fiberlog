@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { VALID_FIELD_CREW_TYPES } from '../../lib/crewTypes'
+import { VALID_FIELD_CREW_TYPES, crewTypeLabel } from '../../lib/crewTypes'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
 import { useBackClose } from '../../lib/backStack'
@@ -61,10 +61,10 @@ function SwitchToCrewButton({ currentUser, enterCrewMode }) {
       onClick={canActAsCrew ? enterCrewMode : undefined}
       disabled={!canActAsCrew}
       title={canActAsCrew
-        ? `Switch to ${currentUser.crew_type} crew view to log your own work`
+        ? `Switch to ${crewTypeLabel(currentUser.crew_type)} crew view to log your own work`
         : isRestricted
           ? 'Warehouse-only managers can\'t switch to crew mode.'
-          : 'Set a field crew_type (aerial / underground / splice / infrastructure / drop / locator / install) on your user via Admin → Users to enable.'}
+          : 'Set a field crew_type (fiber construction / splice / infrastructure / drop / locator / install / fiber tech) on your user via Admin → Users to enable.'}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px',
         borderRadius: 999, border: `1px solid ${canActAsCrew ? 'var(--accent)' : 'var(--border2)'}`,
@@ -154,14 +154,16 @@ export default function ManagerApp() {
   const { projects, loading, error, reload, currentUser, selectUser, darkMode, toggleDarkMode, enterCrewMode } = useApp()
   const isWide = useIsWide()
 
-  const isOwner = currentUser?.role === 'owner'
   // Warehouse-only managers — flag on public.users. They keep full manager
   // DB permissions but the UI only renders the Inventory tab.
   const isRestrictedToInventory = currentUser?.restricted_to_inventory === true
 
+  // Admin tab is open to all non-restricted staff (owner + manager). The
+  // owner/manager boundary is enforced elsewhere (owner-only account minting
+  // via cannotPickOwner + admin-create-user), not by hiding Admin from managers.
   const nav = isRestrictedToInventory
     ? NAV_ITEMS.filter(n => n.id === 'inventory')
-    : (isOwner ? [...NAV_ITEMS, { id: 'admin', label: 'Admin', icon: 'gear' }] : NAV_ITEMS)
+    : [...NAV_ITEMS, { id: 'admin', label: 'Admin', icon: 'gear' }]
 
   const homeTab = isRestrictedToInventory ? 'inventory' : 'submissions'
   const [tab, setTab] = useState(homeTab)

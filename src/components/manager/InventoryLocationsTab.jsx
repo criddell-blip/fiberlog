@@ -49,14 +49,13 @@ const TYPE_ICONS = {
 }
 
 export default function InventoryLocationsTab({ locations, loading, onChanged, onJumpToStock, onJumpToCount, onJumpToPart, focusJump, refreshKey }) {
-  const { users, showToast, currentUser, isQtyPaused } = useApp()
-  // Retire (deactivate) is owner-only. Managers can do everything else
-  // — edit attrs, add bins, jump to stock — but retiring a location is
-  // a destructive-by-default action since it removes the location from
-  // every UI filter and pulldown system-wide. UI gate only; if you want
-  // server-side enforcement later, add an RLS policy on
-  // inventory_locations.is_active that requires is_staff() AND owner role.
-  const isOwner = currentUser?.role === 'owner'
+  const { users, showToast, isQtyPaused } = useApp()
+  // Retire (deactivate) is open to all staff (owner + manager). It's a
+  // destructive-by-default action — it removes the location from every UI
+  // filter and pulldown system-wide — but a warehouse manager needs it to
+  // retire/decommission locations. UI gate only (none server-side); if you
+  // want enforcement later, add an RLS policy on inventory_locations.is_active
+  // requiring is_staff().
   const [editing, setEditing] = useState(null)        // location being edited (or 'new')
   const [addingBinFor, setAddingBinFor] = useState(null)  // warehouse object when adding a bin
   const [labelsFor, setLabelsFor] = useState(null)    // warehouse object when printing bin labels
@@ -578,12 +577,10 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                           onClick={stop(() => setEditing(loc))}
                           style={{ fontSize: 13, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
                         >Edit</button>
-                        {isOwner && (
-                          <button
-                            onClick={stop(() => handleDeactivate(loc))}
-                            style={{ fontSize: 13, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
-                          >Retire</button>
-                        )}
+                        <button
+                          onClick={stop(() => handleDeactivate(loc))}
+                          style={{ fontSize: 13, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                        >Retire</button>
                       </div>
 
                       {/* Bins under this warehouse — grouped by aisle,
@@ -681,12 +678,10 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                                         onClick={() => setEditing(bin)}
                                         style={{ fontSize: 13, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
                                       >Edit</button>
-                                      {isOwner && (
-                                        <button
-                                          onClick={() => handleDeactivate(bin)}
-                                          style={{ fontSize: 13, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
-                                        >Retire</button>
-                                      )}
+                                      <button
+                                        onClick={() => handleDeactivate(bin)}
+                                        style={{ fontSize: 13, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                                      >Retire</button>
                                     </div>
                                   )
                                 })}
@@ -758,7 +753,6 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
       {detailFor && (
         <LocationDetailPanel
           location={detailFor}
-          isOwner={isOwner}
           onClose={() => setDetailFor(null)}
           onJumpToStock={onJumpToStock}
           onJumpToCount={onJumpToCount}

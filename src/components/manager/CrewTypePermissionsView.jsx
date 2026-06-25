@@ -22,8 +22,7 @@ import Icon from '../shared/Icon'
 // the RPC fires async, and on failure we revert + show an error.
 
 const CREW_TYPE_LABELS = {
-  aerial:         { icon: '🏗️', label: 'Aerial' },
-  underground:    { icon: '⛏️', label: 'Underground' },
+  fiber_construction: { icon: '🏗️', label: 'Fiber construction' },
   splice:         { icon: '🔌', label: 'Splice' },
   drop:           { icon: '💧', label: 'Drop' },
   locator:        { icon: '📍', label: 'Locator' },

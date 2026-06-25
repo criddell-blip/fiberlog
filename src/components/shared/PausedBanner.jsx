@@ -7,7 +7,7 @@ import Icon from './Icon'
 // that Sage is authoritative and the qty numbers they used to see are
 // hidden by design.
 //
-// Owner sees a Resume button inline; non-owners just see the notice.
+// Staff (owner or manager) see a Resume button inline; crew just see the notice.
 export default function PausedBanner() {
   const {
     isQtyPaused, qtyDisplayUpdatedAt, qtyDisplayUpdatedBy,
@@ -15,7 +15,7 @@ export default function PausedBanner() {
   } = useApp()
   if (!isQtyPaused) return null
 
-  const isOwner = currentUser?.role === 'owner'
+  const isStaff = currentUser?.role === 'owner' || currentUser?.role === 'manager'
   const updatedByUser = qtyDisplayUpdatedBy && users
     ? users.find(u => u.id === qtyDisplayUpdatedBy)
     : null
@@ -50,7 +50,7 @@ export default function PausedBanner() {
           </span>
         )}
       </div>
-      {isOwner && (
+      {isStaff && (
         <button
           type="button"
           onClick={handleResume}
