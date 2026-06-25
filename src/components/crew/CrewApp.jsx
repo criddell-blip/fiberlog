@@ -38,6 +38,9 @@ function BackToManagerButton({ exitCrewMode, compact = false }) {
 // shows up wherever a user can flip dark/light. Without this, crew on a
 // tablet outdoors had no way to switch out of dark mode.
 function ThemeToggle({ darkMode, onToggle, compact = false }) {
+  // HIDDEN — dark-mode toggle no-ops (real bug, backlogged); dark CSS dormant.
+  return null
+  // eslint-disable-next-line no-unreachable
   return (
     <button
       onClick={onToggle}

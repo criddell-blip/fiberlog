@@ -34,6 +34,9 @@ function BackToManagerButton({ exitCrewMode, compact = false }) {
 // consistency. Both shells need this so working crews on a tablet in
 // daylight can flip out of dark mode without going to the manager portal.
 function ThemeToggle({ darkMode, onToggle, compact = false }) {
+  // HIDDEN — dark-mode toggle no-ops (real bug, backlogged); dark CSS dormant.
+  return null
+  // eslint-disable-next-line no-unreachable
   return (
     <button
       onClick={onToggle}
