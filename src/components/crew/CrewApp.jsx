@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
-import { crewTypeLabel } from '../../lib/crewTypes'
+import { crewTypeLabel, visibleProjectsForCrew } from '../../lib/crewTypes'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 import ProjectList from './ProjectList'
@@ -342,6 +342,11 @@ export default function CrewApp() {
     (currentUser?.role === 'owner' || currentUser?.role === 'manager') && viewMode === 'crew'
   const backToManager = isStaffActingAsCrew ? exitCrewMode : null
 
+  // Hide Gigwave / Fixed Wireless from crews that aren't infra/field-tech.
+  // Selection lookups below still use the full `projects` list (a hidden
+  // project simply can't be reached through the filtered sidebar).
+  const visibleProjects = visibleProjectsForCrew(projects, currentUser?.crew_type)
+
   const [screen, setScreen] = useState('projects')
   // Wide-layout main-panel view. 'projects' (default) shows the project
   // tree → TaskList/TaskWorkspace flow. 'mystock' replaces the right panel
@@ -426,7 +431,7 @@ export default function CrewApp() {
     return (
       <div style={{ position: 'fixed', inset: 0, display: 'flex', background: 'var(--bg)' }}>
         <CrewSidebar
-          projects={projects}
+          projects={visibleProjects}
           selTask={selTask}
           view={view}
           onSelectMyStock={() => setView('mystock')}

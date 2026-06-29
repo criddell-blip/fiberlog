@@ -1,11 +1,14 @@
 import { useApp } from '../../AppContext'
 import { t } from '../../lib/i18n'
+import { visibleProjectsForCrew } from '../../lib/crewTypes'
 import Icon from '../shared/Icon'
 
 const isCompletedTask = t => t.status === 'done' || t.status === 'approved'
 
 export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
-  const { projects, currentUser, lang } = useApp()
+  const { projects: allProjects, currentUser, lang } = useApp()
+  // Hide Gigwave / Fixed Wireless from crews that aren't infra/field-tech.
+  const projects = visibleProjectsForCrew(allProjects, currentUser?.crew_type)
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 
