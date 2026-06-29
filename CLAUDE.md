@@ -201,7 +201,8 @@ supabase/
 - `users_login_picker` RLS policy allows anon `SELECT` WHERE `is_active = true` (so the login screen can show the user list)
 
 ### Inventory locations & bins
-- `inventory_locations.type` CHECK: `warehouse | truck | job_site | vendor | scrap | bin`
+- `inventory_locations.type` CHECK: `warehouse | truck | group | job_site | vendor | scrap | bin`
+- **Group** locations are shared/multi-member buckets (Contractor - RNS, Crew - Construction Underground/Aerial) — distinct from personal trucks, with their own section in the Locations admin. A group's "members" are the users whose `default_pull_location_id` points at it (so `getMyTruck` resolves the group as their My-Stock with full load/return access). Manage members via the Locations admin **Members** editor (`GroupMembersSheet` in `InventoryLocationsTab.jsx`): Add reuses `bulkAssignPullLocation` (consolidates the user's personal-truck stock into the group + retires that truck); Remove clears the pointer + restores a personal truck. Helpers: `getGroupMembers`, `getMemberCountsByLocation`, `removeUserFromGroup` in `lib/inventory.js`. All shared (assigned_to-null) trucks were migrated to this type June 2026.
 - **Bins** are sub-locations under warehouses. They live in the same table with `parent_location_id` set
 - Constraints (enforced by trigger `trg_inv_location_validate_parent`):
   - Only `type='bin'` rows can have a parent (CHECK `inventory_locations_parent_consistency`)
@@ -221,7 +222,7 @@ supabase/
 ### Accounting destinations (`type='job_site'`)
 - **Project destinations** — one per active project, `project_id` set, auto-created by trigger `trg_ensure_project_job_site` on project insert/activation. Names match the project name. Receive auto-deduct transfers from approval AND `region`-routed Sonar imports.
 - **Gigwave + Fixed Wireless destinations** — these are now first-class projects (created in migration `sites_table_and_wireless_projects`) with their own auto-created project buckets. The pre-existing standalone `Gigwave` bucket from the Sonar work was reconciled to point at the new Gigwave project, so existing Sonar `gigwave` routing keeps working. Same consumption-ledger semantics as fiber regions.
-- **None destination** — non-project standalone location, still receives Sonar `none`-routed wireless. `project_id` is NULL.
+- **None destination** — RETIRED June 2026 (`is_active=false`). Fixed Wireless took over: Sonar `none`-routing now resolves the **Fixed Wireless** project bucket (the `none` token is kept internally to avoid a `sonar_routing` CHECK change; the routing option is labeled "Always Fixed Wireless"). None's residual stock was transferred to Fixed Wireless. The empty `Region None` / `Region Gigwave` buckets were retired at the same time.
 - Project destinations are the permanent record of consumption per project. Sage export pulls from them per period; they are not "drained" in the bucket sense — they are the consumption ledger keyed by project.
 
 ### Sites (infra crew's unit of work)
