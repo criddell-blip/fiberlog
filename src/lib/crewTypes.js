@@ -13,11 +13,8 @@
 // new field roles.
 export const VALID_FIELD_CREW_TYPES = [
   'fiber_construction',
-  'splice',
-  'drop',
-  'locator',
+  'field_service',   // June 2026 merged splice + drop + locator + fiber_tech
   'install',
-  'fiber_tech',
   'infrastructure',
 ]
 
@@ -26,15 +23,20 @@ export const VALID_FIELD_CREW_TYPES = [
 // Falls back to a title-cased value for any crew_type not listed here.
 const CREW_TYPE_DISPLAY = {
   fiber_construction: 'Fiber construction',
-  fiber_tech:         'Fiber tech',
-  aerial:             'Aerial',        // legacy — kept valid for back-compat
-  underground:        'Underground',   // legacy — kept valid for back-compat
-  splice:             'Splice',
-  drop:               'Drop',
-  locator:            'Locator',
+  field_service:      'Field service',
   install:            'Install',
   infrastructure:     'Infrastructure',
   contractor:         'Contractor',
+  // Legacy values — kept for back-compat rendering of historical rows; no
+  // longer assignable in the UI. June 2026 merges:
+  //   aerial + underground            → fiber_construction
+  //   splice + drop + locator + fiber_tech → field_service
+  aerial:             'Aerial',
+  underground:        'Underground',
+  splice:             'Splice',
+  drop:               'Drop',
+  locator:            'Locator',
+  fiber_tech:         'Fiber tech',
 }
 
 export function crewTypeLabel(ct) {
@@ -49,10 +51,11 @@ export function crewTypeLabel(ct) {
 // Gigwave + Fixed Wireless are wireless/infra projects identified by name
 // (projects have no type column). They clutter the fiber crews' project
 // list, so hide them from anyone whose crew_type isn't infrastructure or
-// fiber_tech. Infra users have their own shell (InfraCrewApp) and aren't
-// affected here; field techs route through CrewApp and must still see them.
+// field_service. Infra users have their own shell (InfraCrewApp) and aren't
+// affected here; field-service crew (which absorbed the old fiber_tech) route
+// through CrewApp and keep wireless visibility.
 export const WIRELESS_ONLY_PROJECTS = ['Gigwave', 'Fixed Wireless']
-export const CREW_TYPES_SEE_WIRELESS = ['infrastructure', 'fiber_tech']
+export const CREW_TYPES_SEE_WIRELESS = ['infrastructure', 'field_service']
 
 export function visibleProjectsForCrew(projects, crewType) {
   if (!Array.isArray(projects)) return projects

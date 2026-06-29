@@ -166,8 +166,8 @@ export const CREW_OPERATIONS = ['load', 'return', 'issue', 'scrap', 'transfer']
 // and CREW_TYPE_OPTIONS in AdminUsersView). Used by the
 // CrewTypePermissionsView matrix to render rows.
 export const CREW_TYPES = [
-  'fiber_construction', 'splice', 'drop',
-  'locator', 'install', 'infrastructure', 'contractor',
+  'fiber_construction', 'field_service',
+  'install', 'infrastructure', 'contractor',
 ]
 
 // Fetch all permission rows for a single user. Empty array = default-allow

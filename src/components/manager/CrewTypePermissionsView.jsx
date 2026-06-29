@@ -23,12 +23,10 @@ import Icon from '../shared/Icon'
 
 const CREW_TYPE_LABELS = {
   fiber_construction: { icon: '🏗️', label: 'Fiber construction' },
-  splice:         { icon: '🔌', label: 'Splice' },
-  drop:           { icon: '💧', label: 'Drop' },
-  locator:        { icon: '📍', label: 'Locator' },
+  field_service:  { icon: '🛠️', label: 'Field service' },
   install:        { icon: '🏠', label: 'Install' },
   infrastructure: { icon: '📡', label: 'Infrastructure' },
-  contractor:     { icon: '🛠️', label: 'Contractor' },
+  contractor:     { icon: '🧰', label: 'Contractor' },
 }
 
 // "crew_type|department" key for membership lookups.

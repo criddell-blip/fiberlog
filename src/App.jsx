@@ -50,13 +50,13 @@ function RootRouter() {
 
   // Route by role, then by crew_type for the crew shell. Infrastructure crews
   // work against sites (towers, business installs) — not phases — so they get
-  // a sites-shaped shell. Every other crew_type (fiber_construction / splice
-  // / drop / locator / contractor / install) stays on the existing CrewApp.
+  // a sites-shaped shell. Every other crew_type (fiber_construction /
+  // field_service / install / contractor) stays on the existing CrewApp.
   //
   // Working-managers toggle: if a staff user (owner/manager) has a real
   // field crew_type AND flipped viewMode='crew', send them to the crew
   // shell so they can log their own day. Auto-deduct on approval still
-  // requires their crew_type to be one of {fiber_construction, splice,
+  // requires their crew_type to be one of {fiber_construction, field_service,
   // infrastructure} (that's the RPC's guard, not enforced here).
   const isStaff = currentUser.role === 'manager' || currentUser.role === 'owner'
   // Only full-scope staff with a field crew_type may flip into the crew shell.

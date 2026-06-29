@@ -18,13 +18,10 @@ import Icon from '../shared/Icon'
 
 const CREW_TYPE_OPTIONS = [
   { id: 'fiber_construction', label: '🏗️ Fiber construction' },
-  { id: 'splice',         label: '🔌 Splice' },
-  { id: 'drop',           label: '💧 Drop' },
-  { id: 'locator',        label: '📍 Locator' },
+  { id: 'field_service',  label: '🛠️ Field service' },
   { id: 'install',        label: '🏠 Install' },
-  { id: 'fiber_tech',     label: '🧰 Fiber tech' },
   { id: 'infrastructure', label: '📡 Infrastructure (tower/site)' },
-  { id: 'contractor',     label: '🛠️ Contractor' },
+  { id: 'contractor',     label: '🧰 Contractor' },
 ]
 
 // Soft cross-crew detection: infer a likely crew_type from a trailer name's
@@ -45,12 +42,11 @@ function crewTypesFromName(lower) {
   if (lower.includes('aerial') || lower.includes('underground')
       || /\bug\b/.test(lower) || lower.includes('/ug') || lower.includes('ug/'))
                                         types.push('fiber_construction')
-  if (lower.includes('splice'))         types.push('splice')
-  if (lower.includes('drop'))           types.push('drop')
-  if (lower.includes('locator'))        types.push('locator')
+  // splice + drop + locator + fiber_tech merged into one worker class.
+  if (lower.includes('splice') || lower.includes('drop') || lower.includes('locator')
+      || lower.includes('fiber tech') || lower.includes('ftech') || lower.includes('service'))
+                                        types.push('field_service')
   if (lower.includes('install'))        types.push('install')
-  if (lower.includes('fiber tech') || lower.includes('ftech'))
-                                        types.push('fiber_tech')
   if (lower.includes('infra') || lower.includes('tower'))
                                         types.push('infrastructure')
   return types
