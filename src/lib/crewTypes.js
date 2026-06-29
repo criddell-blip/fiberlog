@@ -50,12 +50,11 @@ export function crewTypeLabel(ct) {
 // ─── Crew-mode project visibility ─────────────────────────────────────
 // Gigwave + Fixed Wireless are wireless/infra projects identified by name
 // (projects have no type column). They clutter the fiber crews' project
-// list, so hide them from anyone whose crew_type isn't infrastructure or
-// field_service. Infra users have their own shell (InfraCrewApp) and aren't
-// affected here; field-service crew (which absorbed the old fiber_tech) route
-// through CrewApp and keep wireless visibility.
+// list, so hide them from everyone except infrastructure (who have their own
+// InfraCrewApp shell anyway). field_service crew — which absorbed the old
+// fiber_tech — do NOT see wireless projects (owner's call).
 export const WIRELESS_ONLY_PROJECTS = ['Gigwave', 'Fixed Wireless']
-export const CREW_TYPES_SEE_WIRELESS = ['infrastructure', 'field_service']
+export const CREW_TYPES_SEE_WIRELESS = ['infrastructure']
 
 export function visibleProjectsForCrew(projects, crewType) {
   if (!Array.isArray(projects)) return projects
