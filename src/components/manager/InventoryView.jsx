@@ -4,6 +4,7 @@ import { useIsWide } from '../../lib/useIsWide'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 import { getLocations } from '../../lib/inventory'
+import { inventoryIsLimited } from '../../lib/access'
 import InventoryStockTab from './InventoryStockTab'
 import InventoryLocationsTab from './InventoryLocationsTab'
 import InventoryPartsTab from './InventoryPartsTab'
@@ -158,6 +159,13 @@ export default function InventoryView() {
     { id: 'footage',   label: 'Footage map', sub: 'Cable/conduit → SKU', icon: 'nut',     onClick: () => setShowFootageMap(true),     disabled: false },
   ]
 
+  // Accounting (limited) scope: read-only stock + purchase requests, and the
+  // only write action is Receive PO. Hide cycle-count/adjust/move/reconcile/
+  // sonar/sage/import/footage and the Record-movement button.
+  const limited = inventoryIsLimited(currentUser)
+  const subtabs = limited ? SUBTABS.filter(s => s.id === 'stock' || s.id === 'prs') : SUBTABS
+  const actions = limited ? ACTIONS.filter(a => a.id === 'receive') : ACTIONS
+
   // Count sub-tab takes over the full panel — its body is a scanner-driven
   // counter UI that needs every vertical pixel on mobile. Navigation back is
   // via CountTab's own "← Inventory" button.
@@ -179,15 +187,17 @@ export default function InventoryView() {
         <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.01em', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {activeLabel}
         </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => setShowRecordSheet(true)}
-          disabled={noLocations}
-          title={noLocations ? 'Create a location first' : ''}
-          style={{ height: 36, padding: '0 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap' }}
-        >
-          <Icon name="plus" size={16} /> {isWide ? 'Record movement' : 'Record'}
-        </button>
+        {!limited && (
+          <button
+            className="btn btn-primary"
+            onClick={() => setShowRecordSheet(true)}
+            disabled={noLocations}
+            title={noLocations ? 'Create a location first' : ''}
+            style={{ height: 36, padding: '0 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap' }}
+          >
+            <Icon name="plus" size={16} /> {isWide ? 'Record movement' : 'Record'}
+          </button>
+        )}
         {!isWide && (
           <button
             onClick={() => setActionMenuOpen(true)}
@@ -204,7 +214,7 @@ export default function InventoryView() {
         flexShrink: 0, display: 'flex', gap: 4, padding: '8px 16px', background: 'var(--surface)',
         borderBottom: '1px solid var(--border)', overflowX: 'auto',
       }}>
-        {SUBTABS.map(s => {
+        {subtabs.map(s => {
           const active = tab === s.id
           return (
             <button key={s.id} onClick={() => setTab(s.id)} style={{
@@ -226,7 +236,7 @@ export default function InventoryView() {
           background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexWrap: 'wrap',
         }}>
           <span className="eyebrow" style={{ marginRight: 2 }}>Actions</span>
-          {ACTIONS.map(a => (
+          {actions.map(a => (
             <button key={a.id} onClick={a.onClick} disabled={a.disabled}
               title={a.disabled ? 'Create a location first' : a.sub}
               style={{
@@ -264,6 +274,7 @@ export default function InventoryView() {
             jumpToScope={stockJump}
             onJumpToPart={jumpToPart}
             onJumpToLocation={jumpToLocation}
+            readOnly={limited}
           />
         )}
         {tab === 'locations' && (
@@ -307,7 +318,7 @@ export default function InventoryView() {
         <div className="overlay open" onClick={e => e.target === e.currentTarget && setActionMenuOpen(false)}>
           <div className="overlay-sheet">
             <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12 }}>Actions</div>
-            {ACTIONS.map(a => (
+            {actions.map(a => (
               <button key={a.id} disabled={a.disabled}
                 onClick={() => { a.onClick(); setActionMenuOpen(false) }}
                 style={{

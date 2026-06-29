@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { useBackClose } from '../../lib/backStack'
 import { crewTypeLabel } from '../../lib/crewTypes'
+import { ACCESS_TYPES, accessTypeForUser, accessTypeToFields } from '../../lib/access'
 import {
   createUser, updateUserMetadata, deactivateUser, reactivateUser,
   resetUserPassword, setUserEmail, getAllUsers,
@@ -14,13 +15,6 @@ import {
   getCrewLoadDestinations, setCrewLoadDestinations,
 } from '../../lib/inventory'
 import Icon from '../shared/Icon'
-
-const ROLE_OPTIONS = [
-  { id: 'crew',       label: 'Crew',       desc: 'Field worker' },
-  { id: 'manager',    label: 'Manager',    desc: 'Can approve, manage projects, reset passwords' },
-  { id: 'owner',      label: 'Owner',      desc: 'Full admin (can create other owners)' },
-  { id: 'contractor', label: 'Contractor', desc: 'External worker, limited access' },
-]
 
 const CREW_TYPE_OPTIONS = [
   { id: 'fiber_construction', label: '🏗️ Fiber construction' },
@@ -301,7 +295,8 @@ export default function AdminUsersView({ onBack }) {
                       }}>INACTIVE</span>}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {u.role}{u.crew_type ? ` · ${crewTypeLabel(u.crew_type)}` : ''} · {u.email}
+                      {(ACCESS_TYPES.find(a => a.id === accessTypeForUser(u))?.label) || u.role}
+                      {u.crew_type ? ` · ${crewTypeLabel(u.crew_type)}` : ''} · {u.email}
                     </div>
                   </div>
 
@@ -409,8 +404,15 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
   // we treat email as read-only and only edit metadata.
   const [name, setName] = useState(user?.name || '')
   const [username, setUsername] = useState('')
-  const [role, setRole] = useState(user?.role || 'crew')
+  // Named access type (Crew / Working manager / Warehouse / Accounting /
+  // Full manager / Owner / Contractor). Maps to {role, staff_scope, crew_type}
+  // via accessTypeToFields — see lib/access.js. Replaces the old role select +
+  // restricted_to_inventory checkbox.
+  const [accessType, setAccessType] = useState(accessTypeForUser(user))
   const [crewType, setCrewType] = useState(user?.crew_type || 'fiber_construction')
+  const selectedType = ACCESS_TYPES.find(a => a.id === accessType) || ACCESS_TYPES[0]
+  const accessFields = accessTypeToFields(accessType, crewType)
+  const role = accessFields.role   // derived; used by the existing role-gated sections
   // Who this user reports to. Drives CrewStatus filtering (managers see
   // only their direct reports). Empty string = unmanaged; we map to NULL
   // on save. Owners typically have no manager.
@@ -425,9 +427,6 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
   // stock migration + truck deactivation happen atomically.
   const [pullLocationId, setPullLocationId] = useState(user?.default_pull_location_id || '')
   const initialPullLocationId = user?.default_pull_location_id || ''
-  // Warehouse-only manager scoping. Only meaningful when role='manager';
-  // hidden + reset to false for other roles.
-  const [restrictedToInventory, setRestrictedToInventory] = useState(user?.restricted_to_inventory === true)
   // Manager-side direct reports. Multi-select that flips each crew's
   // manager_id when saved. Only meaningful for owners + managers; hidden
   // for crew/contractor. Initialized from existingUsers where manager_id
@@ -505,8 +504,8 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
       if (!password || password.length < 8) { setError('Password must be at least 8 characters'); return }
       if (usernameConflict) { setError('Username already taken'); return }
     }
-    if (!ROLE_OPTIONS.find(r => r.id === role)) { setError('Pick a role'); return }
-    if (role === 'owner' && cannotPickOwner) { setError('Only owners can create other owners'); return }
+    if (!ACCESS_TYPES.find(a => a.id === accessType)) { setError('Pick an access type'); return }
+    if (accessType === 'owner' && cannotPickOwner) { setError('Only owners can create other owners'); return }
 
     setSubmitting(true)
     try {
@@ -514,14 +513,15 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
         await onSubmit({
           name: name.trim(),
           username: username.trim().toLowerCase(),
-          role,
-          crew_type: crewType || null,
+          role: accessFields.role,
+          crew_type: accessFields.crew_type,
+          staff_scope: accessFields.staff_scope,
           password,
           initials: initials.trim() || generateInitials(name),
           language,
           is_active: isActive,
           manager_id: managerId || null,
-          restricted_to_inventory: role === 'manager' ? restrictedToInventory : false,
+          restricted_to_inventory: false,   // superseded by staff_scope
         })
       } else {
         // Pull-location change goes through the RPC (handles stock migration
@@ -537,13 +537,14 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
         }
         await onSubmit({
           name: name.trim(),
-          role,
-          crew_type: crewType || null,
+          role: accessFields.role,
+          crew_type: accessFields.crew_type,
+          staff_scope: accessFields.staff_scope,
           initials: initials.trim() || generateInitials(name),
           language,
           is_active: isActive,
           manager_id: managerId || null,
-          restricted_to_inventory: role === 'manager' ? restrictedToInventory : false,
+          restricted_to_inventory: false,   // superseded by staff_scope
         })
         // Direct-reports diff — only for owner/manager edits. Add: set
         // manager_id = this user's id on newly-checked crews. Remove: clear
@@ -689,17 +690,17 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
             </div>
           </div>
 
-          {/* Role */}
+          {/* Access type — sets role + scope + crew_type behind the scenes. */}
           <div className="field">
-            <label>Role *</label>
+            <label>Access type *</label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {ROLE_OPTIONS.map(r => {
-                const disabled = r.id === 'owner' && cannotPickOwner
-                const selected = role === r.id
+              {ACCESS_TYPES.map(a => {
+                const disabled = a.ownerOnly && cannotPickOwner
+                const selected = accessType === a.id
                 return (
                   <button
-                    key={r.id}
-                    onClick={() => !disabled && setRole(r.id)}
+                    key={a.id}
+                    onClick={() => !disabled && setAccessType(a.id)}
                     disabled={disabled}
                     style={{
                       textAlign: 'left',
@@ -711,56 +712,35 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
                     }}
                   >
                     <div style={{ fontWeight: 700, fontSize: 13, color: selected ? 'var(--orange)' : 'var(--text)' }}>
-                      {r.label}{disabled ? ' (owner-only)' : ''}
+                      {a.label}{disabled ? ' (owner-only)' : ''}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>{r.desc}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>{a.desc}</div>
                   </button>
                 )
               })}
             </div>
           </div>
 
-          {/* Warehouse-only manager toggle. Only relevant when role='manager'. */}
-          {role === 'manager' && (
+          {/* Crew type — only for the access types that carry one (Crew +
+              Working manager). Everyone else persists crew_type = NULL. */}
+          {selectedType.needsCrew && (
             <div className="field">
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={restrictedToInventory}
-                  onChange={e => setRestrictedToInventory(e.target.checked)}
-                  style={{ marginTop: 2, cursor: 'pointer' }}
-                />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 13 }}>
-                    <Icon name="box" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Warehouse-only manager
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 2, lineHeight: 1.4 }}>
-                    Hides every tab except <strong>Inventory</strong>. They keep full inventory
-                    write access (receive POs, reconcile, record movements, Sage export) but
-                    don't see Approvals, Crew, Projects, Reports, or Assemblies.
-                  </div>
-                </div>
-              </label>
+              <label>Crew type</label>
+              <select
+                value={crewType}
+                onChange={e => setCrewType(e.target.value)}
+                style={{ width: '100%' }}
+              >
+                <option value="">— None —</option>
+                {CREW_TYPE_OPTIONS.map(ct => (
+                  <option key={ct.id} value={ct.id}>{ct.label}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
+                Determines which assemblies crew see, and (for working managers) which crew view they switch into.
+              </div>
             </div>
           )}
-
-          {/* Crew type */}
-          <div className="field">
-            <label>Crew type</label>
-            <select
-              value={crewType}
-              onChange={e => setCrewType(e.target.value)}
-              style={{ width: '100%' }}
-            >
-              <option value="">— None —</option>
-              {CREW_TYPE_OPTIONS.map(ct => (
-                <option key={ct.id} value={ct.id}>{ct.label}</option>
-              ))}
-            </select>
-            <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
-              For managers and owners this is informational. For crew it determines which assemblies they see.
-            </div>
-          </div>
 
           {/* Pull materials from — only shown in edit mode. New users default
               to personal truck (auto-created by trigger); admin can flip

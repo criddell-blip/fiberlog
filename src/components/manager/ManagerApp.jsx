@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { VALID_FIELD_CREW_TYPES, crewTypeLabel } from '../../lib/crewTypes'
+import { crewTypeLabel } from '../../lib/crewTypes'
+import { visibleManagerTabs, canActAsCrew } from '../../lib/access'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
 import { useBackClose } from '../../lib/backStack'
@@ -52,25 +53,22 @@ function ThemeToggle({ darkMode, onToggle }) {
 }
 
 function SwitchToCrewButton({ currentUser, enterCrewMode }) {
-  // Keep this guard in sync with App.jsx's canActAsCrew — a warehouse-only
-  // (restricted_to_inventory) manager can't act as crew even with a crew_type.
-  const isRestricted = currentUser?.restricted_to_inventory === true
-  const canActAsCrew = VALID_FIELD_CREW_TYPES.includes(currentUser?.crew_type) && !isRestricted
+  // Single source of truth: only full-scope staff with a field crew_type may
+  // act as crew (warehouse + accounting are excluded by canActAsCrew).
+  const canCrew = canActAsCrew(currentUser)
   return (
     <button
-      onClick={canActAsCrew ? enterCrewMode : undefined}
-      disabled={!canActAsCrew}
-      title={canActAsCrew
+      onClick={canCrew ? enterCrewMode : undefined}
+      disabled={!canCrew}
+      title={canCrew
         ? `Switch to ${crewTypeLabel(currentUser.crew_type)} crew view to log your own work`
-        : isRestricted
-          ? 'Warehouse-only managers can\'t switch to crew mode.'
-          : 'Set a field crew_type (fiber construction / splice / infrastructure / drop / locator / install / fiber tech) on your user via Admin → Users to enable.'}
+        : 'Only working managers (full access + a field crew_type) can switch to crew mode.'}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px',
-        borderRadius: 999, border: `1px solid ${canActAsCrew ? 'var(--accent)' : 'var(--border2)'}`,
-        background: canActAsCrew ? 'var(--accent-lt)' : 'transparent',
-        color: canActAsCrew ? 'var(--accent-dk)' : 'var(--hint)',
-        cursor: canActAsCrew ? 'pointer' : 'not-allowed', fontSize: 11.5, fontWeight: 600, flexShrink: 0,
+        borderRadius: 999, border: `1px solid ${canCrew ? 'var(--accent)' : 'var(--border2)'}`,
+        background: canCrew ? 'var(--accent-lt)' : 'transparent',
+        color: canCrew ? 'var(--accent-dk)' : 'var(--hint)',
+        cursor: canCrew ? 'pointer' : 'not-allowed', fontSize: 11.5, fontWeight: 600, flexShrink: 0,
       }}>
       <Icon name="truck" size={13} /><span>Crew mode</span>
     </button>
@@ -154,25 +152,25 @@ export default function ManagerApp() {
   const { projects, loading, error, reload, currentUser, selectUser, darkMode, toggleDarkMode, enterCrewMode } = useApp()
   const isWide = useIsWide()
 
-  // Warehouse-only managers — flag on public.users. They keep full manager
-  // DB permissions but the UI only renders the Inventory tab.
-  const isRestrictedToInventory = currentUser?.restricted_to_inventory === true
+  // Visible tabs come from the staff access scope (see lib/access.js):
+  //   full       → all tabs + Admin
+  //   warehouse  → Inventory + Reports + Admin
+  //   accounting → Reports + Inventory (limited inside InventoryView)
+  // The owner/manager boundary (owner-only account minting) is enforced
+  // elsewhere (cannotPickOwner + admin-create-user), not by hiding Admin.
+  const visibleTabIds = visibleManagerTabs(currentUser)
+  const TAB_DEFS = [...NAV_ITEMS, { id: 'admin', label: 'Admin', icon: 'gear' }]
+  const nav = TAB_DEFS.filter(t => visibleTabIds.includes(t.id))
 
-  // Admin tab is open to all non-restricted staff (owner + manager). The
-  // owner/manager boundary is enforced elsewhere (owner-only account minting
-  // via cannotPickOwner + admin-create-user), not by hiding Admin from managers.
-  const nav = isRestrictedToInventory
-    ? NAV_ITEMS.filter(n => n.id === 'inventory')
-    : [...NAV_ITEMS, { id: 'admin', label: 'Admin', icon: 'gear' }]
-
-  const homeTab = isRestrictedToInventory ? 'inventory' : 'submissions'
+  const homeTab = visibleTabIds[0] || 'inventory'
   const [tab, setTab] = useState(homeTab)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
-  // Defensive: a restricted user can only ever be on inventory.
+  // Defensive: keep the active tab within the allowed set (e.g. if scope changes).
   useEffect(() => {
-    if (isRestrictedToInventory && tab !== 'inventory') setTab('inventory')
-  }, [isRestrictedToInventory, tab])
+    if (!visibleTabIds.includes(tab)) setTab(homeTab)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.role, currentUser?.staff_scope, currentUser?.restricted_to_inventory, tab])
 
   // Back button: phone drawer closes first; otherwise a non-home tab returns
   // to the home tab — on BOTH layouts now (the persistent desktop sidebar no

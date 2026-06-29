@@ -5,7 +5,7 @@ import ManagerApp from './components/manager/ManagerApp'
 import Login from './Login'
 import SetNewPassword from './SetNewPassword'
 import Icon from './components/shared/Icon'
-import { VALID_FIELD_CREW_TYPES } from './lib/crewTypes'
+import { canActAsCrew } from './lib/access'
 import './styles/global.css'
 
 function RootRouter() {
@@ -59,14 +59,10 @@ function RootRouter() {
   // requires their crew_type to be one of {fiber_construction, splice,
   // infrastructure} (that's the RPC's guard, not enforced here).
   const isStaff = currentUser.role === 'manager' || currentUser.role === 'owner'
-  // A warehouse-only manager (restricted_to_inventory) must NOT be able to flip
-  // into the crew shell even if they happen to carry a field crew_type — that
-  // would bypass their inventory-only scoping. Mirror this guard in
-  // ManagerApp's SwitchToCrewButton.
-  const canActAsCrew = isStaff
-    && VALID_FIELD_CREW_TYPES.includes(currentUser.crew_type)
-    && !currentUser.restricted_to_inventory
-  if (isStaff && viewMode === 'crew' && canActAsCrew) {
+  // Only full-scope staff with a field crew_type may flip into the crew shell.
+  // Warehouse + accounting staff never act as crew (canActAsCrew enforces the
+  // staff_scope check). Mirror this in ManagerApp's SwitchToCrewButton.
+  if (isStaff && viewMode === 'crew' && canActAsCrew(currentUser)) {
     return currentUser.crew_type === 'infrastructure' ? <InfraCrewApp /> : <CrewApp />
   }
   if (isStaff) return <ManagerApp />

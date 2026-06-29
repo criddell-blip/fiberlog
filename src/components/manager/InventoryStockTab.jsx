@@ -46,7 +46,7 @@ function stockStatus(r) {
 const SUBMODE_ROLLUP = 'rollup'
 const SUBMODE_UNBINNED = 'unbinned'
 
-export default function InventoryStockTab({ locations, locationsLoading, refreshKey, jumpToScope, onJumpToPart, onJumpToLocation }) {
+export default function InventoryStockTab({ locations, locationsLoading, refreshKey, jumpToScope, onJumpToPart, onJumpToLocation, readOnly = false }) {
   const { showToast, currentUser, isQtyPaused } = useApp()
   // Initialize scope from jumpToScope so the very first load fires with
   // the right scope — avoids the race where the parent flipped tabs +
@@ -630,15 +630,17 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
           <div style={{ fontWeight: 700, fontSize: 14, color: '#fff', flex: 1 }}>
             {selectedCount} selected
           </div>
-          <button
-            onClick={() => setShowBulkMove(true)}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 7,
-              padding: '8px 14px', borderRadius: 8, border: 'none',
-              background: 'var(--accent)', color: '#fff',
-              fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
-            }}
-          ><Icon name="move" size={15} /> Bulk move</button>
+          {!readOnly && (
+            <button
+              onClick={() => setShowBulkMove(true)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7,
+                padding: '8px 14px', borderRadius: 8, border: 'none',
+                background: 'var(--accent)', color: '#fff',
+                fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+              }}
+            ><Icon name="move" size={15} /> Bulk move</button>
+          )}
           <button
             onClick={() => setShowPrSheet(true)}
             title="Create a purchase request seeded with the selected parts"

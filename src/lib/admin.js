@@ -32,7 +32,7 @@ export function generateInitials(name) {
 export async function createUser({
   name, username, role, crew_type, password,
   initials, language, is_active,
-  restricted_to_inventory,
+  restricted_to_inventory, staff_scope,
 }) {
   const { data: { session } } = await db.auth.getSession()
   if (!session) throw new Error('Not signed in')
@@ -54,15 +54,19 @@ export async function createUser({
   const result = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`)
 
-  // The edge function doesn't accept restricted_to_inventory (would need
-  // a redeploy to add). When the flag is true, follow up with a direct
-  // metadata update — RLS on users.update allows staff writes.
-  if (restricted_to_inventory && result?.user_id) {
+  // The edge function doesn't accept restricted_to_inventory / staff_scope
+  // (would need a redeploy to add). Follow up with a direct metadata update
+  // for whichever scoping fields are set — RLS on users.update allows staff
+  // writes.
+  const scopeUpdates = {}
+  if (restricted_to_inventory) scopeUpdates.restricted_to_inventory = true
+  if (staff_scope) scopeUpdates.staff_scope = staff_scope
+  if (Object.keys(scopeUpdates).length && result?.user_id) {
     try {
-      await updateUserMetadata(result.user_id, { restricted_to_inventory: true })
+      await updateUserMetadata(result.user_id, scopeUpdates)
     } catch (e) {
-      // Non-fatal: user was created OK, just flip the toggle by hand
-      console.warn('Created user but failed to set restricted_to_inventory:', e)
+      // Non-fatal: user was created OK, just set the scope by hand
+      console.warn('Created user but failed to set access scope:', e)
     }
   }
   return result
@@ -74,7 +78,7 @@ export async function createUser({
 // service_role). Password resets go through admin-set-password.
 export async function updateUserMetadata(userId, updates) {
   const allowed = {}
-  for (const key of ['name', 'initials', 'role', 'crew_type', 'language', 'is_active', 'manager_id', 'restricted_to_inventory']) {
+  for (const key of ['name', 'initials', 'role', 'crew_type', 'language', 'is_active', 'manager_id', 'restricted_to_inventory', 'staff_scope']) {
     if (key in updates) allowed[key] = updates[key]
   }
   const { data, error } = await db
