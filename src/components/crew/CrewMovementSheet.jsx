@@ -120,9 +120,11 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
         const filtered = all.filter(l => {
           if (l.id === myTruck?.id) return false  // can't move to/from yourself
           if (isReturn) return l.type === 'warehouse' || l.type === 'bin'
-          // Load: warehouses + bins + rollup buckets (truck without assigned_to)
+          // Load: warehouses + bins + shared buckets — group locations and the
+          // legacy rollup trucks (truck without an assigned owner).
           if (l.type === 'warehouse') return true
           if (l.type === 'bin') return true
+          if (l.type === 'group') return true
           if (l.type === 'truck' && !l.assigned_to) return true
           return false
         })

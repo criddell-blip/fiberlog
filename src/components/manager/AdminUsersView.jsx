@@ -90,7 +90,9 @@ export default function AdminUsersView({ onBack }) {
         getLocations(),
       ])
       setUsers(all)
-      setTruckLocations((allLocs || []).filter(l => l.type === 'truck' && l.is_active))
+      // Trucks + group locations are both valid "pull from" targets. Groups
+      // are shared/multi-member buckets (Contractor - RNS, etc.).
+      setTruckLocations((allLocs || []).filter(l => (l.type === 'truck' || l.type === 'group') && l.is_active))
     } catch (e) {
       showToast('Failed to load users: ' + e.message)
     } finally {
@@ -777,15 +779,17 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
                 disabled={truckLocations.length === 0}
               >
                 <option value="">— Personal truck (default) —</option>
+                {/* The user's own personal truck (if any) first. */}
                 {truckLocations
-                  .filter(l => !l.assigned_to || l.assigned_to === user?.id)
+                  .filter(l => l.assigned_to === user?.id)
                   .map(l => (
                     <option key={l.id} value={l.id}>
-                      🚚 {l.name}{l.assigned_to === user?.id ? ' (their personal truck)' : ''}
+                      🚚 {l.name} (their personal truck)
                     </option>
                   ))}
+                {/* Shared targets: group locations + any other crew's/unassigned truck. */}
                 {truckLocations
-                  .filter(l => l.assigned_to && l.assigned_to !== user?.id)
+                  .filter(l => l.assigned_to !== user?.id)
                   .map(l => (
                     <option key={l.id} value={l.id}>
                       👥 {l.name} (shared)

@@ -3,7 +3,9 @@ import { useApp } from '../../AppContext'
 import {
   createLocation, updateLocation, deactivateLocation, deactivateLocationWithRecovery,
   getBinsForWarehouse, getStockCountsByLocation, getStockByLocation,
+  getGroupMembers, getMemberCountsByLocation, removeUserFromGroup, bulkAssignPullLocation,
 } from '../../lib/inventory'
+import { crewTypeLabel } from '../../lib/crewTypes'
 import BinLabelSheet from '../cycleCount/BinLabelSheet'
 import AisleSignSheet from './AisleSignSheet'
 import LocationDetailPanel from './LocationDetailPanel'
@@ -14,6 +16,7 @@ import Icon from '../shared/Icon'
 const TYPE_ICON_NAME = {
   warehouse: 'warehouse',
   truck:     'truck',
+  group:     'box',
   job_site:  'pin',
   vendor:    'warehouse',
   scrap:     'x',
@@ -33,6 +36,7 @@ function locActionChip() {
 const TYPE_LABELS = {
   warehouse: 'Warehouse',
   truck:     'Truck',
+  group:     'Group',
   job_site:  'Job site',
   vendor:    'Vendor',
   scrap:     'Scrap',
@@ -42,6 +46,7 @@ const TYPE_LABELS = {
 const TYPE_ICONS = {
   warehouse: '🏭',
   truck:     '🚚',
+  group:     '👥',
   job_site:  '📍',
   vendor:    '🏢',
   scrap:     '🗑️',
@@ -71,6 +76,13 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   // Stock summary counts per location id. Refreshed alongside locations
   // and after any movement (refreshKey bumps).
   const [stockCounts, setStockCounts] = useState(() => new Map())
+
+  // Member counts per group location (users whose default_pull_location_id
+  // points at it). Drives the group-row badge. `membersFor` holds the group
+  // whose Members editor sheet is open.
+  const [memberCounts, setMemberCounts] = useState(() => new Map())
+  const [membersFor, setMembersFor] = useState(null)
+  const [membersRefresh, setMembersRefresh] = useState(0)
 
   // Warehouse + aisle collapse state. With 165+ bins under Main Warehouse,
   // a flat expanded list is a scroll wall. Default: all warehouses and
@@ -142,6 +154,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   useBackClose(editing ? 1 : 0, () => setEditing(null))
   useBackClose(addingBinFor ? 1 : 0, () => setAddingBinFor(null))
   useBackClose(retiring ? 1 : 0, () => setRetiring(null))
+  useBackClose(membersFor ? 1 : 0, () => setMembersFor(null))
 
   useEffect(() => {
     let cancelled = false
@@ -150,6 +163,17 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
       .catch(e => console.warn('Stock counts failed:', e))
     return () => { cancelled = true }
   }, [locations, refreshKey])
+
+  // Member counts for group locations — for the row badge. Refreshes when
+  // locations change or membership is edited (membersRefresh bumps).
+  useEffect(() => {
+    let cancelled = false
+    const groupIds = locations.filter(l => l.type === 'group').map(l => l.id)
+    getMemberCountsByLocation(groupIds)
+      .then(m => { if (!cancelled) setMemberCounts(m) })
+      .catch(e => console.warn('Member counts failed:', e))
+    return () => { cancelled = true }
+  }, [locations, refreshKey, membersRefresh])
 
   // Launcher / cross-link focus. When the user picks a location in the
   // launcher, open its detail panel — that's the natural "look at this
@@ -396,7 +420,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
         </div>
       ) : (
         <>
-          {['warehouse', 'truck', 'job_site', 'vendor', 'scrap'].map(type => {
+          {['warehouse', 'truck', 'group', 'job_site', 'vendor', 'scrap'].map(type => {
             const list = byType[type] || []
             if (list.length === 0) return null
             const isSectionExpanded = expandedSections.has(type)
@@ -523,6 +547,21 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                                 }}>
                                 👤 {loc.assigned_user ? loc.assigned_user.name : 'Unassigned'}
                               </button>
+                            ) : type === 'group' ? (
+                              <button
+                                onClick={stop(() => setMembersFor(loc))}
+                                title="Click to manage members"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                                  padding: '2px 8px', borderRadius: 999,
+                                  background: (memberCounts.get(loc.id) || 0) > 0 ? 'var(--teal-lt)' : 'var(--amber-lt)',
+                                  color: (memberCounts.get(loc.id) || 0) > 0 ? 'var(--teal-mid)' : 'var(--amber)',
+                                  border: `1px solid ${(memberCounts.get(loc.id) || 0) > 0 ? 'var(--teal)' : 'var(--amber)'}`,
+                                  fontSize: 11, fontWeight: 700,
+                                  cursor: 'pointer',
+                                }}>
+                                👥 {(memberCounts.get(loc.id) || 0)} member{(memberCounts.get(loc.id) || 0) === 1 ? '' : 's'}
+                              </button>
                             ) : (
                               <span>
                                 {loc.assigned_user ? `Assigned to ${loc.assigned_user.name}` : (loc.notes || '—')}
@@ -549,6 +588,11 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                         <button onClick={stop(() => setDetailFor(loc))} title="Open details panel — view stock, count, export, edit" style={locActionChip()}>
                           <Icon name="layout" size={14} /> Details
                         </button>
+                        {type === 'group' && (
+                          <button onClick={stop(() => setMembersFor(loc))} title="Manage who pulls from this shared location" style={locActionChip()}>
+                            <Icon name="users" size={14} /> Members
+                          </button>
+                        )}
                         {onJumpToStock && rollup && rollup.distinctParts > 0 && (
                           <button onClick={stop(() => onJumpToStock(loc.id))} title="View stock at this location" style={locActionChip()}>
                             <Icon name="box" size={14} /> Stock
@@ -759,6 +803,16 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
           onJumpToPart={onJumpToPart}
           onEdit={(loc) => setEditing(loc)}
           onRetire={(loc) => handleDeactivate(loc)}
+        />
+      )}
+
+      {membersFor && (
+        <GroupMembersSheet
+          group={membersFor}
+          allUsers={users}
+          onClose={() => setMembersFor(null)}
+          onChanged={() => { setMembersRefresh(k => k + 1); onChanged() }}
+          showToast={showToast}
         />
       )}
 
@@ -981,7 +1035,7 @@ function LocationFormSheet({ location, usersWithoutTruck, saving, onCancel, onSa
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 6 }}>Type</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {/* Bins are added via the per-warehouse "+ Bin" action, not here */}
-            {['warehouse','truck','job_site','vendor','scrap'].map(t => (
+            {['warehouse','truck','group','job_site','vendor','scrap'].map(t => (
               <button key={t} onClick={() => handleTypeChange(t)} style={{
                 padding: '6px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
                 border: `1.5px solid ${type === t ? 'var(--orange)' : 'var(--border2)'}`,
@@ -1274,5 +1328,152 @@ function LastCountedPill({ ts }) {
         counted {label}
       </span>
     </span>
+  )
+}
+
+// ─── GroupMembersSheet ──────────────────────────────────────────────────
+// Manage who pulls from a shared group location. "Members" are the users
+// whose default_pull_location_id points at this group. Add reuses
+// bulkAssignPullLocation (consolidates their personal-truck stock into the
+// group + retires that truck); Remove clears the pointer (and re-gives them
+// a personal truck if they have none). Stock stays in the group pool either
+// way — removing a member doesn't extract their share.
+function GroupMembersSheet({ group, allUsers = [], onClose, onChanged, showToast }) {
+  const [members, setMembers] = useState(null)   // null = loading
+  const [busy, setBusy] = useState(false)
+  const [toAdd, setToAdd] = useState(() => new Set())
+
+  async function reload() {
+    try {
+      const list = await getGroupMembers(group.id)
+      setMembers(list)
+    } catch (e) {
+      showToast?.('Failed to load members: ' + e.message)
+      setMembers([])
+    }
+  }
+  useEffect(() => { reload() /* eslint-disable-next-line */ }, [group.id])
+
+  const memberIds = new Set((members || []).map(m => m.id))
+  // Eligible to add: active users not already pulling from this group.
+  const eligible = (allUsers || [])
+    .filter(u => u.is_active && !memberIds.has(u.id))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+
+  function toggleAdd(id) {
+    setToAdd(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  async function handleAdd() {
+    if (toAdd.size === 0) return
+    setBusy(true)
+    try {
+      await bulkAssignPullLocation({ userIds: [...toAdd], locationId: group.id })
+      setToAdd(new Set())
+      await reload()
+      onChanged?.()
+      showToast?.('Members added')
+    } catch (e) {
+      showToast?.('Add failed: ' + e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleRemove(userId, name) {
+    if (!window.confirm(`Remove ${name} from ${group.name}? Their stock stays in the shared pool; they'll fall back to a personal truck.`)) return
+    setBusy(true)
+    try {
+      await removeUserFromGroup(userId)
+      await reload()
+      onChanged?.()
+    } catch (e) {
+      showToast?.('Remove failed: ' + e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="overlay-sheet">
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>👥 {group.name}</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
+          Members pull from and return to this shared location — it shows as their My Stock.
+        </div>
+
+        {/* Current members */}
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>
+          Members {members ? `(${members.length})` : ''}
+        </div>
+        {members === null ? (
+          <div style={{ color: 'var(--hint)', fontSize: 13, padding: '8px 0' }}>Loading…</div>
+        ) : members.length === 0 ? (
+          <div style={{ color: 'var(--hint)', fontSize: 13, padding: '8px 0' }}>No members yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+            {members.map(m => (
+              <div key={m.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '8px 10px', background: 'var(--surface)',
+                border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{m.name}</div>
+                  {m.crew_type && (
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{crewTypeLabel(m.crew_type)}</div>
+                  )}
+                </div>
+                <button
+                  onClick={() => handleRemove(m.id, m.name)}
+                  disabled={busy}
+                  style={{
+                    fontSize: 12, fontWeight: 600, color: 'var(--red)',
+                    background: 'var(--red-lt)', border: '1px solid var(--red)',
+                    borderRadius: 8, padding: '4px 10px', cursor: busy ? 'default' : 'pointer',
+                  }}>Remove</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Add members */}
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', margin: '6px 0' }}>Add members</div>
+        <div style={{ fontSize: 11, color: 'var(--hint)', marginBottom: 8 }}>
+          Adding a member moves any stock on their personal truck into this group and retires that truck.
+        </div>
+        {eligible.length === 0 ? (
+          <div style={{ color: 'var(--hint)', fontSize: 13 }}>No eligible users to add.</div>
+        ) : (
+          <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: 6 }}>
+            {eligible.map(u => (
+              <label key={u.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
+                borderRadius: 'var(--r-xs)', cursor: 'pointer',
+                background: toAdd.has(u.id) ? 'var(--orange-lt)' : 'transparent',
+              }}>
+                <input type="checkbox" checked={toAdd.has(u.id)} onChange={() => toggleAdd(u.id)} />
+                <span style={{ flex: 1, fontSize: 13 }}>{u.name}</span>
+                {u.crew_type && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{crewTypeLabel(u.crew_type)}</span>}
+              </label>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Close</button>
+          <button
+            className="btn btn-primary"
+            style={{ flex: 2 }}
+            onClick={handleAdd}
+            disabled={busy || toAdd.size === 0}
+          >{busy ? 'Working…' : `Add ${toAdd.size || ''} member${toAdd.size === 1 ? '' : 's'}`}</button>
+        </div>
+      </div>
+    </div>
   )
 }

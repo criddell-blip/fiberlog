@@ -55,7 +55,7 @@ export async function getLocations(opts = {}) {
   if (!includeBins)     q = q.is('parent_location_id', null)
   const { data, error } = await q
   if (error) throw error
-  const typeOrder = { warehouse: 0, truck: 1, job_site: 2, vendor: 3, scrap: 4, bin: 5 }
+  const typeOrder = { warehouse: 0, truck: 1, group: 2, job_site: 3, vendor: 4, scrap: 5, bin: 6 }
   return (data || []).sort((a, b) => {
     const t = (typeOrder[a.type] ?? 9) - (typeOrder[b.type] ?? 9)
     if (t !== 0) return t
@@ -898,6 +898,67 @@ export async function bulkAssignPullLocation({ userIds, locationId }) {
   return data
 }
 
+// ─── Group location membership ────────────────────────────────────────
+// A group location's "members" are the users whose default_pull_location_id
+// points at it (so getMyTruck resolves the group as their My-Stock). Adding
+// a member reuses bulkAssignPullLocation (consolidates their personal-truck
+// stock into the group + retires that truck — shared-truck semantics).
+
+// Members of one group location.
+export async function getGroupMembers(locationId) {
+  if (!locationId) return []
+  const { data, error } = await db
+    .from('users')
+    .select('id, name, initials, crew_type, is_active')
+    .eq('default_pull_location_id', locationId)
+    .order('name')
+  if (error) throw error
+  return data || []
+}
+
+// Member counts for many locations at once → Map<location_id, count>.
+// Used for the group-row badge in the Locations admin.
+export async function getMemberCountsByLocation(locationIds) {
+  const ids = (locationIds || []).filter(Boolean)
+  if (ids.length === 0) return new Map()
+  const { data, error } = await db
+    .from('users')
+    .select('default_pull_location_id')
+    .in('default_pull_location_id', ids)
+  if (error) throw error
+  const m = new Map()
+  for (const r of data || []) {
+    m.set(r.default_pull_location_id, (m.get(r.default_pull_location_id) || 0) + 1)
+  }
+  return m
+}
+
+// Remove a user from a group: clear the pointer and make sure they still
+// have a personal truck to fall back to (getMyTruck step 2). Stock stays in
+// the group — removing someone doesn't extract their share from the pool.
+export async function removeUserFromGroup(userId) {
+  if (!userId) throw new Error('userId required')
+  const { error: uErr } = await db
+    .from('users')
+    .update({ default_pull_location_id: null })
+    .eq('id', userId)
+  if (uErr) throw uErr
+
+  const { data: existing, error: tErr } = await db
+    .from('inventory_locations')
+    .select('id')
+    .eq('assigned_to', userId)
+    .eq('type', 'truck')
+    .eq('is_active', true)
+    .limit(1)
+  if (tErr) throw tErr
+  if (!existing || existing.length === 0) {
+    const { data: u } = await db.from('users').select('name').eq('id', userId).maybeSingle()
+    const first = (u?.name || 'Crew').split(' ')[0]
+    await createLocation({ name: `${first}'s truck`, type: 'truck', assigned_to: userId })
+  }
+}
+
 // Build + download an audit-format CSV scoped to one location. Same row
 // shape as InventoryAuditTab's cross-location export so the resulting
 // file imports cleanly into the existing Reconcile sheet flow.
@@ -1101,18 +1162,13 @@ export async function getMyAllowedLoadDestinations() {
   if (!session?.user?.id) return []
   const userId = session.user.id
 
-  // Three parallel flat queries: own truck, whitelist row IDs, all
-  // active locations (for resolving names / parent names). Cheaper and
-  // more robust than an embedded join (which fails if the FK name isn't
-  // exactly as PostgREST expects).
-  const [truckRes, wlRes, locsRes] = await Promise.all([
-    db.from('inventory_locations')
-      .select('id, name, type, parent_location_id')
-      .eq('assigned_to', userId)
-      .eq('type', 'truck')
-      .eq('is_active', true)
-      .order('created_at', { ascending: true })
-      .limit(1),
+  // Resolve the caller's "home" load target via getMyTruck — that honors
+  // users.default_pull_location_id, so a member of a shared group location
+  // gets the group as their primary destination (not just a personal truck).
+  // Plus the whitelist row IDs and all active locations (for name/parent
+  // resolution). Flat queries — cheaper/more robust than an embedded join.
+  const [home, wlRes, locsRes] = await Promise.all([
+    getMyTruck(),
     db.from('crew_load_destinations')
       .select('location_id')
       .eq('user_id', userId),
@@ -1120,7 +1176,6 @@ export async function getMyAllowedLoadDestinations() {
       .select('id, name, type, parent_location_id, is_active')
       .eq('is_active', true),
   ])
-  if (truckRes.error) throw truckRes.error
   if (wlRes.error) throw wlRes.error
   if (locsRes.error) throw locsRes.error
 
@@ -1128,17 +1183,16 @@ export async function getMyAllowedLoadDestinations() {
   const parentNameById = new Map(
     (locsRes.data || []).filter(l => l.type === 'warehouse').map(l => [l.id, l.name])
   )
-  const truck = truckRes.data?.[0]
 
   const out = []
-  if (truck) {
+  if (home) {
     out.push({
-      id: truck.id, name: truck.name, type: truck.type,
+      id: home.id, name: home.name, type: home.type,
       parentName: null, isOwnTruck: true,
     })
   }
   for (const row of wlRes.data || []) {
-    if (truck && row.location_id === truck.id) continue  // de-dup
+    if (home && row.location_id === home.id) continue  // de-dup
     const loc = locById.get(row.location_id)
     if (!loc) continue  // inactive or deleted; skip
     out.push({
