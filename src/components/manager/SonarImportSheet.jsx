@@ -679,9 +679,13 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             break
           }
           case 'none': {
-            const b = buckets.find(b => b.name === 'None')
-            if (b) { destId = b.id; destReason = 'policy: none' }
-            else status = 'no-none-bucket'
+            // Legacy token 'none' now means "Fixed Wireless catch-all" — the
+            // standalone "None" bucket was retired and Fixed Wireless took
+            // over everything it routed. (Token kept to avoid a sonar_routing
+            // CHECK migration; see SONAR_ROUTING_OPTIONS in lib/inventory.js.)
+            const b = buckets.find(b => b.name === 'Fixed Wireless')
+            if (b) { destId = b.id; destReason = 'policy: fixed wireless' }
+            else status = 'no-fixed-wireless-bucket'
             break
           }
           case 'region': {
@@ -1505,7 +1509,7 @@ function StatusBadge({ status }) {
     'no-source-location': { label: 'no source location', color: 'var(--amber)', bg: 'var(--amber-lt)' },
     'already-imported': { label: 'already imported', color: 'var(--muted)', bg: 'var(--gray-lt)' },
     'no-gigwave-bucket': { label: 'no Gigwave bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
-    'no-none-bucket':    { label: 'no None bucket',    color: 'var(--red)', bg: 'var(--red-lt)' },
+    'no-fixed-wireless-bucket': { label: 'no Fixed Wireless bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
     'unresolved':     { label: 'unresolved',      color: 'var(--amber)',    bg: 'var(--amber-lt)' },
   }
   const m = map[status] || map.ready

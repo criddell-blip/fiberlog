@@ -315,7 +315,9 @@ export async function getStockSummary() {
 export const SONAR_ROUTING_OPTIONS = [
   { id: 'region',  label: 'Region (by city)',   desc: 'Look up customer city → region bucket' },
   { id: 'gigwave', label: 'Always Gigwave',     desc: 'Wireless equipment that always goes to Gigwave' },
-  { id: 'none',    label: 'Always None',        desc: 'Wireless equipment that always goes to None' },
+  // 'none' is a legacy token; the standalone "None" bucket was retired and
+  // Fixed Wireless took over. Kept as-is to avoid a sonar_routing CHECK change.
+  { id: 'none',    label: 'Always Fixed Wireless', desc: 'Wireless equipment that always goes to Fixed Wireless' },
   { id: 'ask',     label: 'Ask per row',        desc: 'Manager picks the destination for each row at import time' },
 ]
 
