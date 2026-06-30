@@ -160,7 +160,7 @@ export async function getStockByLocation(locationId) {
 // Filters: active parts only, non-zero qty only. excludeLocationId
 // drops the caller's truck (or whatever pull location they're loading
 // INTO) so they don't see it as a possible source.
-export async function getAllStockGrouped({ excludeLocationId = null } = {}) {
+export async function getAllStockGrouped({ excludeLocationId = null, excludeTypes = [] } = {}) {
   const [stockRes, partsRes, locsRes] = await Promise.all([
     db.from('inventory_stock').select('part_id, location_id, quantity'),
     db.from('parts_catalog')
@@ -190,6 +190,7 @@ export async function getAllStockGrouped({ excludeLocationId = null } = {}) {
     const loc = locById.get(r.location_id)
     if (!loc) continue  // location is inactive or missing
     if (excludeLocationId && loc.id === excludeLocationId) continue
+    if (excludeTypes.includes(loc.type)) continue  // e.g. job_site buckets are not pull sources
     if (!byPart.has(part.id)) {
       byPart.set(part.id, {
         partId: part.id,

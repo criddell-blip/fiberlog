@@ -224,6 +224,9 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
       const pl = partLocationsByPart[line.part_id]
       if (!pl || !pl.locations) continue
       for (const loc of pl.locations) {
+        // Project (job_site) buckets are accumulate-only; only the owner can
+        // pull from one (to correct a mis-routed consumption).
+        if (loc.type === 'job_site' && currentUser?.role !== 'owner') continue
         counter.set(loc.locationId, (counter.get(loc.locationId) || 0) + 1)
         labelById.set(loc.locationId, loc)
       }
@@ -243,7 +246,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
       })
     }
     return opts.sort((a, b) => b.partsHere - a.partsHere || compareNamesNatural(a.displayLabel, b.displayLabel))
-  }, [lines, partLocationsByPart, locations])
+  }, [lines, partLocationsByPart, locations, currentUser?.role])
 
   const useSmartFromPicker = showFrom && !showAllFromLocations && lines.length > 0
 
@@ -265,9 +268,13 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   // To options — same flavor as before: hide scrap from destinations
   // (scrap movements use the 'scrap' type, not destination=scrap).
   const toOptions = useMemo(() => locations.filter(l => l.type !== 'scrap'), [locations])
-  // Show-all From options — hide vendors (you don't transfer FROM a
-  // vendor; that's `receive`).
-  const allFromOptions = useMemo(() => locations.filter(l => l.type !== 'vendor'), [locations])
+  // Show-all From options — hide vendors (you don't transfer FROM a vendor;
+  // that's `receive`). Project (job_site) buckets are accumulate-only and only
+  // pullable by the owner (mis-routed-consumption correction).
+  const allFromOptions = useMemo(
+    () => locations.filter(l => l.type !== 'vendor' && (currentUser?.role === 'owner' || l.type !== 'job_site')),
+    [locations, currentUser?.role]
+  )
 
   function validate() {
     if (lines.length === 0) return 'Add at least one part'

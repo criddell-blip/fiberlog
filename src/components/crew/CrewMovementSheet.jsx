@@ -182,7 +182,9 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
     setLoadingPartGroups(true)
     ;(async () => {
       try {
-        const groups = await getAllStockGrouped({ excludeLocationId: myTruck?.id })
+        // Crew can't pull from project (job_site) buckets, vendors, or scrap —
+        // those are destinations/terminal, not loadable sources.
+        const groups = await getAllStockGrouped({ excludeLocationId: myTruck?.id, excludeTypes: ['job_site', 'vendor', 'scrap'] })
         if (!cancelled) setPartGroups(groups)
       } catch (e) {
         if (!cancelled) {

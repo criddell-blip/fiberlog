@@ -653,8 +653,11 @@ function PartLocationsPanel({ part, locations, currentUser, onClose, onJumpToLoc
                         → Location
                       </button>
                     )}
-                    {/* Move stock from here → opens BulkMoveSheet pre-filled */}
-                    {l.qty > 0 && (
+                    {/* Move stock from here → opens BulkMoveSheet pre-filled.
+                        Project (job_site) buckets are accumulate-only ledgers —
+                        you can SEE a part sitting in one, but not pull it back
+                        out from here. (vendor/scrap likewise aren't pull sources.) */}
+                    {l.qty > 0 && !['job_site', 'vendor', 'scrap'].includes(l.type) && (
                       <button
                         type="button"
                         onClick={() => handleMoveFromHere(l)}

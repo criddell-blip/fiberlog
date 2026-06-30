@@ -104,10 +104,11 @@ export default function MoveStockSheet({ onClose, onDone }) {
   const totalUnits = lines.reduce((a, l) => a + l.qty, 0)
 
   // Location list for the source/dest pickers — searchable, type-labeled.
-  const locList = (onPick, excludeId) => {
+  const locList = (onPick, excludeId, extraFilter = null) => {
     const query = q.trim().toLowerCase()
     const filtered = locations
       .filter(l => l.id !== excludeId)
+      .filter(l => !extraFilter || extraFilter(l))
       .filter(l => !query || (l.name || '').toLowerCase().includes(query))
       .sort((a, b) => compareNamesNatural(a.name, b.name))
     return (
@@ -165,7 +166,8 @@ export default function MoveStockSheet({ onClose, onDone }) {
             <input type="text" placeholder="Search locations…" value={q} onChange={e => setQ(e.target.value)} autoFocus autoComplete="off" name="move-src-search"
               style={{ flexShrink: 0, width: '100%', padding: '10px 12px', border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--surface2)', fontSize: 14, marginBottom: 8, color: 'var(--text)' }} />
             <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', fontWeight: 700, marginBottom: 6, flexShrink: 0 }}>MOVE FROM</div>
-            {locList(l => { setSource(l); setStage('items'); setQ('') })}
+            {/* Project (job_site) buckets are accumulate-only — not a valid source. */}
+            {locList(l => { setSource(l); setStage('items'); setQ('') }, undefined, l => l.type !== 'job_site')}
           </>
         )}
 
