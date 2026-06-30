@@ -116,6 +116,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   // unmapped/manual. Keyed by `${rowIdx}::${columnName}`.
   const [rowMaterialOverride, setRowMaterialOverride] = useState({})
   const [rowSource, setRowSource] = useState({})        // row idx → source location id (per-row override)
+  const [rowExtraMaterials, setRowExtraMaterials] = useState({})  // job idx → [{sku, qty}] materials added by hand (Sonar job had none/missing)
   // Already-imported [sonar_jobs:...] markers from past movements (90d window).
   const [alreadyImportedKeys, setAlreadyImportedKeys] = useState(() => new Set())
 
@@ -385,7 +386,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       // Materials parsed from value map (consider only material columns)
       const lines = parseFiberRow(row, valueMap, materialColumns)
       // Apply per-row overrides
-      const finalLines = lines.map(line => {
+      const overridden = lines.map(line => {
         const overrideKey = `${idx}::${line.columnName}`
         const ov = rowMaterialOverride[overrideKey]
         if (ov) {
@@ -398,6 +399,16 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         }
         return line
       })
+      // Manually-added materials (for jobs Sonar left without materials).
+      const extras = (rowExtraMaterials[idx] || []).map((m, i) => {
+        const q = Number(m.qty) || 0
+        return {
+          columnName: '+ added', valueText: 'manual', sku: m.sku || '', qty: q,
+          status: (m.sku && q > 0) ? 'ready' : 'manual',
+          _manual: true, _manualIndex: i,
+        }
+      })
+      const finalLines = [...overridden, ...extras]
 
       // Top-level row status
       let rowStatus = 'ready'
@@ -426,7 +437,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         rowStatus,
       }
     })
-  }, [csvRows, crewMap, trucksByUser, pullByUser, activeLocIds, effectiveSourceMap, rowSource, crewUsers, materialColumns, valueMap, effectiveProjectMap, phases, rowMaterialOverride, alreadyImportedKeys])
+  }, [csvRows, crewMap, trucksByUser, pullByUser, activeLocIds, effectiveSourceMap, rowSource, crewUsers, materialColumns, valueMap, effectiveProjectMap, phases, rowMaterialOverride, rowExtraMaterials, alreadyImportedKeys])
 
   // Already-imported lookup vs past movements (90-day window)
   useEffect(() => {
@@ -501,6 +512,22 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   function setRowOverride(rowIdx, columnName, patch) {
     const key = `${rowIdx}::${columnName}`
     setRowMaterialOverride(prev => ({ ...prev, [key]: { ...(prev[key] || {}), ...patch } }))
+  }
+
+  // Manually-added materials for a job that came in with none/missing (common
+  // for contractor jobs + drop fixes). Per-import only — not persisted.
+  function addRowMaterial(rowIdx) {
+    setRowExtraMaterials(prev => ({ ...prev, [rowIdx]: [...(prev[rowIdx] || []), { sku: '', qty: 1 }] }))
+  }
+  function setRowMaterial(rowIdx, i, patch) {
+    setRowExtraMaterials(prev => {
+      const list = [...(prev[rowIdx] || [])]
+      list[i] = { ...list[i], ...patch }
+      return { ...prev, [rowIdx]: list }
+    })
+  }
+  function removeRowMaterial(rowIdx, i) {
+    setRowExtraMaterials(prev => ({ ...prev, [rowIdx]: (prev[rowIdx] || []).filter((_, j) => j !== i) }))
   }
 
   function toggleExclude(idx) {
@@ -897,6 +924,9 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
                     sourceLocations={sourceLocations}
                     rowSourceId={rowSource[r.idx] || ''}
                     onSetSource={locId => setRowSourceLocation(r.idx, locId)}
+                    onAddMaterial={() => addRowMaterial(r.idx)}
+                    onSetMaterial={(i, patch) => setRowMaterial(r.idx, i, patch)}
+                    onRemoveMaterial={i => removeRowMaterial(r.idx, i)}
                   />
                 ))}
               </div>
@@ -990,7 +1020,7 @@ function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, 
 }
 
 // ─── Job preview row ────────────────────────────────────────────────────
-function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, sourceLocations = [], rowSourceId = '', onSetSource }) {
+function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, sourceLocations = [], rowSourceId = '', onSetSource, onAddMaterial, onSetMaterial, onRemoveMaterial }) {
   const isReady = job.rowStatus === 'ready'
   const isAlreadyImported = job.rowStatus === 'already-imported'
   const srcGroups = [
@@ -1051,17 +1081,40 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
         </div>
         <JobStatusBadge status={job.rowStatus} />
       </div>
-      {/* Material lines */}
-      {!isAlreadyImported && job.lines.filter(l => l.status !== 'ignore').length > 0 && (
+      {/* Material lines — always shown for a non-imported job so a job that
+          came in with NO materials (contractor jobs / drop fixes) can still
+          have one added by hand. */}
+      {!isAlreadyImported && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginLeft: 26 }}>
           {job.lines.filter(l => l.status !== 'ignore').map(line => (
-            <div key={line.columnName} style={{
+            <div key={line._manual ? `manual-${line._manualIndex}` : line.columnName} style={{
               display: 'flex', alignItems: 'center', gap: 8,
               fontSize: 11,
             }}>
               <span style={{ minWidth: 110, color: 'var(--hint)', fontStyle: 'italic' }}>{line.columnName}</span>
-              <span style={{ flex: 1 }}>{line.valueText}</span>
-              {(line.status === 'unmapped' || line.status === 'manual') && (
+              {!line._manual && <span style={{ flex: 1 }}>{line.valueText}</span>}
+              {/* Manual line: own SKU + qty + remove, edits rowExtraMaterials. */}
+              {line._manual ? (
+                <>
+                  <select
+                    value={line.sku || ''}
+                    onChange={e => onSetMaterial(line._manualIndex, { sku: e.target.value })}
+                    style={{ ...selectStyle(), flex: 1, maxWidth: 260 }}
+                  >
+                    <option value="">— pick SKU —</option>
+                    {parts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  <input
+                    type="number" min="0" value={line.qty || ''} placeholder="qty"
+                    onChange={e => onSetMaterial(line._manualIndex, { qty: e.target.value })}
+                    style={{ width: 60, padding: '3px 6px', fontSize: 11, border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', background: 'var(--surface2)' }}
+                  />
+                  <button type="button" onClick={() => onRemoveMaterial(line._manualIndex)} title="Remove this added material"
+                    style={{ width: 24, height: 24, padding: 0, background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 'var(--r-xs)', cursor: 'pointer', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name="x" size={12} />
+                  </button>
+                </>
+              ) : (line.status === 'unmapped' || line.status === 'manual') ? (
                 <>
                   <select
                     value={line.sku || ''}
@@ -1079,17 +1132,19 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
                     style={{ width: 60, padding: '3px 6px', fontSize: 11, border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', background: 'var(--surface2)' }}
                   />
                 </>
-              )}
-              {line.status === 'ready' && (
+              ) : line.status === 'ready' ? (
                 <span style={{ fontWeight: 600, color: 'var(--success-fg)' }}>
                   {line.qty} × {parts.find(p => p.id === line.sku)?.name || line.sku}
                 </span>
-              )}
-              {line.status === 'pair-missing' && (
+              ) : line.status === 'pair-missing' ? (
                 <span style={{ color: 'var(--amber)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="alert" size={12} /> {line.reason}</span>
-              )}
+              ) : null}
             </div>
           ))}
+          <button type="button" onClick={onAddMaterial}
+            style={{ alignSelf: 'flex-start', marginTop: 2, fontSize: 11, fontWeight: 600, color: 'var(--accent-dk)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 0', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Icon name="plus" size={12} /> Add material
+          </button>
         </div>
       )}
     </div>
