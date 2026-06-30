@@ -100,7 +100,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [persistedProjectMap, setPersistedProjectMap] = useState(() => new Map())  // project UPPER → phase id
   const [persistedSourceMap, setPersistedSourceMap] = useState(() => new Map())  // sonar_source UPPER → location id (warehouse-type sources only)
   const [phases, setPhases] = useState([])  // [{id, name, project_id, project_name, bucket_id}] — picker source
-  const [warehouses, setWarehouses] = useState([])  // warehouse + bin locations for the "map source to warehouse" picker
+  const [sourceLocations, setSourceLocations] = useState([])  // any active location (warehouse/bin/truck/group) eligible as a Sonar source override
 
   // ── CSV state ───────────────────────────────────────────────────────────
   const [fileName, setFileName] = useState('')
@@ -167,6 +167,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [creatingForModel, setCreatingForModel] = useState(null)
   const [pendingPartRouting, setPendingPartRouting] = useState({}) // part_id → policy
   const [rowDest, setRowDest] = useState({})          // row idx → bucket id (per-row override / ask-resolution)
+  const [rowSource, setRowSource] = useState({})      // row idx → source location id (per-row source override when the completer isn't the carrier)
   const [excluded, setExcluded] = useState(() => new Set())
 
   const [submitting, setSubmitting] = useState(false)
@@ -222,11 +223,17 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         setPersistedProjectMap(projectMap)
         setPhases(phasesData || [])
         setPersistedSourceMap(sourceMap)
-        // Warehouses + bins are the eligible targets for source-mapping a
-        // non-crew Sonar source. Trucks/job_sites/scrap are excluded —
-        // they're handled by other flows (crew picker, project bucket).
-        setWarehouses(
-          (allLocations || []).filter(l => l.type === 'warehouse' || l.type === 'bin')
+        // Eligible source-override targets: any active location the stock
+        // could have come off — warehouses + bins, crew trucks, and shared
+        // group trailers (Contractor-RNS, Drop Trailer, etc.). Used when the
+        // person who completed the job in Sonar isn't the one carrying the
+        // inventory. (job_site project buckets + scrap excluded — they're
+        // destinations, not sources.)
+        setSourceLocations(
+          (allLocations || []).filter(l =>
+            l.is_active !== false &&
+            ['warehouse', 'bin', 'truck', 'group'].includes(l.type)
+          )
         )
       } catch (e) {
         if (!cancelled) setError('Failed to load FiberLog lookups: ' + (e.message || e))
@@ -609,13 +616,14 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       const fullAddress = row['Address | Full Address'] || ''
       const city = parseCityFromFullAddress(fullAddress)
       const sonarProject = (row['Project'] || '').trim()
-      // Resolve the source. Priority 1: warehouse-source map (covers
-      // "Warehouse" and friends). Priority 2: crew → truck. When the
-      // warehouse path wins, userId stays null (consumed_by_user_id
-      // becomes NULL on the resulting movement — accurate "we don't
-      // know which crew did the pull").
-      const sourceLocationId = effectiveSourceMap.get(sonarLoc.toUpperCase()) || null
-      const sourceIsWarehouse = !!sourceLocationId
+      // Resolve the source. Priority 1: per-row override (manager picked the
+      // source for this specific row). Priority 2: persisted source map
+      // (sonar_source → location, e.g. a dispatcher who never carries stock).
+      // Priority 3: crew → truck. When a mapped/overridden location wins,
+      // userId stays null (consumed_by_user_id becomes NULL — we don't know
+      // which crew physically did the pull, only where it came from).
+      const sourceLocationId = rowSource[idx] || effectiveSourceMap.get(sonarLoc.toUpperCase()) || null
+      const sourceIsWarehouse = !!sourceLocationId   // a mapped/overridden location source (any type), not a crew truck
       const userId = sourceIsWarehouse ? null : (crewMap[sonarLoc] || null)
       const truckId = userId ? trucksByUser[userId] : null
       const fromLocationId = sourceLocationId || truckId || null
@@ -736,7 +744,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         status,
       }
     })
-  }, [dedupedRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, phases, effectiveCityMap, effectiveProjectMap, effectiveSourceMap, rowDest, pendingPartRouting, alreadyImportedItemIds])
+  }, [dedupedRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, phases, effectiveCityMap, effectiveProjectMap, effectiveSourceMap, rowDest, rowSource, pendingPartRouting, alreadyImportedItemIds])
 
   const stats = useMemo(() => {
     if (resolved.length === 0) return null
@@ -802,6 +810,31 @@ export default function SonarImportSheet({ onClose, onApplied }) {
 
   function setRowDestination(idx, bucketId) {
     setRowDest(prev => ({ ...prev, [idx]: bucketId || null }))
+  }
+
+  // Per-row source override: pick the location the stock actually came off
+  // for this one row (when the Sonar completer isn't the inventory carrier).
+  function setRowSourceLocation(idx, locationId) {
+    setRowSource(prev => ({ ...prev, [idx]: locationId || null }))
+  }
+
+  // Grouped <option>s for the source pickers (source-map + per-row override).
+  function renderSourceOptions() {
+    const groups = [
+      ['warehouse', '🏭 Warehouses'],
+      ['group',     '👥 Shared trailers'],
+      ['truck',     '🚚 Crew trucks'],
+      ['bin',       '🗄️ Bins'],
+    ]
+    return groups.map(([type, label]) => {
+      const locs = sourceLocations.filter(l => l.type === type)
+      if (locs.length === 0) return null
+      return (
+        <optgroup key={type} label={label}>
+          {locs.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </optgroup>
+      )
+    })
   }
 
   async function handleApply() {
@@ -1073,16 +1106,16 @@ export default function SonarImportSheet({ onClose, onApplied }) {
           {/* Crew mappings */}
           {uniqueSonarLocs.length > 0 && (
             <Section title="Source mappings" accent="var(--teal)"
-              subtitle="One pick per Sonar source. Crews auto-match by name in parens. Non-crew sources (e.g. 'Warehouse') map to a FiberLog warehouse — that pick persists across imports.">
+              subtitle="One pick per Sonar source. Crews auto-match by name in parens. When the completer isn't the carrier (a dispatcher / office person), map the source to the location the stock actually came off — any warehouse, shared trailer, or crew truck. That pick persists across imports.">
               {uniqueSonarLocs.map(loc => {
                 const sourceLocId = effectiveSourceMap.get(loc.toUpperCase())
                 const sourceLocName = sourceLocId
-                  ? (warehouses.find(w => w.id === sourceLocId)?.name || null)
+                  ? (sourceLocations.find(l => l.id === sourceLocId)?.name || null)
                   : null
                 const userId = sourceLocId ? null : crewMap[loc]
                 const hasTruck = userId ? !!trucksByUser[userId] : false
                 const status = sourceLocId
-                  ? { tag: `warehouse${sourceLocName ? `: ${sourceLocName}` : ''}`, color: 'var(--teal-dk)' }
+                  ? { tag: `source${sourceLocName ? `: ${sourceLocName}` : ''}`, color: 'var(--teal-dk)' }
                   : !userId ? { tag: 'unmatched', color: 'var(--amber)' }
                   : !hasTruck ? { tag: 'no truck', color: 'var(--red)' }
                   : { tag: 'matched', color: 'var(--teal-dk)' }
@@ -1119,12 +1152,8 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                         onChange={e => handleSourceLocationChange(loc, e.target.value || null)}
                         style={{ ...selectStyle(), fontSize: 11, color: 'var(--muted)' }}
                       >
-                        <option value="">…or map to a warehouse (persists)</option>
-                        {warehouses.map(w => (
-                          <option key={w.id} value={w.id}>
-                            🏭 {w.name}{w.type === 'bin' ? ' (bin)' : ''}
-                          </option>
-                        ))}
+                        <option value="">…or map to a location (persists)</option>
+                        {renderSourceOptions()}
                       </select>
                     </div>
                   </MappingRow>
@@ -1378,10 +1407,21 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                           <td style={tdStyle()}>
                             <div style={{ fontWeight: 600 }}>
                               {r.sourceIsWarehouse
-                                ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--teal-mid)' }}><Icon name="warehouse" size={13} /> {r.sonarLoc}</span>
+                                ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--teal-mid)' }}><Icon name="box" size={13} /> {sourceLocations.find(l => l.id === r.sourceLocationId)?.name || r.sonarLoc}</span>
                                 : (r.userName || <em style={{ color: 'var(--amber)' }}>{r.sonarLoc}</em>)
                               }
                             </div>
+                            {/* Per-row source override — pick where the stock
+                                actually came off when the completer isn't the
+                                carrier. Resolves no-crew / no-truck rows. */}
+                            <select
+                              value={rowSource[r.idx] || ''}
+                              onChange={e => setRowSourceLocation(r.idx, e.target.value)}
+                              style={{ ...selectStyle(), fontSize: 11, marginTop: 4, color: 'var(--muted)', minWidth: 150 }}
+                            >
+                              <option value="">{r.fromLocationId ? 'override source…' : '— pick source —'}</option>
+                              {renderSourceOptions()}
+                            </select>
                           </td>
                           <td style={tdStyle()}>
                             {needsPicker ? (
