@@ -5,6 +5,7 @@ import { crewTypeLabel } from '../../lib/crewTypes'
 import {
   recordMovementsBatch,
   getSonarProjectMap, setSonarProjectPhase, getPhasesWithBuckets,
+  getSonarSourceLocationMap, setSonarSourceLocation, getLocations,
   getPendingSonarImports, getProcessedSonarImports, getPendingSonarImport,
   markSonarPendingImportApplied, discardSonarPendingImport,
   getFiberValueMap, setFiberValueMap, FIBER_QTY_MODE_OPTIONS,
@@ -49,6 +50,12 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   const [phases, setPhases] = useState([])
   const [persistedProjectMap, setPersistedProjectMap] = useState(() => new Map())
   const [valueMap, setValueMap] = useState(() => new Map())
+  // Source-location support (parity with SonarImportSheet):
+  const [sourceLocations, setSourceLocations] = useState([])   // active warehouse/bin/truck/group, eligible source targets
+  const [pullByUser, setPullByUser] = useState({})             // userId → default_pull_location_id
+  const [activeLocIds, setActiveLocIds] = useState(() => new Set())  // ids of active locations (validate pull targets)
+  const [persistedSourceMap, setPersistedSourceMap] = useState(() => new Map())  // sonar_source(username) UPPER → location id
+  const [pendingSourceMap, setPendingSourceMap] = useState({})  // session edits, mirrors persistedSourceMap
 
   // CSV state
   const [fileName, setFileName] = useState('')
@@ -108,6 +115,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   // Per-row, per-column manual overrides for materials that came back
   // unmapped/manual. Keyed by `${rowIdx}::${columnName}`.
   const [rowMaterialOverride, setRowMaterialOverride] = useState({})
+  const [rowSource, setRowSource] = useState({})        // row idx → source location id (per-row override)
   // Already-imported [sonar_jobs:...] markers from past movements (90d window).
   const [alreadyImportedKeys, setAlreadyImportedKeys] = useState(() => new Set())
 
@@ -116,9 +124,9 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     let cancelled = false
     ;(async () => {
       try {
-        const [usersRes, trucksRes, partsRes, phasesData, projectMap, valMap] = await Promise.all([
+        const [usersRes, trucksRes, partsRes, phasesData, projectMap, valMap, sourceMap, allLocations] = await Promise.all([
           db.from('users')
-            .select('id, name, email, role, crew_type')
+            .select('id, name, email, role, crew_type, default_pull_location_id')
             .eq('is_active', true)
             .order('name'),
           db.from('inventory_locations')
@@ -133,6 +141,8 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
           getPhasesWithBuckets(),
           getSonarProjectMap(),
           getFiberValueMap(),
+          getSonarSourceLocationMap(),
+          getLocations({ includeBins: true }),
         ])
         if (cancelled) return
         // Surface each individual error so a single broken query
@@ -144,10 +154,20 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         const tbu = {}
         for (const t of trucksRes.data || []) tbu[t.assigned_to] = t.id
         setTrucksByUser(tbu)
+        // userId → default_pull_location_id (shared group/trailer assignment)
+        const pbu = {}
+        for (const u of usersRes.data || []) if (u.default_pull_location_id) pbu[u.id] = u.default_pull_location_id
+        setPullByUser(pbu)
         setParts(partsRes.data || [])
         setPhases(phasesData || [])
         setPersistedProjectMap(projectMap)
         setValueMap(valMap)
+        setPersistedSourceMap(sourceMap)
+        // Eligible source-override targets + the active-location set used to
+        // validate a user's pull location.
+        const locs = (allLocations || []).filter(l => l.is_active !== false)
+        setActiveLocIds(new Set(locs.map(l => l.id)))
+        setSourceLocations(locs.filter(l => ['warehouse', 'bin', 'truck', 'group'].includes(l.type)))
       } catch (e) {
         if (!cancelled) setError('Failed to load lookups: ' + (e.message || e))
       }
@@ -264,6 +284,63 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     return merged
   }, [persistedProjectMap, pendingProjectMap])
 
+  // Sonar username → mapped source location (persisted + session edits).
+  const effectiveSourceMap = useMemo(() => {
+    const merged = new Map(persistedSourceMap)
+    for (const [k, v] of Object.entries(pendingSourceMap)) {
+      if (v) merged.set(k, v); else merged.delete(k)
+    }
+    return merged
+  }, [persistedSourceMap, pendingSourceMap])
+
+  // A crew member's own home location: their shared pull location (group/
+  // trailer) when active, else their personal truck. Mirrors getMyTruck so
+  // group members (deactivated personal truck) resolve correctly.
+  function homeLocFor(userId) {
+    if (!userId) return null
+    const pull = pullByUser[userId]
+    if (pull && activeLocIds.has(pull)) return pull
+    return trucksByUser[userId] || null
+  }
+
+  // Persist a username → source-location mapping (for completers who aren't
+  // the carrier). Reuses sonar_source_location_map; keyed on the username.
+  async function handleSourceLocationChange(username, locationId) {
+    const up = username.toUpperCase()
+    setPendingSourceMap(prev => ({ ...prev, [up]: locationId }))
+    if (!locationId) return
+    try {
+      await setSonarSourceLocation(username, locationId)
+      setPersistedSourceMap(prev => { const next = new Map(prev); next.set(up, locationId); return next })
+    } catch (e) {
+      setError('Failed to save source mapping: ' + (e.message || e))
+    }
+  }
+
+  // Per-row source override (one-off).
+  function setRowSourceLocation(idx, locationId) {
+    setRowSource(prev => ({ ...prev, [idx]: locationId || null }))
+  }
+
+  // Grouped <option>s for the source pickers.
+  function renderSourceOptions() {
+    const groups = [
+      ['warehouse', '🏭 Warehouses'],
+      ['group',     '👥 Shared trailers'],
+      ['truck',     '🚚 Crew trucks'],
+      ['bin',       '🗄️ Bins'],
+    ]
+    return groups.map(([type, label]) => {
+      const locs = sourceLocations.filter(l => l.type === type)
+      if (locs.length === 0) return null
+      return (
+        <optgroup key={type} label={label}>
+          {locs.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </optgroup>
+      )
+    })
+  }
+
   // Unique (column, value) combos that need a map entry
   const valueMappingsNeeded = useMemo(() => {
     if (!csvRows) return []
@@ -289,8 +366,12 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     return csvRows.map((row, idx) => {
       const username = (row['User | Username'] || '').trim()
       const userId = crewMap[username] || null
-      const truckId = userId ? trucksByUser[userId] : null
       const userName = userId ? crewUsers.find(u => u.id === userId)?.name || username : username
+      // Source resolution: per-row override → saved per-username map (for
+      // non-carrier completers like cparisi) → the crew member's own home
+      // location (pull group/trailer when active, else personal truck).
+      const sourceIsMapped = !!(rowSource[idx] || effectiveSourceMap.get(username.toUpperCase()))
+      const sourceLocId = rowSource[idx] || effectiveSourceMap.get(username.toUpperCase()) || homeLocFor(userId)
       const sonarProject = (row['Project'] || '').trim()
       const projPhaseId = sonarProject ? effectiveProjectMap.get(sonarProject.toUpperCase()) : null
       const phase = projPhaseId ? phases.find(p => p.id === projPhaseId) : null
@@ -321,8 +402,8 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       // Top-level row status
       let rowStatus = 'ready'
       if (isAlreadyImported) rowStatus = 'already-imported'
-      else if (!userId) rowStatus = 'no-crew'
-      else if (!truckId) rowStatus = 'no-truck'
+      else if (!userId && !sourceIsMapped) rowStatus = 'no-crew'
+      else if (!sourceLocId) rowStatus = 'no-truck'
       else if (!sonarProject) rowStatus = 'no-project'
       else if (!projPhaseId) rowStatus = 'project-unmapped'
       else if (!destBucketId) rowStatus = 'no-project-bucket'
@@ -332,7 +413,8 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         idx,
         address: row['Job | Address on Completion'] || '',
         date: dateStr,
-        username, userId, truckId, userName,
+        username, userId, userName,
+        sourceLocId, sourceIsMapped,
         sonarProject,
         phaseId: projPhaseId, phaseName: phase?.name || '', phaseProjectName: phase?.project_name || '',
         destBucketId,
@@ -344,7 +426,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         rowStatus,
       }
     })
-  }, [csvRows, crewMap, trucksByUser, crewUsers, materialColumns, valueMap, effectiveProjectMap, phases, rowMaterialOverride, alreadyImportedKeys])
+  }, [csvRows, crewMap, trucksByUser, pullByUser, activeLocIds, effectiveSourceMap, rowSource, crewUsers, materialColumns, valueMap, effectiveProjectMap, phases, rowMaterialOverride, alreadyImportedKeys])
 
   // Already-imported lookup vs past movements (90-day window)
   useEffect(() => {
@@ -469,12 +551,14 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             part_id: line.sku,
             quantity: line.qty,
             unit: (parts.find(p => p.id === line.sku)?.unit) || 'ea',
-            from_location_id: r.truckId,
+            from_location_id: r.sourceLocId,
             to_location_id: r.destBucketId,
             notes: notePieces.join(' · '),
             created_by: currentUser?.id,
             phase_id: r.phaseId || null,
-            consumed_by_user_id: r.userId || null,
+            // A mapped/overridden source means the completer wasn't the
+            // carrier — don't attribute consumption to them.
+            consumed_by_user_id: r.sourceIsMapped ? null : (r.userId || null),
           })
         }
       }
@@ -708,28 +792,42 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
           {/* Crew mappings */}
           {uniqueUsernames.length > 0 && (
             <Section title="Crew (User | Username → FiberLog user)" accent="var(--teal)"
-              subtitle="Auto-matched by exact username. Override if wrong.">
+              subtitle="Auto-matched by exact username. When the completer isn't the carrier (e.g. cparisi entering contractor jobs), map them to the location the stock came off — any warehouse, shared trailer, or truck. That pick persists.">
               {uniqueUsernames.map(uname => {
                 const uid = crewMap[uname]
-                const hasTruck = uid ? !!trucksByUser[uid] : false
-                const status = !uid ? { tag: 'unmatched', color: 'var(--amber)' }
-                  : !hasTruck ? { tag: 'no truck', color: 'var(--red)' }
+                const mappedLocId = effectiveSourceMap.get(uname.toUpperCase())
+                const mappedLocName = mappedLocId ? (sourceLocations.find(l => l.id === mappedLocId)?.name || null) : null
+                const homeLoc = uid ? homeLocFor(uid) : null
+                const status = mappedLocId
+                  ? { tag: `source${mappedLocName ? `: ${mappedLocName}` : ''}`, color: 'var(--teal-dk)' }
+                  : !uid ? { tag: 'unmatched', color: 'var(--amber)' }
+                  : !homeLoc ? { tag: 'no truck', color: 'var(--red)' }
                   : { tag: 'matched', color: 'var(--teal-dk)' }
                 const n = resolved.filter(r => r.username === uname).length
                 return (
                   <MappingRow key={uname} primary={uname} secondary={`${n} row${n === 1 ? '' : 's'}`} status={status}>
-                    <select
-                      value={uid || ''}
-                      onChange={e => setCrewMap(prev => ({ ...prev, [uname]: e.target.value }))}
-                      style={selectStyle()}
-                    >
-                      <option value="">— pick crew —</option>
-                      {crewUsers.map(u => (
-                        <option key={u.id} value={u.id}>
-                          {u.name}{u.crew_type ? ` (${crewTypeLabel(u.crew_type)})` : ''}{trucksByUser[u.id] ? '' : ' — no truck!'}
-                        </option>
-                      ))}
-                    </select>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <select
+                        value={uid || ''}
+                        onChange={e => setCrewMap(prev => ({ ...prev, [uname]: e.target.value }))}
+                        style={selectStyle()}
+                      >
+                        <option value="">— pick crew —</option>
+                        {crewUsers.map(u => (
+                          <option key={u.id} value={u.id}>
+                            {u.name}{u.crew_type ? ` (${crewTypeLabel(u.crew_type)})` : ''}{(trucksByUser[u.id] || homeLocFor(u.id)) ? '' : ' — no truck!'}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={mappedLocId || ''}
+                        onChange={e => handleSourceLocationChange(uname, e.target.value || null)}
+                        style={{ ...selectStyle(), fontSize: 11, color: 'var(--muted)' }}
+                      >
+                        <option value="">…or pull from a location (persists)</option>
+                        {renderSourceOptions()}
+                      </select>
+                    </div>
                   </MappingRow>
                 )
               })}
@@ -796,6 +894,9 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
                     isExcluded={excluded.has(r.idx)}
                     onToggleExclude={() => toggleExclude(r.idx)}
                     onSetOverride={(col, patch) => setRowOverride(r.idx, col, patch)}
+                    sourceLocations={sourceLocations}
+                    rowSourceId={rowSource[r.idx] || ''}
+                    onSetSource={locId => setRowSourceLocation(r.idx, locId)}
                   />
                 ))}
               </div>
@@ -889,9 +990,15 @@ function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, 
 }
 
 // ─── Job preview row ────────────────────────────────────────────────────
-function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride }) {
+function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, sourceLocations = [], rowSourceId = '', onSetSource }) {
   const isReady = job.rowStatus === 'ready'
   const isAlreadyImported = job.rowStatus === 'already-imported'
+  const srcGroups = [
+    ['warehouse', '🏭 Warehouses'],
+    ['group',     '👥 Shared trailers'],
+    ['truck',     '🚚 Crew trucks'],
+    ['bin',       '🗄️ Bins'],
+  ]
   return (
     <div style={{
       padding: '8px 10px', borderBottom: '1px solid var(--border)',
@@ -914,6 +1021,33 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride }) {
           <div style={{ fontSize: 10, color: 'var(--hint)' }}>
             {job.date} · {job.userName || job.username} · {job.sonarProject} → {job.phaseProjectName} / {job.phaseName}
           </div>
+          {/* Per-row source override — set where the stock came off when the
+              completer isn't the carrier; resolves no-crew / no-truck rows. */}
+          {!isAlreadyImported && (
+            <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 10, color: 'var(--hint)' }}>source:</span>
+              <select
+                value={rowSourceId}
+                onChange={e => onSetSource(e.target.value)}
+                style={{ ...selectStyle(), fontSize: 11, minWidth: 150, color: 'var(--muted)' }}
+              >
+                <option value="">
+                  {job.sourceLocId
+                    ? (sourceLocations.find(l => l.id === job.sourceLocId)?.name || 'override source…')
+                    : '— pick source —'}
+                </option>
+                {srcGroups.map(([type, label]) => {
+                  const locs = sourceLocations.filter(l => l.type === type)
+                  if (locs.length === 0) return null
+                  return (
+                    <optgroup key={type} label={label}>
+                      {locs.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </optgroup>
+                  )
+                })}
+              </select>
+            </div>
+          )}
         </div>
         <JobStatusBadge status={job.rowStatus} />
       </div>
