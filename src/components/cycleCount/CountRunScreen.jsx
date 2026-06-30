@@ -51,6 +51,17 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
   const [confirmSubmitBin, setConfirmSubmitBin] = useState(false)
   const [endResult, setEndResult] = useState(null)
   const [busy, setBusy] = useState(false)
+  // Parts with an in-flight count save (renders a small "saving…" spinner on
+  // the row). Saves are optimistic, so this is just reassurance the write is
+  // committing — a momentary lag never reads as "hung".
+  const [savingParts, setSavingParts] = useState(() => new Set())
+  function markSaving(partId, on) {
+    setSavingParts(prev => {
+      const next = new Set(prev)
+      if (on) next.add(partId); else next.delete(partId)
+      return next
+    })
+  }
 
   // Track which line should pulse / scroll into view (most recent scan).
   const [highlightedLineKey, setHighlightedLineKey] = useState(null)
@@ -172,6 +183,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
       if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
     }, 50)
 
+    markSaving(part.id, true)
     try {
       await recordCountLine({ sessionId: activeSession.id, partId: part.id, countedQty: newQty })
       // New unexpected line needs the real row id/ordering for remove + submit.
@@ -181,6 +193,8 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
       scanFeedback('error')
       showToast('Save failed: ' + e.message)
       await refreshLines(activeSession.id)
+    } finally {
+      markSaving(part.id, false)
     }
   }
 
@@ -188,12 +202,15 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
   // "still missing" list and creates the shortage variance at end of run).
   async function handleCountZero(line) {
     setLines(prev => prev.map(l => l.id === line.id ? { ...l, counted_qty: 0 } : l))
+    markSaving(line.part_id, true)
     try {
       await recordCountLine({ sessionId: activeSession.id, partId: line.part_id, countedQty: 0 })
     } catch (e) {
       console.error('Count-zero failed:', e)
       showToast('Save failed: ' + e.message)
       await refreshLines(activeSession.id)
+    } finally {
+      markSaving(line.part_id, false)
     }
   }
 
@@ -204,12 +221,15 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
     if (isNaN(numeric) || numeric < 0) { setQtySheetLine(null); return }
     setLines(prev => prev.map(l => l.id === line.id ? { ...l, counted_qty: numeric } : l))
     setQtySheetLine(null)
+    markSaving(line.part_id, true)
     try {
       await recordCountLine({ sessionId: activeSession.id, partId: line.part_id, countedQty: numeric })
     } catch (e) {
       console.error('Save qty failed:', e)
       showToast('Save failed: ' + e.message)
       await refreshLines(activeSession.id)
+    } finally {
+      markSaving(line.part_id, false)
     }
   }
 
@@ -471,6 +491,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
                         <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 'var(--fs-base)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{part.name || line.part_id}</div>
                         <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>{line.part_id}</div>
                       </div>
+                      {savingParts.has(line.part_id) && <SavingDot />}
                       <button onClick={() => setQtySheetLine(line)} className="btn btn-primary" style={{ padding: '8px 14px', fontSize: 'var(--fs-sm)', flexShrink: 0 }}>Count</button>
                       <button onClick={() => handleCountZero(line)} title="Found none" style={{ width: 40, height: 36, flexShrink: 0, border: '1px solid var(--border2)', background: 'var(--surface2)', color: 'var(--muted)', borderRadius: 'var(--r-xs)', fontWeight: 800, cursor: 'pointer' }}>0</button>
                     </div>
@@ -496,6 +517,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
                         <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 'var(--fs-base)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{part.name || line.part_id}</div>
                         <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>{line.part_id}</div>
                       </div>
+                      {savingParts.has(line.part_id) && <SavingDot />}
                       <div className="mono" style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>{line.counted_qty}</div>
                       <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', minWidth: 18 }}>{part.unit || 'ea'}</span>
                     </div>
@@ -517,6 +539,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
                         <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 'var(--fs-base)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{part.name || line.part_id}</div>
                         <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>{line.part_id}</div>
                       </div>
+                      {savingParts.has(line.part_id) && <SavingDot />}
                       <div className="mono" style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>{line.counted_qty}</div>
                       <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', minWidth: 18 }}>{part.unit || 'ea'}</span>
                       <button type="button" onClick={() => handleRemoveLine(line)} title="Remove — scanned by mistake"
@@ -1318,5 +1341,25 @@ function EndResultScreen({ run, onDone }) {
       </div>
       <button className="btn btn-primary" onClick={onDone}>Done</button>
     </div>
+  )
+}
+
+// Small in-flight indicator for a count row while its save commits. Saves are
+// optimistic, so this is brief reassurance, not a blocking spinner. Renders its
+// own keyframe (identical @keyframes across instances is harmless).
+function SavingDot() {
+  return (
+    <>
+      <style>{`@keyframes ccspin{to{transform:rotate(360deg)}}`}</style>
+      <span
+        title="Saving…"
+        aria-label="Saving"
+        style={{
+          width: 12, height: 12, borderRadius: '50%', flexShrink: 0,
+          border: '2px solid var(--border2)', borderTopColor: 'var(--orange)',
+          display: 'inline-block', animation: 'ccspin 0.7s linear infinite',
+        }}
+      />
+    </>
   )
 }
