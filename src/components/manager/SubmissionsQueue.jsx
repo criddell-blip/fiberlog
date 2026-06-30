@@ -303,7 +303,7 @@ export default function SubmissionsQueue() {
         {!loading && sortedProjects.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--hint)' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10, color: 'var(--gray-mid)' }}><Icon name="layers" size={32} /></div>
-            <div>No {filter} submissions</div>
+            <div>No {showArchived ? 'archived' : (filter === 'all' ? '' : filter + ' ')}submissions</div>
           </div>
         )}
 
