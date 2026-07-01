@@ -14,6 +14,9 @@ import {
   recordMovementsBatch,
   createLocation,
   createDraftParts,
+  getAllParts,
+  getStockRowsForParts,
+  updatePartsBatch,
 } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
@@ -22,10 +25,17 @@ const STAGES = {
   pick:      'pick',
   mapping:   'mapping',
   importing: 'importing',
+  review:    'review',
   done:      'done',
 }
 
 const CHUNK_SIZE = 100
+
+// Location types whose stock we're allowed to auto-zero during the post-import
+// sweep. Trucks hold a crew member's live on-truck count and job_site buckets
+// are the Sage consumption ledger — zeroing either would corrupt real records,
+// so orphan stock sitting there is deactivated-but-left-alone (see runSweep).
+const ZEROABLE_LOCATION_TYPES = new Set(['warehouse', 'bin'])
 
 // Tag every console log so it's easy to spot in DevTools
 const LOG_PREFIX = '[InventoryImport]'
@@ -38,7 +48,12 @@ export default function InventoryImportSheet({ locations, currentUser, onClose, 
   // Back closes the importer (mounted only when open). Confirm once past the
   // file-pick stage so a stray Back doesn't drop a loaded CSV / column mapping.
   useBackClose(1, onClose, {
-    confirm: () => stage === STAGES.pick || window.confirm('Close the import? Unsaved mapping will be lost.'),
+    // Veto Back outright while the sweep is committing movements — closing
+    // mid-flight would unmount the sheet and lose the result summary.
+    confirm: () => {
+      if (sweeping) return false
+      return stage === STAGES.pick || window.confirm('Close the import? Unsaved mapping will be lost.')
+    },
   })
 
   const [headers, setHeaders] = useState([])
@@ -57,6 +72,22 @@ export default function InventoryImportSheet({ locations, currentUser, onClose, 
 
   const [progress, setProgress] = useState({ done: 0, total: 0, errors: [], draftsCreated: 0 })
   const [results, setResults] = useState(null)
+
+  // Post-import sweep: parts that are active in FiberLog but weren't in this
+  // CSV (likely renamed/retired in accounting). orphanReview holds the
+  // reviewable list; sweepResult holds the outcome after the user confirms.
+  const [orphanReview, setOrphanReview] = useState(null)
+  const [sweepSelected, setSweepSelected] = useState(() => new Set())
+  const [sweeping, setSweeping] = useState(false)
+  const [sweepResult, setSweepResult] = useState(null)
+
+  function toggleSweep(partId) {
+    setSweepSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(partId)) next.delete(partId); else next.add(partId)
+      return next
+    })
+  }
 
   // ─── Stage 1: file pick + parse ───────────────────────────────────────────
 
@@ -321,6 +352,154 @@ export default function InventoryImportSheet({ locations, currentUser, onClose, 
       movementsSkippedDueToMissingParts: movementsSkipped,
       skippedSkusSample,
     })
+
+    // ─── Orphan sweep prep ───────────────────────────────────────────────
+    // Find active parts whose SKU never appeared in this file — the leftovers
+    // from accounting renaming SKUs. We surface them for review (opt-in
+    // deactivate + zero). The import itself already succeeded, so any failure
+    // here is non-fatal — we just skip straight to the done screen.
+    try {
+      const seenSkus = new Set()
+      for (const row of rows) {
+        const sku = (row.SKU || '').trim()
+        if (sku) seenSkus.add(sku)
+      }
+      const allParts = await getAllParts()
+      const orphanParts = allParts.filter(p => p.is_active && !seenSkus.has(p.id))
+      if (orphanParts.length === 0) {
+        setStage(STAGES.done)
+        return
+      }
+      const stockRows = await getStockRowsForParts(orphanParts.map(p => p.id))
+      const byPart = new Map()
+      for (const p of orphanParts) {
+        byPart.set(p.id, { part: p, totalQty: 0, zeroableQty: 0, otherQty: 0, locations: [] })
+      }
+      for (const r of stockRows) {
+        const entry = byPart.get(r.part_id)
+        if (!entry) continue
+        const qty = Number(r.quantity) || 0
+        const type = r.location?.type
+        entry.totalQty += qty
+        if (ZEROABLE_LOCATION_TYPES.has(type)) entry.zeroableQty += qty
+        else entry.otherQty += qty
+        entry.locations.push({
+          locationId: r.location_id,
+          name: r.location?.name || r.location_id,
+          type,
+          qty,
+        })
+      }
+      const orphans = [...byPart.values()].sort((a, b) => b.totalQty - a.totalQty)
+      setOrphanReview({ orphans })
+      // Default-select only orphans whose stock is entirely warehouse/bin (or
+      // none) — these zero cleanly. Parts holding truck / project-bucket stock
+      // start UNchecked so the manager must consciously opt in (deactivating
+      // them would strand that stock on an inactive part); this also blunts the
+      // partial-file footgun of sweeping the whole catalog by default.
+      setSweepSelected(new Set(orphans.filter(o => o.otherQty === 0).map(o => o.part.id)))
+      setStage(STAGES.review)
+    } catch (e) {
+      console.error(LOG_PREFIX, 'orphan computation failed:', e)
+      setStage(STAGES.done)
+    }
+  }
+
+  // ─── Stage 3.5: sweep (deactivate + zero orphans) ────────────────────────
+
+  // Given the set of orphan part ids the user confirmed, zero their
+  // warehouse/bin stock (balancing `adjust` movements) and flip them to
+  // is_active=false. Truck / job_site / vendor / scrap stock is deliberately
+  // left untouched (see ZEROABLE_LOCATION_TYPES).
+  //
+  // Deactivation is gated PER PART on its zeroing movements succeeding: a part
+  // is only flipped inactive once all of its adjust movements committed.
+  // Otherwise a failed zero (RLS reject, constraint, network) would strand an
+  // inactive part still holding warehouse stock — the exact corruption this
+  // feature exists to prevent, and movements are append-only so it can't be
+  // rolled back. `recordMovementsBatch` inserts atomically, so a per-part
+  // batch is all-or-nothing — a clean success signal.
+  async function runSweep(selectedIds) {
+    if (!orphanReview || selectedIds.size === 0) return
+    if (!currentUser?.id) { showToast('Cannot sweep — no signed-in user'); return }
+    if (!window.confirm(
+      `Deactivate ${selectedIds.size} part${selectedIds.size === 1 ? '' : 's'} and zero their warehouse stock?\n\n` +
+      `This writes permanent adjustment movements and can't be undone.`
+    )) return
+
+    setSweeping(true)
+    const stamp = new Date().toISOString().slice(0, 10)
+
+    // Balancing adjusts are built from the review-time stock snapshot
+    // (getStockRowsForParts), not re-read at commit. If warehouse stock changes
+    // between review and confirm the zero won't land exactly — acceptable for a
+    // single-operator admin flow run right after an import.
+
+    let movementsCreated = 0
+    let zeroedUnits = 0
+    let leftAloneQty = 0
+    const okToDeactivate = []        // part ids whose zeroing fully succeeded
+    const moveErrors = []            // { part_id, message } for parts we skipped
+
+    for (const o of orphanReview.orphans) {
+      if (!selectedIds.has(o.part.id)) continue
+
+      // Build this part's zeroing movements. Positive on-hand → negative adjust
+      // (source only); negative on-hand → positive adjust (destination only);
+      // quantity is always the positive magnitude. validateMovement enforces
+      // the one-sidedness.
+      const partMovements = []
+      for (const loc of o.locations) {
+        const qty = Number(loc.qty) || 0
+        if (qty === 0) continue
+        if (!ZEROABLE_LOCATION_TYPES.has(loc.type)) { leftAloneQty += Math.abs(qty); continue }
+        partMovements.push(qty > 0
+          ? { movement_type: 'adjust', part_id: o.part.id, from_location_id: loc.locationId, to_location_id: null, quantity: qty,          unit: o.part.unit || null, notes: `Zeroed — not in BoxHero import ${stamp}`, created_by: currentUser.id }
+          : { movement_type: 'adjust', part_id: o.part.id, from_location_id: null, to_location_id: loc.locationId, quantity: Math.abs(qty), unit: o.part.unit || null, notes: `Zeroed — not in BoxHero import ${stamp}`, created_by: currentUser.id })
+      }
+
+      // Nothing to zero (part has no warehouse stock) → safe to deactivate.
+      if (partMovements.length === 0) {
+        okToDeactivate.push(o.part.id)
+        continue
+      }
+
+      try {
+        const inserted = await recordMovementsBatch(partMovements)
+        movementsCreated += inserted.length
+        for (const m of partMovements) zeroedUnits += Number(m.quantity) || 0
+        okToDeactivate.push(o.part.id)
+      } catch (e) {
+        // This part's zeroing failed atomically — leave it ACTIVE with its
+        // stock intact so it stays visible/manageable rather than stranded.
+        moveErrors.push({ part_id: o.part.id, message: e.message })
+      }
+    }
+
+    // Deactivate only the parts we successfully zeroed.
+    let deactivated = 0
+    const deactivateErrors = []
+    if (okToDeactivate.length > 0) {
+      try {
+        const res = await updatePartsBatch(okToDeactivate, { is_active: false })
+        deactivated = res.updated.length
+        for (const err of res.errors || []) deactivateErrors.push(err)
+      } catch (e) {
+        console.error(LOG_PREFIX, 'bulk deactivate failed:', e)
+        deactivateErrors.push({ id: '(batch)', message: e.message })
+      }
+    }
+
+    setSweepResult({
+      deactivated,
+      movementsCreated,
+      zeroedUnits,
+      leftAloneQty,
+      skippedParts: moveErrors.length,
+      errors: [...moveErrors, ...deactivateErrors].slice(0, 20),
+      errorCount: moveErrors.length + deactivateErrors.length,
+    })
+    setSweeping(false)
     setStage(STAGES.done)
   }
 
@@ -332,7 +511,7 @@ export default function InventoryImportSheet({ locations, currentUser, onClose, 
       <div className="overlay-sheet" style={{ maxWidth: 720, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div style={{ fontWeight: 800, fontSize: 17 }}>Import inventory CSV</div>
-          {stage !== STAGES.importing && (
+          {stage !== STAGES.importing && !sweeping && (
             <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', display: 'inline-flex' }}><Icon name="x" size={18} /></button>
           )}
         </div>
@@ -359,9 +538,19 @@ export default function InventoryImportSheet({ locations, currentUser, onClose, 
             />
           )}
           {stage === STAGES.importing && <ImportingStage progress={progress} />}
+          {stage === STAGES.review && (
+            <ReviewStage
+              orphanReview={orphanReview}
+              selected={sweepSelected}
+              onToggle={toggleSweep}
+              onSelectAll={() => setSweepSelected(new Set(orphanReview.orphans.map(o => o.part.id)))}
+              onClearAll={() => setSweepSelected(new Set())}
+            />
+          )}
           {stage === STAGES.done && (
             <DoneStage
               results={results}
+              sweepResult={sweepResult}
               unmatchedSkus={unmatchedSkus}
               downloadUnmatchedCsv={downloadUnmatchedCsv}
             />
@@ -380,6 +569,21 @@ export default function InventoryImportSheet({ locations, currentUser, onClose, 
               >
                 Import {mappingSummary.totalMovements.toLocaleString()} movements
                 {mappingSummary.draftsToCreate > 0 && ` + ${mappingSummary.draftsToCreate} draft parts`}
+              </button>
+            </>
+          )}
+          {stage === STAGES.review && (
+            <>
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setStage(STAGES.done)} disabled={sweeping}>
+                Skip
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 2 }}
+                onClick={() => runSweep(sweepSelected)}
+                disabled={sweeping || sweepSelected.size === 0}
+              >
+                {sweeping ? 'Working…' : `Deactivate ${sweepSelected.size} part${sweepSelected.size === 1 ? '' : 's'}`}
               </button>
             </>
           )}
@@ -654,10 +858,115 @@ function ImportingStage({ progress }) {
   )
 }
 
-function DoneStage({ results, unmatchedSkus, downloadUnmatchedCsv }) {
+// ─── Stage 3.5: review orphans ───────────────────────────────────────────────
+
+function ReviewStage({ orphanReview, selected, onToggle, onSelectAll, onClearAll }) {
+  const orphans = orphanReview?.orphans || []
+  const allSelected = orphans.length > 0 && orphans.every(o => selected.has(o.part.id))
+
+  // Live totals for the summary line, computed over the selected orphans only.
+  const { deactivateCount, zeroUnits, leftAloneUnits } = useMemo(() => {
+    let z = 0, left = 0, n = 0
+    for (const o of orphans) {
+      if (!selected.has(o.part.id)) continue
+      n++
+      z += o.zeroableQty
+      left += Math.abs(o.otherQty)
+    }
+    return { deactivateCount: n, zeroUnits: z, leftAloneUnits: left }
+  }, [orphans, selected])
+
+  return (
+    <div>
+      <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>
+        {orphans.length} active part{orphans.length === 1 ? '' : 's'} weren't in this import
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+        These are active in FiberLog but their SKU wasn't in the file — usually parts accounting
+        renamed or retired. Selected parts get <strong>deactivated</strong>, and their warehouse
+        stock is <strong>zeroed</strong>.
+      </div>
+
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12,
+        padding: '10px 12px', borderRadius: 'var(--r-sm)',
+        background: 'var(--amber-lt)', border: '1px solid var(--amber)',
+        fontSize: 12, color: 'var(--amber)',
+      }}>
+        <Icon name="alert" size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+        <div>
+          Only do this if this CSV is a <strong>complete</strong> catalog export. A partial file
+          lists every real part as an orphan.
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+        <div className="mono" style={{ fontSize: 12, color: 'var(--hint)' }}>
+          {deactivateCount} selected
+        </div>
+        <button
+          onClick={allSelected ? onClearAll : onSelectAll}
+          style={{
+            padding: '5px 11px', borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border2)',
+          }}
+        >
+          {allSelected ? 'Deselect all' : `Select all ${orphans.length}`}
+        </button>
+      </div>
+
+      <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', overflow: 'hidden', marginBottom: 12 }}>
+        {orphans.map((o, i) => {
+          const isSel = selected.has(o.part.id)
+          const hasOther = o.otherQty !== 0
+          return (
+            <label key={o.part.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer',
+              borderBottom: i < orphans.length - 1 ? '1px solid var(--row-divider)' : 'none',
+              background: isSel ? 'var(--selected-row)' : 'transparent',
+            }}>
+              <input type="checkbox" checked={isSel} onChange={() => onToggle(o.part.id)} style={{ cursor: 'pointer', flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {o.part.name}
+                </div>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--hint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {o.part.id}{o.locations.length > 0 ? ` · ${o.locations.map(l => l.name).join(', ')}` : ' · no stock'}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: o.totalQty < 0 ? 'var(--red)' : 'var(--text)' }}>
+                  {o.totalQty.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--hint)', fontWeight: 500 }}>{o.part.unit || 'ea'}</span>
+                </div>
+                {hasOther && (
+                  <div style={{
+                    fontSize: 9.5, fontWeight: 700, color: 'var(--amber)',
+                    display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 1,
+                  }}>
+                    <Icon name="alert" size={10} /> outside warehouse — won't zero
+                  </div>
+                )}
+              </div>
+            </label>
+          )
+        })}
+      </div>
+
+      <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
+        Will deactivate <strong>{deactivateCount}</strong> part{deactivateCount === 1 ? '' : 's'} and
+        zero <strong>{zeroUnits.toLocaleString()}</strong> units of warehouse stock.
+        {leftAloneUnits > 0 && (
+          <> <strong>{leftAloneUnits.toLocaleString()}</strong> units in trucks / project buckets stay as-is.</>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DoneStage({ results, sweepResult, unmatchedSkus, downloadUnmatchedCsv }) {
   if (!results) return null
   const draftErrCount = (results.draftErrors || []).length
-  const hasProblem = results.errorCount > 0 || draftErrCount > 0 || results.draftFatalError || results.movementsSkippedDueToMissingParts > 0
+  const hasProblem = results.errorCount > 0 || draftErrCount > 0 || results.draftFatalError || results.movementsSkippedDueToMissingParts > 0 || (sweepResult?.errorCount || 0) > 0
   return (
     <div style={{ padding: '12px 0' }}>
       <div style={{ textAlign: 'center', marginBottom: 18 }}>
@@ -683,6 +992,43 @@ function DoneStage({ results, unmatchedSkus, downloadUnmatchedCsv }) {
           <Stat label="Movement errors" value={results.errorCount.toLocaleString()} />
         )}
       </div>
+
+      {sweepResult && (
+        <div style={{
+          marginBottom: 12, padding: '10px 14px',
+          background: sweepResult.errorCount > 0 ? 'var(--amber-lt)' : 'var(--teal-lt)',
+          border: `1px solid ${sweepResult.errorCount > 0 ? 'var(--amber)' : 'var(--teal)'}`,
+          borderRadius: 'var(--r-sm)', fontSize: 12,
+          color: sweepResult.errorCount > 0 ? 'var(--amber)' : 'var(--teal)',
+        }}>
+          <div style={{ fontWeight: 800, marginBottom: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Icon name="check" size={13} /> Swept {sweepResult.deactivated} orphan part{sweepResult.deactivated === 1 ? '' : 's'}
+          </div>
+          <div style={{ color: 'var(--muted)' }}>
+            Deactivated {sweepResult.deactivated} · zeroed {sweepResult.zeroedUnits.toLocaleString()} units
+            across {sweepResult.movementsCreated} warehouse movement{sweepResult.movementsCreated === 1 ? '' : 's'}.
+            {sweepResult.leftAloneQty > 0 && (
+              <> {sweepResult.leftAloneQty.toLocaleString()} units in trucks / project buckets were left as-is.</>
+            )}
+            {sweepResult.skippedParts > 0 && (
+              <> <strong>{sweepResult.skippedParts}</strong> part{sweepResult.skippedParts === 1 ? '' : 's'} skipped — zeroing failed, left active (see below).</>
+            )}
+          </div>
+          {sweepResult.errorCount > 0 && (
+            <div style={{
+              marginTop: 6, maxHeight: 140, overflowY: 'auto',
+              fontSize: 11, fontFamily: 'monospace',
+              background: 'rgba(0,0,0,0.04)', borderRadius: 'var(--r-sm)', padding: '8px',
+            }}>
+              {sweepResult.errors.map((e, i) => (
+                <div key={i} style={{ marginBottom: 3 }}>
+                  <strong>{e.part_id || e.id}</strong>: {e.message}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {results.draftFatalError && (
         <div style={{

@@ -10,7 +10,7 @@ import Icon from '../shared/Icon'
 
 const COMMON_UNITS = ['ea', 'ft', 'm', 'in', 'lb', 'kg', 'box', 'roll', 'spool', 'pair', 'pack', 'kit']
 
-export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, onJumpToLocation, locations, currentUser }) {
+export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, onJumpToLocation, locations, currentUser, readOnly = false }) {
   const { showToast, isQtyPaused } = useApp()
   // Default to the active-parts view. Drafts (auto-created by CSV imports
   // for SKUs not yet in the catalog) used to be the default since cleanup
@@ -421,11 +421,11 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                 </div>
 
                 <div style={{ display: 'flex', gap: 4 }}>
-                  {!p.is_active ? (
+                  {!readOnly && (!p.is_active ? (
                     <button onClick={() => handleQuickActivate(p)} style={quickBtnStyle('teal')}>Activate</button>
                   ) : (
                     <button onClick={() => handleQuickDeactivate(p)} style={quickBtnStyle('amber')}>Retire</button>
-                  )}
+                  ))}
                   <button
                     onClick={() => setViewingLocationsFor(p)}
                     style={{ ...quickBtnStyle('default'), display: 'inline-flex', alignItems: 'center', gap: 5 }}
@@ -433,7 +433,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                   >
                     <Icon name="pin" size={13} /> Locations
                   </button>
-                  <button onClick={() => setEditing(p)} style={quickBtnStyle('default')}>Edit</button>
+                  {!readOnly && <button onClick={() => setEditing(p)} style={quickBtnStyle('default')}>Edit</button>}
                 </div>
               </div>
             )
@@ -451,11 +451,11 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           <div style={{ fontWeight: 700, fontSize: 14, color: '#fff', flex: 1 }}>
             {selectedCount} selected
           </div>
-          <button onClick={() => setBulkEditing(true)} style={bulkActionBtn('orange')}><Icon name="edit" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Bulk edit</button>
+          {!readOnly && <button onClick={() => setBulkEditing(true)} style={bulkActionBtn('orange')}><Icon name="edit" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Bulk edit</button>}
           <button onClick={() => setShowLabelSheet(true)} style={bulkActionBtn('purple')}><Icon name="tag" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Labels</button>
-          <button onClick={() => setShowPrSheet(true)} style={bulkActionBtn('orange')}><Icon name="clipboard" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Create PR</button>
-          <button onClick={handleBulkActivate} style={bulkActionBtn('teal')}><Icon name="check" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Activate</button>
-          <button onClick={handleBulkDeactivate} style={bulkActionBtn('amber')}>⊘ Deactivate</button>
+          {!readOnly && <button onClick={() => setShowPrSheet(true)} style={bulkActionBtn('orange')}><Icon name="clipboard" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Create PR</button>}
+          {!readOnly && <button onClick={handleBulkActivate} style={bulkActionBtn('teal')}><Icon name="check" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Activate</button>}
+          {!readOnly && <button onClick={handleBulkDeactivate} style={bulkActionBtn('amber')}>⊘ Deactivate</button>}
           <button onClick={clearSelection} style={bulkActionBtn('ghost')}>Cancel</button>
         </div>
       )}
@@ -491,6 +491,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           part={viewingLocationsFor}
           locations={locations}
           currentUser={currentUser}
+          readOnly={readOnly}
           onClose={() => setViewingLocationsFor(null)}
           onJumpToLocation={(id) => { setViewingLocationsFor(null); onJumpToLocation?.(id) }}
           onMoved={() => { setViewingLocationsFor(null); onChanged?.() }}
@@ -519,7 +520,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
 // Disclaimer reminds the user this is FiberLog's logged view, not
 // authoritative — Sage owns the verified counts (per the transactional-
 // only positioning).
-function PartLocationsPanel({ part, locations, currentUser, onClose, onJumpToLocation, onMoved }) {
+function PartLocationsPanel({ part, locations, currentUser, readOnly = false, onClose, onJumpToLocation, onMoved }) {
   const { isQtyPaused } = useApp()
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
@@ -657,7 +658,7 @@ function PartLocationsPanel({ part, locations, currentUser, onClose, onJumpToLoc
                         Project (job_site) buckets are accumulate-only ledgers —
                         you can SEE a part sitting in one, but not pull it back
                         out from here. (vendor/scrap likewise aren't pull sources.) */}
-                    {l.qty > 0 && !['job_site', 'vendor', 'scrap'].includes(l.type) && (
+                    {!readOnly && l.qty > 0 && !['job_site', 'vendor', 'scrap'].includes(l.type) && (
                       <button
                         type="button"
                         onClick={() => handleMoveFromHere(l)}

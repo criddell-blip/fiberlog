@@ -159,11 +159,13 @@ export default function InventoryView() {
     { id: 'footage',   label: 'Footage map', sub: 'Cable/conduit → SKU', icon: 'nut',     onClick: () => setShowFootageMap(true),     disabled: false },
   ]
 
-  // Accounting (limited) scope: read-only stock + purchase requests, and the
-  // only write action is Receive PO. Hide cycle-count/adjust/move/reconcile/
-  // sonar/sage/import/footage and the Record-movement button.
+  // Accounting (limited) scope: read-only stock + parts catalog + purchase
+  // requests, and the only write action is Receive PO. Hide cycle-count/adjust/
+  // move/reconcile/sonar/sage/import/footage and the Record-movement button.
+  // Parts is included so accounting can confirm a SKU exists even when it has
+  // no logged stock (the Stock tab lists only stocked parts).
   const limited = inventoryIsLimited(currentUser)
-  const subtabs = limited ? SUBTABS.filter(s => s.id === 'stock' || s.id === 'prs') : SUBTABS
+  const subtabs = limited ? SUBTABS.filter(s => s.id === 'stock' || s.id === 'parts' || s.id === 'prs') : SUBTABS
   const actions = limited ? ACTIONS.filter(a => a.id === 'receive') : ACTIONS
 
   // Count sub-tab takes over the full panel — its body is a scanner-driven
@@ -297,6 +299,7 @@ export default function InventoryView() {
             onJumpToLocation={jumpToLocation}
             locations={locations}
             currentUser={currentUser}
+            readOnly={limited}
           />
         )}
         {tab === 'movements' && (

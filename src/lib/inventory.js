@@ -695,6 +695,33 @@ export async function getStockForWarehouseTree(warehouseId) {
   return (stock || []).filter(r => Number(r.quantity) !== 0)
 }
 
+// Per-location, non-zero stock rows for a set of parts. Used by the import
+// "sweep" (deactivate + zero parts not in the file) to (a) show each orphan's
+// stock and where it sits and (b) build the balancing adjust movements. The
+// `.in('part_id', …)` filter is chunked so a large orphan set can't blow past
+// PostgREST's URL length limit.
+export async function getStockRowsForParts(partIds) {
+  const ids = [...new Set((partIds || []).filter(Boolean))]
+  if (ids.length === 0) return []
+  const CHUNK = 200
+  const out = []
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK)
+    const { data, error } = await db
+      .from('inventory_stock')
+      .select(`
+        part_id, location_id, quantity,
+        location:inventory_locations(id, name, type, parent_location_id)
+      `)
+      .in('part_id', chunk)
+    if (error) throw error
+    for (const r of data || []) {
+      if (Number(r.quantity) !== 0) out.push(r)
+    }
+  }
+  return out
+}
+
 // ─── MOVEMENTS ───────────────────────────────────────────────────────────────
 
 // Movement-type rules. Mirrors the DB's movement_endpoints_valid CHECK
