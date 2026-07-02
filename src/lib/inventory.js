@@ -855,6 +855,9 @@ export async function recordMovementsBatch(movements) {
     // reporting); without forwarding them here they'd silently write NULL.
     phase_id: m.phase_id || null,
     consumed_by_user_id: m.consumed_by_user_id || null,
+    // Real work date (job completion) for imported rows. Non-import callers
+    // omit it → NULL → reports/Sage COALESCE(occurred_at, created_at).
+    occurred_at: m.occurred_at || null,
     created_by: m.created_by,
   }))
   const { data, error } = await db.from('inventory_movements').insert(payload).select('id')
@@ -1759,7 +1762,7 @@ export async function getMovementsForSageExport({ since, until, includeExported 
   // "no movements" because the preflight was rejecting the join.
   let q = db.from('inventory_movements')
     .select(`
-      id, movement_type, quantity, unit, unit_cost, notes, created_at,
+      id, movement_type, quantity, unit, unit_cost, notes, created_at, occurred_at,
       exported_at, export_batch_id, submission_id, task_id, vendor_invoice,
       part:parts_catalog(id, name, unit, department, material_group, category),
       from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type, parent_location_id, project_id),
@@ -1767,12 +1770,81 @@ export async function getMovementsForSageExport({ since, until, includeExported 
       phase:phases!inventory_movements_phase_id_fkey(id, name, project_id, project:projects(id, name))
     `)
     .order('created_at', { ascending: true })
+  // Window by EFFECTIVE (work) date = occurred_at ?? created_at, so a job
+  // imported in a later month lands in the correct Sage period. `created_at >=
+  // since` is a SAFE lower-bound prefilter (a work-in-range row was imported
+  // at/after the work, so created_at >= since too); we intentionally do NOT
+  // bound created_at on the upper side (a late import would be dropped). The
+  // exact effective-date window is applied in JS below.
   if (since) q = q.gte('created_at', since)
-  if (until) q = q.lte('created_at', until)
   if (!includeExported) q = q.is('exported_at', null)
   const { data, error } = await q
   if (error) throw error
-  return data || []
+  const sinceT = since ? new Date(since).getTime() : null
+  const untilT = until ? new Date(until).getTime() : null
+  return (data || []).filter(m => {
+    const eff = movementEffectiveDate(m)
+    if (!eff) return false
+    const t = new Date(eff).getTime()
+    if (sinceT != null && t < sinceT) return false
+    if (untilT != null && t > untilT) return false
+    return true
+  })
+}
+
+// ─── CONSUMPTION LEDGER (shared by Reports → Consumption + Sage export) ───────
+//
+// The SINGLE definition of "material consumed into a project": a `transfer`
+// movement that lands in a `job_site` bucket. Both the Reports Consumption view
+// and the Sage export read this so their numbers can never disagree.
+//
+// Dates by REAL WORK DATE via `movementEffectiveDate` = occurred_at ?? created_at.
+// occurred_at is the backfilled / importer-stamped job date; same-day crew rows
+// leave it NULL and coalesce to created_at. This is what stops a June job
+// imported in July from being counted as July. See CLAUDE.md occurred_at note.
+//
+// Rows are enriched with: project (via the bucket, with phase/site fallbacks),
+// part attributes, the consuming user (consumed_by_user_id — partial on Sonar),
+// phase, and — for infra auto-deduct rows only — the site (task → site).
+//
+// `sinceCreated` is a SAFE lower-bound prefilter on created_at: a row whose
+// effective (work) date is >= X necessarily has created_at >= X too (import
+// happens at/after the work), so this prunes old rows without ever dropping an
+// in-range one. The caller applies the exact effective-date window (which needs
+// occurred_at ?? created_at and can't be expressed as a single PostgREST filter).
+export async function getConsumptionLedger({ sinceCreated = null } = {}) {
+  let q = db.from('inventory_movements')
+    .select(`
+      id, movement_type, quantity, unit, notes, created_at, occurred_at,
+      part_id, consumed_by_user_id, phase_id, task_id,
+      part:parts_catalog(id, name, unit, department, material_group, item_type, boxhero_id),
+      to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type, project_id, project:projects(id, name)),
+      phase:phases!inventory_movements_phase_id_fkey(id, name, project:projects(id, name)),
+      consumer:users!inventory_movements_consumed_by_user_id_fkey(id, name, initials, crew_type),
+      task:tasks(name, site:sites(name, project:projects(id, name)))
+    `)
+    .eq('movement_type', 'transfer')
+    .order('created_at', { ascending: false })
+  if (sinceCreated) q = q.gte('created_at', sinceCreated)
+  const { data, error } = await q
+  if (error) throw error
+  // Consumption only = landed in a project bucket. movement_type is already
+  // transfer; this drops truck↔truck / warehouse↔warehouse staging.
+  return (data || []).filter(m => m.to_location?.type === 'job_site')
+}
+
+// Effective work date for a movement: the stamped/backfilled job date if we
+// have it, else the insert time. Shared by the Consumption report + Sage export.
+export function movementEffectiveDate(m) {
+  return m?.occurred_at || m?.created_at || null
+}
+
+// Which flow produced a consumption row — for the Source column / filter.
+export function consumptionSource(m) {
+  const n = m?.notes || ''
+  if (n.includes('[sonar_jobs:')) return 'fiber-sonar'
+  if (n.includes('[sonar:')) return 'field-tech-sonar'
+  return 'crew/other'
 }
 
 // Decide whether a movement should be included in the export.
@@ -1859,7 +1931,11 @@ export function buildSageCsv(movements, opts = {}) {
     if (!isExportableMovement(m, opts)) continue
     lineIdx++
 
-    const date = m.created_at ? String(m.created_at).slice(0, 10) : ''
+    // Date by real work date (occurred_at ?? created_at) so a job imported in
+    // a later month still lands in the correct Sage period. Same effective-date
+    // basis the Consumption report uses. See getConsumptionLedger.
+    const eff = movementEffectiveDate(m)
+    const date = eff ? String(eff).slice(0, 10) : ''
     const txnType = SAGE_TRANSACTION_TYPE[m.movement_type] || 'Inventory Adjustment'
     const referenceNo = m.submission_id
       ? `SUB-${String(m.submission_id).slice(0, 8)}`
@@ -1940,14 +2016,21 @@ export async function markMovementsExported(movementIds, { userId = null, notes 
     .single()
   if (bErr) throw bErr
 
-  const { error: uErr } = await db
-    .from('inventory_movements')
-    .update({
-      exported_at: batch.exported_at,  // align with the batch's canonical timestamp
-      export_batch_id: batch.id,
-    })
-    .in('id', movementIds)
-  if (uErr) throw uErr
+  // Chunk the stamp update. supabase-js puts `.in('id', [...])` into the request
+  // URL; a few hundred UUIDs blow past the gateway's URL limit → HTTP 400 (the
+  // "bad request" bug when the unexported backlog grew). 100 ids/URL is safe.
+  const CHUNK = 100
+  for (let i = 0; i < movementIds.length; i += CHUNK) {
+    const slice = movementIds.slice(i, i + CHUNK)
+    const { error: uErr } = await db
+      .from('inventory_movements')
+      .update({
+        exported_at: batch.exported_at,  // align with the batch's canonical timestamp
+        export_batch_id: batch.id,
+      })
+      .in('id', slice)
+    if (uErr) throw uErr
+  }
 
   return batch
 }

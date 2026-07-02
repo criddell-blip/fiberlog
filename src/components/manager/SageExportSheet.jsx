@@ -19,20 +19,22 @@ import Icon from '../shared/Icon'
 // location/project names used directly as codes. We'll layer code
 // mappings (warehouse name → Sage warehouse code, etc) once the actual
 // values are known.
-export default function SageExportSheet({ onClose }) {
+export default function SageExportSheet({ onClose, initialSince = null, initialUntil = null }) {
   const { showToast, currentUser } = useApp()
 
   // Back closes the export sheet (mounted only when open). No data entry to
   // lose — just a date range — so no confirm.
   useBackClose(1, onClose)
 
-  // Default range: last 7 days (Sat night → Fri night kind of window)
-  const defaultUntil = useMemo(() => isoLocalDate(new Date()), [])
+  // Default range: the range passed in (e.g. the Consumption report's current
+  // filter, so "Export to Sage" exports what you're viewing) else last 7 days.
+  const defaultUntil = useMemo(() => initialUntil || isoLocalDate(new Date()), [initialUntil])
   const defaultSince = useMemo(() => {
+    if (initialSince) return initialSince
     const d = new Date()
     d.setDate(d.getDate() - 7)
     return isoLocalDate(d)
-  }, [])
+  }, [initialSince])
 
   const [since, setSince] = useState(defaultSince)
   const [until, setUntil] = useState(defaultUntil)

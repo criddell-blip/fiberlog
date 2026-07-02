@@ -217,6 +217,7 @@ supabase/
 - Movements with `from_location_id` decrement source stock, `to_location_id` increment destination
 - `adjust` is special: positive (to only) or negative (from only)
 - `inventory_movements.notes` and `vendor_invoice` are both `text` (no length limit) — Receive PO writes the vendor name into notes, Sonar import writes `[sonar:<itemId>]` for future dedup
+- `inventory_movements.occurred_at timestamptz` (nullable, no default) — the real **work/job date**, distinct from `created_at` (import/insert timestamp). Backfilled from the date token in `notes` for the two import families (fiber-jobs `[sonar_jobs:<acct>_YYYY-MM-DD_<type>]`, field-tech prose `Sonar install · YYYY-MM-DD HH:MM · …`) — migration `20260702000000_inventory_movements_occurred_at.sql` (487 rows). Consumers (reporting / Sage) should `COALESCE(occurred_at, created_at)`. Crew load/return + auto-deduct rows leave it NULL because for them `created_at ≈ work date`. Backfilling it is an `occurred_at`-only UPDATE — safe past the column-scoped `trg_inv_movement_immutable` trigger, which guards `notes` (and 12 other core fields) but not `occurred_at`; never set `notes` in the same UPDATE.
 - A trigger updates `inventory_stock` automatically when a movement is inserted
 - **CHECK constraint `movement_endpoints_valid`** enforces correct from/to per type (e.g., `receive` requires `to NOT NULL, from NULL`; `transfer`/`return` require both and different). The JS `validateMovement()` in `lib/inventory.js` mirrors this so we fail fast.
 

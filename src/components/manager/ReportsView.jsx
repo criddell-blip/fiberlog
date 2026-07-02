@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { db, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabase'
+import { getConsumptionLedger, movementEffectiveDate, consumptionSource } from '../../lib/inventory'
 import { useIsWide } from '../../lib/useIsWide'
 import Icon from '../shared/Icon'
+import SageExportSheet from './SageExportSheet'
 
 async function fetchBoxHeroStock() {
   try {
@@ -80,6 +82,17 @@ export default function ReportsView() {
   const [selUser, setSelUser] = useState('all')
   const [users, setUsers] = useState([])
   const [groupBy, setGroupBy] = useState('part')
+  // Data source: 'passdowns' = approved crew submissions (the original report);
+  // 'consumption' = the movement ledger (material into project buckets, dated by
+  // real work date). Both feed the same rows/groupBy/CSV chrome downstream.
+  const [mode, setMode] = useState('passdowns')
+  // Consumption-only filters (client-side, like project/crew).
+  const [partQuery, setPartQuery] = useState('')
+  const [selDept, setSelDept] = useState('all')
+  const [selMatGroup, setSelMatGroup] = useState('all')
+  const [deptOptions, setDeptOptions] = useState([])
+  const [mgOptions, setMgOptions] = useState([])
+  const [showSage, setShowSage] = useState(false)
   const [stockMap, setStockMap] = useState({})
   const [stockLoading, setStockLoading] = useState(false)
   const [barcodeMap, setBarcodeMap] = useState({}) // 'part' | 'person' | 'project'
@@ -93,9 +106,18 @@ export default function ReportsView() {
   useEffect(() => {
     db.from('users').select('id, name, initials, crew_type').eq('is_active', true).order('name')
       .then(({ data }) => setUsers(data || []))
+    // Department + material-group option lists for the consumption filters.
+    db.from('parts_catalog').select('department, material_group').eq('is_active', true)
+      .then(({ data }) => {
+        setDeptOptions([...new Set((data || []).map(r => r.department).filter(Boolean))].sort())
+        setMgOptions([...new Set((data || []).map(r => r.material_group).filter(Boolean))].sort())
+      })
   }, [])
 
-  useEffect(() => { load() }, [dateFrom, dateTo, selProject, selUser])
+  useEffect(() => {
+    if (mode === 'consumption') loadConsumption()
+    else load()
+  }, [mode, dateFrom, dateTo, selProject, selUser, partQuery, selDept, selMatGroup])
 
   async function loadStock() {
     setStockLoading(true)
@@ -235,6 +257,77 @@ export default function ReportsView() {
       setRows(reportRows)
     } catch(e) {
       console.error('Reports load failed:', e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Consumption mode: read the shared movement ledger (material into project
+  // buckets) instead of passdown submissions. Emits the SAME row shape as
+  // load() so every downstream consumer (groupBy, summaries, CSV) is reused
+  // unchanged. Dates by real work date (occurred_at ?? created_at).
+  async function loadConsumption() {
+    setLoading(true)
+    try {
+      const fromISO = dateFrom + 'T00:00:00'
+      const toISO = dateTo + 'T23:59:59.999'
+      const ledger = await getConsumptionLedger({ sinceCreated: fromISO })
+      const fromT = new Date(fromISO).getTime()
+      const toT = new Date(toISO).getTime()
+      const q = partQuery.trim().toLowerCase()
+      const reportRows = []
+      for (const m of ledger) {
+        const effRaw = movementEffectiveDate(m)
+        const effT = new Date(effRaw).getTime()
+        if (effT < fromT || effT > toT) continue   // exact effective-date window
+
+        // Resolve project: the bucket's project, then phase, then infra site.
+        // Legacy "Region X" buckets carry no project_id — strip the prefix so
+        // they fold into the real project name instead of splitting the total.
+        const proj = m.to_location?.project || m.phase?.project || m.task?.site?.project || null
+        const projId = proj?.id || null
+        const projName = proj?.name
+          || (m.to_location?.name || '').replace(/^(\(.*\)\s*)?Region\s+/i, '').trim()
+          || '—'
+        if (selProject !== 'all' && projId !== selProject) continue
+        if (selUser !== 'all' && m.consumed_by_user_id !== selUser) continue
+
+        const dept = m.part?.department || ''
+        const mg = m.part?.material_group || ''
+        if (selDept !== 'all' && dept !== selDept) continue
+        if (selMatGroup !== 'all' && mg !== selMatGroup) continue
+        if (q && !`${m.part?.name || ''} ${m.part_id || ''}`.toLowerCase().includes(q)) continue
+
+        // "Phase / Site" column: infra site if present, else phase, else bucket.
+        const locationName = m.task?.site?.name || m.phase?.name || m.to_location?.name || '—'
+        reportRows.push({
+          date: new Date(effRaw).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          dateRaw: effRaw,
+          partId: m.part?.id || m.part_id,
+          partName: m.part?.name || m.part_id,
+          unit: m.unit || m.part?.unit || 'ea',
+          qty: m.quantity || 0,
+          barcode: m.part?.boxhero_id || '',
+          department: dept,
+          itemType: m.part?.item_type || '',
+          materialGroup: mg,
+          // consumed_by is reliable for crew auto-deduct, partial for Sonar —
+          // show a clear placeholder rather than dropping the row.
+          userName: m.consumer?.name || '(unknown installer)',
+          userInitials: m.consumer?.initials || '—',
+          crewType: m.consumer?.crew_type || '',
+          projectName: projName,
+          phaseName: locationName,
+          taskName: m.task?.name || '—',
+          source: consumptionSource(m),
+          submissionId: null,
+        })
+      }
+      reportRows.sort((a, b) => new Date(b.dateRaw) - new Date(a.dateRaw))
+      setRows(reportRows)
+    } catch(e) {
+      console.error('Consumption load failed:', e)
+      showToast?.('Failed to load consumption', 'error')
     } finally {
       setLoading(false)
     }
@@ -558,7 +651,7 @@ export default function ReportsView() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `fiberlog-parts-${dateFrom}-to-${dateTo}.csv`
+    a.download = `fiberlog-${mode === 'consumption' ? 'consumption' : 'parts'}-${dateFrom}-to-${dateTo}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -586,6 +679,20 @@ export default function ReportsView() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
           <div style={{ fontWeight: 800, fontSize: 17, color: 'var(--text)' }}>Reports</div>
+          {/* Data-source toggle — "what data am I looking at" (vs group-by's
+              "how is it grouped"). Passdowns = approved crew submissions;
+              Consumption = the movement ledger (all material into projects,
+              incl. Sonar/field-tech, dated by real work date). */}
+          <div style={{ display: 'inline-flex', gap: 4, background: 'var(--surface2)', padding: 3, borderRadius: 20, border: '1px solid var(--border)' }}>
+            {[{ id: 'passdowns', label: 'Passdowns' }, { id: 'consumption', label: 'Consumption' }].map(x => (
+              <button key={x.id} onClick={() => setMode(x.id)} style={{
+                padding: '3px 12px', borderRadius: 16, fontSize: 11, fontWeight: 700,
+                background: mode === x.id ? 'var(--orange)' : 'transparent',
+                color: mode === x.id ? 'white' : 'var(--muted)',
+                border: 'none', cursor: 'pointer'
+              }}>{x.label}</button>
+            ))}
+          </div>
           <button
             onClick={() => setShowFilters(v => !v)}
             className={`chip${showFilters ? ' chip-active' : ''}`}
@@ -673,10 +780,32 @@ export default function ReportsView() {
               <select value={selUser} onChange={e => setSelUser(e.target.value)}
                 style={{ flex: 1, minWidth: 120, padding: '7px 10px', background: 'var(--surface2)',
                   border: '1.5px solid var(--border2)', borderRadius: 8, color: 'var(--text)', fontSize: 12 }}>
-                <option value="all">All crew</option>
+                <option value="all">{mode === 'consumption' ? 'All installers' : 'All crew'}</option>
                 {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </div>
+
+            {/* Consumption-only filters: part search + department + material group. */}
+            {mode === 'consumption' && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                <input type="text" value={partQuery} onChange={e => setPartQuery(e.target.value)}
+                  placeholder="Search part / SKU…" autoComplete="off" name="consumption-part-search"
+                  style={{ flex: 2, minWidth: 140, padding: '7px 10px', background: 'var(--surface2)',
+                    border: '1.5px solid var(--border2)', borderRadius: 8, color: 'var(--text)', fontSize: 12 }} />
+                <select value={selDept} onChange={e => setSelDept(e.target.value)}
+                  style={{ flex: 1, minWidth: 120, padding: '7px 10px', background: 'var(--surface2)',
+                    border: '1.5px solid var(--border2)', borderRadius: 8, color: 'var(--text)', fontSize: 12 }}>
+                  <option value="all">All departments</option>
+                  {deptOptions.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+                <select value={selMatGroup} onChange={e => setSelMatGroup(e.target.value)}
+                  style={{ flex: 1, minWidth: 120, padding: '7px 10px', background: 'var(--surface2)',
+                    border: '1.5px solid var(--border2)', borderRadius: 8, color: 'var(--text)', fontSize: 12 }}>
+                  <option value="all">All material groups</option>
+                  {mgOptions.map(g => <option key={g} value={g}>{g}</option>)}
+                </select>
+              </div>
+            )}
 
             {/* Secondary actions — less-used (per-session) buttons live in
                 the expanded panel so they don't crowd the always-visible row. */}
@@ -684,15 +813,34 @@ export default function ReportsView() {
               <button onClick={loadStock} className="chip">
                 <Icon name="box" size={14} /> {stockLoading ? 'Loading…' : 'Stock levels'}
               </button>
-              {/* Progress PDF is fiber-only — disabled for infra-only projects */}
-              <button onClick={generateProjectReport}
-                disabled={isInfraOnly}
-                title={isInfraOnly ? 'Progress PDF is fiber-only (organized by phases). Infra projects don’t use phases yet.' : ''}
-                className="chip"
-                style={{ opacity: isInfraOnly ? 0.5 : 1, cursor: isInfraOnly ? 'not-allowed' : 'pointer' }}>
-                <Icon name="receipt" size={14} /> Progress PDF
-              </button>
+              {/* Sage export reads the same consumption ledger — surfaced here so
+                  you can export the exact period you're viewing. Also still lives
+                  under Inventory. */}
+              {mode === 'consumption' && (
+                <button onClick={() => setShowSage(true)} className="chip">
+                  <Icon name="receipt" size={14} /> Export to Sage
+                </button>
+              )}
+              {/* Progress PDF is fiber/passdown-only (organized by phases) — hidden
+                  in consumption mode, disabled for infra-only projects. */}
+              {mode === 'passdowns' && (
+                <button onClick={generateProjectReport}
+                  disabled={isInfraOnly}
+                  title={isInfraOnly ? 'Progress PDF is fiber-only (organized by phases). Infra projects don’t use phases yet.' : ''}
+                  className="chip"
+                  style={{ opacity: isInfraOnly ? 0.5 : 1, cursor: isInfraOnly ? 'not-allowed' : 'pointer' }}>
+                  <Icon name="receipt" size={14} /> Progress PDF
+                </button>
+              )}
             </div>
+
+            {/* Attribution honesty note for consumption mode. */}
+            {mode === 'consumption' && (
+              <div style={{ fontSize: 10.5, color: 'var(--hint)', marginTop: 8, lineHeight: 1.4 }}>
+                Consumption = material moved into a project. Dated by real work date.
+                “Installer” is recorded for crew work; Sonar/field-tech imports may show “(unknown installer)”.
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -704,7 +852,7 @@ export default function ReportsView() {
         {!loading && rows.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--hint)' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10, color: 'var(--gray-mid)' }}><Icon name="chart" size={32} /></div>
-            <div>No approved submissions in this range</div>
+            <div>{mode === 'consumption' ? 'No material consumed in this range' : 'No approved submissions in this range'}</div>
           </div>
         )}
 
@@ -753,6 +901,14 @@ export default function ReportsView() {
           ))
         })()}
       </div>
+
+      {showSage && (
+        <SageExportSheet
+          initialSince={dateFrom}
+          initialUntil={dateTo}
+          onClose={() => setShowSage(false)}
+        />
+      )}
     </div>
   )
 }

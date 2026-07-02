@@ -854,6 +854,9 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             r.destReason,
             r.sonarItemId && `[sonar:${r.sonarItemId}]`,
           ].filter(Boolean)
+          // Real work date (job completion) so reports/Sage date by when the
+          // install happened, not when we imported the CSV. See occurred_at.
+          const occ = r.date ? new Date(r.date) : null
           return {
             movement_type: 'transfer',
             part_id: r.partId,
@@ -863,6 +866,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             to_location_id: r.destId,
             notes: noteParts.join(' · '),
             created_by: currentUser?.id,
+            occurred_at: (occ && !isNaN(occ.getTime())) ? occ.toISOString() : null,
             phase_id: r.phaseTagId || null,
             // NULL for warehouse-source rows — no crew to attribute the pull to.
             consumed_by_user_id: r.userId || null,

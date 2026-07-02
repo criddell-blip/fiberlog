@@ -573,6 +573,9 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             line.columnName + ': ' + line.valueText,
             `[sonar_jobs:${r.dedupKey}]`,
           ].filter(Boolean)
+          // Real job date (completion) so reports/Sage date by when the work
+          // happened, not the import day. r.date is 'YYYY-MM-DD'. See occurred_at.
+          const occ = r.date ? new Date(r.date + 'T00:00:00') : null
           movements.push({
             movement_type: 'transfer',
             part_id: line.sku,
@@ -582,6 +585,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             to_location_id: r.destBucketId,
             notes: notePieces.join(' · '),
             created_by: currentUser?.id,
+            occurred_at: (occ && !isNaN(occ.getTime())) ? occ.toISOString() : null,
             phase_id: r.phaseId || null,
             // A mapped/overridden source means the completer wasn't the
             // carrier — don't attribute consumption to them.
