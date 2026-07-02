@@ -6,12 +6,17 @@ import BulkMoveSheet from './BulkMoveSheet'
 import PurchaseRequestSheet from './PurchaseRequestSheet'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
 import { useBackClose } from '../../lib/backStack'
+import { useIsWide } from '../../lib/useIsWide'
 import Icon from '../shared/Icon'
 
 const COMMON_UNITS = ['ea', 'ft', 'm', 'in', 'lb', 'kg', 'box', 'roll', 'spool', 'pair', 'pack', 'kit']
 
 export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, onJumpToLocation, locations, currentUser, readOnly = false }) {
   const { showToast, isQtyPaused } = useApp()
+  // Desktop = single horizontal row; phone = stacked card so the part name/SKU
+  // get their own full-width line instead of being crushed to 0 by the action
+  // buttons (mirrors InventoryStockTab's responsive split).
+  const isWide = useIsWide()
   // Default to the active-parts view. Drafts (auto-created by CSV imports
   // for SKUs not yet in the catalog) used to be the default since cleanup
   // was the day-job — the active list is what the owner actually wants
@@ -358,82 +363,106 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
             const stockQty = stockTotals.get(p.id) || 0
             const isSelected = selectedIds.has(p.id)
             const isHighlighted = highlightedPartId === p.id
-            return (
-              <div
-                key={p.id}
-                ref={el => { partRowRefs.current[p.id] = el }}
-                style={{
-                  display: 'flex', alignItems: 'center', padding: '10px 14px', gap: 10,
-                  borderBottom: i < filtered.length - 1 ? '1px solid var(--row-divider)' : 'none',
-                  background: isHighlighted ? 'var(--accent-lt)'
-                    : isSelected ? 'var(--selected-row)'
-                    : 'transparent',
-                  boxShadow: isHighlighted ? 'inset 0 0 0 2px var(--accent)' : 'none',
-                  transition: 'background 0.25s, box-shadow 0.25s',
-                }}
-              >
-                {/*
-                  Checkbox uses onClick (not onChange) so we can read
-                  e.shiftKey for range selection. Empty onChange satisfies
-                  React's controlled-input contract.
-                */}
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={() => {}}
-                  onClick={e => handleCheckboxClick(e, i)}
-                  style={{ cursor: 'pointer', flexShrink: 0 }}
-                />
-
-                <span className={`status ${p.is_active ? 'status-instock' : 'status-draft'}`} style={{ flexShrink: 0, width: 56 }}>
-                  {p.is_active ? 'ACTIVE' : 'DRAFT'}
-                </span>
-
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {p.name}
-                    {p.nickname && (
-                      <span style={{ fontWeight: 400, color: 'var(--accent-dk)', marginLeft: 6, fontStyle: 'italic', fontSize: 12 }}>
-                        aka {p.nickname}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mono" style={{ fontSize: 12, color: 'var(--hint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {p.id} · {p.unit || 'ea'} · {p.category || 'Uncategorized'}
-                  </div>
-                </div>
-
-                <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 60 }}>
-                  {isQtyPaused ? (
-                    stockQty > 0 ? (
-                      <span className="pill pill-success pill-sm">stocked</span>
-                    ) : (
-                      <span style={{ fontSize: 10, color: 'var(--hint)' }}>—</span>
-                    )
-                  ) : (
-                    <>
-                      <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: stockQty > 0 ? 'var(--text)' : 'var(--hint)' }}>
-                        {stockQty.toLocaleString()}
-                      </div>
-                      <div className="eyebrow" style={{ fontSize: 9 }}>in stock</div>
-                    </>
+            // Shared pieces so desktop row + phone card stay in sync.
+            const checkbox = (
+              // onClick (not onChange) so we can read e.shiftKey for range select.
+              <input type="checkbox" checked={isSelected} onChange={() => {}}
+                onClick={e => handleCheckboxClick(e, i)}
+                style={{ cursor: 'pointer', flexShrink: 0 }} />
+            )
+            const statusBadge = (
+              <span className={`status ${p.is_active ? 'status-instock' : 'status-draft'}`} style={{ flexShrink: 0, width: 56 }}>
+                {p.is_active ? 'ACTIVE' : 'DRAFT'}
+              </span>
+            )
+            const nameBlock = (
+              <>
+                <div style={{ fontWeight: 600, fontSize: 13.5, ...(isWide ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } : {}) }}>
+                  {p.name}
+                  {p.nickname && (
+                    <span style={{ fontWeight: 400, color: 'var(--accent-dk)', marginLeft: 6, fontStyle: 'italic', fontSize: 12 }}>
+                      aka {p.nickname}
+                    </span>
                   )}
                 </div>
+                <div className="mono" style={{ fontSize: 12, color: 'var(--hint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {p.id} · {p.unit || 'ea'} · {p.category || 'Uncategorized'}
+                </div>
+              </>
+            )
+            const stockBlock = (
+              isQtyPaused ? (
+                stockQty > 0 ? (
+                  <span className="pill pill-success pill-sm">stocked</span>
+                ) : (
+                  <span style={{ fontSize: 10, color: 'var(--hint)' }}>—</span>
+                )
+              ) : (
+                <>
+                  <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: stockQty > 0 ? 'var(--text)' : 'var(--hint)' }}>
+                    {stockQty.toLocaleString()}
+                  </div>
+                  <div className="eyebrow" style={{ fontSize: 9 }}>in stock</div>
+                </>
+              )
+            )
+            const actionButtons = (
+              <>
+                {!readOnly && (!p.is_active ? (
+                  <button onClick={() => handleQuickActivate(p)} style={quickBtnStyle('teal')}>Activate</button>
+                ) : (
+                  <button onClick={() => handleQuickDeactivate(p)} style={quickBtnStyle('amber')}>Retire</button>
+                ))}
+                <button
+                  onClick={() => setViewingLocationsFor(p)}
+                  style={{ ...quickBtnStyle('default'), display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                  title="See which locations have logged stock of this part"
+                >
+                  <Icon name="pin" size={13} /> Locations
+                </button>
+                {!readOnly && <button onClick={() => setEditing(p)} style={quickBtnStyle('default')}>Edit</button>}
+              </>
+            )
 
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {!readOnly && (!p.is_active ? (
-                    <button onClick={() => handleQuickActivate(p)} style={quickBtnStyle('teal')}>Activate</button>
-                  ) : (
-                    <button onClick={() => handleQuickDeactivate(p)} style={quickBtnStyle('amber')}>Retire</button>
-                  ))}
-                  <button
-                    onClick={() => setViewingLocationsFor(p)}
-                    style={{ ...quickBtnStyle('default'), display: 'inline-flex', alignItems: 'center', gap: 5 }}
-                    title="See which locations have logged stock of this part"
-                  >
-                    <Icon name="pin" size={13} /> Locations
-                  </button>
-                  {!readOnly && <button onClick={() => setEditing(p)} style={quickBtnStyle('default')}>Edit</button>}
+            const rowBg = isHighlighted ? 'var(--accent-lt)' : isSelected ? 'var(--selected-row)' : 'transparent'
+            const rowShadow = isHighlighted ? 'inset 0 0 0 2px var(--accent)' : 'none'
+
+            if (isWide) {
+              return (
+                <div key={p.id} ref={el => { partRowRefs.current[p.id] = el }}
+                  style={{
+                    display: 'flex', alignItems: 'center', padding: '10px 14px', gap: 10,
+                    borderBottom: i < filtered.length - 1 ? '1px solid var(--row-divider)' : 'none',
+                    background: rowBg, boxShadow: rowShadow,
+                    transition: 'background 0.25s, box-shadow 0.25s',
+                  }}>
+                  {checkbox}
+                  {statusBadge}
+                  <div style={{ flex: 1, minWidth: 0 }}>{nameBlock}</div>
+                  <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 60 }}>{stockBlock}</div>
+                  <div style={{ display: 'flex', gap: 4 }}>{actionButtons}</div>
+                </div>
+              )
+            }
+
+            // Phone: stacked card — name/SKU on their own full-width line so the
+            // action buttons can't squeeze them out; badge/stock/actions reflow below.
+            return (
+              <div key={p.id} ref={el => { partRowRefs.current[p.id] = el }}
+                style={{
+                  padding: '12px 14px',
+                  borderBottom: i < filtered.length - 1 ? '1px solid var(--row-divider)' : 'none',
+                  background: rowBg, boxShadow: rowShadow,
+                  transition: 'background 0.25s, box-shadow 0.25s',
+                }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  {checkbox}
+                  <div style={{ flex: 1, minWidth: 0 }}>{nameBlock}</div>
+                  <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 52 }}>{stockBlock}</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 8, paddingLeft: 26 }}>
+                  {statusBadge}
+                  {actionButtons}
                 </div>
               </div>
             )
