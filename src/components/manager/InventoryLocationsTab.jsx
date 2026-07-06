@@ -9,6 +9,7 @@ import { crewTypeLabel } from '../../lib/crewTypes'
 import BinLabelSheet from '../cycleCount/BinLabelSheet'
 import AisleSignSheet from './AisleSignSheet'
 import LocationDetailPanel from './LocationDetailPanel'
+import LocationWithBinPicker from './LocationWithBinPicker'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 
@@ -144,7 +145,10 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   const [retiring, setRetiring] = useState(null)
   const [retireStock, setRetireStock] = useState([])
   const [retireSelectedParts, setRetireSelectedParts] = useState({})
-  const [retireDestinationId, setRetireDestinationId] = useState('')
+  // Destination picker is now warehouse→bin capable (backlog #24). The
+  // effective destination is retireDestBinId || retireDestTopId.
+  const [retireDestTopId, setRetireDestTopId] = useState('')
+  const [retireDestBinId, setRetireDestBinId] = useState('')
   const [retireLoading, setRetireLoading] = useState(false)
   const [retireSaving, setRetireSaving] = useState(false)
 
@@ -313,7 +317,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   // open starts fresh.
   useEffect(() => {
     if (!retiring) {
-      setRetireStock([]); setRetireSelectedParts({}); setRetireDestinationId('')
+      setRetireStock([]); setRetireSelectedParts({}); setRetireDestTopId(''); setRetireDestBinId('')
       return
     }
     let cancelled = false
@@ -345,6 +349,10 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
     return () => { cancelled = true }
   }, [retiring, showToast])
 
+  // Clear a stale bin pick when the top-level destination changes, so a bin
+  // from a previously-selected warehouse can't leak through as the target.
+  useEffect(() => { setRetireDestBinId('') }, [retireDestTopId])
+
   function toggleRetirePart(partId) {
     setRetireSelectedParts(prev => ({
       ...prev,
@@ -369,7 +377,8 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
     const recoveryItems = Object.entries(retireSelectedParts)
       .filter(([, v]) => v.selected && v.qty > 0)
       .map(([partId, v]) => ({ partId, quantity: v.qty, unit: v.unit }))
-    if (recoveryItems.length > 0 && !retireDestinationId) {
+    const retireDest = retireDestBinId || retireDestTopId
+    if (recoveryItems.length > 0 && !retireDest) {
       showToast('Pick a destination for the parts you selected.')
       return
     }
@@ -378,7 +387,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
       await deactivateLocationWithRecovery(
         retiring.id,
         recoveryItems,
-        recoveryItems.length > 0 ? retireDestinationId : null,
+        recoveryItems.length > 0 ? retireDest : null,
       )
       const wasBin = retiring.type === 'bin'
       const parentId = retiring.parent_location_id
@@ -937,23 +946,22 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
 
                 <div className="field">
                   <label>Move selected parts to</label>
-                  <select
-                    value={retireDestinationId}
-                    onChange={e => setRetireDestinationId(e.target.value)}
-                    disabled={recoveryCount === 0}
-                    style={{
-                      width: '100%', padding: '8px 10px', fontSize: 13,
-                      background: recoveryCount === 0 ? 'var(--gray-lt)' : 'var(--surface2)',
-                      color: recoveryCount === 0 ? 'var(--hint)' : 'var(--text)',
-                      border: '1.5px solid var(--border2)', borderRadius: 8,
-                    }}>
-                    <option value="">— Pick a location —</option>
-                    {destOptions.map(d => (
-                      <option key={d.id} value={d.id}>
-                        {TYPE_ICONS[d.type] || ''} {d.name}{d.type !== 'warehouse' ? ` (${TYPE_LABELS[d.type]})` : ''}
-                      </option>
-                    ))}
-                  </select>
+                  {recoveryCount === 0 ? (
+                    <div style={{
+                      width: '100%', padding: '10px 12px', fontSize: 13,
+                      background: 'var(--gray-lt)', color: 'var(--hint)',
+                      border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)',
+                    }}>Select at least one part above first</div>
+                  ) : (
+                    <LocationWithBinPicker
+                      topLevelId={retireDestTopId} setTopLevelId={setRetireDestTopId}
+                      binId={retireDestBinId} setBinId={setRetireDestBinId}
+                      options={destOptions}
+                      binsByWarehouse={binsByWarehouse}
+                      locations={locations}
+                      excludeId={retiring.id}
+                    />
+                  )}
                 </div>
               </>
             )}
@@ -974,7 +982,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                 onClick={() => setRetiring(null)} disabled={retireSaving}>Cancel</button>
               <button className="btn btn-danger" style={{ flex: 2 }}
                 onClick={handleConfirmRetire}
-                disabled={retireSaving || retireLoading || (recoveryCount > 0 && !retireDestinationId)}>
+                disabled={retireSaving || retireLoading || (recoveryCount > 0 && !(retireDestBinId || retireDestTopId))}>
                 {retireSaving
                   ? 'Working…'
                   : recoveryCount > 0

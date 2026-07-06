@@ -8,6 +8,7 @@ import {
 } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
+import LocationWithBinPicker from './LocationWithBinPicker'
 
 const TYPES = [
   { id: 'receive',  label: 'Receive',  iconName: 'download', hint: 'New stock from a vendor' },
@@ -737,53 +738,6 @@ function SmartFromPicker({ options, totalLines, value, onChange }) {
 // Cascading location picker: top-level location first, then optional bin
 // when the top-level is a warehouse. The "effective" id is the bin if one
 // is picked, otherwise the top-level (which means "warehouse-level / unbinned").
-function LocationWithBinPicker({
-  topLevelId, setTopLevelId, binId, setBinId,
-  options, binsByWarehouse, locations,
-}) {
-  const selectedTop = locations.find(l => l.id === topLevelId)
-  const isWarehouse = selectedTop?.type === 'warehouse'
-  const bins = isWarehouse ? (binsByWarehouse[topLevelId] || []) : []
-
-  return (
-    <div>
-      <select
-        value={topLevelId}
-        onChange={e => setTopLevelId(e.target.value)}
-        style={{ width: '100%', padding: '10px 12px', borderRadius: 'var(--r-sm)', border: '1.5px solid var(--border2)', fontSize: 14, background: 'var(--bg)' }}
-      >
-        <option value="">— Pick a location —</option>
-        {options.map(loc => (
-          <option key={loc.id} value={loc.id}>
-            {loc.assigned_user?.name || loc.name} ({loc.type})
-          </option>
-        ))}
-      </select>
-
-      {isWarehouse && bins.length > 0 && (
-        <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>↳ Bin:</span>
-          <select
-            value={binId}
-            onChange={e => setBinId(e.target.value)}
-            style={{ flex: 1, padding: '7px 10px', borderRadius: 'var(--r-sm)', border: '1.5px solid var(--border2)', fontSize: 13, background: 'var(--bg)' }}
-          >
-            <option value="">(unbinned — warehouse level)</option>
-            {bins.map(b => (
-              <option key={b.id} value={b.id}>📥 {b.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
-      {isWarehouse && bins.length === 0 && (
-        <div style={{ marginTop: 4, fontSize: 11, color: 'var(--hint)' }}>
-          No bins under this warehouse — stock goes to the warehouse level.
-        </div>
-      )}
-    </div>
-  )
-}
-
 function dirBtn(selected) {
   return {
     flex: 1, padding: '8px 12px', borderRadius: 'var(--r-sm)',

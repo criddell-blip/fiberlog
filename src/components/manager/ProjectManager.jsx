@@ -6,9 +6,10 @@ import {
   decommissionSiteWithRecovery,
   getTaskCountsBySite, getTasksBySite, getMaterialsAtSite,
 } from '../../lib/supabase'
-import { getLocations } from '../../lib/inventory'
+import { getLocations, getBinsForWarehouse } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
+import LocationWithBinPicker from './LocationWithBinPicker'
 
 const SITE_TYPES = [
   { id: 'wireless', label: 'Wireless', iconName: 'pin' },
@@ -151,7 +152,11 @@ export default function ProjectManager() {
   const [decommMaterials, setDecommMaterials] = useState([])
   const [decommSelectedParts, setDecommSelectedParts] = useState({})
   const [decommDestinations, setDecommDestinations] = useState([])
-  const [decommDestinationId, setDecommDestinationId] = useState('')
+  // Warehouse→bin capable destination picker (backlog #24). Effective
+  // destination = decommDestBinId || decommDestTopId.
+  const [decommBinsByWarehouse, setDecommBinsByWarehouse] = useState({})
+  const [decommDestTopId, setDecommDestTopId] = useState('')
+  const [decommDestBinId, setDecommDestBinId] = useState('')
   const [decommLoading, setDecommLoading] = useState(false)
 
   // Sub-modals stacked on top of Edit Site: tasks-at-site, materials-at-site.
@@ -298,18 +303,30 @@ export default function ProjectManager() {
   useEffect(() => {
     if (!confirmDecommSite) {
       setDecommMaterials([]); setDecommSelectedParts({})
-      setDecommDestinations([]); setDecommDestinationId('')
+      setDecommDestinations([]); setDecommBinsByWarehouse({})
+      setDecommDestTopId(''); setDecommDestBinId('')
       return
     }
     let cancelled = false
     setDecommLoading(true)
     Promise.all([
       getMaterialsAtSite(confirmDecommSite.id),
-      getLocations().then(locs => locs.filter(l => l.type === 'warehouse')),
+      getLocations().then(async locs => {
+        const whs = locs.filter(l => l.type === 'warehouse')
+        // Preload each warehouse's bins so the destination picker can offer
+        // bin-level targets (not just the warehouse itself).
+        const binsMap = {}
+        for (const w of whs) {
+          try { binsMap[w.id] = await getBinsForWarehouse(w.id) }
+          catch { binsMap[w.id] = [] }
+        }
+        return { whs, binsMap }
+      }),
     ])
-      .then(([mats, dests]) => {
+      .then(([mats, { whs: dests, binsMap }]) => {
         if (cancelled) return
         setDecommMaterials(mats)
+        setDecommBinsByWarehouse(binsMap)
         // Default: nothing selected. User opts in to recovery. Most
         // decommissions are accounting-only (gear stays installed) so
         // making "select all" the default would push them toward writing
@@ -318,7 +335,7 @@ export default function ProjectManager() {
           mats.map(m => [m.partId, { selected: false, qty: m.qty, name: m.name, unit: m.unit }])
         ))
         setDecommDestinations(dests)
-        if (dests.length === 1) setDecommDestinationId(dests[0].id)  // auto-pick if only one warehouse
+        if (dests.length === 1) setDecommDestTopId(dests[0].id)  // auto-pick if only one warehouse
       })
       .catch(e => {
         console.warn('Decommission modal load failed:', e)
@@ -327,6 +344,9 @@ export default function ProjectManager() {
       .finally(() => { if (!cancelled) setDecommLoading(false) })
     return () => { cancelled = true }
   }, [confirmDecommSite])
+
+  // Clear a stale bin pick when the destination warehouse changes.
+  useEffect(() => { setDecommDestBinId('') }, [decommDestTopId])
 
   function toggleDecommPart(partId) {
     setDecommSelectedParts(prev => ({
@@ -357,13 +377,14 @@ export default function ProjectManager() {
     const recoveryItems = Object.entries(decommSelectedParts)
       .filter(([, v]) => v.selected && v.qty > 0)
       .map(([partId, v]) => ({ partId, quantity: v.qty, unit: v.unit }))
-    if (recoveryItems.length > 0 && !decommDestinationId) {
-      showToast('Pick a destination warehouse for the parts you selected.')
+    const decommDest = decommDestBinId || decommDestTopId
+    if (recoveryItems.length > 0 && !decommDest) {
+      showToast('Pick a destination for the parts you selected.')
       return
     }
     setEditSiteSaving(true)
     try {
-      await decommissionSiteWithRecovery(id, recoveryItems, recoveryItems.length > 0 ? decommDestinationId : null)
+      await decommissionSiteWithRecovery(id, recoveryItems, recoveryItems.length > 0 ? decommDest : null)
       setProjectSites(prev => prev.filter(s => s.id !== id))
       setSiteCountByProject(prev => ({
         ...prev,
@@ -1620,21 +1641,21 @@ export default function ProjectManager() {
                       one part is selected. Greyed when no selection. */}
                   <div className="field">
                     <label>Move recovered parts to</label>
-                    <select
-                      value={decommDestinationId}
-                      onChange={e => setDecommDestinationId(e.target.value)}
-                      disabled={recoveryCount === 0}
-                      style={{
-                        width: '100%', padding: '8px 10px', fontSize: 13,
-                        background: recoveryCount === 0 ? 'var(--gray-lt)' : 'var(--surface2)',
-                        color: recoveryCount === 0 ? 'var(--hint)' : 'var(--text)',
-                        border: '1.5px solid var(--border2)', borderRadius: 8,
-                      }}>
-                      <option value="">— Pick a warehouse —</option>
-                      {decommDestinations.map(d => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
-                      ))}
-                    </select>
+                    {recoveryCount === 0 ? (
+                      <div style={{
+                        width: '100%', padding: '10px 12px', fontSize: 13,
+                        background: 'var(--gray-lt)', color: 'var(--hint)',
+                        border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)',
+                      }}>Select at least one part above first</div>
+                    ) : (
+                      <LocationWithBinPicker
+                        topLevelId={decommDestTopId} setTopLevelId={setDecommDestTopId}
+                        binId={decommDestBinId} setBinId={setDecommDestBinId}
+                        options={decommDestinations}
+                        binsByWarehouse={decommBinsByWarehouse}
+                        locations={decommDestinations}
+                      />
+                    )}
                   </div>
                 </>
               )}
@@ -1653,7 +1674,7 @@ export default function ProjectManager() {
                   onClick={() => setConfirmDecommSite(null)} disabled={editSiteSaving}>Cancel</button>
                 <button className="btn btn-danger" style={{ flex: 2 }}
                   onClick={handleDecommissionSite}
-                  disabled={editSiteSaving || decommLoading || (recoveryCount > 0 && !decommDestinationId)}>
+                  disabled={editSiteSaving || decommLoading || (recoveryCount > 0 && !(decommDestBinId || decommDestTopId))}>
                   {editSiteSaving
                     ? 'Working…'
                     : recoveryCount > 0
