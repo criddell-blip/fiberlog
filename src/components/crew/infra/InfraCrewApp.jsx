@@ -11,9 +11,9 @@ import SitesList from './SitesList'
 import SiteTaskList from './SiteTaskList'
 import SetNewPassword from '../../../SetNewPassword'
 
-// See CrewApp.jsx — same rule. Read-only summary for tasks the crew has
-// already submitted; the editable workspace is only for 'open' tasks.
-const isReadOnlyTask = t => t.status === 'pending' || t.status === 'approved' || t.status === 'done'
+// See CrewApp.jsx — same rule. Editable until the manager closes it
+// (backlog #2); only closed tasks get the read-only summary.
+const isReadOnlyTask = t => !!t.is_closed
 
 // Back-to-manager pill (see CrewApp for the rationale — same component
 // inlined here so each crew shell stays self-contained).
@@ -71,8 +71,8 @@ const SITE_TYPE_ICON_NAME = {
   fiber:    'warehouse',
 }
 
-const isActiveCrewTask = t => t.status !== 'done' && t.status !== 'approved' && t.status !== 'pending'
-const isCompletedTask  = t => t.status === 'done' || t.status === 'approved'
+const isActiveCrewTask = t => !t.is_closed
+const isCompletedTask  = t => !!t.is_closed
 
 // ─── SIGN OUT CONFIRM (copied from CrewApp to keep this shell self-contained) ─
 // Also hosts the theme toggle + back-to-manager pill for narrow layouts.
@@ -712,7 +712,11 @@ export default function InfraCrewApp() {
             phase={workspacePhaseShim}
             task={selTask}
             onBack={() => navTo('tasks')}
-            onSubmitDone={() => { setSelTaskId(null); navTo('projects') }}
+            // Land back on the site's task list (1 step up), not the project
+            // root — the task stays open under is_closed and ascending one
+            // level avoids the multi-entry history unwind that can bounce the
+            // browser out of the app on submit (see lib/backStack.js).
+            onSubmitDone={() => { setSelTaskId(null); navTo('tasks') }}
             onUserTap={() => setShowSignOut(true)}
           />
         )

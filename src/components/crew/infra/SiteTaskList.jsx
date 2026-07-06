@@ -21,8 +21,8 @@ const INFRA_JOB_TYPES = [
   { id: 'emergency',   label: 'Emergency', icon: '⚡' },
 ]
 
-const isActiveCrewTask = t => t.status !== 'done' && t.status !== 'approved' && t.status !== 'pending'
-const isCompletedTask  = t => t.status === 'done' || t.status === 'approved'
+const isActiveCrewTask = t => !t.is_closed
+const isCompletedTask  = t => !!t.is_closed
 
 export default function SiteTaskList({ project, site, onSelect, onBack, onUserTap, onTaskCreated }) {
   const { currentUser, showToast } = useApp()
@@ -38,9 +38,11 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
     confirm: () => !(taskName.trim() || taskNotes.trim()) || window.confirm('Discard this new task?'),
   })
 
+  // Backlog #2: active = open (not closed) regardless of passdown status.
+  // A submitted-but-not-closed task stays here; its TaskCard shows a
+  // "Pending" pill so the crew still see it's awaiting approval.
   const activeTasks    = site.tasks.filter(isActiveCrewTask)
   const completedTasks = site.tasks.filter(isCompletedTask)
-  const pendingTasks   = site.tasks.filter(t => t.status === 'pending')
 
   async function handleCreate() {
     if (!taskName.trim()) return
@@ -115,7 +117,7 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
 
       {/* Tasks list */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 16px' }}>
-        {activeTasks.length === 0 && pendingTasks.length === 0 && (
+        {activeTasks.length === 0 && (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
             No active tasks at this site. Tap “New task” above to start one.
           </div>
@@ -124,15 +126,6 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
         {activeTasks.map(t => (
           <TaskCard key={t.id} task={t} onClick={() => onSelect(t)} />
         ))}
-
-        {pendingTasks.length > 0 && (
-          <>
-            <SectionLabel>Submitted (awaiting approval)</SectionLabel>
-            {pendingTasks.map(t => (
-              <TaskCard key={t.id} task={t} onClick={() => onSelect(t)} muted />
-            ))}
-          </>
-        )}
 
         {completedTasks.length > 0 && (
           <>
@@ -276,19 +269,15 @@ function TaskCard({ task, onClick, muted }) {
           borderRadius: 20, background: 'var(--amber-lt)', color: 'var(--amber)', flexShrink: 0
         }}>Pending</span>
       )}
+      {task.status === 'approved' && !task.is_closed && (
+        <span style={{
+          fontSize: 10, fontWeight: 700, padding: '2px 8px',
+          borderRadius: 20, background: 'var(--teal-lt)', color: 'var(--teal-mid)', flexShrink: 0
+        }}>Approved</span>
+      )}
       {onClick && (
         <Icon name="chevron-right" size={16} color="var(--hint)" />
       )}
     </div>
-  )
-}
-
-function SectionLabel({ children }) {
-  return (
-    <div style={{
-      fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-      letterSpacing: '.06em', color: 'var(--hint)',
-      padding: '12px 4px 6px',
-    }}>{children}</div>
   )
 }

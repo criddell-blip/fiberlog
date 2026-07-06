@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import {
-  db, addTask,
+  db, addTask, setTaskClosed,
   getSitesByProject, addSite, updateSite,
   decommissionSiteWithRecovery,
   getTaskCountsBySite, getTasksBySite, getMaterialsAtSite,
@@ -470,6 +470,35 @@ export default function ProjectManager() {
     }
   }
 
+  // Backlog #2: the manager closes a task when the work is truly done
+  // (and can reopen it). This is the only thing that pulls a task out of
+  // the crew's active list now — approving a passdown no longer does.
+  async function handleToggleClose(task, closed) {
+    try {
+      await setTaskClosed(task.id, closed, currentUser?.id)
+      const patch = {
+        is_closed: closed,
+        closed_at: closed ? new Date().toISOString() : null,
+        closed_by: closed ? (currentUser?.id || null) : null,
+      }
+      setProjects(prev => prev.map(p => {
+        if (p.id !== selProject?.id) return p
+        const updatedPhases = p.phases.map(ph =>
+          ph.id === selPhase.id
+            ? { ...ph, tasks: ph.tasks.map(t => t.id === task.id ? { ...t, ...patch } : t) }
+            : ph
+        )
+        const updated = { ...p, phases: updatedPhases }
+        setSelProject(updated)
+        setSelPhase(sp => sp && ({ ...sp, tasks: sp.tasks.map(t => t.id === task.id ? { ...t, ...patch } : t) }))
+        return updated
+      }))
+      showToast(closed ? 'Task closed' : 'Task reopened')
+    } catch(e) {
+      showToast((closed ? 'Close' : 'Reopen') + ' failed: ' + e.message)
+    }
+  }
+
   async function handleAddPhase() {
     if (!phaseName.trim() || !selProject) return
     setPhaseSaving(true)
@@ -603,7 +632,7 @@ export default function ProjectManager() {
 
   // Phase detail view
   if (selPhase && selProject) {
-    const done = selPhase.tasks?.filter(t => t.status === 'done' || t.status === 'approved').length || 0
+    const done = selPhase.tasks?.filter(t => t.is_closed).length || 0
     const total = selPhase.tasks?.length || 0
 
     return (
@@ -749,9 +778,10 @@ export default function ProjectManager() {
 
           {(() => {
             const tasks = selPhase.tasks || []
-            const openT = tasks.filter(t => t.status === 'open' || (!t.status))
-            const pendingT = tasks.filter(t => t.status === 'pending')
-            const approvedT = tasks.filter(t => t.status === 'approved' || t.status === 'done')
+            // Backlog #2: lifecycle is is_closed, not status. Open tasks stay
+            // open across passdowns; status is just the latest-passdown badge.
+            const openT = tasks.filter(t => !t.is_closed)
+            const closedT = tasks.filter(t => t.is_closed)
 
             const CreatorChip = ({ task }) => {
               const c = task.creator
@@ -760,6 +790,19 @@ export default function ProjectManager() {
                 <span className="creator-chip" title={c.name}>
                   <span className="creator-initials">{c.initials}</span>
                   <span className="creator-name">{c.name}</span>
+                </span>
+              )
+            }
+
+            // Latest-passdown badge on an open task (display only).
+            const StatusBadge = ({ status }) => {
+              const cfg =
+                status === 'approved' ? { bg: 'var(--teal-lt)', color: 'var(--teal-mid)', label: 'Approved' } :
+                status === 'pending'  ? { bg: 'var(--amber-lt)', color: 'var(--amber)',    label: 'Pending'  } :
+                                        { bg: 'var(--gray-lt)', color: 'var(--muted)',     label: 'Open'     }
+              return (
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: cfg.bg, color: cfg.color }}>
+                  {cfg.label}
                 </span>
               )
             }
@@ -782,7 +825,12 @@ export default function ProjectManager() {
                         </div>
                         {t.notes && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t.notes}</div>}
                       </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--gray-lt)', color: 'var(--muted)' }}>Open</span>
+                      <StatusBadge status={t.status} />
+                      <button onClick={() => handleToggleClose(t, true)}
+                        title="Close task — work is done"
+                        style={{ background: 'var(--teal-lt)', border: 'none', borderRadius: 'var(--r-xs)', padding: '4px 9px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--teal-mid)' }}>
+                        Close
+                      </button>
                       <button onClick={() => setConfirmDeleteTask(t)}
                         style={{ background: 'var(--red-lt)', border: 'none', borderRadius: 'var(--r-xs)', padding: '4px 8px', cursor: 'pointer', fontSize: 13, color: 'var(--red)' }}>
                         <Icon name="trash" size={14} />
@@ -791,32 +839,12 @@ export default function ProjectManager() {
                   )
                 })}
 
-                {pendingT.map(t => {
-                  const jt = JOB_TYPES.find(j => j.id === (t.type || t.task_type)) || JOB_TYPES[0]
-                  return (
-                    <div key={t.id} style={{
-                      background: 'var(--surface)', border: '1px solid var(--border)',
-                      borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 6,
-                      display: 'flex', alignItems: 'center', gap: 10
-                    }}>
-                      <span style={{ fontSize: 16 }}>{jt.icon}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13 }}>
-                          {t.name}
-                          <CreatorChip task={t} />
-                        </div>
-                        {t.notes && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t.notes}</div>}
-                      </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--amber-lt)', color: 'var(--amber)' }}>Pending</span>
-                      <button onClick={() => setConfirmDeleteTask(t)}
-                        style={{ background: 'var(--red-lt)', border: 'none', borderRadius: 'var(--r-xs)', padding: '4px 8px', cursor: 'pointer', fontSize: 13, color: 'var(--red)' }}>
-                        <Icon name="trash" size={14} />
-                      </button>
-                    </div>
-                  )
-                })}
-
-                {approvedT.map(t => (
+                {closedT.length > 0 && (
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--hint)', textTransform: 'uppercase', letterSpacing: '.05em', margin: '14px 0 6px' }}>
+                    Closed
+                  </div>
+                )}
+                {closedT.map(t => (
                   <div key={t.id} style={{
                     background: 'var(--surface)', border: '1px solid var(--border)',
                     borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 6,
@@ -827,9 +855,11 @@ export default function ProjectManager() {
                       {t.name}
                       <CreatorChip task={t} />
                     </div>
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'var(--teal-lt)', color: 'var(--teal-mid)' }}>
-                      {t.status === 'approved' ? 'Approved' : 'Done'}
-                    </span>
+                    <button onClick={() => handleToggleClose(t, false)}
+                      title="Reopen task"
+                      style={{ background: 'var(--gray-lt)', border: 'none', borderRadius: 'var(--r-xs)', padding: '4px 9px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>
+                      Reopen
+                    </button>
                     <button onClick={() => setConfirmDeleteTask(t)}
                       style={{ background: 'var(--red-lt)', border: 'none', borderRadius: 'var(--r-xs)', padding: '4px 8px', cursor: 'pointer', fontSize: 13, color: 'var(--red)' }}>
                       <Icon name="trash" size={14} />
@@ -913,7 +943,7 @@ export default function ProjectManager() {
   // Project detail view
   if (selProject) {
     const totalTasks = selProject.phases?.reduce((a, ph) => a + ph.tasks.length, 0) || 0
-    const doneTasks = selProject.phases?.reduce((a, ph) => a + ph.tasks.filter(t => t.status === 'done' || t.status === 'approved').length, 0) || 0
+    const doneTasks = selProject.phases?.reduce((a, ph) => a + ph.tasks.filter(t => t.is_closed).length, 0) || 0
     // A project is "infra-style" if it has zero phases but at least one site.
     // Drives all the conditional rendering below — swap PHASES stat → SITES,
     // hide fiber targets section, surface the Sites admin.
@@ -1140,7 +1170,7 @@ export default function ProjectManager() {
           )}
 
           {!isInfraProject && (selProject.phases || []).map(ph => {
-            const done = ph.tasks.filter(t => t.status === 'done' || t.status === 'approved').length
+            const done = ph.tasks.filter(t => t.is_closed).length
             const total = ph.tasks.length
             const pct = total > 0 ? Math.round(done / total * 100) : 0
             const hasTargets = TARGET_FIELDS.some(f => (ph[f.col] || ph[f.key] || 0) > 0)
@@ -1695,7 +1725,7 @@ export default function ProjectManager() {
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px' }}>
         {projects.map(p => {
           const totalTasks = p.phases?.reduce((a, ph) => a + ph.tasks.length, 0) || 0
-          const doneTasks = p.phases?.reduce((a, ph) => a + ph.tasks.filter(t => t.status === 'done' || t.status === 'approved').length, 0) || 0
+          const doneTasks = p.phases?.reduce((a, ph) => a + ph.tasks.filter(t => t.is_closed).length, 0) || 0
           const pct = totalTasks > 0 ? Math.round(doneTasks / totalTasks * 100) : 0
           const siteCount = siteCountByProject[p.id] || 0
           // Build the count line conditionally — for an infra-only project

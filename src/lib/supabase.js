@@ -124,6 +124,23 @@ export async function addTask(phaseId, name, jobType, notes, userId) {
   return data
 }
 
+// Manager-controlled task lifecycle (backlog #2). `is_closed` — not
+// `status` — is what gates crew visibility/editability now: a task stays
+// open across as many passdowns as needed and the manager closes it
+// explicitly when the work is truly done. Approving a submission no longer
+// touches this. Passing closed=false reopens (clears closed_at/closed_by).
+export async function setTaskClosed(taskId, closed, userId) {
+  const { error } = await db
+    .from('tasks')
+    .update({
+      is_closed: closed,
+      closed_at: closed ? new Date().toISOString() : null,
+      closed_by: closed ? (userId || null) : null,
+    })
+    .eq('id', taskId)
+  if (error) throw error
+}
+
 // ─── SITES (INFRA WORKFLOW) ──────────────────────────────────────────────────
 // Infra crews work against sites (towers, business installs, MDU equipment
 // closets) rather than fiber phases. Sites live under projects via
@@ -492,12 +509,19 @@ export async function getUsers() {
 }
 
 // ─── SESSIONS ─────────────────────────────────────────────────────────────────
+// One session per (user, day, TASK). This is load-bearing for backlog #2:
+// under the is_closed model a crew member legitimately works several open
+// tasks in the same day, and submissions link to a task only through their
+// session's task_id. If sessions were one-per-day (the old model) a second
+// task's submit would (a) overwrite the shared session's task_id and (b)
+// have handleSubmit's session-scoped cleanup delete the first task's
+// pending submission. Per-task sessions keep each task's passdown isolated.
 export async function startSession(userId, taskId) {
   const today = new Date().toISOString().split('T')[0]
   const { data, error } = await db
     .from('work_sessions')
     .upsert({ user_id: userId, task_id: taskId, session_date: today, status: 'started' },
-      { onConflict: 'user_id,session_date' })
+      { onConflict: 'user_id,session_date,task_id' })
     .select()
     .single()
   if (error) throw error

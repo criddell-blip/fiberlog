@@ -382,25 +382,32 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       })
       if (error) throw error
 
-      // Submit succeeded — flip task status. We intentionally preserve
-      // working_counts / last_worked_by / last_worked_at so that if the
-      // manager flags this submission and the task reverts to 'open',
-      // the crew can reopen and see exactly what they submitted (and
-      // edit instead of re-entering). The approve_submission RPC is
-      // what clears working_counts — that's the real "task is done"
-      // signal.
+      // Submit succeeded. Mirror status='pending' (display only now — the
+      // task's open/closed lifecycle is governed by is_closed, not status),
+      // and RESET the working draft so the NEXT passdown starts from zero.
+      // This is the backlog #2 fix for the multi-day double-count: the task
+      // stays open across days, so if we kept the draft, tomorrow's passdown
+      // would re-log today's counts on top of its own. Each passdown must be
+      // independent. (approve_submission no longer clears the draft.)
       const { error: taskErr } = await db.from('tasks').update({
         status: 'pending',
+        working_counts: {},
+        last_worked_by: null,
+        last_worked_at: null,
       }).eq('id', task.id)
       if (taskErr) console.error('Task status update failed:', taskErr)
+      try { localStorage.removeItem('fiberlog_counts_' + task.id) } catch {}
 
-      // Propagate the status flip to AppContext immediately, so when TaskList
-      // re-mounts (after the user exits this workspace) it shows the task in
-      // the Submitted bucket. The realtime UPDATE fires too, but the listener
-      // is in TaskList which is currently unmounted — so it'd miss this event.
+      // Propagate to AppContext immediately so when TaskList re-mounts (after
+      // the user exits this workspace) the task shows the fresh state. The
+      // realtime UPDATE fires too, but the listener is in TaskList which is
+      // currently unmounted — so it'd miss this event. is_closed stays false:
+      // the task remains in the crew's Active list, ready for the next passdown.
       const updatedTask = {
         ...task,
         status: 'pending',
+        working_counts: {},
+        is_closed: false,
         updated_at: new Date().toISOString(),
       }
       setTaskLocal(project.id, phase.id, updatedTask)

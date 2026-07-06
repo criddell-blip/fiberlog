@@ -136,7 +136,7 @@ export default function AdminPanel() {
           await db.from('submissions').delete().in('session_id', sessionIds)
           await db.from('work_sessions').delete().in('id', sessionIds)
         }
-        await db.from('tasks').update({ status: 'open' }).in('id', taskIds)
+        await db.from('tasks').update({ status: 'open', is_closed: false, closed_at: null, closed_by: null }).in('id', taskIds)
       }
       setConfirm(null)
       showToast(`Test data cleared from ${phase.name}`)

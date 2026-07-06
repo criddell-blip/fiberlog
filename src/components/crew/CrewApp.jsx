@@ -12,11 +12,11 @@ import TaskSummaryView from './TaskSummaryView'
 import MyStockView from './MyStockView'
 import SetNewPassword from '../../SetNewPassword'
 
-// Tasks in these states aren't editable from the crew workspace — they go
-// to the read-only TaskSummaryView so the crew can inspect what they
-// submitted without thinking they can re-edit it. (Manager flagging is
-// the only path that flips it back to 'open' for re-editing.)
-const isReadOnlyTask = t => t.status === 'pending' || t.status === 'approved' || t.status === 'done'
+// A task is editable from the crew workspace until the manager explicitly
+// closes it (backlog #2). Only closed tasks go to the read-only
+// TaskSummaryView. Submitting a passdown no longer locks the task — the
+// crew can keep logging against it day after day until it's closed.
+const isReadOnlyTask = t => !!t.is_closed
 
 // "Back to manager" pill — only rendered for staff users acting as crew
 // via the manager↔crew toggle. Helps them flip back without signing out
@@ -60,12 +60,11 @@ const JOB_ICONS = { aerial: '🏗️', underground: '⛏️', splice: '🔌', fi
 
 // Tasks the crew can still act on in the sidebar. Submitted (pending) tasks
 // are hidden — once the crew submits, the task should disappear from the
-// sidebar so it doesn't look like there's still work to do. The main
-// TaskList panel still surfaces them in a "Submitted" section. If the
-// manager flags a submission, SubmissionsQueue reverts the task to 'open'
-// so it reappears here.
-const isActiveCrewTask = t => t.status !== 'done' && t.status !== 'approved' && t.status !== 'pending'
-const isCompletedTask = t => t.status === 'done' || t.status === 'approved'
+// sidebar so it doesn't look like there's still work to do. A task drops
+// out of the active list only when the manager closes it — submitted or
+// approved passdowns leave the task open so the crew can keep logging.
+const isActiveCrewTask = t => !t.is_closed
+const isCompletedTask = t => !!t.is_closed
 
 // ─── SIGN OUT CONFIRM ─────────────────────────────────────────────────────────
 // Hosts the theme toggle for narrow layouts (sidebar isn't rendered).
@@ -608,7 +607,13 @@ export default function CrewApp() {
             phase={selPhase}
             task={selTask}
             onBack={() => navTo('tasks')}
-            onSubmitDone={() => { setSelTaskId(null); navTo('projects') }}
+            // Land back on the task list (1 step up), not the project root.
+            // Under the is_closed model the task stays open, so the crew
+            // want to see it (now badged "Submitted") and can log the next
+            // passdown or pick another task. Ascending one level also avoids
+            // the multi-entry history unwind that can bounce the browser out
+            // of the app on submit (see lib/backStack.js).
+            onSubmitDone={() => { setSelTaskId(null); navTo('tasks') }}
             onUserTap={() => setShowSignOut(true)}
           />
         )

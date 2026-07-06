@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { approveSubmission, db, nextChannelSuffix } from '../../lib/supabase'
+import { approveSubmission, setTaskClosed, db, nextChannelSuffix } from '../../lib/supabase'
 import { useApp } from '../../AppContext'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
@@ -43,6 +43,10 @@ export default function SubmissionsQueue() {
   const [note, setNote] = useState('')
   const [acting, setActing] = useState(false)
   const [selectedParts, setSelectedParts] = useState([])
+  // is_closed of the selected submission's task (backlog #2) — drives the
+  // "Close task" affordance so Chris can approve the final passdown and
+  // close the task in one place. null = not loaded yet.
+  const [selTaskClosed, setSelTaskClosed] = useState(null)
   const [partsLoading, setPartsLoading] = useState(false)
   const [filter, setFilter] = useState('pending')
   const [showArchived, setShowArchived] = useState(false)
@@ -145,9 +149,15 @@ export default function SubmissionsQueue() {
     if (!sub.session_id) return
     setPartsLoading(true)
     setSelectedParts([])
+    setSelTaskClosed(null)
     try {
       // Use task_id not session_id - one session can span multiple tasks
       const taskId = sub.work_sessions?.task_id
+      if (taskId) {
+        db.from('tasks').select('is_closed').eq('id', taskId).single()
+          .then(({ data }) => setSelTaskClosed(!!data?.is_closed))
+          .catch(() => {})
+      }
       const { data: entries } = await db
         .from('log_entries').select('id, footage_amt, task_id').eq('session_id', sub.session_id)
       // Filter to this task's entries if task_id exists on log_entries
@@ -191,11 +201,11 @@ export default function SubmissionsQueue() {
         reviewed_at: new Date().toISOString(),
       }).eq('id', sub.id)
 
-      // Revert the underlying task to 'open' so it reappears in the crew's
-      // sidebar — they need to see it to fix and resubmit. Without this,
-      // the task stays 'pending' and is hidden from the sidebar by
-      // isActiveCrewTask, leaving the crew with no visible way to act on
-      // the flag.
+      // Mirror the task's status back to 'open' (backlog #2: the task is
+      // still visible to the crew via is_closed regardless — this re-arms
+      // the crew workspace flag banner, which is gated on status==='open',
+      // and clears the stale pending/approved badge). Task stays open so
+      // the crew can fix and resubmit.
       const taskId = sub.work_sessions?.task_id
       if (taskId) {
         const { error: taskErr } = await db.from('tasks').update({ status: 'open' }).eq('id', taskId)
@@ -206,6 +216,21 @@ export default function SubmissionsQueue() {
       showToast(`Flagged — ${sub.users?.name}`)
       await loadSubmissions()
     } catch (e) { showToast('Flag failed: ' + e.message) }
+    finally { setActing(false) }
+  }
+
+  // Backlog #2: close the task once its work is done — the daily flow is
+  // approve the final passdown, then close here without leaving the queue.
+  async function handleCloseTask(sub) {
+    const taskId = sub.work_sessions?.task_id
+    if (!taskId) return
+    setActing(true)
+    try {
+      await setTaskClosed(taskId, true, currentUser?.id)
+      setSelTaskClosed(true)
+      showToast('Task closed')
+      reload()
+    } catch (e) { showToast('Close task failed: ' + e.message) }
     finally { setActing(false) }
   }
 
@@ -459,6 +484,25 @@ export default function SubmissionsQueue() {
               <div style={{ textAlign: 'center', padding: 12, borderRadius: 'var(--r-sm)', fontWeight: 700, background: STATUS_COLORS[selected.status]?.bg, color: STATUS_COLORS[selected.status]?.text }}>
                 {STATUS_COLORS[selected.status]?.label}
               </div>
+            )}
+
+            {/* Backlog #2: close the task once its work is truly done. The
+                task stays open across passdowns otherwise — approving alone
+                no longer completes it. */}
+            {selected.work_sessions?.task_id && (
+              selTaskClosed ? (
+                <div style={{ width: '100%', marginTop: 8, padding: 10, textAlign: 'center', background: 'var(--teal-lt)', borderRadius: 'var(--r-sm)', color: 'var(--teal-mid)', fontSize: 13, fontWeight: 700 }}>
+                  <Icon name="check" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Task closed
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleCloseTask(selected)}
+                  disabled={acting || selTaskClosed === null}
+                  style={{ width: '100%', marginTop: 8, padding: 10, background: 'var(--teal-lt)', border: '1px solid var(--teal-mid)', borderRadius: 'var(--r-sm)', color: 'var(--teal-mid)', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}
+                >
+                  <Icon name="check" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Close task — work is done
+                </button>
+              )
             )}
 
             {selected.status === 'approved' && !selected.archived && (

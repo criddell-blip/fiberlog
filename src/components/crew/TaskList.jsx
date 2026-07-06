@@ -153,14 +153,16 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
     }
   }
 
-  const openTasks = tasks.filter(tk => tk.status === 'open' || !tk.status)
-  const pendingTasks = tasks.filter(tk => tk.status === 'pending')
-  // Only show approved tasks from the last 30 days — older work lives in reports
+  // Backlog #2: a task stays in Active until the manager closes it, no
+  // matter how many passdowns have been submitted or approved against it.
+  // The last passdown's status still shows as a small pill on the row.
+  const openTasks = tasks.filter(tk => !tk.is_closed)
+  // Only show closed tasks from the last 30 days — older work lives in reports
   const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
   const cutoff = Date.now() - THIRTY_DAYS_MS
   const approvedTasks = tasks.filter(tk => {
-    if (tk.status !== 'approved' && tk.status !== 'done') return false
-    const ts = tk.updated_at || tk.created_at
+    if (!tk.is_closed) return false
+    const ts = tk.closed_at || tk.updated_at || tk.created_at
     if (!ts) return true
     return new Date(ts).getTime() >= cutoff
   })
@@ -228,13 +230,23 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
                       <span className="creator-name">{task.creator.name}</span>
                     </span>
                   )}
-                  {/* Default "open" state needs no pill — being in the Active Tasks
-                      section is the signal. Only render a pill for non-default states. */}
-                  {isFlagged && (
+                  {/* Open tasks stay in Active even after a passdown is
+                      submitted/approved — a small pill tells the crew the
+                      state of their last passdown. Flagged wins over the
+                      others. Plain open needs no pill. */}
+                  {isFlagged ? (
                     <span className="pill pill-danger" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                       <Icon name="alert" size={12} /> {lang === 'es' ? 'Marcado' : 'Flagged'}
                     </span>
-                  )}
+                  ) : task.status === 'pending' ? (
+                    <span className="pill" style={{ background: 'var(--amber-lt)', color: 'var(--amber)' }}>
+                      {lang === 'es' ? 'Enviada' : 'Submitted'}
+                    </span>
+                  ) : task.status === 'approved' ? (
+                    <span className="pill pill-success" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <Icon name="check" size={12} /> {lang === 'es' ? 'Aprobada' : 'Approved'}
+                    </span>
+                  ) : null}
                 </div>
               </div>
               <Icon name="chevron-right" size={20} color="var(--border2)" />
@@ -242,52 +254,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
           )
         })}
 
-        {/* Pending tasks — submitted but not yet approved. Editable. */}
-        {pendingTasks.length > 0 && (
-          <>
-            <div className="sec-label" style={{ marginTop: 8 }}>
-              {lang === 'es' ? 'Enviadas' : 'Submitted'}
-              <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--hint)', fontWeight: 600 }}>
-                {lang === 'es' ? 'toque para editar' : 'tap to edit'}
-              </span>
-            </div>
-            {pendingTasks.map(task => {
-              const jt = getJobType(task)
-              const colors = JOB_COLORS[jt.id] || JOB_COLORS.aerial
-              return (
-                <div key={task.id} className="card card-tap" onClick={() => onSelect(task)}
-                     style={{ borderColor: 'var(--amber)' }}>
-                  <div className="icon-pill" style={{
-                    width: 40, height: 40, borderRadius: 'var(--r-sm)',
-                    background: colors.bg, fontSize: 20
-                  }}>
-                    {jt.icon}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700 }}>{task.name}</div>
-                    {task.notes && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{task.notes}</div>}
-                    <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      <span className="pill" style={{ background: colors.bg, color: colors.text }}>
-                        {jt.label}
-                      </span>
-                      {task.creator && (
-                        <span className="creator-chip" title={task.creator.name} style={{ marginLeft: 0 }}>
-                          <span className="creator-initials">{task.creator.initials}</span>
-                          <span className="creator-name">{task.creator.name}</span>
-                        </span>
-                      )}
-                      {/* Amber card border + the "Submitted" section header already
-                          tell the crew this is pending — no redundant pill. */}
-                    </div>
-                  </div>
-                  <Icon name="chevron-right" size={20} color="var(--border2)" />
-                </div>
-              )
-            })}
-          </>
-        )}
-
-        {/* Approved tasks — collapsed by default, last 30 days only */}
+        {/* Closed tasks — collapsed by default, last 30 days only */}
         {approvedTasks.length > 0 && (
           <>
             <button
@@ -308,17 +275,16 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
 
             {showPast && approvedTasks.map((task, i) => {
               const jt = getJobType(task)
-              // updated_at = the moment status flipped to approved (that's
-              // the most recent write on the task row). Close enough to
-              // "date submitted" for the crew's mental model; an exact
-              // submission timestamp lives on the submissions row, fetched
-              // by TaskSummaryView when they tap in.
-              const when = task.updated_at
-                ? new Date(task.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+              // closed_at = the moment the manager closed the task. Close
+              // enough to "date completed" for the crew's mental model; an
+              // exact submission timestamp lives on the submissions row,
+              // fetched by TaskSummaryView when they tap in.
+              const when = (task.closed_at || task.updated_at)
+                ? new Date(task.closed_at || task.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                 : null
               // Tappable so the crew can open TaskSummaryView and inspect
               // what was submitted/approved. The parent's onSelect handler
-              // routes pending/approved/done tasks to the summary view.
+              // routes closed tasks to the read-only summary view.
               return (
                 <div key={task.id} onClick={() => onSelect(task)} style={{
                   display: 'flex', alignItems: 'center', gap: 10,
