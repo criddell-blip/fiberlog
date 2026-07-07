@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement, getMyAllowedLoadDestinations, groupLocationsByAisle } from '../../lib/inventory'
 import { getCrewTypePartRestrictions } from '../../lib/admin'
 import { useBackClose } from '../../lib/backStack'
+import { matchesAllTokens } from '../../lib/shared'
 import { t } from '../../lib/i18n'
 import Icon from '../shared/Icon'
 
@@ -1138,20 +1139,6 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
       </div>
     </div>
   )
-}
-
-// Multi-word search: every whitespace token must appear somewhere in the
-// combined field list (case-insensitive). Whole-phrase .includes() made
-// "lag bolt box" match nothing while "Lag Bolts, 1/2 x 4 (Box of 50)"
-// sat right there — same bug class as the server-side searchPartsCatalog
-// fix in lib/supabase.js. Deliberate asymmetry vs the server: here tokens
-// may match ACROSS fields (name + SKU concatenated) since we're filtering
-// a small already-loaded list; the server requires all tokens in the same
-// column. A query can therefore match slightly more here — acceptable.
-function matchesAllTokens(query, fields) {
-  const haystack = fields.filter(Boolean).join(' ').toLowerCase()
-  return query.trim().toLowerCase().split(/\s+/).filter(Boolean)
-    .every(tok => haystack.includes(tok))
 }
 
 function locationIcon(type, hasOwner) {

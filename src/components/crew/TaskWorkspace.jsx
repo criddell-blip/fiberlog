@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { startSession, saveEntry, getTaskSummary, db } from '../../lib/supabase'
 import { getFootageTypePartMap } from '../../lib/inventory'
 import { FIBER_COUNTS, CONDUIT_SIZES } from '../../lib/footageTypes'
+import { mergePartsById } from '../../lib/shared'
 import { t } from '../../lib/i18n'
 import { useBackClose } from '../../lib/backStack'
 import PartSearch from './workspace/PartSearch'
@@ -912,15 +913,4 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       )}
     </div>
   )
-}
-
-// Dedup a list of {id, name, unit, qty} parts by id, summing quantities.
-function mergePartsById(list) {
-  const m = {}
-  for (const p of list) {
-    if (!p || !p.id) continue
-    if (!m[p.id]) m[p.id] = { ...p }
-    else m[p.id] = { ...m[p.id], qty: (m[p.id].qty || 0) + (p.qty || 0) }
-  }
-  return Object.values(m).filter(p => p.qty > 0)
 }
