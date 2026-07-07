@@ -7,6 +7,8 @@ Deployed at https://criddell-blip.github.io/fiberlog/ via GitHub Pages.
 > **Need the full end-to-end inventory walk-through?** See [docs/INVENTORY_FLOW.md](docs/INVENTORY_FLOW.md) — covers every crew workflow, every manager entry point, and the Sage export at the end of the line.
 >
 > **Need a deep dive on the Inventory tab specifically?** See [docs/INVENTORY_TAB.md](docs/INVENTORY_TAB.md) — every sub-tab, every action sheet, and how they fit into the daily/weekly/monthly cadence.
+>
+> **The crew-facing how-to (bilingual EN/ES)?** See [docs/CREW_GUIDE.md](docs/CREW_GUIDE.md) — rewritten July 2026 for the is_closed multi-passdown model.
 
 ---
 
@@ -157,20 +159,27 @@ src/
     crewTypes.js          ← crewTypeLabel() display map + VALID_FIELD_CREW_TYPES
     cycleCount.js         ← cycle-count RPC wrappers + BIN:<uuid> barcode helpers
     backStack.js          ← Back-button coordinator + useBackClose hook
-    i18n.js               ← en/es strings for the crew shells
-    calculations.js (+ calculations.test.js) ← aerial/underground/splice parts math
-    csvImport.js          ← shared CSV import/export utilities
+    i18n.js               ← en/es strings for the crew shells (~290 keys; crew lang toggle reads/writes localStorage.fiberlog_lang)
+    csvImport.js          ← shared CSV parse/read utilities (byte-level)
+    useCsvImport.js (+ .test.js) ← import-wizard hooks: useCsvFile / useSonarPendingQueue / useEffectiveMap / useAlreadyImportedMarkers + pure extractMarkerKeys
+    shared.js (+ .test.js) ← extracted money-path helpers: mergePartsById (submit), matchesAllTokens (search)
+    format.js             ← fmtWhen(iso, lang) shared date formatter
+    useRealtimeQueue.js   ← subscribe + try/catch + auto-reconnect hook for review queues
+    inventory.test.js     ← validateMovement matrix, buildSageCsv + exclusions, movementEffectiveDate
     footageTypes.js       ← footage "type" option lists (fiber counts, conduit sizes)
     recencyPill.js, scanFeedback.js ← small shared UI helpers
     useIsWide.js          ← shared 768px-breakpoint hook (used by both CrewApp and ManagerApp)
   components/
-    shared/               ← Icon.jsx (line icon set), PausedBanner.jsx, ScanInput.jsx (USB scanner + phone camera)
+    shared/               ← Icon.jsx (line icon set), PausedBanner.jsx, ScanInput.jsx (USB scanner + phone camera), QrLabelSheet.jsx (config-driven QR label chassis + PrintPortal — the ONE home of the Chrome print-CSS)
     crew/                 ← UI for non-manager users (logging work, parts used, etc.)
       CrewApp.jsx         ← fiber-crew entry: Project → Phase → Task → Workspace
       ProjectList.jsx, PhaseList.jsx, TaskList.jsx, TaskWorkspace.jsx
-      TaskSummaryView.jsx ← read-only inspection of pending/approved/done tasks (parts, hours, notes, status, manager feedback) — both crew shells route here when isReadOnlyTask(task)
+      taskState.js        ← single source for isReadOnlyTask/isActiveCrewTask/isCompletedTask (all is_closed-based — never gate on tasks.status)
+      SignOutConfirm.jsx  ← shared sign-out sheet (language toggle, change password, manager pill) used by both shells
+      PassdownList.jsx    ← shared passdown-card list (status/hours/parts/notes) for TaskSummaryView + TaskWorkspace's history overlay; exports fmtWhen
+      TaskSummaryView.jsx ← read-only inspection of CLOSED tasks — lists ALL passdowns; both crew shells route here when isReadOnlyTask(task)
       MyStockView.jsx     ← crew's personal-truck inventory view (Load + Return UI)
-      CrewMovementSheet.jsx ← unified overlay for load/return (other ops are RPC-supported, UI deferred)
+      CrewMovementSheet.jsx ← unified overlay for load/return (other ops are RPC-supported, UI deferred); over-load warn-but-allow + crew-type whitelist badges live here
       FoundInventorySheet.jsx ← crew "report found inventory" → pending intake request (backlog #19)
       workspace/          ← PartSearch.jsx (catalog search overlay — the only file left here; the workspace tab bodies live inline in TaskWorkspace.jsx)
       infra/              ← sites-shaped shell for crew_type='infrastructure'
@@ -190,7 +199,10 @@ src/
       InventoryStockTab.jsx, InventoryLocationsTab.jsx, InventoryPartsTab.jsx,
       InventoryMovementsTab.jsx, InventoryAuditTab.jsx
       PurchaseRequestsTab.jsx, PurchaseRequestSheet.jsx ← FiberLog-originated PRs (compose, cost history, CSV/email export, lifecycle)
-      IntakeRequestsQueue.jsx ← "Found" sub-tab — approve/reject crew intake requests (mirrors SubmissionsQueue)
+      ReviewQueue.jsx     ← config-driven review-queue chassis (header/filter/list/detail overlay) + ReviewActions/InitialsAvatar/StatusPill — both queues build on it (backlog #22)
+      IntakeRequestsQueue.jsx ← "Found" sub-tab — approve/reject crew intake requests (on ReviewQueue)
+      importShared.jsx    ← shared import-wizard chrome: Section/MappingRow/StatusBadge/SourceLocationSelect/webhook panels (Sonar + FiberJobs + InventoryImport)
+      chrome.jsx          ← shared manager styling tokens: chipStyle / cardSurface / LoadingBlock / EmptyState
       LocationDetailPanel.jsx ← location drill-in (view stock / count / export / labels / edit)
       LocationWithBinPicker.jsx ← shared warehouse→bin destination picker
       RecordMovementSheet.jsx ← arbitrary single-movement entry
@@ -258,6 +270,7 @@ supabase/
 - `tasks.site_id` (nullable) — infra tasks anchor here. Consumed by `getInfraTree()` + `InfraCrewApp`.
 - `tasks.phase_id` is now **nullable** (was NOT NULL). CHECK `tasks_anchor_present` ensures every task has at least one of `{phase_id, site_id}` — never both NULL.
 - `tasks.is_closed boolean NOT NULL DEFAULT false` + `tasks.closed_at timestamptz` + `tasks.closed_by uuid → users(id)` — the **manager-controlled lifecycle gate** (backlog #2). Decoupled from submission approval: a task stays open across multiple daily passdowns and only leaves crew active lists when a manager explicitly closes it (`is_closed=true`). `tasks.status` is now just a display mirror. Backfilled `is_closed=true` for existing `approved`/`done` tasks (migration `20260706000000_tasks_is_closed_lifecycle.sql`).
+- **Tasks are SHARED across crew by design** (handoffs, multi-crew passdowns) — anyone can open/log against any open task. Guardrails (July 2026): opening a task holding someone else's non-empty unsubmitted draft pops a confirm (decline = zero trace), an amber "Editing X's UNSUBMITTED draft" banner shows while inside it, and the passdown-history strip names other contributors. Submitted passdowns are per-submitter and immutable to others. Escalation option if crews still collide: per-user drafts (working_counts keyed by user).
 - `approve_submission` increments phase actuals only when `phase_id IS NOT NULL` (infra has no site actuals concept). Auto-deduct resolves the project bucket via override → phase's project → site's project, so infra approvals deduct cleanly into the site's project bucket.
 - 198 sites bulk-imported from owner's CSV. All mapped to a project (the last unmapped one, "Prestige II", was assigned to Heber on May 22). `getInfraTree()` still has a defensive console.warn for any future unmapped sites.
 - Sites admin lives in `ProjectManager.jsx`'s project detail view — only renders for infra-style projects (0 phases + ≥1 site). Full CRUD: add / edit (rename, change type, address, notes, **move to different project**) / decommission (soft-delete via status='decommissioned'). Decommission confirm hints to log physical equipment recovery as a Receive PO with a "Site decommissioned" note. Edit Site overlay also exposes two read-only drilldowns: **View tasks** (the site's tasks with name + type + status pill) and **View materials** (parts summed across all task_id-linked inventory_movements). Search + type pills render when ≥8 sites. Per-site task count badges.
@@ -346,8 +359,11 @@ All `SECURITY DEFINER`, all with `SET search_path = public, pg_temp`. EXECUTE on
 
 `npm test` (one-shot) or `npm run test:watch`. Vitest configured via `package.json` only — no separate config file.
 
-- `src/lib/calculations.test.js` — 34 tests (28 `it()` blocks + two 3-case `it.each` tables — count the runner output, not the `it(`s) covering bolt-size mapping, lashing math (ceil rounding), structure mappings, mergeParts dedupe. Covers the arithmetic most likely to silently regress when SKU maps or per-100ft ratios get tweaked.
-- No component tests yet. The crew workflow + manager sheets are smoke-tested manually via the deployed app.
+**50 tests across 3 suites** (re-pointed July 2026 — the old `calculations.js` + its 34 tests were DELETED after the audit proved the module unreachable from the app; the suite was guarding dead code):
+- `src/lib/inventory.test.js` — `validateMovement`'s full endpoint matrix (mirrors the DB `movement_endpoints_valid` CHECK), `buildSageCsv` (18-column order, movement-type → Sage mapping, effective dates, CSV escaping), `isExportableMovement` exclusion rules, `movementEffectiveDate`.
+- `src/lib/shared.test.js` — `mergePartsById` (the submit-path dedupe) and `matchesAllTokens` (multi-word search semantics).
+- `src/lib/useCsvImport.test.js` — `extractMarkerKeys` (the double-import guard's marker parser, incl. `sonar` vs `sonar_jobs` prefix isolation).
+- No component tests yet (no jsdom/testing-library in devDeps). The crew workflow + manager sheets are smoke-tested via QA persona runs (see `qa-harness/README.md`) and manually on the deployed app.
 
 ---
 
@@ -403,6 +419,8 @@ For any input that's NOT meant to be filled by the browser's saved-credentials l
 - `localStorage.fiberlog_remembered_username` — last login username
 - `localStorage.fiberlog_view_mode` — `'manager' | 'crew'` for the working-manager toggle. Reset to `'manager'` on logout in `AppContext.logout()` so a different next-user doesn't inherit it.
 - `localStorage.fiberlog_counts_<taskId>` — offline fallback mirror of the crew workspace tally draft (`TaskWorkspace.jsx`; the primary store is `tasks.working_counts` — localStorage is only read when that query fails).
+- `localStorage.fiberlog_lang` — crew's per-device language override (`'en' | 'es'`). Resolve order in AppContext: this override → `users.language` (manager-set default) → `'en'`. **Deliberately NOT cleared on logout** (a Spanish speaker's phone stays Spanish; the login screen has its own toggle for shared devices). Crew can't write their own `users` row (RLS), so this is the only self-service persistence.
+- `localStorage.fiberlog_expanded_project_<userId>` — which project the crew sidebar auto-expands (last one they opened). Keyed per user so shared devices don't leak; first-ever login starts collapsed. Replaced the old auto-expand-first-project default that opened Heber for everyone.
 
 ---
 
@@ -556,6 +574,7 @@ npx supabase login                             # auth supabase CLI (first time)
 
 ## Gotchas worth knowing
 
+- **Phase/project deletes are FK-blocked once the ledger references them** — `inventory_movements.phase_id` is ON DELETE NO ACTION, and auto-deduct + the importers stamp `phase_id` on movements. Any worked phase can't be deleted from AdminPanel until the FK rule changes (proposed: SET NULL, migration pending owner approval July 2026). AdminPanel's delete chains now surface the real error instead of falsely toasting success — supabase-js returns `{error}`, it doesn't throw, so every step of a destructive chain must check it.
 - **MCP `create_directory` was unreliable** in past sessions (timed out). Not your problem in Claude Code, but if you see it elsewhere, retry usually works.
 - **Self-deactivation is blocked client-side** in `AdminUsersView`. Server doesn't enforce, but adding a server check is on the someday list.
 - **Hard-deleting users from `public.users` will fail** because of FK references in `inventory_movements`, `log_entries`, `submissions`, etc. Use soft-delete (`is_active = false`) only. The new Users admin UI does not expose hard-delete.
