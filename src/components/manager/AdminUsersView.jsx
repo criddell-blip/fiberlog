@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { useBackClose } from '../../lib/backStack'
-import { crewTypeLabel } from '../../lib/crewTypes'
+import { crewTypeLabel, VALID_FIELD_CREW_TYPES } from '../../lib/crewTypes'
 import { ACCESS_TYPES, accessTypeForUser, accessTypeToFields } from '../../lib/access'
 import {
   createUser, updateUserMetadata, deactivateUser, reactivateUser,
@@ -405,7 +405,11 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
   // via accessTypeToFields — see lib/access.js. Replaces the old role select +
   // restricted_to_inventory checkbox.
   const [accessType, setAccessType] = useState(accessTypeForUser(user))
-  const [crewType, setCrewType] = useState(user?.crew_type || 'fiber_construction')
+  // Existing users keep their real crew_type — including NULL ('').
+  // Defaulting an existing NULL to 'fiber_construction' silently persisted
+  // a crew_type on any unrelated edit (July 2026 audit, backlog #33).
+  // New users still default to the most common type as a convenience.
+  const [crewType, setCrewType] = useState(user?.crew_type ?? (isNew ? 'fiber_construction' : ''))
   const selectedType = ACCESS_TYPES.find(a => a.id === accessType) || ACCESS_TYPES[0]
   const accessFields = accessTypeToFields(accessType, crewType)
   const role = accessFields.role   // derived; used by the existing role-gated sections
@@ -502,6 +506,21 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
     }
     if (!ACCESS_TYPES.find(a => a.id === accessType)) { setError('Pick an access type'); return }
     if (accessType === 'owner' && cannotPickOwner) { setError('Only owners can create other owners'); return }
+
+    // Role changes are a big deal — a manager silently demoted to crew
+    // loses the manager portal on next load. The July 2026 audit caught
+    // admins flipping access type just to reach the crew-only sections
+    // and then saving the demotion without realizing. Make it explicit.
+    if (!isNew && user?.role && accessFields.role !== user.role) {
+      const ok = window.confirm(
+        `This changes ${user.name}'s role from ${user.role.toUpperCase()} to ${accessFields.role.toUpperCase()}.\n\n` +
+        (user.role !== 'crew' && accessFields.role === 'crew'
+          ? 'They will LOSE access to the manager portal.\n\n'
+          : '') +
+        'Save anyway?'
+      )
+      if (!ok) return
+    }
 
     setSubmitting(true)
     try {
@@ -798,7 +817,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
                     fontSize: 11, fontWeight: 600,
                   }}>
                     <Icon name="alert" size={12} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 4 }} /><strong>{loc.name}</strong> sounds like a <strong>{trailerTypes.join(' / ')}</strong> trailer,
-                    but this user's crew type is <strong>{crewType}</strong>. Assign anyway?
+                    but this user's crew type is <strong>{crewTypeLabel(crewType)}</strong>. Assign anyway?
                   </div>
                 )
               })()}
@@ -915,10 +934,17 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
             </label>
           )}
 
-          {/* Movement permissions (edit only; only applies to crew/contractor).
-              Saves immediately on toggle — independent of the form Save button
-              since it writes a separate table. */}
-          {!isNew && (role === 'crew' || role === 'contractor') && (
+          {/* Movement permissions (edit only). Saves immediately on toggle —
+              independent of the form Save button since it writes a separate
+              table. Gated on the PERSISTED user, not the currently-selected
+              access type: working managers load trucks too, and gating on
+              the live selection forced admins to flip a manager's access
+              type to Crew just to reach this section — then Save silently
+              demoted them (July 2026 audit, backlog #33). */}
+          {!isNew && (
+            user?.role === 'crew' || user?.role === 'contractor' ||
+            VALID_FIELD_CREW_TYPES.includes(user?.crew_type)
+          ) && (
             <>
               <CrewPermissionsSection userId={user?.id} />
               <LoadDestinationsSection userId={user?.id} />
