@@ -60,25 +60,38 @@ export default function AdminPanel() {
     finally { setSaving(false) }
   }
 
+  // Supabase doesn't THROW on failure — it returns { error }. Every step
+  // of these destructive chains must check it, or a blocked delete (FK
+  // violation, RLS) silently "succeeds": local state updates, the toast
+  // lies, and the row is back after a reload. That's exactly the
+  // "I deleted the phase but it still shows up" report — phases with
+  // inventory_movements stamped against them are FK-blocked today
+  // (inventory_movements.phase_id is ON DELETE NO ACTION), and the error
+  // was being swallowed.
+  const must = res => { if (res.error) throw res.error; return res.data || [] }
+
   async function deletePhase(phase) {
     setLoading(true)
     try {
-      const { data: tasks } = await db.from('tasks').select('id').eq('phase_id', phase.id)
-      const taskIds = (tasks || []).map(t => t.id)
+      const tasks = must(await db.from('tasks').select('id').eq('phase_id', phase.id))
+      const taskIds = tasks.map(t => t.id)
       if (taskIds.length > 0) {
-        const { data: sessions } = await db.from('work_sessions').select('id').in('task_id', taskIds)
-        const sessionIds = (sessions || []).map(s => s.id)
+        const sessions = must(await db.from('work_sessions').select('id').in('task_id', taskIds))
+        const sessionIds = sessions.map(s => s.id)
         if (sessionIds.length > 0) {
-          const { data: entries } = await db.from('log_entries').select('id').in('session_id', sessionIds)
-          const entryIds = (entries || []).map(e => e.id)
-          if (entryIds.length > 0) await db.from('entry_parts').delete().in('entry_id', entryIds)
-          await db.from('log_entries').delete().in('session_id', sessionIds)
-          await db.from('submissions').delete().in('session_id', sessionIds)
-          await db.from('work_sessions').delete().in('id', sessionIds)
+          const entries = must(await db.from('log_entries').select('id').in('session_id', sessionIds))
+          const entryIds = entries.map(e => e.id)
+          if (entryIds.length > 0) must(await db.from('entry_parts').delete().in('entry_id', entryIds))
+          must(await db.from('log_entries').delete().in('session_id', sessionIds))
+          must(await db.from('submissions').delete().in('session_id', sessionIds))
+          must(await db.from('work_sessions').delete().in('id', sessionIds))
         }
-        await db.from('tasks').delete().in('id', taskIds)
+        must(await db.from('tasks').delete().in('id', taskIds))
       }
-      await db.from('phases').delete().eq('id', phase.id)
+      // .select() so a silently-filtered delete (0 rows) can't masquerade
+      // as success either.
+      const deleted = must(await db.from('phases').delete().eq('id', phase.id).select('id'))
+      if (deleted.length === 0) throw new Error('Nothing was deleted — the phase may be protected or already gone. Refresh and retry.')
       setSelProject(prev => ({ ...prev, phases: prev.phases.filter(ph => ph.id !== phase.id) }))
       setProjects(prev => prev.map(p => p.id === selProject.id
         ? { ...p, phases: p.phases.filter(ph => ph.id !== phase.id) } : p
@@ -92,26 +105,27 @@ export default function AdminPanel() {
   async function deleteProject(project) {
     setLoading(true)
     try {
-      const { data: phases } = await db.from('phases').select('id').eq('project_id', project.id)
-      for (const phase of (phases || [])) {
-        const { data: tasks } = await db.from('tasks').select('id').eq('phase_id', phase.id)
-        const taskIds = (tasks || []).map(t => t.id)
+      const phases = must(await db.from('phases').select('id').eq('project_id', project.id))
+      for (const phase of phases) {
+        const tasks = must(await db.from('tasks').select('id').eq('phase_id', phase.id))
+        const taskIds = tasks.map(t => t.id)
         if (taskIds.length > 0) {
-          const { data: sessions } = await db.from('work_sessions').select('id').in('task_id', taskIds)
-          const sessionIds = (sessions || []).map(s => s.id)
+          const sessions = must(await db.from('work_sessions').select('id').in('task_id', taskIds))
+          const sessionIds = sessions.map(s => s.id)
           if (sessionIds.length > 0) {
-            const { data: entries } = await db.from('log_entries').select('id').in('session_id', sessionIds)
-            const entryIds = (entries || []).map(e => e.id)
-            if (entryIds.length > 0) await db.from('entry_parts').delete().in('entry_id', entryIds)
-            await db.from('log_entries').delete().in('session_id', sessionIds)
-            await db.from('submissions').delete().in('session_id', sessionIds)
-            await db.from('work_sessions').delete().in('id', sessionIds)
+            const entries = must(await db.from('log_entries').select('id').in('session_id', sessionIds))
+            const entryIds = entries.map(e => e.id)
+            if (entryIds.length > 0) must(await db.from('entry_parts').delete().in('entry_id', entryIds))
+            must(await db.from('log_entries').delete().in('session_id', sessionIds))
+            must(await db.from('submissions').delete().in('session_id', sessionIds))
+            must(await db.from('work_sessions').delete().in('id', sessionIds))
           }
-          await db.from('tasks').delete().in('id', taskIds)
+          must(await db.from('tasks').delete().in('id', taskIds))
         }
-        await db.from('phases').delete().eq('id', phase.id)
+        must(await db.from('phases').delete().eq('id', phase.id))
       }
-      await db.from('projects').delete().eq('id', project.id)
+      const deleted = must(await db.from('projects').delete().eq('id', project.id).select('id'))
+      if (deleted.length === 0) throw new Error('Nothing was deleted — the project may be protected or already gone. Refresh and retry.')
       setProjects(prev => prev.filter(p => p.id !== project.id))
       setSelProject(null)
       setConfirm(null)
@@ -123,20 +137,20 @@ export default function AdminPanel() {
   async function clearPhaseData(phase) {
     setLoading(true)
     try {
-      const { data: tasks } = await db.from('tasks').select('id').eq('phase_id', phase.id)
-      const taskIds = (tasks || []).map(t => t.id)
+      const tasks = must(await db.from('tasks').select('id').eq('phase_id', phase.id))
+      const taskIds = tasks.map(t => t.id)
       if (taskIds.length > 0) {
-        const { data: sessions } = await db.from('work_sessions').select('id').in('task_id', taskIds)
-        const sessionIds = (sessions || []).map(s => s.id)
+        const sessions = must(await db.from('work_sessions').select('id').in('task_id', taskIds))
+        const sessionIds = sessions.map(s => s.id)
         if (sessionIds.length > 0) {
-          const { data: entries } = await db.from('log_entries').select('id').in('session_id', sessionIds)
-          const entryIds = (entries || []).map(e => e.id)
-          if (entryIds.length > 0) await db.from('entry_parts').delete().in('entry_id', entryIds)
-          await db.from('log_entries').delete().in('session_id', sessionIds)
-          await db.from('submissions').delete().in('session_id', sessionIds)
-          await db.from('work_sessions').delete().in('id', sessionIds)
+          const entries = must(await db.from('log_entries').select('id').in('session_id', sessionIds))
+          const entryIds = entries.map(e => e.id)
+          if (entryIds.length > 0) must(await db.from('entry_parts').delete().in('entry_id', entryIds))
+          must(await db.from('log_entries').delete().in('session_id', sessionIds))
+          must(await db.from('submissions').delete().in('session_id', sessionIds))
+          must(await db.from('work_sessions').delete().in('id', sessionIds))
         }
-        await db.from('tasks').update({ status: 'open', is_closed: false, closed_at: null, closed_by: null }).in('id', taskIds)
+        must(await db.from('tasks').update({ status: 'open', is_closed: false, closed_at: null, closed_by: null }).in('id', taskIds))
       }
       setConfirm(null)
       showToast(`Test data cleared from ${phase.name}`)
