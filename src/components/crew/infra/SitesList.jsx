@@ -1,5 +1,9 @@
 import { useState, useMemo } from 'react'
 import Icon from '../../shared/Icon'
+// is_closed-based predicate (shared with the crew shells). The old local
+// status-based check dropped pending/approved-but-open tasks from the open
+// count while they still showed as active in SiteTaskList one level deeper.
+import { isActiveCrewTask } from '../taskState'
 
 // SitesList — middle layer of the infra navigation. Given an infra project
 // (which carries its sites pre-loaded via getInfraTree), renders a searchable,
@@ -18,8 +22,6 @@ const SITE_TYPE_LABELS = {
   wireless: 'Wireless',
   fiber:    'Fiber',
 }
-
-const isActiveCrewTask = t => t.status !== 'done' && t.status !== 'approved' && t.status !== 'pending'
 
 export default function SitesList({ project, onSelect, onBack, onUserTap }) {
   const [query, setQuery]   = useState('')

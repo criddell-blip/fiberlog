@@ -1,21 +1,8 @@
 import { useState, useMemo, useEffect } from 'react'
 import { recordMovementsBatch, getBinsForWarehouse } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
+import LocationWithBinPicker from './LocationWithBinPicker'
 import Icon from '../shared/Icon'
-
-const CHUNK_SIZE = 100
-
-// Emoji glyphs kept here are consumed inside native <option> elements
-// (which can't render SVG); leave them as text. The structural source/dest
-// chips outside <select> use the <Icon> line set via TYPE_ICON_NAMES below.
-const TYPE_ICONS = {
-  warehouse: '🏭',
-  truck:     '🚚',
-  job_site:  '📍',
-  vendor:    '🏢',
-  scrap:     '🗑️',
-  bin:       '📥',
-}
 
 const TYPE_ICON_NAMES = {
   warehouse: 'warehouse',
@@ -38,6 +25,7 @@ export default function BulkMoveSheet({
 
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [progress, setProgress] = useState(null)   // { done, total } while a chunked insert runs
   const [error, setError] = useState(null)
 
   // Back closes the sheet (mounted only when open). Confirm if a note was typed
@@ -59,16 +47,10 @@ export default function BulkMoveSheet({
     setRowState(s => ({ ...s, [partId]: { ...s[partId], removed: !s[partId].removed } }))
   }
 
-  // Source's parent warehouse, if the source is a bin — used to exclude it
-  // from destination options (you can't move a bin to its own warehouse's
-  // bin-tree without picking a different bin).
-  const sourceParentId = sourceLocation?.type === 'bin' ? sourceLocation.parent_location_id : null
-
   // Filter destination top-level options:
   //   - Hide vendors (you don't transfer TO a vendor)
-  //   - Hide the source itself
-  //   - Hide the source's parent warehouse if source is a bin (otherwise
-  //     "warehouse → its own bin" works fine via the bin sub-picker)
+  //   - Hide the source itself (a bin source is additionally excluded from
+  //     its parent's bin sub-list via LocationWithBinPicker's excludeId)
   const destOptions = useMemo(
     () => locations.filter(l => l.type !== 'vendor' && l.id !== sourceLocation?.id),
     [locations, sourceLocation]
@@ -134,30 +116,25 @@ export default function BulkMoveSheet({
       created_by: currentUser?.id,
     }))
 
-    let created = 0
-    const errors = []
     try {
-      for (let i = 0; i < movements.length; i += CHUNK_SIZE) {
-        const chunk = movements.slice(i, i + CHUNK_SIZE)
-        try {
-          const inserted = await recordMovementsBatch(chunk)
-          created += inserted.length
-        } catch (e) {
-          for (const m of chunk) {
-            try {
-              await recordMovementsBatch([m])
-              created++
-            } catch (rowErr) {
-              errors.push({ part_id: m.part_id, message: rowErr.message })
-            }
-          }
-        }
-      }
-      onComplete({ created, errors })
+      // chunk:true = the chunked-insert-with-single-row-fallback loop that
+      // used to live here — one bad row can't sink its neighbors; row-level
+      // failures come back in `errors` instead of throwing.
+      const { inserted, errors } = await recordMovementsBatch(movements, {
+        chunk: true,
+        onProgress: p => setProgress(p),
+      })
+      onComplete({
+        created: inserted.length,
+        // Preserve the sheet's historical error shape ({ part_id, message })
+        // for the caller's toast + console report.
+        errors: errors.map(e => ({ part_id: e.movement?.part_id, message: e.message })),
+      })
     } catch (e) {
       setError(e.message || 'Bulk move failed')
     } finally {
       setSubmitting(false)
+      setProgress(null)
     }
   }
 
@@ -184,10 +161,6 @@ export default function BulkMoveSheet({
     return top.assigned_user?.name || top.name
   }, [effectiveDestId, destTopId, destBinId, locations, binsByWarehouse])
 
-  const destTop = locations.find(l => l.id === destTopId)
-  const destIsWarehouse = destTop?.type === 'warehouse'
-  const destBins = destIsWarehouse ? (binsByWarehouse[destTopId] || []) : []
-
   return (
     // Backdrop tap does NOT dismiss — prevents mid-edit data loss. Cancel button below.
     <div className="overlay open">
@@ -207,44 +180,19 @@ export default function BulkMoveSheet({
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {/* Destination with bin sub-picker */}
+          {/* Destination with bin sub-picker — shared two-step picker
+              (excludeId keeps the source bin out of its own warehouse's
+              bin list; bins lazy-load via the effect above). */}
           <div className="field">
             <label>Destination</label>
-            <select
-              value={destTopId}
-              onChange={e => setDestTopId(e.target.value)}
-              style={{ width: '100%', padding: '10px 12px', borderRadius: 'var(--r-sm)', border: '1.5px solid var(--border2)', fontSize: 14, background: 'var(--bg)' }}
-            >
-              <option value="">— Pick a destination —</option>
-              {destOptions.map(l => (
-                <option key={l.id} value={l.id}>
-                  {TYPE_ICONS[l.type] || '📦'} {l.assigned_user?.name || l.name} ({l.type})
-                </option>
-              ))}
-            </select>
-
-            {destIsWarehouse && destBins.length > 0 && (
-              <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>↳ Bin:</span>
-                <select
-                  value={destBinId}
-                  onChange={e => setDestBinId(e.target.value)}
-                  style={{ flex: 1, padding: '7px 10px', borderRadius: 'var(--r-sm)', border: '1.5px solid var(--border2)', fontSize: 13, background: 'var(--bg)' }}
-                >
-                  <option value="">(unbinned — warehouse level)</option>
-                  {destBins
-                    .filter(b => b.id !== sourceLocation?.id)   // can't move a bin to itself
-                    .map(b => (
-                      <option key={b.id} value={b.id}>📥 {b.name}</option>
-                    ))}
-                </select>
-              </div>
-            )}
-            {destIsWarehouse && destBins.length === 0 && (
-              <div style={{ marginTop: 4, fontSize: 11, color: 'var(--hint)' }}>
-                No bins under this warehouse — stock goes to the warehouse level.
-              </div>
-            )}
+            <LocationWithBinPicker
+              topLevelId={destTopId} setTopLevelId={setDestTopId}
+              binId={destBinId} setBinId={setDestBinId}
+              options={destOptions}
+              binsByWarehouse={binsByWarehouse}
+              locations={locations}
+              excludeId={sourceLocation?.id}
+            />
           </div>
 
           {/* Per-row qty editor */}
@@ -344,7 +292,7 @@ export default function BulkMoveSheet({
             disabled={submitting || !effectiveDestId || destEqualsSource || validMovements.length === 0}
           >
             {submitting
-              ? 'Moving…'
+              ? (progress ? `Moving… ${progress.done}/${progress.total}` : 'Moving…')
               : effectiveDestId
                 ? `Move ${validMovements.length} part${validMovements.length === 1 ? '' : 's'} → ${destDisplayName}`
                 : `Move ${validMovements.length} parts`}

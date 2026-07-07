@@ -2,8 +2,10 @@ import { useApp } from '../../AppContext'
 import { t } from '../../lib/i18n'
 import { visibleProjectsForCrew } from '../../lib/crewTypes'
 import Icon from '../shared/Icon'
-
-const isCompletedTask = t => t.status === 'done' || t.status === 'approved'
+// is_closed-based predicate (shared with the crew shells). The old local
+// status-based check counted approved-but-open tasks as complete here while
+// they still sat in the Active list one level deeper. Progress = closed/total.
+import { isCompletedTask } from './taskState'
 
 export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
   const { projects: allProjects, currentUser, lang } = useApp()

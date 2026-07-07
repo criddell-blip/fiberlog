@@ -3,6 +3,7 @@ import { useApp } from '../../../AppContext'
 import { addInfraTask } from '../../../lib/supabase'
 import { useBackClose } from '../../../lib/backStack'
 import { t } from '../../../lib/i18n'
+import { isActiveCrewTask, isCompletedTask } from '../taskState'
 import Icon from '../../shared/Icon'
 
 // SiteTaskList — leaf layer of the infra navigation. Shows the tasks for a
@@ -22,9 +23,6 @@ const INFRA_JOB_TYPES = [
   { id: 'audit',       labelKey: 'infraAudit', icon: '🔍' },
   { id: 'emergency',   labelKey: 'infraEmergency', icon: '⚡' },
 ]
-
-const isActiveCrewTask = t => !t.is_closed
-const isCompletedTask  = t => !!t.is_closed
 
 export default function SiteTaskList({ project, site, onSelect, onBack, onUserTap, onTaskCreated }) {
   const { currentUser, showToast, lang } = useApp()

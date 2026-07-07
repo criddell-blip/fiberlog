@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../../AppContext'
 import { useIsWide } from '../../../lib/useIsWide'
-import { t } from '../../../lib/i18n'
 import { useBackClose } from '../../../lib/backStack'
 import Icon from '../../shared/Icon'
 import { getInfraTree, subscribeToAllTaskChanges } from '../../../lib/supabase'
@@ -10,47 +9,10 @@ import TaskWorkspace from '../TaskWorkspace'
 import TaskSummaryView from '../TaskSummaryView'
 import SitesList from './SitesList'
 import SiteTaskList from './SiteTaskList'
-import SetNewPassword from '../../../SetNewPassword'
-
-// See CrewApp.jsx — same rule. Editable until the manager closes it
-// (backlog #2); only closed tasks get the read-only summary.
-const isReadOnlyTask = t => !!t.is_closed
-
-// Back-to-manager pill (see CrewApp for the rationale — same component
-// inlined here so each crew shell stays self-contained).
-function BackToManagerButton({ exitCrewMode, compact = false }) {
-  return (
-    <button
-      onClick={exitCrewMode}
-      title="Return to the manager portal"
-      className={`settings-pill mode${compact ? ' compact' : ''}`}
-    >
-      <span style={{ display: 'inline-flex', lineHeight: 1 }}><Icon name="gear" size={compact ? 13 : 15} /></span>
-      <span>Manager</span>
-    </button>
-  )
-}
-
-// Small theme toggle, mirrored from ManagerApp's ThemeToggle for visual
-// consistency. Both shells need this so working crews on a tablet in
-// daylight can flip out of dark mode without going to the manager portal.
-function ThemeToggle({ darkMode, onToggle, compact = false }) {
-  // HIDDEN — dark-mode toggle no-ops (real bug, backlogged); dark CSS dormant.
-  return null
-  // eslint-disable-next-line no-unreachable
-  return (
-    <button
-      onClick={onToggle}
-      title={`Switch to ${darkMode ? 'light' : 'dark'} mode`}
-      className={`settings-pill${compact ? ' compact' : ''}`}
-    >
-      <span style={{ fontSize: compact ? 13 : 15, lineHeight: 1 }}>
-        {darkMode ? '🌙' : '☀️'}
-      </span>
-      <span>{darkMode ? 'Dark' : 'Light'}</span>
-    </button>
-  )
-}
+// Shared crew-shell chrome + task-state predicates (extracted from the
+// former byte-identical copies in this file and CrewApp.jsx).
+import SignOutConfirm, { BackToManagerButton, ThemeToggle } from '../SignOutConfirm'
+import { isReadOnlyTask, isActiveCrewTask, isCompletedTask } from '../taskState'
 
 // ─── ABOUT THIS SHELL ─────────────────────────────────────────────────────────
 // Infrastructure crews work against SITES (towers, business installs, MDU
@@ -70,76 +32,6 @@ function ThemeToggle({ darkMode, onToggle, compact = false }) {
 const SITE_TYPE_ICON_NAME = {
   wireless: 'pin',
   fiber:    'warehouse',
-}
-
-const isActiveCrewTask = t => !t.is_closed
-const isCompletedTask  = t => !!t.is_closed
-
-// ─── SIGN OUT CONFIRM (copied from CrewApp to keep this shell self-contained) ─
-// Also hosts the theme toggle + back-to-manager pill for narrow layouts,
-// plus the crew self-service language toggle (EN | Español). KEEP IN SYNC
-// with the sibling in CrewApp.jsx.
-function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode, exitCrewMode }) {
-  const { currentUser, setLang } = useApp()
-  const [showChangePw, setShowChangePw] = useState(false)
-  return (
-    <div className="overlay open" onClick={e => e.target === e.currentTarget && onCancel()}>
-      <div className="overlay-sheet" style={{ textAlign: 'center' }}>
-        <div className="avatar avatar-lg avatar-owner" style={{ margin: '0 auto 12px' }}>
-          {currentUser?.initials}
-        </div>
-        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>{currentUser?.name}</div>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 18 }}>
-          {t('signOutQ', lang)}
-        </div>
-        {(toggleDarkMode || exitCrewMode) && (
-          <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 18 }}>
-            {toggleDarkMode && <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} />}
-            {exitCrewMode && <BackToManagerButton exitCrewMode={exitCrewMode} />}
-          </div>
-        )}
-        {/* Language toggle — crew self-service (the manager-set
-            users.language is only the default; this overrides per-device
-            via localStorage.fiberlog_lang, kept across logouts). */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
-          <span style={{ fontSize: 12, color: 'var(--hint)' }}>🌐 {t('language', lang)}</span>
-          <button type="button" onClick={() => setLang('en')} style={langPillStyle(lang !== 'es')}>EN</button>
-          <button type="button" onClick={() => setLang('es')} style={langPillStyle(lang === 'es')}>Español</button>
-        </div>
-        <button
-          type="button"
-          onClick={() => setShowChangePw(true)}
-          style={{
-            width: '100%', marginBottom: 10, padding: '9px 12px',
-            background: 'var(--surface2)', color: 'var(--text)',
-            border: '1px solid var(--border2)', borderRadius: 'var(--r-sm)',
-            fontSize: 13, fontWeight: 600, cursor: 'pointer',
-          }}
-        >🔑 {t('changePassword', lang)}</button>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel}>
-            {t('cancel', lang)}
-          </button>
-          <button className="btn btn-danger" style={{ flex: 2 }} onClick={onConfirm}>
-            {t('signOut', lang)}
-          </button>
-        </div>
-      </div>
-      {showChangePw && <SetNewPassword asSheet onClose={() => setShowChangePw(false)} />}
-    </div>
-  )
-}
-
-// Small selected/unselected pill for the EN | Español toggle. Shared shape
-// with CrewApp's copy — keep in sync.
-function langPillStyle(active) {
-  return {
-    padding: '5px 12px', borderRadius: 999, fontSize: 12, cursor: 'pointer',
-    fontWeight: active ? 800 : 500,
-    border: `1.5px solid ${active ? 'var(--orange)' : 'var(--border2)'}`,
-    background: active ? 'var(--orange-lt)' : 'var(--surface)',
-    color: active ? 'var(--orange-dk)' : 'var(--muted)',
-  }
 }
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
