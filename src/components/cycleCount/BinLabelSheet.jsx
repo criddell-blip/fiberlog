@@ -1,14 +1,13 @@
-import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
-import QRCode from 'qrcode'
+import QrLabelSheet from '../shared/QrLabelSheet'
 import { formatBinCode } from '../../lib/cycleCount'
 import { getBinsForWarehouse } from '../../lib/inventory'
-import { useBackClose } from '../../lib/backStack'
-import Icon from '../shared/Icon'
 
 // Print bin labels for stuck-on-the-shelf scanning. Generates a QR code
 // encoding `BIN:<uuid>` per bin, plus the bin name in large readable type
 // and the parent warehouse name as a sub-line.
+//
+// Thin config wrapper around the shared QrLabelSheet chassis (which owns
+// the print-portal technique + Chrome pagination workarounds).
 //
 // Format picker mirrors SkuLabelSheet — two flavors:
 //   • Labels (letter_4up / letter_8up) — bigger, stick-on-shelf labels.
@@ -78,270 +77,78 @@ const FORMAT_PRESETS = {
 }
 
 export default function BinLabelSheet({ warehouse, onClose }) {
-  // Back closes the sheet (mounted only when open); display-only, no confirm.
-  useBackClose(1, onClose)
-  const [format, setFormat] = useState('letter_4up')
-  const [bins, setBins] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [selected, setSelected] = useState(() => new Set())
-  const [qrCache, setQrCache] = useState({})  // binId → data URL
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const b = await getBinsForWarehouse(warehouse.id)
-        if (cancelled) return
-        setBins(b)
-        // Default selection: all bins
-        setSelected(new Set(b.map(x => x.id)))
-        // Pre-generate QR codes
-        const cache = {}
-        for (const bin of b) {
-          cache[bin.id] = await QRCode.toDataURL(formatBinCode(bin.id), {
-            errorCorrectionLevel: 'M',
-            margin: 1,
-            scale: 8,
-          })
-        }
-        if (!cancelled) setQrCache(cache)
-      } catch (e) {
-        console.error('Bin load failed:', e)
-        if (!cancelled) setError(e.message || 'Could not load bins')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [warehouse.id])
-
-  function toggle(binId) {
-    setSelected(prev => {
-      const next = new Set(prev)
-      if (next.has(binId)) next.delete(binId)
-      else next.add(binId)
-      return next
-    })
-  }
-
-  function selectAll() {
-    setSelected(new Set(bins.map(b => b.id)))
-  }
-  function selectNone() {
-    setSelected(new Set())
-  }
-
-  function handlePrint() {
-    window.print()
-  }
-
-  const preset = FORMAT_PRESETS[format]
-  const labelsToPrint = bins.filter(b => selected.has(b.id))
-
   return (
-    <>
-      {/* Print-only stylesheet. The print-labels element is rendered to
-          body via Portal so it's a direct child of body. In print mode we
-          hide every direct child of body EXCEPT the portal — that way the
-          labels flow naturally across pages instead of getting clipped
-          by position:absolute (the old approach broke pagination past
-          the first page). */}
-      <style>{`
-        .print-labels-portal { display: none; }
-        @media print {
-          /* CRITICAL: global.css locks html/body/#root to height:100%
-             + overflow:hidden so the app fits in one viewport without
-             a body scrollbar. That same rule kills print past page 1
-             because the document never extends beyond one viewport.
-             Override here so multi-page output actually flows. */
-          html, body, #root {
-            height: auto !important;
-            overflow: visible !important;
-          }
-          body > *:not(.print-labels-portal) { display: none !important; }
-          .print-labels-portal { display: block !important; }
-          @page { size: letter; margin: ${preset.pageMargin}; }
-        }
-      `}</style>
-
-      <div
-        className="overlay open no-print"
-        onClick={e => e.target === e.currentTarget && onClose()}
-      >
-        <div className="overlay-sheet" style={{ maxWidth: 720 }}>
-          <div style={{ fontWeight: 'var(--fw-black)', fontSize: 'var(--fs-lg)', marginBottom: 4 }}>
-            Print bin labels
-          </div>
-          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 14 }}>
-            Each label has a QR encoding <code style={{ fontFamily: '"DM Mono", monospace', fontSize: 'var(--fs-xs)' }}>BIN:&lt;uuid&gt;</code>.
-            Both USB scanners and the phone camera read these.
-          </div>
-
-          {/* Format picker — labels for stick-on, scan sheets for clipboard reference */}
-          <div className="field">
-            <label>Format</label>
-            <select value={format} onChange={e => setFormat(e.target.value)} style={{ width: '100%' }}>
-              {Object.entries(FORMAT_PRESETS).map(([key, p]) => (
-                <option key={key} value={key}>{p.label}</option>
-              ))}
-            </select>
-            <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', marginTop: 4 }}>
-              {preset.description}
-            </div>
-          </div>
-
-          {loading && (
-            <div style={{ padding: 30, textAlign: 'center', color: 'var(--muted)' }}>
-              Loading bins + generating QR codes…
-            </div>
-          )}
-
-          {error && (
-            <div className="banner banner-danger" style={{
-              borderRadius: 'var(--r-sm)', borderBottom: 'none',
-              border: '1px solid var(--danger-border)', marginBottom: 14,
-            }}>
-              <span className="banner-icon" style={{ display: 'inline-flex' }}><Icon name="alert" size={16} /></span>
-              <div className="banner-body">{error}</div>
-            </div>
-          )}
-
-          {!loading && !error && bins.length === 0 && (
-            <div style={{ padding: 30, textAlign: 'center', color: 'var(--hint)' }}>
-              No bins in <strong>{warehouse.name}</strong> yet. Add some in the Locations tab first.
-            </div>
-          )}
-
-          {!loading && !error && bins.length > 0 && (
-            <>
-              {/* Selection controls */}
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '8px 0', marginBottom: 8,
-                borderBottom: '1px solid var(--border)',
-              }}>
-                <div style={{ flex: 1, fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
-                  {selected.size} of {bins.length} selected
-                </div>
-                <button onClick={selectAll} className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 'var(--fs-xs)' }}>
-                  All
-                </button>
-                <button onClick={selectNone} className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 'var(--fs-xs)' }}>
-                  None
-                </button>
-              </div>
-
-              {/* Bin checklist */}
-              <div style={{ maxHeight: 240, overflowY: 'auto', marginBottom: 14 }}>
-                {bins.map(bin => (
-                  <label key={bin.id} style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '6px 4px', cursor: 'pointer',
-                    borderBottom: '1px solid var(--border)',
-                  }}>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(bin.id)}
-                      onChange={() => toggle(bin.id)}
-                      style={{ cursor: 'pointer' }}
-                    />
-                    <span style={{ flex: 1, fontSize: 'var(--fs-base)' }}>{bin.name}</span>
-                    <span style={{ fontSize: 10, color: 'var(--hint)', fontFamily: '"DM Mono", monospace' }}>
-                      {bin.id.slice(0, 8)}…
-                    </span>
-                  </label>
-                ))}
-              </div>
-
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-                <button
-                  className="btn btn-primary"
-                  style={{ flex: 2 }}
-                  onClick={handlePrint}
-                  disabled={labelsToPrint.length === 0}
-                >
-                  <Icon name="printer" size={15} style={{ display: 'inline-block', verticalAlign: '-3px', marginRight: 6 }} />Print {labelsToPrint.length} label{labelsToPrint.length === 1 ? '' : 's'}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Printable layout — rendered to body via Portal so it flows
-          naturally across pages in print mode. Hidden on screen by the
-          .print-labels-portal default; revealed in @media print. */}
-      {labelsToPrint.length > 0 && createPortal(
-        <div className="print-labels-portal">
-          {/* Flex-wrap instead of CSS grid: Chrome's print engine has a
-              long-standing pagination bug with display:grid (the grid
-              container won't split across pages, content past page 1
-              gets clipped). Flex-wrap with explicit cell widths
-              paginates cleanly across any browser. */}
-          <div style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            width: '100%',
-            color: 'black',
-            background: 'white',
-          }}>
-            {labelsToPrint.map(bin => (
-              <div key={bin.id} style={{
-                flex: `0 0 calc(100% / ${preset.columns})`,
-                maxWidth: `calc(100% / ${preset.columns})`,
-                border: '1px dashed #888',
-                padding: format === 'scan_sheet_60' ? '0.04in' : '0.15in',
-                boxSizing: 'border-box',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                minHeight: preset.minHeight,
-                textAlign: 'center',
-                breakInside: 'avoid',
-                pageBreakInside: 'avoid',
-              }}>
-                <div style={{
-                  fontSize: preset.nameFontPx, fontWeight: 800,
-                  lineHeight: 1.15,
-                  marginBottom: 3,
-                  wordBreak: 'break-word',
-                  maxWidth: '100%',
-                }}>
-                  {bin.name}
-                </div>
-                {preset.showSub && preset.subFontPx > 0 && (
-                  <div style={{ fontSize: preset.subFontPx, color: '#666', marginBottom: 5 }}>
-                    {warehouse.name}
-                  </div>
-                )}
-                {qrCache[bin.id] && (
-                  <img
-                    src={qrCache[bin.id]}
-                    alt={`QR for ${bin.name}`}
-                    style={{ width: preset.qrSize, height: preset.qrSize }}
-                  />
-                )}
-                {preset.idFontPx > 0 && (
-                  <div style={{
-                    fontSize: preset.idFontPx, color: '#888',
-                    fontFamily: 'monospace',
-                    marginTop: 4,
-                    wordBreak: 'break-all',
-                    maxWidth: '100%',
-                    lineHeight: 1.1,
-                  }}>
-                    BIN:{bin.id}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>,
-        document.body
+    <QrLabelSheet
+      title="Print bin labels"
+      subtitle={(
+        <>
+          Each label has a QR encoding <code style={{ fontFamily: '"DM Mono", monospace', fontSize: 'var(--fs-xs)' }}>BIN:&lt;uuid&gt;</code>.
+          Both USB scanners and the phone camera read these.
+        </>
       )}
-    </>
+      presets={FORMAT_PRESETS}
+      defaultFormat="letter_4up"
+      formatFieldLabel="Format"
+      loadItems={() => getBinsForWarehouse(warehouse.id)}
+      loadKey={warehouse.id}
+      qrPayload={bin => formatBinCode(bin.id)}
+      qrScale={8}
+      loadingText="Loading bins + generating QR codes…"
+      errorFallback="Could not load bins"
+      emptyContent={(
+        <>
+          No bins in <strong>{warehouse.name}</strong> yet. Add some in the Locations tab first.
+        </>
+      )}
+      checklistMaxHeight={240}
+      renderChecklistRow={bin => (
+        <>
+          <span style={{ flex: 1, fontSize: 'var(--fs-base)' }}>{bin.name}</span>
+          <span style={{ fontSize: 10, color: 'var(--hint)', fontFamily: '"DM Mono", monospace' }}>
+            {bin.id.slice(0, 8)}…
+          </span>
+        </>
+      )}
+      cellBorderColor="#888"
+      cellPadding={format => format === 'scan_sheet_60' ? '0.04in' : '0.15in'}
+      renderLabel={(bin, preset, qrDataUrl) => (
+        <>
+          <div style={{
+            fontSize: preset.nameFontPx, fontWeight: 800,
+            lineHeight: 1.15,
+            marginBottom: 3,
+            wordBreak: 'break-word',
+            maxWidth: '100%',
+          }}>
+            {bin.name}
+          </div>
+          {preset.showSub && preset.subFontPx > 0 && (
+            <div style={{ fontSize: preset.subFontPx, color: '#666', marginBottom: 5 }}>
+              {warehouse.name}
+            </div>
+          )}
+          {qrDataUrl && (
+            <img
+              src={qrDataUrl}
+              alt={`QR for ${bin.name}`}
+              style={{ width: preset.qrSize, height: preset.qrSize }}
+            />
+          )}
+          {preset.idFontPx > 0 && (
+            <div style={{
+              fontSize: preset.idFontPx, color: '#888',
+              fontFamily: 'monospace',
+              marginTop: 4,
+              wordBreak: 'break-all',
+              maxWidth: '100%',
+              lineHeight: 1.1,
+            }}>
+              BIN:{bin.id}
+            </div>
+          )}
+        </>
+      )}
+      onClose={onClose}
+    />
   )
 }

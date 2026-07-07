@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { getBinsForWarehouse } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
+import { PrintPortalStyle, PrintPortal } from '../shared/QrLabelSheet'
 
 // Big readable signs for warehouse navigation — one sign per aisle,
 // extracted from existing bin names via the same prefix-parse the
@@ -93,19 +94,14 @@ export default function AisleSignSheet({ warehouse, onClose }) {
 
   return (
     <>
-      <style>{`
-        @media print {
-          body * { visibility: hidden !important; }
-          .print-aisle-signs, .print-aisle-signs * { visibility: visible !important; }
-          .print-aisle-signs {
-            position: absolute !important;
-            left: 0 !important; top: 0 !important;
-            width: 100% !important;
-            margin: 0 !important; padding: 0 !important;
-            background: white !important;
-          }
-          .no-print { display: none !important; }
-          @page { margin: 0.4in; }
+      {/* Shared portal print chrome (see QrLabelSheet) — replaces the old
+          visibility:hidden + position:absolute technique, which broke
+          pagination past page one. No size: rule in @page so the user can
+          still pick portrait/landscape in the browser's print dialog. */}
+      <PrintPortalStyle
+        pageMargin="0.4in"
+        pageSize={null}
+        extraPrintCss={`
           .aisle-sign-page {
             page-break-after: always;
             break-after: page;
@@ -114,8 +110,8 @@ export default function AisleSignSheet({ warehouse, onClose }) {
             page-break-after: auto;
             break-after: auto;
           }
-        }
-      `}</style>
+        `}
+      />
 
       <div
         className="overlay open no-print"
@@ -195,51 +191,54 @@ export default function AisleSignSheet({ warehouse, onClose }) {
         </div>
       </div>
 
-      {/* Printable signs — one page per aisle */}
-      <div className="print-aisle-signs" style={{ display: signsToPrint.length === 0 ? 'none' : 'block' }}>
-        {signsToPrint.map(g => (
-          <div key={g.key} className="aisle-sign-page" style={{
-            color: 'black',
-            background: 'white',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minHeight: '10in',
-            textAlign: 'center',
-            padding: '0.5in',
-            boxSizing: 'border-box',
-          }}>
-            <div style={{
-              fontSize: '180pt',
-              fontWeight: 900,
-              letterSpacing: '-0.02em',
-              lineHeight: 1,
-              marginBottom: '0.3in',
+      {/* Printable signs — one page per aisle, rendered to body via the
+          shared PrintPortal so multi-page output flows across pages. */}
+      {signsToPrint.length > 0 && (
+        <PrintPortal>
+          {signsToPrint.map(g => (
+            <div key={g.key} className="aisle-sign-page" style={{
+              color: 'black',
+              background: 'white',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: '10in',
+              textAlign: 'center',
+              padding: '0.5in',
+              boxSizing: 'border-box',
             }}>
-              {g.label.toUpperCase()}
-            </div>
-            {summarizeBays(g.bins) && (
               <div style={{
-                fontSize: '48pt',
-                fontWeight: 600,
-                color: '#666',
-                letterSpacing: '0.02em',
+                fontSize: '180pt',
+                fontWeight: 900,
+                letterSpacing: '-0.02em',
+                lineHeight: 1,
+                marginBottom: '0.3in',
               }}>
-                {summarizeBays(g.bins).toUpperCase()}
+                {g.label.toUpperCase()}
               </div>
-            )}
-            <div style={{
-              fontSize: '18pt',
-              color: '#888',
-              marginTop: '0.6in',
-              fontWeight: 500,
-            }}>
-              {warehouse.name}
+              {summarizeBays(g.bins) && (
+                <div style={{
+                  fontSize: '48pt',
+                  fontWeight: 600,
+                  color: '#666',
+                  letterSpacing: '0.02em',
+                }}>
+                  {summarizeBays(g.bins).toUpperCase()}
+                </div>
+              )}
+              <div style={{
+                fontSize: '18pt',
+                color: '#888',
+                marginTop: '0.6in',
+                fontWeight: 500,
+              }}>
+                {warehouse.name}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </PrintPortal>
+      )}
     </>
   )
 }
