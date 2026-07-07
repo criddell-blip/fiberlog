@@ -245,11 +245,9 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   const partList = useMemo(() => {
     const source = isLoad ? otherStock : (myStock || [])
     if (!partSearch.trim()) return source
-    const q = partSearch.trim().toLowerCase()
     return source.filter(r => {
       const pc = r.parts_catalog
-      return (pc?.name || '').toLowerCase().includes(q)
-          || (pc?.id || '').toLowerCase().includes(q)
+      return matchesAllTokens(partSearch, [pc?.name, pc?.id])
     })
   }, [isLoad, otherStock, myStock, partSearch])
 
@@ -272,21 +270,16 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   // touching this function.
   const filteredGroups = useMemo(() => {
     if (!partGroups) return []
-    const q = partSearch.trim().toLowerCase()
-    if (!q) return partGroups
+    if (!partSearch.trim()) return partGroups
     return partGroups.filter(p => {
-      if ((p.name || '').toLowerCase().includes(q)) return true
-      if ((p.nickname || '').toLowerCase().includes(q)) return true
-      if ((p.partId || '').toLowerCase().includes(q)) return true
-      if ((p.material_group || '').toLowerCase().includes(q)) return true
-      if ((p.department || '').toLowerCase().includes(q)) return true
+      const fields = [p.name, p.nickname, p.partId, p.material_group, p.department]
       // Search across attribute values (string-typed only — numbers/booleans skipped)
       if (p.attributes && typeof p.attributes === 'object') {
         for (const v of Object.values(p.attributes)) {
-          if (typeof v === 'string' && v.toLowerCase().includes(q)) return true
+          if (typeof v === 'string') fields.push(v)
         }
       }
-      return false
+      return matchesAllTokens(partSearch, fields)
     })
   }, [partGroups, partSearch])
 
@@ -986,6 +979,20 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
       </div>
     </div>
   )
+}
+
+// Multi-word search: every whitespace token must appear somewhere in the
+// combined field list (case-insensitive). Whole-phrase .includes() made
+// "lag bolt box" match nothing while "Lag Bolts, 1/2 x 4 (Box of 50)"
+// sat right there — same bug class as the server-side searchPartsCatalog
+// fix in lib/supabase.js. Deliberate asymmetry vs the server: here tokens
+// may match ACROSS fields (name + SKU concatenated) since we're filtering
+// a small already-loaded list; the server requires all tokens in the same
+// column. A query can therefore match slightly more here — acceptable.
+function matchesAllTokens(query, fields) {
+  const haystack = fields.filter(Boolean).join(' ').toLowerCase()
+  return query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    .every(tok => haystack.includes(tok))
 }
 
 function locationIcon(type, hasOwner) {

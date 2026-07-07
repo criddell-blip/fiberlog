@@ -41,7 +41,13 @@ export const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 export async function searchPartsCatalog(query, { cols = 'id, name, nickname, unit', limit = 20 } = {}) {
   const q = String(query ?? '').trim()
   if (!q) return []
-  const pattern = `%${q}%`
+  // Tokenize on whitespace and AND the tokens within each column — chained
+  // .ilike() calls on one builder combine with AND. A single whole-phrase
+  // %pattern% made multi-word queries useless: "lag bolt box" found nothing
+  // because no field contains that exact substring, while the part is named
+  // "Lag Bolts, 1/2 x 4 (Box of 50)". Every token must hit the SAME column
+  // (predictable; cross-column token splits don't match).
+  const tokens = q.split(/\s+/).filter(Boolean)
 
   // Searched in priority order — first hit wins after de-dupe.
   const searchedCols = [
@@ -57,9 +63,11 @@ export async function searchPartsCatalog(query, { cols = 'id, name, nickname, un
   ]
 
   const results = await Promise.all(
-    searchedCols.map(col =>
-      db.from('parts_catalog').select(cols).ilike(col, pattern).order('name').limit(limit)
-    )
+    searchedCols.map(col => {
+      let qb = db.from('parts_catalog').select(cols)
+      for (const tok of tokens) qb = qb.ilike(col, `%${tok}%`)
+      return qb.order('name').limit(limit)
+    })
   )
 
   for (const r of results) {
