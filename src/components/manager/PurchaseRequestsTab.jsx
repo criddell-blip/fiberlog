@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
 import { getPurchaseRequests } from '../../lib/inventory'
 import PurchaseRequestSheet from './PurchaseRequestSheet'
+import { chipStyle, CARD_SHADOW, LoadingBlock, EmptyState } from './chrome'
 import Icon from '../shared/Icon'
 
 // Shorten a PR's vendor list for a one-line summary.
@@ -91,28 +92,23 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
         </div>
       )}
 
-      {loading && (
-        <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>Loading…</div>
-      )}
+      {loading && <LoadingBlock />}
 
       {!loading && rows.length === 0 && (
-        <div style={{ padding: 48, textAlign: 'center', color: 'var(--hint)' }}>
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10, color: 'var(--border2)' }}>
-            <Icon name="clipboard" size={36} />
-          </div>
+        <EmptyState icon="clipboard" padding={48}>
           <div>No purchase requests in this view.</div>
           {canCreate && (
             <div style={{ marginTop: 12, fontSize: 12 }}>
               Click <strong>New PR</strong> or use bulk-select on the Stock / Parts tabs to create one.
             </div>
           )}
-        </div>
+        </EmptyState>
       )}
 
       {/* Desktop: dense grid table. Phone: collapses to cards (the fixed-px
           grid would otherwise overflow ~390px). */}
       {!loading && rows.length > 0 && isWide && (
-        <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r)', overflow: 'hidden', boxShadow: '0 1px 3px rgba(15,23,42,0.06)' }}>
+        <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r)', overflow: 'hidden', boxShadow: CARD_SHADOW }}>
           {/* Header */}
           <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, padding: '0 14px', height: 38, alignItems: 'center', background: 'var(--surface2)', borderBottom: '1px solid var(--border)' }}>
             <span className="eyebrow">PR #</span>
@@ -205,18 +201,6 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
       )}
     </div>
   )
-}
-
-// Console filter chip — active reads as a dark chip.
-function chipStyle(selected) {
-  return {
-    display: 'inline-flex', alignItems: 'center',
-    height: 30, padding: '0 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-    whiteSpace: 'nowrap', cursor: 'pointer',
-    background: selected ? 'var(--dark-bar)' : 'var(--surface)',
-    color: selected ? '#fff' : 'var(--muted)',
-    border: `1px solid ${selected ? 'var(--dark-bar)' : 'var(--border2)'}`,
-  }
 }
 
 // Status pill — semantic colors kept (pending amber, ordered emerald,

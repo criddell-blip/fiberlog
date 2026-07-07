@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getRecentMovements } from '../../lib/inventory'
+import { fmtWhen } from '../../lib/format'
+import { chipStyle, cardSurface, LoadingBlock, EmptyState } from './chrome'
 import Icon from '../shared/Icon'
 
 // Movement-type accents. Receive/issue are the in/out pair; the rest keep
@@ -72,14 +74,11 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
       </select>
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Loading…</div>
+        <LoadingBlock />
       ) : movements.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 48, color: 'var(--hint)' }}>
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10, color: 'var(--border2)' }}>
-            <Icon name="activity" size={36} />
-          </div>
+        <EmptyState icon="activity" padding={48}>
           <div>No movements match your filters.</div>
-        </div>
+        </EmptyState>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {movements.map(m => {
@@ -101,10 +100,9 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
             const toName   = m.to_location?.name   || (m.movement_type === 'issue' || m.movement_type === 'scrap' ? 'Consumed' : null)
             return (
               <div key={m.id} style={{
-                background: 'var(--surface)', border: '1px solid var(--border)',
+                ...cardSurface,
                 borderLeft: `3px solid ${colors.text}`,
-                borderRadius: 'var(--r)', padding: '11px 14px',
-                boxShadow: '0 1px 3px rgba(15,23,42,0.06)',
+                padding: '11px 14px',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
                   <span style={{
@@ -124,7 +122,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
                   {fromName && toName && <span style={{ color: 'var(--hint)' }}>→</span>}
                   {toName && <span>To <strong style={{ color: 'var(--text)' }}>{toName}</strong></span>}
                   <span className="mono" style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--hint)' }}>
-                    {new Date(m.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    {fmtWhen(m.created_at)}
                     {m.created_by_user && ` · ${m.created_by_user.initials}`}
                   </span>
                 </div>
@@ -142,16 +140,4 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
       )}
     </div>
   )
-}
-
-// Console filter chip — active reads as a dark chip.
-function chipStyle(selected) {
-  return {
-    display: 'inline-flex', alignItems: 'center', gap: 6,
-    height: 30, padding: '0 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-    whiteSpace: 'nowrap', cursor: 'pointer',
-    background: selected ? 'var(--dark-bar)' : 'var(--surface)',
-    color: selected ? '#fff' : 'var(--muted)',
-    border: `1px solid ${selected ? 'var(--dark-bar)' : 'var(--border2)'}`,
-  }
 }

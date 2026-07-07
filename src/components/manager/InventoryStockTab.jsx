@@ -9,6 +9,7 @@ import SkuLabelSheet from './SkuLabelSheet'
 import PurchaseRequestSheet from './PurchaseRequestSheet'
 import { useIsWide } from '../../lib/useIsWide'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
+import { chipStyle, cardSurface, CARD_SHADOW, EmptyState } from './chrome'
 import Icon from '../shared/Icon'
 
 const TYPE_ICONS = {
@@ -347,7 +348,7 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
       }}>
         <button
           onClick={() => setShowFilters(v => !v)}
-          style={pillStyle(showFilters)}
+          style={chipStyle(showFilters)}
           title={showFilters ? 'Hide location filters' : 'Show location + bin filters'}
         >
           <Icon name="filter" size={14} /> {showFilters ? 'Hide filters' : 'Filters'}
@@ -401,11 +402,11 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
 
             {/* Secondary location pills — filtered by the selected type. */}
             <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-              <button onClick={() => setScope('all')} style={pillStyle(scope === 'all')}>All locations</button>
+              <button onClick={() => setScope('all')} style={chipStyle(scope === 'all')}>All locations</button>
               {locations
                 .filter(loc => typeFilter === 'all' || loc.type === typeFilter)
                 .map(loc => (
-                  <button key={loc.id} onClick={() => setScope(loc.id)} style={pillStyle(scope === loc.id)}>
+                  <button key={loc.id} onClick={() => setScope(loc.id)} style={chipStyle(scope === loc.id)}>
                     <Icon name={TYPE_ICON_NAME[loc.type] || 'box'} size={14} />
                     {loc.assigned_user?.name || loc.name}
                   </button>
@@ -478,12 +479,12 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {!loading && filtered.length > 0 && (
-            <button onClick={() => setShowLabelSheet(true)} title="Print SKU labels for the parts shown above" style={pillStyle(false)}>
+            <button onClick={() => setShowLabelSheet(true)} title="Print SKU labels for the parts shown above" style={chipStyle(false)}>
               <Icon name="tag" size={14} /> Labels
             </button>
           )}
           {canBulkSelect && filtered.length > 0 && (
-            <button onClick={allVisibleSelected ? clearSelection : selectAllVisible} style={pillStyle(false)}>
+            <button onClick={allVisibleSelected ? clearSelection : selectAllVisible} style={chipStyle(false)}>
               {allVisibleSelected ? 'Deselect all' : 'Select all'}
             </button>
           )}
@@ -491,11 +492,11 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
       </div>
 
       {!loading && filtered.length === 0 && (
-        <div style={{ textAlign: 'center', padding: 40, color: 'var(--hint)' }}>
+        <EmptyState>
           {totalLines === 0
             ? 'No stock here yet — record a receive movement to get started.'
             : 'No parts match your search.'}
-        </div>
+        </EmptyState>
       )}
 
       {/* Desktop: Console data table */}
@@ -504,7 +505,7 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
           ? '28px minmax(0,1fr) 132px 130px 104px 92px'
           : 'minmax(0,1fr) 132px 130px 104px 92px'
         return (
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', overflow: 'hidden', boxShadow: '0 1px 3px rgba(15,23,42,0.06)' }}>
+          <div style={{ ...cardSurface, overflow: 'hidden' }}>
             {/* Header row */}
             <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 12, alignItems: 'center', height: 38, padding: '0 16px', background: 'var(--surface2)', borderBottom: '1px solid var(--border)' }}>
               {canBulkSelect && (
@@ -586,7 +587,7 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
                   display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px',
                   background: isHighlighted ? 'var(--accent-lt)' : isSelected ? 'var(--selected-row)' : 'var(--surface)',
                   border: '1px solid var(--border)', borderRadius: 'var(--r)',
-                  boxShadow: isHighlighted ? 'inset 0 0 0 2px var(--accent)' : '0 1px 3px rgba(15,23,42,0.06)',
+                  boxShadow: isHighlighted ? 'inset 0 0 0 2px var(--accent)' : CARD_SHADOW,
                   transition: 'background .25s', opacity: isDraft ? 0.6 : 1,
                 }}>
                 {canBulkSelect && (
@@ -711,20 +712,8 @@ function toRowShape(data) {
   }))
 }
 
-// Console filter chips — active reads as a dark chip; inactive is a white
-// hairline chip. (Shared visual: the .chip / .chip-active classes in global.css;
-// these inline styles mirror them so the existing call sites stay unchanged.)
-function pillStyle(selected) {
-  return {
-    display: 'inline-flex', alignItems: 'center', gap: 6,
-    height: 30, padding: '0 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-    whiteSpace: 'nowrap', cursor: 'pointer',
-    background: selected ? 'var(--dark-bar)' : 'var(--surface)',
-    color: selected ? '#fff' : 'var(--muted)',
-    border: `1px solid ${selected ? 'var(--dark-bar)' : 'var(--border2)'}`,
-  }
-}
-
+// Deliberately smaller accent sub-pill (bin drill-in) — NOT a drifted copy of
+// the shared 30px chipStyle in ./chrome.jsx; stays local on purpose.
 function subPillStyle(selected) {
   return {
     display: 'inline-flex', alignItems: 'center', gap: 5,

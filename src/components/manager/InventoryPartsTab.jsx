@@ -7,6 +7,7 @@ import PurchaseRequestSheet from './PurchaseRequestSheet'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
 import { useBackClose } from '../../lib/backStack'
 import { useIsWide } from '../../lib/useIsWide'
+import { chipStyle, cardSurface, LoadingBlock, EmptyState } from './chrome'
 import Icon from '../shared/Icon'
 
 const COMMON_UNITS = ['ea', 'ft', 'm', 'in', 'lb', 'kg', 'box', 'roll', 'spool', 'pair', 'pack', 'kit']
@@ -295,7 +296,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   }
 
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Loading parts…</div>
+    return <LoadingBlock label="Loading parts…" />
   }
 
   const selectedCount = selectedIds.size
@@ -305,13 +306,13 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
       {/* Compact filter pills — only 3 options, stay visible. Reduced
           padding from previous so they sit at ~28px row instead of 35px. */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-        <button onClick={() => setFilter('all')} style={pillStyle(filter === 'all')}>
+        <button onClick={() => setFilter('all')} style={chipStyle(filter === 'all')}>
           All ({counts.all})
         </button>
-        <button onClick={() => setFilter('active')} style={pillStyle(filter === 'active')}>
+        <button onClick={() => setFilter('active')} style={chipStyle(filter === 'active')}>
           Active ({counts.active})
         </button>
-        <button onClick={() => setFilter('draft')} style={pillStyle(filter === 'draft', 'amber')}>
+        <button onClick={() => setFilter('draft')} style={chipStyle(filter === 'draft', { color: 'amber' })}>
           <Icon name="alert" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Drafts ({counts.draft})
         </button>
       </div>
@@ -346,7 +347,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           <button
             onClick={allVisibleSelected ? clearSelection : selectAllVisible}
             title="Tip: shift-click a part to select a range"
-            style={pillStyle(false)}
+            style={chipStyle(false)}
           >
             {allVisibleSelected ? 'Deselect all' : `Select all ${filtered.length}`}
           </button>
@@ -354,11 +355,11 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
       </div>
 
       {filtered.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 40, color: 'var(--hint)' }}>
+        <EmptyState>
           {parts.length === 0 ? 'No parts yet' : 'No parts match your filters'}
-        </div>
+        </EmptyState>
       ) : (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', overflow: 'hidden', boxShadow: '0 1px 3px rgba(15,23,42,0.06)' }}>
+        <div style={{ ...cardSurface, overflow: 'hidden' }}>
           {filtered.map((p, i) => {
             const stockQty = stockTotals.get(p.id) || 0
             const isSelected = selectedIds.has(p.id)
@@ -737,20 +738,6 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
       )}
     </div>
   )
-}
-
-// Console filter chip — active reads as a dark chip (amber variant for the
-// drafts filter). Inactive is a white hairline chip.
-function pillStyle(selected, color = 'accent') {
-  const activeBg = color === 'amber' ? 'var(--amber)' : 'var(--dark-bar)'
-  return {
-    display: 'inline-flex', alignItems: 'center', gap: 6,
-    height: 30, padding: '0 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-    whiteSpace: 'nowrap', cursor: 'pointer',
-    background: selected ? activeBg : 'var(--surface)',
-    color: selected ? '#fff' : 'var(--muted)',
-    border: `1px solid ${selected ? activeBg : 'var(--border2)'}`,
-  }
 }
 
 // Small per-row action button (outline chip).

@@ -305,6 +305,11 @@ export default function ReconcileSheet({ onClose, onApplied }) {
 // ─── Sub-components ─────────────────────────────────────────────────────
 
 function ReconcileRow({ row, excluded, onToggle, note, onNoteChange }) {
+  // Kept local on purpose (#36.4): this maps reconcile ROW states, not
+  // submission/intake statuses. Shape note for the queues' future shared
+  // STATUS_COLORS (backlog #22): `status → { bg, fg }` keyed by status id —
+  // if SubmissionsQueue/IntakeRequestsQueue ever extract theirs into a shared
+  // module, this map already matches that shape and could adopt it.
   const STATUS_COLORS = {
     add:               { bg: 'var(--teal-lt)',   fg: 'var(--teal-dk)' },
     remove:            { bg: 'var(--red-lt)',    fg: 'var(--red)' },

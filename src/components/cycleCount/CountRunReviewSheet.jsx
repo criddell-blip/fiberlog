@@ -6,6 +6,7 @@ import {
   discardCountResolution,
   discardCountRun,
 } from '../../lib/cycleCount'
+import { fmtWhen } from '../../lib/format'
 import Icon from '../shared/Icon'
 
 // Overlay sheet that opens when a manager taps a pending count run in the
@@ -481,10 +482,4 @@ function ResolutionRow({ resolution, onApprove, onDiscard, busy }) {
       </div>
     </div>
   )
-}
-
-function fmtWhen(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }

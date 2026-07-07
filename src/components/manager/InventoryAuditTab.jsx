@@ -7,6 +7,7 @@ import {
   getBinsForWarehouse,
   compareNamesNatural,
 } from '../../lib/inventory'
+import { chipStyle, CARD_SHADOW, EmptyState } from './chrome'
 
 // Audit / cycle-count export tab.
 //
@@ -286,7 +287,7 @@ export default function InventoryAuditTab({ locations, refreshKey }) {
             { id: 'draft',  label: 'Drafts' },
             { id: 'all',    label: 'All' },
           ].map(opt => (
-            <button key={opt.id} onClick={() => setPartStatus(opt.id)} style={pillStyle(partStatus === opt.id)}>
+            <button key={opt.id} onClick={() => setPartStatus(opt.id)} style={chipStyle(partStatus === opt.id)}>
               {opt.id === 'draft' && <Icon name="alert" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />}{opt.label}
             </button>
           ))}
@@ -302,7 +303,7 @@ export default function InventoryAuditTab({ locations, refreshKey }) {
             { id: 'zero_negative', label: 'Zero or negative' },
             { id: 'all',           label: 'All (including 0)' },
           ].map(opt => (
-            <button key={opt.id} onClick={() => setStockLevel(opt.id)} style={pillStyle(stockLevel === opt.id)}>
+            <button key={opt.id} onClick={() => setStockLevel(opt.id)} style={chipStyle(stockLevel === opt.id)}>
               {opt.label}
             </button>
           ))}
@@ -445,9 +446,9 @@ function ResultView({ result, locations, onReset, onDownload }) {
       </button>
 
       {totalLines === 0 ? (
-        <div style={{ textAlign: 'center', padding: 30, color: 'var(--hint)' }}>
+        <EmptyState padding={30}>
           No rows matched these filters. Loosen them and try again.
-        </div>
+        </EmptyState>
       ) : (
         <>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--hint)', marginBottom: 6 }}>
@@ -577,18 +578,6 @@ function downloadText(filename, text) {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
-// Console filter chip — active reads as a dark chip.
-function pillStyle(selected) {
-  return {
-    display: 'inline-flex', alignItems: 'center', gap: 6,
-    height: 30, padding: '0 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-    whiteSpace: 'nowrap', cursor: 'pointer',
-    background: selected ? 'var(--dark-bar)' : 'var(--surface)',
-    color: selected ? '#fff' : 'var(--muted)',
-    border: `1px solid ${selected ? 'var(--dark-bar)' : 'var(--border2)'}`,
-  }
-}
-
 function Stat({ label, value, accent }) {
   return (
     <div style={{
@@ -596,7 +585,7 @@ function Stat({ label, value, accent }) {
       background: accent ? 'var(--accent-lt)' : 'var(--surface)',
       border: `1px solid ${accent ? 'var(--accent)' : 'var(--border)'}`,
       borderRadius: 'var(--r)', padding: '10px 12px', textAlign: 'center',
-      boxShadow: accent ? 'none' : '0 1px 3px rgba(15,23,42,0.06)',
+      boxShadow: accent ? 'none' : CARD_SHADOW,
     }}>
       <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: accent ? 'var(--accent-dk)' : 'var(--text)' }}>{value}</div>
       <div className="eyebrow" style={{ marginTop: 2 }}>{label}</div>

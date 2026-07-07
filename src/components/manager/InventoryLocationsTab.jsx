@@ -11,6 +11,7 @@ import AisleSignSheet from './AisleSignSheet'
 import LocationDetailPanel from './LocationDetailPanel'
 import LocationWithBinPicker from './LocationWithBinPicker'
 import { useBackClose } from '../../lib/backStack'
+import { CARD_SHADOW, LoadingBlock, EmptyState } from './chrome'
 import Icon from '../shared/Icon'
 
 // Console line-icon per location type (the header rows use this instead of emoji).
@@ -410,7 +411,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
   }
 
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Loading locations…</div>
+    return <LoadingBlock label="Loading locations…" />
   }
 
   return (
@@ -422,11 +423,11 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
       </div>
 
       {locations.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 40, color: 'var(--hint)' }}>
+        <EmptyState>
           <div style={{ fontSize: 32, marginBottom: 8 }}>🏭</div>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>No locations yet</div>
           <div style={{ fontSize: 13 }}>Start with your main warehouse, then add trucks for each crew member.</div>
-        </div>
+        </EmptyState>
       ) : (
         <>
           {['warehouse', 'truck', 'group', 'job_site', 'vendor', 'scrap'].map(type => {
@@ -512,7 +513,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                           display: 'flex', alignItems: 'center', gap: 8,
                           flexWrap: 'wrap',
                           cursor: isWhExpandable ? 'pointer' : 'default',
-                          boxShadow: isWhExpanded ? 'none' : '0 1px 3px rgba(15,23,42,0.06)',
+                          boxShadow: isWhExpanded ? 'none' : CARD_SHADOW,
                         }}>
                         {isWhExpandable && (
                           <span style={{
