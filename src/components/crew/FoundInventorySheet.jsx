@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { searchParts } from '../../lib/supabase'
 import { getLocations, createIntakeRequest } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
+import { t } from '../../lib/i18n'
 import Icon from '../shared/Icon'
 
 // Crew "Report found inventory" (backlog #19). The crew member is physically
@@ -13,7 +14,7 @@ import Icon from '../shared/Icon'
 // carried on the request (the part is created by the approval RPC, not here —
 // crew can't write parts_catalog).
 export default function FoundInventorySheet({ onClose, onComplete }) {
-  const { currentUser, showToast } = useApp()
+  const { currentUser, showToast, lang } = useApp()
 
   // Part selection: either an existing catalog part, or a new draft.
   const [partSel, setPartSel] = useState(null)      // { id, name, unit } | null
@@ -38,7 +39,7 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
 
   const dirty = !!partSel || showDraft || !!draftName.trim() || !!qty.trim() || !!reason.trim()
   useBackClose(1, onClose, {
-    confirm: () => !dirty || window.confirm('Discard this report?'),
+    confirm: () => !dirty || window.confirm(t('discardReport', lang)),
   })
 
   // Load warehouses once; auto-select if there's only one.
@@ -89,12 +90,14 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
   }
 
   async function handleSubmit() {
+    // Error state holds an i18n key (or a raw server message) — t()
+    // passes unknown strings through, so rendering t(error, lang) covers both.
     setError('')
-    if (!partSel && !showDraft) { setError('Pick a part or add a new one'); return }
-    if (showDraft && !draftName.trim()) { setError('New part needs a name'); return }
-    if (!locId) { setError('Pick a destination warehouse'); return }
+    if (!partSel && !showDraft) { setError('pickPartOrAdd'); return }
+    if (showDraft && !draftName.trim()) { setError('newPartNeedsName'); return }
+    if (!locId) { setError('pickDestWarehouse'); return }
     const q = Number(qty)
-    if (!q || q <= 0) { setError('Enter a quantity greater than 0'); return }
+    if (!q || q <= 0) { setError('enterQtyGtZero'); return }
 
     setSubmitting(true)
     try {
@@ -109,10 +112,10 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
         reason,
         requestedBy: currentUser?.id,
       })
-      showToast('Sent for manager approval')
+      showToast(t('sentForApproval', lang))
       onComplete ? onComplete() : onClose()
     } catch (e) {
-      setError(e.message || 'Could not submit')
+      setError(e.message || 'couldNotSubmit')
       setSubmitting(false)
     }
   }
@@ -126,7 +129,7 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
       <div className="overlay-sheet" style={{ maxWidth: 480, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14, flexShrink: 0 }}>
           <Icon name="box" size={19} />
-          <div style={{ fontWeight: 800, fontSize: 17 }}>Report found inventory</div>
+          <div style={{ fontWeight: 800, fontSize: 17 }}>{t('reportFoundInventory', lang)}</div>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -141,45 +144,45 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{partSel.name}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{partSel.id}</div>
               </div>
-              <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} onClick={clearPart}>Change</button>
+              <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} onClick={clearPart}>{t('change', lang)}</button>
             </div>
           ) : showDraft ? (
             <div style={{ marginBottom: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <div style={{ fontWeight: 700, fontSize: 13 }}>New part (manager will review)</div>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{t('newPartManagerReview', lang)}</div>
                 <button
                   onClick={() => { setShowDraft(false); setDraftName('') }}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--teal-mid)', fontSize: 12, fontWeight: 600 }}
-                >Search existing instead</button>
+                >{t('searchExistingInstead', lang)}</button>
               </div>
               <div className="field">
-                <label>Part name *</label>
-                <input type="text" value={draftName} onChange={e => { setDraftName(e.target.value); setError('') }} placeholder="e.g. Fiber drop clamp" autoFocus />
+                <label>{t('partNameReq', lang)}</label>
+                <input type="text" value={draftName} onChange={e => { setDraftName(e.target.value); setError('') }} placeholder={t('draftNamePh', lang)} autoFocus />
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <div className="field" style={{ flex: 1 }}>
-                  <label>Unit</label>
+                  <label>{t('unitLabel', lang)}</label>
                   <input type="text" value={draftUnit} onChange={e => setDraftUnit(e.target.value)} placeholder="ea" />
                 </div>
                 <div className="field" style={{ flex: 2 }}>
-                  <label>Department (optional)</label>
-                  <input type="text" value={draftDept} onChange={e => setDraftDept(e.target.value)} placeholder="e.g. Fiber" />
+                  <label>{t('departmentOptional', lang)}</label>
+                  <input type="text" value={draftDept} onChange={e => setDraftDept(e.target.value)} placeholder={t('deptPh', lang)} />
                 </div>
               </div>
             </div>
           ) : (
             <div style={{ marginBottom: 14 }}>
               <div className="field">
-                <label>Which part?</label>
+                <label>{t('whichPart', lang)}</label>
                 <input
                   type="text" value={query}
                   onChange={e => handleSearch(e.target.value)}
-                  placeholder="Search by name or SKU…"
+                  placeholder={t('foundSearchPh', lang)}
                   autoComplete="off" autoCorrect="off" spellCheck="false"
                   autoFocus
                 />
               </div>
-              {searching && <div style={{ textAlign: 'center', padding: 12, color: 'var(--muted)', fontSize: 13 }}>Searching…</div>}
+              {searching && <div style={{ textAlign: 'center', padding: 12, color: 'var(--muted)', fontSize: 13 }}>{t('searching', lang)}</div>}
               {!searching && results.map(p => (
                 <div
                   key={p.id}
@@ -203,16 +206,16 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
                 style={{ width: '100%', marginTop: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                 onClick={startDraft}
               >
-                <Icon name="plus" size={15} /> Can't find it — add as new part
+                <Icon name="plus" size={15} /> {t('cantFindAddNew', lang)}
               </button>
             </div>
           )}
 
           {/* ── Destination warehouse ────────────────────────────────────── */}
           <div className="field">
-            <label>Book into which warehouse? *</label>
+            <label>{t('bookIntoWarehouse', lang)}</label>
             {warehouses.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--hint)', padding: '8px 0' }}>Loading warehouses…</div>
+              <div style={{ fontSize: 12, color: 'var(--hint)', padding: '8px 0' }}>{t('loadingWarehouses', lang)}</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {warehouses.map(w => {
@@ -239,7 +242,7 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
 
           {/* ── Quantity + reason ────────────────────────────────────────── */}
           <div className="field">
-            <label>How many? *</label>
+            <label>{t('howMany', lang)}</label>
             <input
               type="number" inputMode="decimal" min="0" step="any"
               value={qty}
@@ -251,11 +254,11 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
           </div>
 
           <div className="field">
-            <label>Where / why did you find it?</label>
+            <label>{t('whereWhyFound', lang)}</label>
             <textarea
               value={reason}
               onChange={e => setReason(e.target.value)}
-              placeholder="e.g. Found a box of these in the back of the truck — not on my stock"
+              placeholder={t('foundReasonPh', lang)}
               rows={2}
               style={{ width: '100%', resize: 'vertical' }}
             />
@@ -263,15 +266,15 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
 
           {error && (
             <div style={{ padding: '8px 12px', background: 'var(--red-lt)', color: 'var(--red)', borderRadius: 'var(--r-sm)', fontSize: 13, marginBottom: 8, fontWeight: 600 }}>
-              {error}
+              {t(error, lang)}
             </div>
           )}
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexShrink: 0, marginTop: 12 }}>
-          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose} disabled={submitting}>Cancel</button>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose} disabled={submitting}>{t('cancel', lang)}</button>
           <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSubmit} disabled={submitting}>
-            {submitting ? 'Sending…' : 'Send for approval'}
+            {submitting ? t('sending', lang) : t('sendForApproval', lang)}
           </button>
         </div>
       </div>

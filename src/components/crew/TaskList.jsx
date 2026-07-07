@@ -5,12 +5,14 @@ import { t } from '../../lib/i18n'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 
+// labelKey → i18n; render via t(jt.labelKey, lang), never the raw key.
+// (The 'emergency' entry reuses the existing crew-facing key.)
 const JOB_TYPES = [
-  { id: 'aerial', label: 'Aerial Construction', icon: '🏗️' },
-  { id: 'underground', label: 'Underground', icon: '⛏️' },
-  { id: 'splice', label: 'Splice', icon: '🔌' },
-  { id: 'fiber_pull', label: 'Fiber Pull', icon: '📦' },
-  { id: 'emergency', label: 'Emergency Fix', icon: '⚡' },
+  { id: 'aerial', labelKey: 'jobAerial', icon: '🏗️' },
+  { id: 'underground', labelKey: 'jobUnderground', icon: '⛏️' },
+  { id: 'splice', labelKey: 'jobSplice', icon: '🔌' },
+  { id: 'fiber_pull', labelKey: 'jobFiberPull', icon: '📦' },
+  { id: 'emergency', labelKey: 'emergency', icon: '⚡' },
 ]
 
 const JOB_COLORS = {
@@ -50,7 +52,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
 
   // Back closes the New-task overlay; confirm first if a name/notes were typed.
   useBackClose(showNewTask ? 1 : 0, () => setShowNewTask(false), {
-    confirm: () => !(taskName.trim() || taskNotes.trim()) || window.confirm('Discard this new task?'),
+    confirm: () => !(taskName.trim() || taskNotes.trim()) || window.confirm(t('discardNewTask', lang)),
   })
 
   // Refresh the flagged-id set whenever the task list changes (covers
@@ -96,7 +98,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
         const hydrated = { ...newTask, creator, type: newTask.task_type, notes: newTask.scope_notes || '' }
         setTasks(prev => {
           if (prev.find(tk => tk.id === hydrated.id)) return prev
-          showToast(`New task: ${hydrated.name}`)
+          showToast(`${t('toastNewTaskPre', lang)} ${hydrated.name}`)
           return [...prev, hydrated]
         })
         // Defer global update to the microtask queue — React 18's batching means
@@ -122,7 +124,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
           Promise.resolve().then(() => {
             setTaskLocal(project.id, phase.id, merged)
             if (updated.status === 'approved') {
-              showToast(`${merged.name} approved`)
+              showToast(`${merged.name} ${t('approvedToastSuffix', lang)}`)
             }
           })
           return prev.map(tk => tk.id === merged.id ? merged : tk)
@@ -222,7 +224,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
                 {task.notes && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{task.notes}</div>}
                 <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <span className="pill" style={{ background: colors.bg, color: colors.text }}>
-                    {jt.label}
+                    {t(jt.labelKey, lang)}
                   </span>
                   {task.creator && (
                     <span className="creator-chip" title={task.creator.name} style={{ marginLeft: 0 }}>
@@ -236,15 +238,15 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
                       others. Plain open needs no pill. */}
                   {isFlagged ? (
                     <span className="pill pill-danger" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <Icon name="alert" size={12} /> {lang === 'es' ? 'Marcado' : 'Flagged'}
+                      <Icon name="alert" size={12} /> {t('flaggedPill', lang)}
                     </span>
                   ) : task.status === 'pending' ? (
                     <span className="pill" style={{ background: 'var(--amber-lt)', color: 'var(--amber)' }}>
-                      {lang === 'es' ? 'Enviada' : 'Submitted'}
+                      {t('submittedPill', lang)}
                     </span>
                   ) : task.status === 'approved' ? (
                     <span className="pill pill-success" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <Icon name="check" size={12} /> {lang === 'es' ? 'Aprobada' : 'Approved'}
+                      <Icon name="check" size={12} /> {t('approvedPill', lang)}
                     </span>
                   ) : null}
                 </div>
@@ -267,7 +269,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
               }}
             >
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--hint)' }}>
-                {lang === 'es' ? 'Completadas' : 'Completed'}
+                {t('completedLabel', lang)}
                 <span style={{ marginLeft: 6, color: 'var(--muted)' }}>· {approvedTasks.length}</span>
               </span>
               <span style={{ color: 'var(--hint)', display: 'inline-flex', transform: showPast ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}><Icon name="chevron-right" size={15} /></span>
@@ -280,7 +282,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
               // exact submission timestamp lives on the submissions row,
               // fetched by TaskSummaryView when they tap in.
               const when = (task.closed_at || task.updated_at)
-                ? new Date(task.closed_at || task.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                ? new Date(task.closed_at || task.updated_at).toLocaleDateString(lang === 'es' ? 'es' : 'en-US', { month: 'short', day: 'numeric' })
                 : null
               // Tappable so the crew can open TaskSummaryView and inspect
               // what was submitted/approved. The parent's onSelect handler
@@ -336,7 +338,7 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {JOB_TYPES.map(jt => (
                   <button key={jt.id} className={`job-chip${jobType === jt.id ? ' selected' : ''}`} onClick={() => setJobType(jt.id)}>
-                    {jt.icon} {jt.label}
+                    {jt.icon} {t(jt.labelKey, lang)}
                   </button>
                 ))}
               </div>

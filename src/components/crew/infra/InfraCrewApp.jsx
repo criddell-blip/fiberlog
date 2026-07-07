@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../../AppContext'
 import { useIsWide } from '../../../lib/useIsWide'
+import { t } from '../../../lib/i18n'
 import { useBackClose } from '../../../lib/backStack'
 import Icon from '../../shared/Icon'
 import { getInfraTree, subscribeToAllTaskChanges } from '../../../lib/supabase'
@@ -75,9 +76,11 @@ const isActiveCrewTask = t => !t.is_closed
 const isCompletedTask  = t => !!t.is_closed
 
 // ─── SIGN OUT CONFIRM (copied from CrewApp to keep this shell self-contained) ─
-// Also hosts the theme toggle + back-to-manager pill for narrow layouts.
+// Also hosts the theme toggle + back-to-manager pill for narrow layouts,
+// plus the crew self-service language toggle (EN | Español). KEEP IN SYNC
+// with the sibling in CrewApp.jsx.
 function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode, exitCrewMode }) {
-  const { currentUser } = useApp()
+  const { currentUser, setLang } = useApp()
   const [showChangePw, setShowChangePw] = useState(false)
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onCancel()}>
@@ -87,7 +90,7 @@ function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode, e
         </div>
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>{currentUser?.name}</div>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 18 }}>
-          {lang === 'es' ? '¿Cerrar sesión?' : 'Sign out?'}
+          {t('signOutQ', lang)}
         </div>
         {(toggleDarkMode || exitCrewMode) && (
           <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 18 }}>
@@ -95,6 +98,14 @@ function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode, e
             {exitCrewMode && <BackToManagerButton exitCrewMode={exitCrewMode} />}
           </div>
         )}
+        {/* Language toggle — crew self-service (the manager-set
+            users.language is only the default; this overrides per-device
+            via localStorage.fiberlog_lang, kept across logouts). */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+          <span style={{ fontSize: 12, color: 'var(--hint)' }}>🌐 {t('language', lang)}</span>
+          <button type="button" onClick={() => setLang('en')} style={langPillStyle(lang !== 'es')}>EN</button>
+          <button type="button" onClick={() => setLang('es')} style={langPillStyle(lang === 'es')}>Español</button>
+        </div>
         <button
           type="button"
           onClick={() => setShowChangePw(true)}
@@ -104,19 +115,31 @@ function SignOutConfirm({ onConfirm, onCancel, lang, darkMode, toggleDarkMode, e
             border: '1px solid var(--border2)', borderRadius: 'var(--r-sm)',
             fontSize: 13, fontWeight: 600, cursor: 'pointer',
           }}
-        >🔑 {lang === 'es' ? 'Cambiar contraseña' : 'Change password'}</button>
+        >🔑 {t('changePassword', lang)}</button>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel}>
-            {lang === 'es' ? 'Cancelar' : 'Cancel'}
+            {t('cancel', lang)}
           </button>
           <button className="btn btn-danger" style={{ flex: 2 }} onClick={onConfirm}>
-            {lang === 'es' ? 'Cerrar sesión' : 'Sign out'}
+            {t('signOut', lang)}
           </button>
         </div>
       </div>
       {showChangePw && <SetNewPassword asSheet onClose={() => setShowChangePw(false)} />}
     </div>
   )
+}
+
+// Small selected/unselected pill for the EN | Español toggle. Shared shape
+// with CrewApp's copy — keep in sync.
+function langPillStyle(active) {
+  return {
+    padding: '5px 12px', borderRadius: 999, fontSize: 12, cursor: 'pointer',
+    fontWeight: active ? 800 : 500,
+    border: `1.5px solid ${active ? 'var(--orange)' : 'var(--border2)'}`,
+    background: active ? 'var(--orange-lt)' : 'var(--surface)',
+    color: active ? 'var(--orange-dk)' : 'var(--muted)',
+  }
 }
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────

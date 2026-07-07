@@ -10,7 +10,7 @@ export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
   // Hide Gigwave / Fixed Wireless from crews that aren't infra/field-tech.
   const projects = visibleProjectsForCrew(allProjects, currentUser?.crew_type)
 
-  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+  const today = new Date().toLocaleDateString(lang === 'es' ? 'es' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useApp } from '../../../AppContext'
 import { addInfraTask } from '../../../lib/supabase'
 import { useBackClose } from '../../../lib/backStack'
+import { t } from '../../../lib/i18n'
 import Icon from '../../shared/Icon'
 
 // SiteTaskList — leaf layer of the infra navigation. Shows the tasks for a
@@ -13,19 +14,20 @@ import Icon from '../../shared/Icon'
 // its own task-type vocabulary (e.g. "tower install", "site maintenance",
 // "antenna swap"), extend this list — task_type is a free text column.
 
+// labelKey → i18n; render via t(jt.labelKey, lang).
 const INFRA_JOB_TYPES = [
-  { id: 'maintenance', label: 'Maintenance', icon: '🔧' },
-  { id: 'build',       label: 'Build / Install', icon: '🏗️' },
-  { id: 'swap',        label: 'Equipment Swap', icon: '🔁' },
-  { id: 'audit',       label: 'Audit / Inspect', icon: '🔍' },
-  { id: 'emergency',   label: 'Emergency', icon: '⚡' },
+  { id: 'maintenance', labelKey: 'infraMaintenance', icon: '🔧' },
+  { id: 'build',       labelKey: 'infraBuild', icon: '🏗️' },
+  { id: 'swap',        labelKey: 'infraSwap', icon: '🔁' },
+  { id: 'audit',       labelKey: 'infraAudit', icon: '🔍' },
+  { id: 'emergency',   labelKey: 'infraEmergency', icon: '⚡' },
 ]
 
 const isActiveCrewTask = t => !t.is_closed
 const isCompletedTask  = t => !!t.is_closed
 
 export default function SiteTaskList({ project, site, onSelect, onBack, onUserTap, onTaskCreated }) {
-  const { currentUser, showToast } = useApp()
+  const { currentUser, showToast, lang } = useApp()
   const [showNewTask, setShowNewTask] = useState(false)
   const [taskName, setTaskName]   = useState('')
   const [taskNotes, setTaskNotes] = useState('')
@@ -35,7 +37,7 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
 
   // Back closes the New-task overlay; confirm first if a name/notes were typed.
   useBackClose(showNewTask ? 1 : 0, () => setShowNewTask(false), {
-    confirm: () => !(taskName.trim() || taskNotes.trim()) || window.confirm('Discard this new task?'),
+    confirm: () => !(taskName.trim() || taskNotes.trim()) || window.confirm(t('discardNewTask', lang)),
   })
 
   // Backlog #2: active = open (not closed) regardless of passdown status.
@@ -56,10 +58,10 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
       onTaskCreated?.()
       setTaskName(''); setTaskNotes(''); setJobType('maintenance')
       setShowNewTask(false)
-      showToast('Task created')
+      showToast(t('taskCreatedToast', lang))
     } catch (e) {
       console.error('Create infra task failed:', e)
-      showToast('Could not create task: ' + e.message)
+      showToast(t('errCreateTask', lang) + e.message)
     } finally {
       setSaving(false)
     }
@@ -111,7 +113,7 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
           onClick={() => setShowNewTask(true)}
           style={{ width: '100%', padding: '10px 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
         >
-          <Icon name="plus" size={15} /> New task at this site
+          <Icon name="plus" size={15} /> {t('newTaskAtSite', lang)}
         </button>
       </div>
 
@@ -119,7 +121,7 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 16px' }}>
         {activeTasks.length === 0 && (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
-            No active tasks at this site. Tap “New task” above to start one.
+            {t('noActiveTasksSite', lang)}
           </div>
         )}
 
@@ -137,7 +139,7 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
                 fontSize: 12, color: 'var(--muted)', fontWeight: 600, textAlign: 'left'
               }}
             >
-              <Icon name={showPast ? 'chevron-down' : 'chevron-right'} size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />{completedTasks.length} completed task{completedTasks.length === 1 ? '' : 's'}
+              <Icon name={showPast ? 'chevron-down' : 'chevron-right'} size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />{completedTasks.length} {completedTasks.length === 1 ? t('completedTaskOne', lang) : t('completedTaskMany', lang)}
             </button>
             {showPast && completedTasks.map(t => (
               // Tappable — routes through onSelect which the parent
@@ -153,18 +155,18 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
       {showNewTask && (
         <div className="overlay open" onClick={e => e.target === e.currentTarget && setShowNewTask(false)}>
           <div className="overlay-sheet">
-            <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>New task</div>
+            <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>{t('newTask', lang)}</div>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
-              At <strong>{site.name}</strong>
+              {t('atWord', lang)} <strong>{site.name}</strong>
             </div>
 
             <div className="field">
-              <label>Task name</label>
+              <label>{t('taskNameLabel', lang)}</label>
               <input
                 type="text"
                 value={taskName}
                 onChange={e => setTaskName(e.target.value)}
-                placeholder="e.g. Replace UPS battery"
+                placeholder={t('infraTaskNamePh', lang)}
                 autoFocus
                 autoComplete="off"
                 name="infra-task-name"
@@ -172,7 +174,7 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
             </div>
 
             <div className="field">
-              <label>Type</label>
+              <label>{t('typeLabel', lang)}</label>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {INFRA_JOB_TYPES.map(jt => (
                   <button
@@ -185,26 +187,26 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
                       border: 'none', cursor: 'pointer'
                     }}
                   >
-                    {jt.icon} {jt.label}
+                    {jt.icon} {t(jt.labelKey, lang)}
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="field">
-              <label>Scope notes (optional)</label>
+              <label>{t('scopeNotesOptional', lang)}</label>
               <textarea
                 value={taskNotes}
                 onChange={e => setTaskNotes(e.target.value)}
                 rows={3}
-                placeholder="What's the work?"
+                placeholder={t('scopeNotesPh', lang)}
               />
             </div>
 
             {/* Why Create is disabled — never a silent dead button. */}
             {!taskName.trim() && (
               <div style={{ marginTop: 12, fontSize: 11, color: 'var(--hint)', textAlign: 'center' }}>
-                Give the task a name to create it
+                {t('giveTaskNameCreate', lang)}
               </div>
             )}
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -213,13 +215,13 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
                 style={{ flex: 1 }}
                 onClick={() => setShowNewTask(false)}
                 disabled={saving}
-              >Cancel</button>
+              >{t('cancel', lang)}</button>
               <button
                 className="btn btn-primary"
                 style={{ flex: 2 }}
                 onClick={handleCreate}
                 disabled={saving || !taskName.trim()}
-              >{saving ? 'Creating…' : 'Create task'}</button>
+              >{saving ? t('creating', lang) : t('createTask', lang)}</button>
             </div>
           </div>
         </div>
@@ -231,13 +233,14 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 function TaskCard({ task, onClick, muted }) {
+  const { lang } = useApp()
   const isPending = task.status === 'pending'
   // For pending/approved/done tasks, surface the date the row last
   // changed — that's when it was submitted (pending) or approved
   // (approved/done). Active 'open' tasks don't need a date in the card.
   const showDate = task.status === 'pending' || task.status === 'approved' || task.status === 'done'
   const when = showDate && task.updated_at
-    ? new Date(task.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    ? new Date(task.updated_at).toLocaleDateString(lang === 'es' ? 'es' : 'en-US', { month: 'short', day: 'numeric' })
     : null
   const meta = [
     task.type || task.task_type || 'task',
@@ -273,13 +276,13 @@ function TaskCard({ task, onClick, muted }) {
         <span style={{
           fontSize: 10, fontWeight: 700, padding: '2px 8px',
           borderRadius: 20, background: 'var(--amber-lt)', color: 'var(--amber)', flexShrink: 0
-        }}>Pending</span>
+        }}>{t('pendingPill', lang)}</span>
       )}
       {task.status === 'approved' && !task.is_closed && (
         <span style={{
           fontSize: 10, fontWeight: 700, padding: '2px 8px',
           borderRadius: 20, background: 'var(--teal-lt)', color: 'var(--teal-mid)', flexShrink: 0
-        }}>Approved</span>
+        }}>{t('approvedPill', lang)}</span>
       )}
       {onClick && (
         <Icon name="chevron-right" size={16} color="var(--hint)" />

@@ -542,7 +542,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                   : `${history.submissions.length} passdowns submitted`)}
             {' · '}{(history.totalHours || 0).toLocaleString()} hrs
             <span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-medium)' }}>
-              {' · '}{lang === 'es' ? 'última' : 'latest'} {fmtWhen(history.submissions[0].created_at)}
+              {' · '}{lang === 'es' ? 'última' : 'latest'} {fmtWhen(history.submissions[0].created_at, lang)}
             </span>
           </span>
           <span style={{ flexShrink: 0, fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-bold)', color: 'var(--teal-mid)' }}>
@@ -560,7 +560,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
             {lastWorkedInfo.name}
             {lastWorkedInfo.at && (
               <span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-medium)', marginLeft: 4 }}>
-                · {new Date(lastWorkedInfo.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                · {new Date(lastWorkedInfo.at).toLocaleString(lang === 'es' ? 'es' : 'en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
               </span>
             )}
           </span>
@@ -771,7 +771,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
           <div className="overlay-sheet">
             <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>{t('submitYourDay', lang)}</div>
             <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
-              {currentUser?.name} · {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+              {currentUser?.name} · {new Date().toLocaleDateString(lang === 'es' ? 'es' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
             </div>
 
             <div className="metric-grid">

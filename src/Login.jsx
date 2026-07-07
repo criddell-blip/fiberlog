@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useApp } from './AppContext'
 import { db } from './lib/supabase'
+import { t } from './lib/i18n'
 
 // Standard username + password login. Replaced the old avatar-grid picker
 // once crew rosters grew past the point where a grid of faces was useful.
@@ -34,10 +35,16 @@ export function resolveUserByLogin(users, typedRaw) {
 }
 
 export default function Login() {
-  const { users, login, darkMode } = useApp()
+  // lang here resolves pre-auth as: localStorage override → 'en' (no
+  // currentUser yet). The corner toggle below calls setLang, which seeds
+  // localStorage.fiberlog_lang — so a Spanish-only crew member can get
+  // Spanish BEFORE authenticating, and the whole app follows after login.
+  const { users, login, darkMode, lang, setLang } = useApp()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(true)
+  // Error state holds an i18n KEY (not text) so a live language flip
+  // re-renders the message in the new language.
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [shake, setShake] = useState(false)
@@ -67,11 +74,11 @@ export default function Login() {
 
     const trimmed = username.trim()
     if (!trimmed) {
-      setError('Enter your username')
+      setError('errEnterUsername')
       return
     }
     if (!password) {
-      setError('Enter your password')
+      setError('errEnterPassword')
       passwordRef.current?.focus()
       return
     }
@@ -85,14 +92,14 @@ export default function Login() {
     // work at once, no lockstep cutover.
     const matchingUser = resolveUserByLogin(users, trimmed)
     if (!matchingUser) {
-      setError('Invalid login')
+      setError('errInvalidLogin')
       setShake(true)
       setPassword('')
       setTimeout(() => setShake(false), 500)
       return
     }
     if (!matchingUser.is_active) {
-      setError('This account is inactive — contact your manager')
+      setError('errInactiveAccount')
       return
     }
 
@@ -103,7 +110,7 @@ export default function Login() {
 
     if (loginError) {
       // Don't leak whether it was bad username vs bad password
-      setError('Invalid login')
+      setError('errInvalidLogin')
       setShake(true)
       setPassword('')
       setTimeout(() => setShake(false), 500)
@@ -210,12 +217,12 @@ export default function Login() {
           <>
             <form onSubmit={handleSubmit}>
               <div className="field">
-                <label>Name or email</label>
+                <label>{t('loginNameOrEmail', lang)}</label>
                 <input
                   type="text"
                   value={username}
                   onChange={e => { setUsername(e.target.value); setError('') }}
-                  placeholder="firstname.lastname"
+                  placeholder={t('loginUserPlaceholder', lang)}
                   autoCapitalize="none"
                   autoCorrect="off"
                   autoComplete="username"
@@ -223,12 +230,12 @@ export default function Login() {
                   autoFocus={!username}
                 />
                 <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
-                  Your name or company email
+                  {t('loginHelper', lang)}
                 </div>
               </div>
 
               <div className="field">
-                <label>Password</label>
+                <label>{t('passwordLabel', lang)}</label>
                 <input
                   ref={passwordRef}
                   type="password"
@@ -250,7 +257,7 @@ export default function Login() {
                   onChange={e => setRemember(e.target.checked)}
                   style={{ cursor: 'pointer' }}
                 />
-                Remember my username on this device
+                {t('rememberMe', lang)}
               </label>
 
               {error && (
@@ -260,7 +267,7 @@ export default function Login() {
                   borderRadius: 'var(--r-sm)', fontSize: 13, marginBottom: 12,
                   textAlign: 'center', fontWeight: 600,
                 }}>
-                  {error}
+                  {t(error, lang)}
                 </div>
               )}
 
@@ -270,7 +277,7 @@ export default function Login() {
                 disabled={submitting}
                 style={{ width: '100%' }}
               >
-                {submitting ? 'Signing in…' : 'Sign in'}
+                {submitting ? t('signingIn', lang) : t('signIn', lang)}
               </button>
             </form>
 
@@ -285,7 +292,7 @@ export default function Login() {
                     textDecoration: 'underline', padding: 4,
                   }}
                 >
-                  Forgot your password?
+                  {t('forgotPasswordQ', lang)}
                 </button>
               </div>
             )}
@@ -295,29 +302,27 @@ export default function Login() {
           resetSent ? (
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 28, marginBottom: 8 }}>📧</div>
-              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>Check your email</div>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>{t('resetCheckEmail', lang)}</div>
               <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.5, marginBottom: 20 }}>
-                If that account exists, we sent a password reset link to its company
-                email. Open the link on this device to set a new password.
+                {t('resetCheckEmailBody', lang)}
               </div>
               <button className="btn btn-ghost" style={{ width: '100%' }} onClick={backToLogin}>
-                Back to sign in
+                {t('backToSignIn', lang)}
               </button>
             </div>
           ) : (
             <form onSubmit={handleForgot}>
-              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Reset your password</div>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{t('resetTitle', lang)}</div>
               <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.5 }}>
-                Enter your name or company email. We'll send a reset link to your
-                company inbox.
+                {t('resetSub', lang)}
               </div>
               <div className="field">
-                <label>Name or email</label>
+                <label>{t('loginNameOrEmail', lang)}</label>
                 <input
                   type="text"
                   value={resetId}
                   onChange={e => setResetId(e.target.value)}
-                  placeholder="firstname.lastname"
+                  placeholder={t('loginUserPlaceholder', lang)}
                   autoCapitalize="none"
                   autoCorrect="off"
                   autoComplete="username"
@@ -331,7 +336,7 @@ export default function Login() {
                 disabled={resetSubmitting || !resetId.trim()}
                 style={{ width: '100%' }}
               >
-                {resetSubmitting ? 'Sending…' : 'Send reset link'}
+                {resetSubmitting ? t('sending', lang) : t('resetSend', lang)}
               </button>
               <button
                 type="button"
@@ -342,7 +347,7 @@ export default function Login() {
                   width: '100%', padding: 4,
                 }}
               >
-                Cancel
+                {t('cancel', lang)}
               </button>
             </form>
           )
@@ -354,11 +359,37 @@ export default function Login() {
             textAlign: 'center', lineHeight: 1.5,
           }}>
             {PASSWORD_RESET_ENABLED
-              ? 'Still stuck? Ask your manager — they can reset it from the Admin panel.'
-              : 'Forgot your password? Ask your manager — they can reset it from the Admin panel.'}
+              ? t('loginFooterStuck', lang)
+              : t('loginFooterForgot', lang)}
           </div>
         )}
       </div>
+
+      {/* Language toggle — bottom corner, pre-auth. A Spanish-only crew
+          member must be able to get Spanish BEFORE signing in; flipping
+          here seeds localStorage.fiberlog_lang (per-device, survives
+          logout) so the rest of the app follows. */}
+      <div style={{
+        position: 'fixed', bottom: 14, right: 16,
+        display: 'flex', alignItems: 'center', gap: 6,
+        fontSize: 12, color: 'var(--hint)',
+      }}>
+        <span aria-hidden>🌐</span>
+        <button type="button" onClick={() => setLang('en')} style={langBtnStyle(lang !== 'es')}>EN</button>
+        <span>·</span>
+        <button type="button" onClick={() => setLang('es')} style={langBtnStyle(lang === 'es')}>ES</button>
+      </div>
     </div>
   )
+}
+
+// Tiny text-button style for the corner language toggle — deliberately
+// unobtrusive (hint color, no chrome) so it doesn't compete with the form.
+function langBtnStyle(active) {
+  return {
+    background: 'none', border: 'none', cursor: 'pointer', padding: 2,
+    fontSize: 12, fontWeight: active ? 800 : 500,
+    color: active ? 'var(--orange)' : 'var(--muted)',
+    textDecoration: active ? 'none' : 'underline',
+  }
 }

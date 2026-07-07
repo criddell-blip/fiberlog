@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import { getTaskSummary } from '../../lib/supabase'
+import { t } from '../../lib/i18n'
 import Icon from '../shared/Icon'
 import PassdownList from './PassdownList'
 
@@ -19,7 +20,7 @@ import PassdownList from './PassdownList'
 // infra via the shim) — we only use its .name for the header line.
 
 export default function TaskSummaryView({ project, phase, task, onBack, onUserTap }) {
-  const { currentUser } = useApp()
+  const { currentUser, lang } = useApp()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [summary, setSummary] = useState(null)
@@ -79,20 +80,20 @@ export default function TaskSummaryView({ project, phase, task, onBack, onUserTa
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
         {loading && (
-          <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Loading summary…</div>
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>{t('loadingSummary', lang)}</div>
         )}
 
         {error && (
           <div style={{ textAlign: 'center', padding: 24, color: 'var(--red)', fontSize: 13 }}>
-            Could not load summary: {error}
+            {t('errLoadSummary', lang)}{error}
           </div>
         )}
 
         {!loading && !error && subs.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--hint)' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8, color: 'var(--gray-mid)' }}><Icon name="layers" size={30} /></div>
-            <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>No submission yet</div>
-            <div style={{ fontSize: 12 }}>This task was closed without a submission attached.</div>
+            <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>{t('noSubmissionYet', lang)}</div>
+            <div style={{ fontSize: 12 }}>{t('closedNoSubmission', lang)}</div>
           </div>
         )}
 
@@ -103,7 +104,7 @@ export default function TaskSummaryView({ project, phase, task, onBack, onUserTa
                 scope_notes) and `scope_notes` so raw-fetched tasks work. */}
             {(task.notes || task.scope_notes) && (
               <>
-                <div className="sec-label" style={{ marginBottom: 8 }}>Task notes</div>
+                <div className="sec-label" style={{ marginBottom: 8 }}>{t('taskNotesLabel', lang)}</div>
                 <div className="card" style={{
                   padding: '10px 14px', marginBottom: 14,
                   fontSize: 'var(--fs-base)', whiteSpace: 'pre-wrap',
@@ -115,8 +116,8 @@ export default function TaskSummaryView({ project, phase, task, onBack, onUserTa
 
             <div className="sec-label" style={{ marginBottom: 8 }}>
               {subs.length === 1
-                ? 'Submitted passdown'
-                : `${subs.length} passdowns · ${(summary.totalHours || 0).toLocaleString()} hrs total`}
+                ? t('submittedPassdown', lang)
+                : `${subs.length} ${t('passdownsWord', lang)} · ${(summary.totalHours || 0).toLocaleString()} ${t('hrsTotal', lang)}`}
             </div>
             <PassdownList submissions={subs} />
 
@@ -127,7 +128,7 @@ export default function TaskSummaryView({ project, phase, task, onBack, onUserTa
               borderRadius: 'var(--r-xs)', padding: '8px 10px',
               fontSize: 11, textAlign: 'center', marginTop: 14,
             }}>
-              Read-only view. To make changes, ask your manager to flag the submission or reopen the task.
+              {t('readOnlyFooter', lang)}
             </div>
           </>
         )}

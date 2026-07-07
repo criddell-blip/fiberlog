@@ -16,6 +16,14 @@ const THEME_STORAGE_KEY = 'fiberlog_dark_mode_v2'
 // their own work; we persist so a reload doesn't bounce them back to the
 // manager view mid-task.
 const VIEW_MODE_KEY = 'fiberlog_view_mode'
+// LocalStorage key for the crew's self-picked UI language ('en' | 'es').
+// This is a PER-DEVICE override: crew can't write their own users.language
+// row (RLS: only is_staff() can UPDATE public.users), so the phone itself
+// remembers the choice. Deliberately NOT cleared on logout — a Spanish
+// speaker's phone stays Spanish across logins; a shared device follows
+// whoever last flipped the toggle (login screen has its own toggle, so
+// the next user can flip it back before signing in).
+const LANG_KEY = 'fiberlog_lang'
 
 function readInitialDarkMode() {
   try {
@@ -25,6 +33,14 @@ function readInitialDarkMode() {
     // localStorage unavailable (private mode etc.) — fall through to default
   }
   return false   // Console is light-default; dark is opt-in via the toggle
+}
+
+function readInitialLang() {
+  try {
+    const saved = localStorage.getItem(LANG_KEY)
+    if (saved === 'en' || saved === 'es') return saved
+  } catch (e) {}
+  return null   // no device override — fall back to users.language, then 'en'
 }
 
 function readInitialViewMode() {
@@ -60,6 +76,16 @@ export function AppProvider({ children }) {
   // Theme is global state so the toggle works the same way no matter which
   // sub-app the user is in (crew or manager), and it persists across reloads.
   const [darkMode, setDarkMode] = useState(readInitialDarkMode)
+
+  // UI language. Device override (crew self-service toggle) wins over the
+  // manager-set users.language, which wins over English. Persisted per
+  // device and intentionally NOT reset on logout — see LANG_KEY above.
+  const [langOverride, setLangOverride] = useState(readInitialLang)
+  function setLang(next) {
+    if (next !== 'en' && next !== 'es') return
+    setLangOverride(next)
+    try { localStorage.setItem(LANG_KEY, next) } catch (e) {}
+  }
 
   // viewMode controls whether a staff user (owner / manager) sees the
   // manager portal or the crew shell. Crew users ignore this entirely —
@@ -400,7 +426,9 @@ export function AppProvider({ children }) {
       login, logout,
       // Self-service password: recovery-link reset + in-app change
       recoveryMode, completePasswordReset, changeOwnPassword,
-      lang: currentUser?.language || 'en',
+      // Resolve order: device override → manager-set profile language → 'en'.
+      lang: langOverride || currentUser?.language || 'en',
+      setLang,
       loading, error,
       toast, showToast,
       setTaskLocal,

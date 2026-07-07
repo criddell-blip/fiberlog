@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useApp } from './AppContext'
 import { useBackClose } from './lib/backStack'
+import { t } from './lib/i18n'
 
 // Set-new-password screen. Two modes:
 //   • Recovery (default): full-screen card App.jsx shows when the app is
@@ -12,11 +13,14 @@ import { useBackClose } from './lib/backStack'
 // Mirrors the ResetPasswordSheet form in AdminUsersView (≥8 chars, show/hide)
 // but adds a confirm field since there's no manager reading it back.
 export default function SetNewPassword({ asSheet = false, onClose }) {
-  const { completePasswordReset, changeOwnPassword } = useApp()
+  const { completePasswordReset, changeOwnPassword, lang } = useApp()
   const [pw, setPw] = useState('')
   const [confirm, setConfirm] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  // Holds an i18n key for our own validation messages, or a raw server
+  // message — t() passes unknown strings through unchanged, so rendering
+  // t(error, lang) covers both.
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
 
@@ -26,8 +30,8 @@ export default function SetNewPassword({ asSheet = false, onClose }) {
   async function handleSubmit(e) {
     if (e) e.preventDefault()
     if (submitting) return
-    if (!pw || pw.length < 8) { setError('Password must be at least 8 characters'); return }
-    if (pw !== confirm) { setError("Passwords don't match"); return }
+    if (!pw || pw.length < 8) { setError('pwTooShort'); return }
+    if (pw !== confirm) { setError('pwNoMatch'); return }
     setSubmitting(true); setError('')
     try {
       if (asSheet) {
@@ -39,7 +43,7 @@ export default function SetNewPassword({ asSheet = false, onClose }) {
         await completePasswordReset(pw)
       }
     } catch (err) {
-      setError(err.message || 'Could not update password')
+      setError(err.message || 'pwUpdateFailed')
       setSubmitting(false)
     }
   }
@@ -47,7 +51,7 @@ export default function SetNewPassword({ asSheet = false, onClose }) {
   const form = (
     <form onSubmit={handleSubmit}>
       <div className="field">
-        <label>New password (minimum 8 characters)</label>
+        <label>{t('newPasswordLabel', lang)}</label>
         <div style={{ display: 'flex', gap: 6 }}>
           <input
             type={showPw ? 'text' : 'password'}
@@ -65,12 +69,12 @@ export default function SetNewPassword({ asSheet = false, onClose }) {
               border: '1.5px solid var(--border2)', background: 'var(--bg)',
               color: 'var(--muted)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
             }}
-          >{showPw ? 'Hide' : 'Show'}</button>
+          >{showPw ? t('hidePw', lang) : t('showPw', lang)}</button>
         </div>
       </div>
 
       <div className="field">
-        <label>Confirm new password</label>
+        <label>{t('confirmPasswordLabel', lang)}</label>
         <input
           type={showPw ? 'text' : 'password'}
           value={confirm}
@@ -85,13 +89,13 @@ export default function SetNewPassword({ asSheet = false, onClose }) {
           padding: '10px 12px', background: 'var(--red-lt)', color: 'var(--red)',
           borderRadius: 'var(--r-sm)', fontSize: 13, marginBottom: 12,
           textAlign: 'center', fontWeight: 600,
-        }}>{error}</div>
+        }}>{t(error, lang)}</div>
       )}
 
       <div style={{ display: 'flex', gap: 8 }}>
         {asSheet && (
           <button type="button" className="btn btn-ghost" style={{ flex: 1 }}
-            onClick={onClose} disabled={submitting}>Cancel</button>
+            onClick={onClose} disabled={submitting}>{t('cancel', lang)}</button>
         )}
         <button
           type="submit"
@@ -99,7 +103,7 @@ export default function SetNewPassword({ asSheet = false, onClose }) {
           disabled={submitting}
           style={{ flex: asSheet ? 2 : 1, width: asSheet ? undefined : '100%' }}
         >
-          {submitting ? 'Saving…' : 'Set password'}
+          {submitting ? t('saving', lang) : t('setPasswordBtn', lang)}
         </button>
       </div>
     </form>
@@ -108,7 +112,7 @@ export default function SetNewPassword({ asSheet = false, onClose }) {
   const successBlock = (
     <div style={{ textAlign: 'center' }}>
       <div style={{ fontSize: 28, marginBottom: 8 }}>✅</div>
-      <div style={{ fontWeight: 700, fontSize: 15 }}>Password updated</div>
+      <div style={{ fontWeight: 700, fontSize: 15 }}>{t('pwUpdated', lang)}</div>
     </div>
   )
 
@@ -117,7 +121,7 @@ export default function SetNewPassword({ asSheet = false, onClose }) {
     return (
       <div className="overlay open" onClick={e => e.target === e.currentTarget && !submitting && onClose && onClose()}>
         <div className="overlay-sheet">
-          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>Change password</div>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>{t('changePassword', lang)}</div>
           {done ? successBlock : form}
         </div>
       </div>
@@ -143,7 +147,7 @@ export default function SetNewPassword({ asSheet = false, onClose }) {
           <span style={{ color: 'var(--orange)' }}>Log</span>
         </div>
         <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center', marginBottom: 24 }}>
-          Set a new password to finish signing in.
+          {t('recoverySub', lang)}
         </div>
         {form}
       </div>

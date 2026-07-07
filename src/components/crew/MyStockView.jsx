@@ -5,6 +5,7 @@ import CrewMovementSheet from './CrewMovementSheet'
 import FoundInventorySheet from './FoundInventorySheet'
 import PausedBanner from '../shared/PausedBanner'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
+import { t } from '../../lib/i18n'
 import Icon from '../shared/Icon'
 
 // Crew-facing "what's on my truck" view. Read-only stock list scoped to
@@ -18,7 +19,7 @@ import Icon from '../shared/Icon'
 // refresh, and after any successful movement. Good enough for a single
 // crew member's session.
 export default function MyStockView({ onBack, onUserTap }) {
-  const { currentUser, showToast, isQtyPaused } = useApp()
+  const { currentUser, showToast, isQtyPaused, lang } = useApp()
   const [truck, setTruck] = useState(null)
   const [stock, setStock] = useState([])
   const [loading, setLoading] = useState(true)
@@ -45,10 +46,14 @@ export default function MyStockView({ onBack, onUserTap }) {
       setDeniedOps(new Set(perms.filter(p => p.allowed === false).map(p => p.operation)))
     } catch (e) {
       console.error('Load my-stock failed:', e)
-      showToast('Could not load stock: ' + e.message)
+      showToast(t('errLoadStock', lang) + e.message)
     } finally {
       setLoading(false)
     }
+    // `lang` is deliberately NOT a dep — it's only read in the error toast,
+    // and including it would refetch the whole stock list on every language
+    // toggle. Worst case: an error toast in the pre-toggle language.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showToast])
 
   useEffect(() => { load() }, [load])
@@ -88,15 +93,15 @@ export default function MyStockView({ onBack, onUserTap }) {
         {onBack && <button className="back-btn" onClick={onBack}>←</button>}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.5px', lineHeight: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Icon name="box" size={19} /><span style={{ color: 'var(--text)' }}>My</span>{' '}
-            <span style={{ color: 'var(--orange)' }}>Stock</span>
+            <Icon name="box" size={19} /><span style={{ color: 'var(--text)' }}>{t('myStockA', lang)}</span>{' '}
+            <span style={{ color: 'var(--orange)' }}>{t('myStockB', lang)}</span>
           </div>
           <div className="topbar-sub" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {truck
               ? (truck._isShared
-                  ? <>{truck.name} <span style={{ color: 'var(--teal-mid)', fontWeight: 600 }}>· shared</span></>
+                  ? <>{truck.name} <span style={{ color: 'var(--teal-mid)', fontWeight: 600 }}>· {t('sharedTag', lang)}</span></>
                   : truck.name)
-              : (loading ? 'Loading…' : 'No truck assigned')}
+              : (loading ? t('loading', lang) : t('noTruckAssigned', lang))}
           </div>
         </div>
         {onUserTap && (
@@ -116,9 +121,9 @@ export default function MyStockView({ onBack, onUserTap }) {
         {/* Stats row — Total units hidden when display mode is paused
             (per org-wide pause switch). Just "Part types" stays. */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-          <Stat label="Part types" value={stock.length} color="var(--teal)" />
+          <Stat label={t('statPartTypes', lang)} value={stock.length} color="var(--teal)" />
           {!isQtyPaused && (
-            <Stat label="Total units" value={totalUnits.toLocaleString()} color="var(--orange)" />
+            <Stat label={t('statTotalUnits', lang)} value={totalUnits.toLocaleString()} color="var(--orange)" />
           )}
         </div>
 
@@ -134,7 +139,7 @@ export default function MyStockView({ onBack, onUserTap }) {
               onClick={() => { setReturnPartId(null); setSheetMode('load') }}
               disabled={!truck || loading}
             >
-              <Icon name="download" size={16} /> Load
+              <Icon name="download" size={16} /> {t('loadBtn', lang)}
             </button>
           )}
           {canReturn && (
@@ -144,18 +149,18 @@ export default function MyStockView({ onBack, onUserTap }) {
               onClick={() => { setReturnPartId(null); setSheetMode('return') }}
               disabled={!truck || loading || stock.length === 0}
             >
-              <Icon name="upload" size={16} /> Return
+              <Icon name="upload" size={16} /> {t('returnBtn', lang)}
             </button>
           )}
           {!canLoad && !canReturn && (
             <div style={{ flex: 1, padding: '8px 12px', textAlign: 'center', fontSize: 12, color: 'var(--muted)', background: 'var(--surface2)', borderRadius: 'var(--r-sm)' }}>
-              No movements permitted — ask your manager.
+              {t('noMovementsPermitted', lang)}
             </div>
           )}
           <button
             onClick={load}
             disabled={loading}
-            title="Refresh"
+            title={t('refresh', lang)}
             style={{
               padding: '0 12px',
               border: '1px solid var(--border2)',
@@ -183,7 +188,7 @@ export default function MyStockView({ onBack, onUserTap }) {
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
           }}
         >
-          <Icon name="plus" size={15} /> Report found inventory
+          <Icon name="plus" size={15} /> {t('reportFoundInventory', lang)}
         </button>
       </div>
 
@@ -192,7 +197,7 @@ export default function MyStockView({ onBack, onUserTap }) {
         <div style={{ padding: '8px 16px', flexShrink: 0, background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
           <input
             type="text"
-            placeholder="Search parts by name or SKU…"
+            placeholder={t('stockSearchPlaceholder', lang)}
             value={search}
             onChange={e => setSearch(e.target.value)}
             autoComplete="off"
@@ -210,7 +215,7 @@ export default function MyStockView({ onBack, onUserTap }) {
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px 24px' }}>
         {loading && stock.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)', fontSize: 14 }}>
-            Loading your stock…
+            {t('loadingYourStock', lang)}
           </div>
         )}
 
@@ -221,10 +226,10 @@ export default function MyStockView({ onBack, onUserTap }) {
           }}>
             <div style={{ color: 'var(--gray-mid)' }}><Icon name="truck" size={34} /></div>
             <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
-              No truck assigned yet
+              {t('noTruckYetTitle', lang)}
             </div>
             <div style={{ fontSize: 13, maxWidth: 280 }}>
-              Ask your manager to set up your personal stock location.
+              {t('noTruckYetBody', lang)}
             </div>
           </div>
         )}
@@ -236,18 +241,22 @@ export default function MyStockView({ onBack, onUserTap }) {
           }}>
             <div style={{ color: 'var(--gray-mid)' }}><Icon name="box" size={34} /></div>
             <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
-              {truck._isShared ? `${truck.name} is empty` : 'Your truck is empty'}
+              {truck._isShared ? `${truck.name} ${t('isEmpty', lang)}` : t('truckEmpty', lang)}
             </div>
             <div style={{ fontSize: 13, maxWidth: 280 }}>
-              Tap <strong>Load</strong> to bring parts from a warehouse
-              {truck._isShared ? ` onto ${truck.name}` : ' onto your truck'}.
+              {/* Composed so <strong>Load</strong> stays emphasized in both
+                  languages: "Tap **Load** to bring parts from a warehouse
+                  onto your truck." / "Toca **Cargar** para traer partes de
+                  una bodega a tu camión." */}
+              {t('tapWord', lang)} <strong>{t('loadBtn', lang)}</strong> {t('emptyBodyRest', lang)}
+              {truck._isShared ? ` ${t('ontoWord', lang)} ${truck.name}` : ` ${t('ontoYourTruck', lang)}`}.
             </div>
           </div>
         )}
 
         {!loading && filteredStock.length === 0 && stock.length > 0 && search && (
           <div style={{ textAlign: 'center', padding: 30, color: 'var(--hint)', fontSize: 13 }}>
-            No matches for "{search}"
+            {t('noMatchesFor', lang)} "{search}"
           </div>
         )}
 
@@ -268,7 +277,7 @@ export default function MyStockView({ onBack, onUserTap }) {
             >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {pc?.name || pc?.id || 'Unknown part'}
+                  {pc?.name || pc?.id || t('unknownPart', lang)}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--hint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {pc?.id}
@@ -294,11 +303,11 @@ export default function MyStockView({ onBack, onUserTap }) {
               {canReturn && qty > 0 && (
                 <button
                   onClick={() => { setReturnPartId(pc?.id); setSheetMode('return') }}
-                  title="Return this part to a warehouse"
+                  title={t('returnPartTitle', lang)}
                   className="btn btn-ghost"
                   style={{ flexShrink: 0, padding: '8px 10px', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}
                 >
-                  <Icon name="upload" size={15} /> Return
+                  <Icon name="upload" size={15} /> {t('returnBtn', lang)}
                 </button>
               )}
             </div>

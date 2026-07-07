@@ -5,26 +5,34 @@
 // #34) so the two renderings can't drift. Data shape = getTaskSummary()'s
 // submissions array.
 
+import { useApp } from '../../AppContext'
+import { t } from '../../lib/i18n'
+
+// labelKey → i18n; render via t(cfg.labelKey, lang).
 export const STATUS_CONFIG = {
-  pending:  { bg: 'var(--amber-lt)', text: 'var(--amber)',    label: 'Pending review',  icon: '⏳' },
-  approved: { bg: 'var(--teal-lt)',  text: 'var(--teal-mid)', label: 'Approved',        icon: '✅' },
-  flagged:  { bg: 'var(--red-lt)',   text: 'var(--red)',      label: 'Flagged',         icon: '🚩' },
-  done:     { bg: 'var(--gray-lt)',  text: 'var(--muted)',    label: 'Done',            icon: '✓'  },
-  open:     { bg: 'var(--orange-lt)', text: 'var(--orange)',  label: 'Open',            icon: '○'  },
+  pending:  { bg: 'var(--amber-lt)', text: 'var(--amber)',    labelKey: 'statusPendingReview', icon: '⏳' },
+  approved: { bg: 'var(--teal-lt)',  text: 'var(--teal-mid)', labelKey: 'statusApproved',      icon: '✅' },
+  flagged:  { bg: 'var(--red-lt)',   text: 'var(--red)',      labelKey: 'statusFlagged',       icon: '🚩' },
+  done:     { bg: 'var(--gray-lt)',  text: 'var(--muted)',    labelKey: 'statusDone',          icon: '✓'  },
+  open:     { bg: 'var(--orange-lt)', text: 'var(--orange)',  labelKey: 'statusOpen',          icon: '○'  },
 }
 
 const FOOTAGE_FIELDS = [
-  { key: 'total_strand_ft',    label: 'Strand',       unit: 'ft' },
-  { key: 'total_fiber_ft',     label: 'Fiber',        unit: 'ft' },
-  { key: 'total_conduit_ft',   label: 'Conduit',      unit: 'ft' },
-  { key: 'total_mst_hst',      label: 'MST/HST',      unit: 'units' },
-  { key: 'total_splice_cases', label: 'Splice cases', unit: 'cases' },
-  { key: 'total_handholes',    label: 'Handholes',    unit: 'ea' },
-  { key: 'total_vaults',       label: 'Vaults',       unit: 'ea' },
-  { key: 'total_poles',        label: 'Poles',        unit: 'ea' },
+  { key: 'total_strand_ft',    labelKey: 'strandLabel',      unitKey: 'unitFt' },
+  { key: 'total_fiber_ft',     labelKey: 'fiberLabel',       unitKey: 'unitFt' },
+  { key: 'total_conduit_ft',   labelKey: 'conduitLabel',     unitKey: 'unitFt' },
+  { key: 'total_mst_hst',      labelKey: 'mstLabel',         unitKey: 'unitUnits' },
+  { key: 'total_splice_cases', labelKey: 'spliceCasesLabel', unitKey: 'unitCases' },
+  { key: 'total_handholes',    labelKey: 'handholesLabel',   unitKey: 'unitEa' },
+  { key: 'total_vaults',       labelKey: 'vaultsLabel',      unitKey: 'unitEa' },
+  { key: 'total_poles',        labelKey: 'polesCap',         unitKey: 'unitEa' },
 ]
 
 export default function PassdownList({ submissions }) {
+  // Lang comes from context (not a prop) — TaskSummaryView and
+  // TaskWorkspace both render inside the provider, so this keeps the two
+  // call sites identical and drift-free.
+  const { lang } = useApp()
   if (!submissions || submissions.length === 0) return null
   return submissions.map((sub, i) => {
     const cfg = STATUS_CONFIG[sub.status] || STATUS_CONFIG.open
@@ -38,25 +46,25 @@ export default function PassdownList({ submissions }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 14 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'currentColor', flexShrink: 0 }} />
-            <span>{cfg.label}</span>
+            <span>{t(cfg.labelKey, lang)}</span>
             <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700 }}>
               {(Number(sub.hours_worked) || 0).toLocaleString()} hrs
             </span>
           </div>
           <div style={{ fontSize: 11, marginTop: 4, opacity: 0.85 }}>
-            Submitted {fmtWhen(sub.created_at)} by {sub.users?.name || 'you'}
+            {t('submittedWord', lang)} {fmtWhen(sub.created_at, lang)} {t('byWord', lang)} {sub.users?.name || t('youWord', lang)}
             {sub.reviewed_at && sub.reviewer?.name && (
-              <> · reviewed {fmtWhen(sub.reviewed_at)} by {sub.reviewer.name}</>
+              <> · {t('reviewedWord', lang)} {fmtWhen(sub.reviewed_at, lang)} {t('byWord', lang)} {sub.reviewer.name}</>
             )}
           </div>
           {sub.status === 'flagged' && sub.flag_reason && (
             <div style={{ marginTop: 8, padding: '8px 10px', background: 'rgba(0,0,0,0.06)', borderRadius: 'var(--r-xs)', fontSize: 12, fontWeight: 600 }}>
-              Manager note: {sub.flag_reason}
+              {t('managerNote', lang)} {sub.flag_reason}
             </div>
           )}
           {sub.status !== 'flagged' && sub.manager_notes && (
             <div style={{ marginTop: 8, padding: '8px 10px', background: 'rgba(0,0,0,0.06)', borderRadius: 'var(--r-xs)', fontSize: 12, fontStyle: 'italic' }}>
-              Manager note: {sub.manager_notes}
+              {t('managerNote', lang)} {sub.manager_notes}
             </div>
           )}
         </div>
@@ -67,9 +75,9 @@ export default function PassdownList({ submissions }) {
           <div className="metric-row" style={{ marginBottom: 10, alignItems: 'center' }}>
             {FOOTAGE_FIELDS.filter(f => (sub[f.key] || 0) > 0).map(f => (
               <div key={f.key} style={{ fontSize: 12, lineHeight: 1.2 }}>
-                <div style={{ color: 'var(--muted)', fontSize: 11, fontWeight: 600 }}>{f.label}</div>
+                <div style={{ color: 'var(--muted)', fontSize: 11, fontWeight: 600 }}>{t(f.labelKey, lang)}</div>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>
-                  {(sub[f.key] || 0).toLocaleString()} <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>{f.unit}</span>
+                  {(sub[f.key] || 0).toLocaleString()} <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>{t(f.unitKey, lang)}</span>
                 </div>
               </div>
             ))}
@@ -83,7 +91,7 @@ export default function PassdownList({ submissions }) {
             borderRadius: 'var(--r-sm)', padding: 12, textAlign: 'center',
             color: 'var(--hint)', fontSize: 12,
           }}>
-            No parts logged on this passdown.
+            {t('noPartsOnPassdown', lang)}
           </div>
         ) : (
           <div style={{
@@ -120,8 +128,10 @@ export default function PassdownList({ submissions }) {
   })
 }
 
-export function fmtWhen(iso) {
+// Locale-aware "Jul 5, 2:30 PM" / "5 jul, 14:30". Default 'en' keeps
+// legacy no-lang call sites working.
+export function fmtWhen(iso, lang = 'en') {
   if (!iso) return ''
   const d = new Date(iso)
-  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  return d.toLocaleString(lang === 'es' ? 'es' : 'en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }

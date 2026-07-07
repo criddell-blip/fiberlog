@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement, getMyAllowedLoadDestinations, groupLocationsByAisle } from '../../lib/inventory'
 import { getCrewTypePartRestrictions } from '../../lib/admin'
 import { useBackClose } from '../../lib/backStack'
+import { t } from '../../lib/i18n'
 import Icon from '../shared/Icon'
 
 // Unified sheet for crew-initiated movements. Modes covered today:
@@ -121,7 +122,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
     confirm: () => {
       if (confirming) return true   // stepping back out of the review — never prompt
       const dirty = !!selectedPartId || quantity.trim() !== '' || notes.trim() !== '' || lines.length > 0
-      return !dirty || window.confirm('Discard this entry?')
+      return !dirty || window.confirm(t('discardEntry', lang))
     },
   })
 
@@ -153,7 +154,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
       } catch (e) {
         if (!cancelled) {
           console.error('Locations load failed:', e)
-          setError('Could not load locations: ' + e.message)
+          setError(t('errLoadLocations', lang) + e.message)
         }
       } finally {
         if (!cancelled) setLoadingLocations(false)
@@ -210,7 +211,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
       } catch (e) {
         if (!cancelled) {
           console.error('Stock index load failed:', e)
-          setError('Could not load stock: ' + e.message)
+          setError(t('errLoadStock', lang) + e.message)
         }
       } finally {
         setLoadingPartGroups(false)
@@ -235,7 +236,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
       } catch (e) {
         if (!cancelled) {
           console.error('Source stock load failed:', e)
-          setError('Could not load source stock: ' + e.message)
+          setError(t('errLoadSourceStock', lang) + e.message)
         }
       } finally {
         if (!cancelled) setLoadingOtherStock(false)
@@ -334,21 +335,24 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
 
   const availableQty = Number(selectedPart?.quantity || 0)
 
+  // "Parts in {dept} aren't on your crew's allowed list" — word order
+  // differs between languages, so compose from pre/post keys.
+  const restrictedDeptMsg = dept =>
+    `${t('restrictedDeptPre', lang)} ${dept} ${t('restrictedDeptPost', lang)}`
+
   function validate() {
-    if (!otherLocationId) return isLoad ? 'Pick a source location' : 'Pick a destination warehouse'
-    if (!selectedPartId) return 'Pick a part'
+    if (!otherLocationId) return isLoad ? t('pickSource', lang) : t('pickDestWarehouse', lang)
+    if (!selectedPartId) return t('pickPart', lang)
     // Whitelist re-check: covers the prefill-return path (pickers bypassed,
     // so the badge gate never ran) and the race where a part was picked
     // before the async whitelist fetch resolved. The RPC would 403 anyway —
     // this just says so before commit instead of after.
     const dept = selectedPart?.parts_catalog?.department
     if (isRestrictedDept(dept)) {
-      return lang === 'es'
-        ? `Las piezas de ${dept} no están en la lista de tu cuadrilla`
-        : `${dept} parts aren't on your crew's allowed list`
+      return restrictedDeptMsg(dept)
     }
     const q = Number(quantity)
-    if (!q || q <= 0) return 'Quantity must be greater than 0'
+    if (!q || q <= 0) return t('qtyGtZero', lang)
     return null
   }
 
@@ -432,7 +436,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   // Primary action. Decides whether the move needs the review step first.
   function handlePrimary() {
     const all = buildEffectiveLines()
-    if (all.length === 0) { setError(isLoad ? 'Add a part to load' : 'Add a part to return'); return }
+    if (all.length === 0) { setError(isLoad ? t('addPartToLoad', lang) : t('addPartToReturn', lang)); return }
     // Confirm everything except the safe fast path (single part → own
     // truck) — and ALWAYS confirm over-draw, so going negative is a
     // reviewed decision, never a fat-finger.
@@ -484,9 +488,14 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
       let target = ''
       if (isLoad && destForLoad) {
         const d = allowedDestinations.find(x => x.id === destForLoad)
-        if (d) target = ' to ' + d.name
+        if (d) target = ` ${t('toWord', lang)} ` + d.name
       }
-      showToast(`${isLoad ? 'Loaded' : 'Returned'} ${okCount} part${okCount === 1 ? '' : 's'}${target}`)
+      // Singular gets its own key (Spanish verb agreement: "Se cargó 1
+      // parte" vs "Se cargaron 3 partes"); plural composes pre + count.
+      const msg = okCount === 1
+        ? t(isLoad ? 'toastLoadedOne' : 'toastReturnedOne', lang)
+        : `${t(isLoad ? 'toastLoadedPre' : 'toastReturnedPre', lang)} ${okCount} ${t('partMany', lang)}`
+      showToast(msg + target)
       onComplete()
     } else {
       // Drop back to editing with only the failed lines for retry.
@@ -494,19 +503,21 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
       setSelectedPartId(null)
       setQuantity('')
       setConfirming(false)
-      setError(`${okCount} of ${all.length} done. Failed: ` +
+      setError(`${okCount} ${t('ofWord', lang)} ${all.length} ${t('doneFailedPrefix', lang)} ` +
         failed.map(f => `${f.line.partName} (${f.msg})`).join('; '))
     }
   }
 
   // Human phrase for where the move is going (review screen + nowhere else).
   function destinationPhrase() {
-    if (isReturn) return `to ${confirmLines[0]?.otherLabel || 'the warehouse'}`
+    // Fallbacks matter: a missing label would otherwise leave a dangling
+    // preposition in the review heading ("Move 2 parts to").
+    if (isReturn) return `${t('toWord', lang)} ${confirmLines[0]?.otherLabel || t('theWarehouseWord', lang)}`
     if (destForLoad) {
       const d = allowedDestinations.find(x => x.id === destForLoad)
-      return `to ${d?.name || 'the destination'}`
+      return `${t('toWord', lang)} ${d?.name || t('theDestinationWord', lang)}`
     }
-    return 'onto your truck'
+    return t('ontoYourTruck', lang)
   }
 
   // Current-selection validity (string error | null) — reused by the Add
@@ -529,15 +540,13 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
           <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Icon name={confirming ? 'check' : (isLoad ? 'download' : 'upload')} size={18} />
             {confirming
-              ? (isLoad ? 'Confirm load' : 'Confirm return')
-              : (isLoad ? 'Load from warehouse' : 'Return to warehouse')}
+              ? (isLoad ? t('confirmLoad', lang) : t('confirmReturn', lang))
+              : (isLoad ? t('loadFromWarehouse', lang) : t('returnToWarehouse', lang))}
           </div>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>
             {confirming
-              ? 'Double-check what you\'re moving, then confirm.'
-              : (isLoad
-                  ? 'Pick where you\'re grabbing parts from, then what you\'re taking.'
-                  : 'Pick where you\'re dropping parts off, then what you\'re returning.')}
+              ? t('confirmSub', lang)
+              : (isLoad ? t('loadSub', lang) : t('returnSub', lang))}
           </div>
         </div>
 
@@ -545,7 +554,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
         {confirming && (
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>
-              Move {confirmLines.length} part{confirmLines.length === 1 ? '' : 's'} {destinationPhrase()}
+              {t('moveWord', lang)} {confirmLines.length} {confirmLines.length === 1 ? t('partOne', lang) : t('partMany', lang)} {destinationPhrase()}
             </div>
 
             {isLoad && destForLoad && (
@@ -554,7 +563,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                 background: 'var(--amber-lt)', color: 'var(--amber)',
                 borderRadius: 'var(--r-sm)', fontSize: 11, fontWeight: 600,
               }}>
-                This records a transfer — the material counts as moved, not staged on your truck.
+                {t('transferNotice', lang)}
               </div>
             )}
 
@@ -568,13 +577,11 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.partName}</div>
                     {isLoad && l.otherLabel && (
-                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>from {l.otherLabel}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t('fromWord', lang)} {l.otherLabel}</div>
                     )}
                     {l.overDraw && (
                       <div style={{ fontSize: 11, color: 'var(--amber)', fontWeight: 700 }}>
-                        {lang === 'es'
-                          ? `Solo ${Number(l.availableQty || 0).toLocaleString()} disponibles — quedará negativo`
-                          : `Only ${Number(l.availableQty || 0).toLocaleString()} on hand — will go negative`}
+                        {t('onlyWord', lang)} {Number(l.availableQty || 0).toLocaleString()} {t('onHandGoNegative', lang)}
                       </div>
                     )}
                   </div>
@@ -588,7 +595,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
 
             {notes.trim() && (
               <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>
-                Note: {notes.trim()}
+                {t('notePrefix', lang)} {notes.trim()}
               </div>
             )}
           </div>
@@ -603,14 +610,14 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
               onClick={() => setViewMode('by-part')}
               style={modeBtnStyle(viewMode === 'by-part')}
             >
-              <Icon name="search" size={14} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Find a part
+              <Icon name="search" size={14} style={{ verticalAlign: 'middle', marginRight: 5 }} /> {t('findAPart', lang)}
             </button>
             <button
               type="button"
               onClick={() => setViewMode('by-location')}
               style={modeBtnStyle(viewMode === 'by-location')}
             >
-              <Icon name="pin" size={14} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Pick a location
+              <Icon name="pin" size={14} style={{ verticalAlign: 'middle', marginRight: 5 }} /> {t('pickALocation', lang)}
             </button>
           </div>
         )}
@@ -620,7 +627,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
           <div style={{ marginBottom: 14 }}>
             <input
               type="text"
-              placeholder="Search parts by name, SKU, group, department…"
+              placeholder={t('partSearchLong', lang)}
               value={partSearch}
               onChange={e => setPartSearch(e.target.value)}
               autoFocus
@@ -634,14 +641,14 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
             />
             {loadingPartGroups && (
               <div style={{ padding: 16, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
-                Loading stock index…
+                {t('loadingStockIndex', lang)}
               </div>
             )}
             {!loadingPartGroups && partGroups && filteredGroups.length === 0 && (
               <div style={{ padding: 16, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>
                 {partSearch
-                  ? `No parts matching "${partSearch}"`
-                  : 'No stock in the system. Receive a PO or import inventory first.'}
+                  ? `${t('noPartsMatching', lang)} "${partSearch}"`
+                  : t('noStockInSystem', lang)}
               </div>
             )}
             <div style={{
@@ -666,12 +673,12 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                       {group.name}
                       {group.nickname && (
                         <span style={{ fontWeight: 400, color: 'var(--orange)', marginLeft: 6, fontStyle: 'italic' }}>
-                          aka {group.nickname}
+                          {t('akaWord', lang)} {group.nickname}
                         </span>
                       )}
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'var(--font-mono)' }}>
-                      {group.partId} · {group.totalQty.toLocaleString()} {group.unit || 'ea'} across {group.locations.length} location{group.locations.length === 1 ? '' : 's'}
+                      {group.partId} · {group.totalQty.toLocaleString()} {group.unit || 'ea'} {t('acrossWord', lang)} {group.locations.length} {group.locations.length === 1 ? t('locationOne', lang) : t('locationMany', lang)}
                       {/* Badge lives on the SKU line, not the nowrap name line —
                           long part names would ellipsize it out of view at 390px. */}
                       {restricted && (
@@ -680,7 +687,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                           padding: '1px 7px', borderRadius: 999,
                           background: 'var(--gray-lt)', color: 'var(--muted)',
                         }}>
-                          {lang === 'es' ? 'No disponible para tu cuadrilla' : 'Not loadable for your crew'}
+                          {t('notLoadableForCrew', lang)}
                         </span>
                       )}
                     </div>
@@ -692,7 +699,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                       <div
                         key={loc.locationId}
                         onClick={() => { if (!restricted) pickPartAtLocation(group, loc) }}
-                        title={restricted ? `${group.department} parts aren't on your crew's allowed list` : undefined}
+                        title={restricted ? restrictedDeptMsg(group.department) : undefined}
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10,
                           padding: '8px 12px',
@@ -732,7 +739,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                 {selectedPart.parts_catalog?.name || prefillPartId}
               </div>
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                <span className="mono">{availableQty.toLocaleString()}</span> on your truck · pick where it goes
+                <span className="mono">{availableQty.toLocaleString()}</span> {t('onYourTruckPick', lang)}
               </div>
               {/* Prefill bypasses the pickers, so the whitelist badge has to
                   live here too — otherwise this path 403s blind at commit.
@@ -743,7 +750,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                   fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 999,
                   background: 'var(--gray-lt)', color: 'var(--muted)',
                 }}>
-                  {lang === 'es' ? 'No disponible para tu cuadrilla' : 'Not loadable for your crew'}
+                  {t('notLoadableForCrew', lang)}
                 </div>
               )}
             </div>
@@ -753,7 +760,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
         {/* ── By-location view (Load + Return): searchable, aisle-grouped ──── */}
         {viewMode === 'by-location' && (
           <div className="field">
-            <label>{isLoad ? 'Source' : 'Destination'}</label>
+            <label>{isLoad ? t('sourceLabel', lang) : t('destinationLabel', lang)}</label>
             {otherLocationId ? (() => {
               // Selected — compact chip + Change (reopens the picker).
               const sel = sortedLocations.find(l => l.id === otherLocationId)
@@ -766,21 +773,21 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                   <button type="button"
                     onClick={() => { if (lines.length === 0) { setOtherLocationId(''); setLocSearch('') } }}
                     disabled={lines.length > 0}
-                    title={lines.length > 0 ? 'Finish or clear the list to change' : ''}
+                    title={lines.length > 0 ? t('changeLockedTitle', lang) : ''}
                     style={{ background: 'none', border: 'none', color: 'var(--orange-dk)', fontWeight: 700, fontSize: 12, cursor: lines.length > 0 ? 'not-allowed' : 'pointer', opacity: lines.length > 0 ? 0.45 : 1, flexShrink: 0 }}>
-                    Change
+                    {t('change', lang)}
                   </button>
                 </div>
               )
             })() : loadingLocations ? (
-              <div style={{ padding: 16, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
+              <div style={{ padding: 16, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>{t('loading', lang)}</div>
             ) : otherLocations.length === 0 ? (
-              <div style={{ padding: 16, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>No {isLoad ? 'sources' : 'warehouses'} available</div>
+              <div style={{ padding: 16, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>{isLoad ? t('noSourcesAvail', lang) : t('noWarehousesAvail', lang)}</div>
             ) : (
               <>
                 <input
                   type="text"
-                  placeholder={`Search ${isLoad ? 'sources' : 'warehouses'}…`}
+                  placeholder={isLoad ? t('searchSourcesPh', lang) : t('searchWarehousesPh', lang)}
                   value={locSearch}
                   onChange={e => setLocSearch(e.target.value)}
                   autoComplete="off"
@@ -793,7 +800,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                   const groups = groupLocationsByAisle(filtered)
                   const searching = !!q
                   if (groups.length === 0) {
-                    return <div style={{ padding: 16, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>No matching locations</div>
+                    return <div style={{ padding: 16, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>{t('noMatchingLocations', lang)}</div>
                   }
                   return (
                     <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)' }}>
@@ -831,11 +838,11 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
         {viewMode === 'by-location' && otherLocationId && (
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>
-              Part
+              {t('partLabel', lang)}
             </div>
             <input
               type="text"
-              placeholder="Search parts…"
+              placeholder={t('searchPartsShort', lang)}
               value={partSearch}
               onChange={e => setPartSearch(e.target.value)}
               autoComplete="off"
@@ -848,13 +855,13 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
             />
             {(isLoad && loadingOtherStock) && (
               <div style={{ padding: 16, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
-                Loading stock…
+                {t('loadingStockShort', lang)}
               </div>
             )}
             {!loadingOtherStock && partList.length === 0 && (
               <div style={{ padding: 16, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>
-                {isLoad ? 'No stock at this location' : 'Nothing on your truck yet'}
-                {partSearch && ` matching "${partSearch}"`}
+                {isLoad ? t('noStockAtLocation', lang) : t('nothingOnTruck', lang)}
+                {partSearch && ` ${t('matchingWord', lang)} "${partSearch}"`}
               </div>
             )}
             <div style={{
@@ -876,7 +883,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                   <div
                     key={pc?.id || i}
                     onClick={() => { if (!restricted) setSelectedPartId(pc?.id) }}
-                    title={restricted ? `${pc?.department} parts aren't on your crew's allowed list` : undefined}
+                    title={restricted ? restrictedDeptMsg(pc?.department) : undefined}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 10,
                       padding: '8px 12px',
@@ -899,7 +906,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                             padding: '1px 7px', borderRadius: 999,
                             background: 'var(--gray-lt)', color: 'var(--muted)',
                           }}>
-                            {lang === 'es' ? 'No disponible para tu cuadrilla' : 'Not loadable for your crew'}
+                            {t('notLoadableForCrew', lang)}
                           </span>
                         )}
                       </div>
@@ -918,13 +925,13 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
         {selectedPartId && (
           <div className="field">
             <label>
-              Quantity
+              {t('quantityLabel', lang)}
               <span style={{ marginLeft: 8, color: 'var(--muted)', fontWeight: 400, fontSize: 11 }}>
                 {/* Negative on-hand is an expected state under warn-but-allow —
                     show the real number, not "none". */}
                 {availableQty !== 0
-                  ? `(${availableQty.toLocaleString()} ${lang === 'es' ? 'disponibles' : 'on hand'})`
-                  : (lang === 'es' ? '(nada disponible)' : '(none on hand)')}
+                  ? `(${availableQty.toLocaleString()} ${t('onHandWord', lang)})`
+                  : t('noneOnHand', lang)}
               </span>
             </label>
             <input
@@ -945,7 +952,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                 #17 warn-but-allow — review step still forces a look). */}
             {quantity !== '' && curQty <= 0 && (
               <div style={{ marginTop: 4, fontSize: 11, fontWeight: 600, color: 'var(--red)' }}>
-                {lang === 'es' ? 'La cantidad debe ser mayor que 0' : 'Quantity must be greater than 0'}
+                {t('qtyGtZero', lang)}
               </div>
             )}
             {curOverDraw && curQty > 0 && (
@@ -954,13 +961,11 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                 background: 'var(--amber-lt)', color: 'var(--amber)',
                 borderRadius: 'var(--r-sm)', fontSize: 11, fontWeight: 700,
               }}>
+                {/* mid/post key halves carry their own spacing/punctuation —
+                    the two languages phrase the numbers differently. */}
                 {isLoad
-                  ? (lang === 'es'
-                      ? `Cargando ${curQty.toLocaleString()} — solo hay ${availableQty.toLocaleString()}. La fuente quedará en negativo.`
-                      : `Loading ${curQty.toLocaleString()} — only ${availableQty.toLocaleString()} on hand. The source will go negative.`)
-                  : (lang === 'es'
-                      ? `Devolviendo ${curQty.toLocaleString()} — tu camión solo muestra ${availableQty.toLocaleString()}. Quedará en negativo.`
-                      : `Returning ${curQty.toLocaleString()} — your truck only shows ${availableQty.toLocaleString()}. It will go negative.`)}
+                  ? `${t('loadingVerb', lang)} ${curQty.toLocaleString()}${t('odLoadMid', lang)}${availableQty.toLocaleString()}${t('odLoadPost', lang)}`
+                  : `${t('returningVerb', lang)} ${curQty.toLocaleString()}${t('odReturnMid', lang)}${availableQty.toLocaleString()}${t('odReturnPost', lang)}`}
               </div>
             )}
           </div>
@@ -983,7 +988,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
             }}
           >
-            <Icon name="plus" size={14} /> Add another part
+            <Icon name="plus" size={14} /> {t('addAnotherPart', lang)}
           </button>
         )}
         {/* Why Add is disabled — validation should never be a silent dead
@@ -998,7 +1003,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
         {/* Cart — the parts queued for this submit. */}
         {lines.length > 0 && (
           <div className="field">
-            <label>{isLoad ? 'Loading' : 'Returning'} · {lines.length} part{lines.length === 1 ? '' : 's'}</label>
+            <label>{isLoad ? t('loadingVerb', lang) : t('returningVerb', lang)} · {lines.length} {lines.length === 1 ? t('partOne', lang) : t('partMany', lang)}</label>
             <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', overflow: 'hidden', background: 'var(--surface)' }}>
               {lines.map((l, i) => (
                 <div key={i} style={{
@@ -1009,7 +1014,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                     <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.partName}</div>
                     <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                       <span className="mono">{l.qty.toLocaleString()}</span> {l.unit || 'ea'}
-                      {isLoad && l.otherLabel ? ` · from ${l.otherLabel}` : ''}
+                      {isLoad && l.otherLabel ? ` · ${t('fromWord', lang)} ${l.otherLabel}` : ''}
                     </div>
                   </div>
                   <button
@@ -1025,11 +1030,11 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
         {/* Note — shared across every line in this submit. */}
         {(selectedPartId || lines.length > 0) && (
           <div className="field">
-            <label>Note (optional)</label>
+            <label>{t('noteOptional', lang)}</label>
             <textarea
               value={notes}
               onChange={e => setNotes(e.target.value)}
-              placeholder="Anything worth recording…"
+              placeholder={t('movementNotePh', lang)}
               style={{ minHeight: 44 }}
               autoComplete="off"
               name="crew-movement-notes"
@@ -1041,7 +1046,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
             their own truck (no whitelist) — Load behaves exactly as before. */}
         {isLoad && allowedDestinations.length > 1 && (
           <div className="field">
-            <label>Load to</label>
+            <label>{t('loadTo', lang)}</label>
             <select
               value={destinationLocationId}
               onChange={e => setDestinationLocationId(e.target.value)}
@@ -1052,7 +1057,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
               {allowedDestinations.map(d => (
                 <option key={d.id} value={d.id}>
                   {d.isOwnTruck
-                    ? `🚚 My truck (${d.name})`
+                    ? `🚚 ${t('myTruckWord', lang)} (${d.name})`
                     : `${locationIcon(d.type, false)} ${d.name}`}
                 </option>
               ))}
@@ -1063,8 +1068,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                 background: 'var(--amber-lt)', color: 'var(--amber)',
                 borderRadius: 'var(--r-sm)', fontSize: 11, fontWeight: 600,
               }}>
-                Loading directly to this location records a transfer — the
-                material counts as moved, not staged on your truck.
+                {t('destTransferNotice', lang)}
               </div>
             )}
           </div>
@@ -1087,7 +1091,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
         {confirming ? (
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setConfirming(false)} disabled={submitting}>
-              ← Back
+              ← {t('back', lang)}
             </button>
             <button
               className="btn btn-primary"
@@ -1096,8 +1100,8 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
               disabled={submitting}
             >
               {submitting
-                ? 'Saving…'
-                : `Confirm — ${isLoad ? 'load' : 'return'} ${confirmLines.length} part${confirmLines.length === 1 ? '' : 's'}`}
+                ? t('saving', lang)
+                : `${t(isLoad ? 'confirmVerbLoad' : 'confirmVerbReturn', lang)} ${confirmLines.length} ${confirmLines.length === 1 ? t('partOne', lang) : t('partMany', lang)}`}
             </button>
           </div>
         ) : (
@@ -1109,14 +1113,12 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
               <div style={{ marginBottom: 8, fontSize: 11, color: 'var(--hint)', textAlign: 'center' }}>
                 {curError && selectedPartId
                   ? curError
-                  : (lang === 'es'
-                      ? 'Elige una pieza y una cantidad para continuar'
-                      : 'Pick a part and enter a quantity to continue')}
+                  : t('pickPartQtyHint', lang)}
               </div>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose} disabled={submitting}>
-                Cancel
+                {t('cancel', lang)}
               </button>
               <button
                 className="btn btn-primary"
@@ -1125,10 +1127,10 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                 disabled={submitting || effectiveCount === 0}
               >
                 {submitting
-                  ? 'Saving…'
+                  ? t('saving', lang)
                   : effectiveCount === 0
-                    ? (isLoad ? 'Load' : 'Return')
-                    : `${isLoad ? 'Load' : 'Return'} ${effectiveCount} part${effectiveCount === 1 ? '' : 's'}`}
+                    ? (isLoad ? t('loadBtn', lang) : t('returnBtn', lang))
+                    : `${isLoad ? t('loadBtn', lang) : t('returnBtn', lang)} ${effectiveCount} ${effectiveCount === 1 ? t('partOne', lang) : t('partMany', lang)}`}
               </button>
             </div>
           </>
