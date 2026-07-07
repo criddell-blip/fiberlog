@@ -594,88 +594,116 @@ export async function approveSubmission(id, note) {
   if (error) throw error
 }
 
-// Crew-side read-only inspection of a submitted task: latest submission +
-// its parts + status. Used by TaskSummaryView so the crew can tap a
-// pending / approved / done task in their sidebar and see what was
-// submitted without entering the editable TaskWorkspace.
+// Crew-side read-only view of everything submitted against a task: ALL
+// passdowns (newest first), each with its own parts + notes. Consumed by
+// TaskSummaryView (closed tasks) and TaskWorkspace's history strip (open
+// tasks, backlog #34) — under the is_closed model a task legitimately
+// accumulates many submissions, so "latest only" stopped being the story.
 //
-// Returns null if no submission exists (a task can be marked 'done' or
-// 'approved' without ever having had a submission in weird edge cases).
+// Server-filtered with work_sessions!inner — the old version scanned the
+// 20 most-recent submissions SYSTEM-WIDE and filtered client-side, which
+// blanked summaries as volume grew, and it excluded archived rows, which
+// blanked a task's summary the moment a manager archived its approved
+// submission. Archived submissions are still real work; include them.
 //
-// We look up by task_id rather than session_id — a session can span
-// multiple tasks, and we want the latest submission whose work_sessions
-// row points at THIS task.
+// Per-passdown parts come from log_entries.submission_id (stamped on every
+// post-July-2026 submit + backfilled). Legacy unlinked entries fall back
+// to session+task scope and are attributed to that session's submission —
+// safe because pre-link sessions effectively had one submission each.
+//
+// Returns { submissions: [...], totalHours } — empty array if none.
 export async function getTaskSummary(taskId) {
-  // Latest submission for the task. We sort by created_at DESC; on
-  // re-submit (manager flagged → crew fixed → resubmitted) handleSubmit
-  // deletes prior pending/flagged rows, so usually there's just one
-  // current row plus historical approved ones.
   const { data: subs, error: sErr } = await db
     .from('submissions')
     .select(`
-      id, status, created_at, reviewed_at, hours_worked,
+      id, status, created_at, reviewed_at, hours_worked, archived,
       flag_reason, manager_notes, session_id, user_id,
       total_strand_ft, total_fiber_ft, total_conduit_ft,
       total_mst_hst, total_splice_cases, total_handholes,
       total_vaults, total_poles,
       users!submissions_user_id_fkey ( name, initials ),
       reviewer:users!submissions_reviewed_by_fkey ( name, initials ),
-      work_sessions!submissions_session_id_fkey ( task_id )
+      work_sessions!inner ( task_id )
     `)
-    .eq('archived', false)
+    .eq('work_sessions.task_id', taskId)
     .order('created_at', { ascending: false })
-    .limit(20)
   if (sErr) throw sErr
+  if (!subs || subs.length === 0) return { submissions: [], totalHours: 0 }
 
-  // Filter client-side — PostgREST can't filter on a joined column directly
-  // without a !inner. We want all submissions whose session points at our
-  // task. Keep the first (most recent) match.
-  const match = (subs || []).find(s => s.work_sessions?.task_id === taskId)
-  if (!match) return null
-
-  // Aggregate parts for the submission's session, scoped to this task.
-  // (One session can have entries for multiple tasks; le.task_id keeps
-  // them straight.)
+  // One fetch for every entry that could belong to any of these passdowns:
+  // linked rows by submission_id, legacy rows by session+task. Assumes a
+  // task accumulates at most a few dozen passdowns (uuid lists ride in the
+  // GET query string, and the submissions fetch is un-paginated) — if
+  // year-open tasks ever emerge under the is_closed model, chunk these.
+  const subIds = subs.map(s => s.id)
+  const sessionIds = [...new Set(subs.map(s => s.session_id).filter(Boolean))]
   const { data: entries, error: eErr } = await db
     .from('log_entries')
-    .select('id, task_id, footage_amt, note_text, entry_type')
-    .eq('session_id', match.session_id)
+    .select('id, task_id, session_id, submission_id, note_text')
+    .or(`submission_id.in.(${subIds.join(',')}),session_id.in.(${sessionIds.join(',')})`)
   if (eErr) throw eErr
 
-  const taskEntries = (entries || []).filter(e => !e.task_id || e.task_id === taskId)
-  if (taskEntries.length === 0) {
-    return { submission: match, parts: [], notes: [] }
+  // Attribute each entry to a submission: direct link wins; unlinked
+  // legacy entries go to their session's single submission (skipped if
+  // the session somehow has several — better absent than double-counted).
+  const subsBySession = new Map()
+  for (const s of subs) {
+    if (!subsBySession.has(s.session_id)) subsBySession.set(s.session_id, [])
+    subsBySession.get(s.session_id).push(s)
+  }
+  const entriesBySub = new Map(subIds.map(id => [id, []]))
+  for (const e of (entries || [])) {
+    if (e.submission_id && entriesBySub.has(e.submission_id)) {
+      entriesBySub.get(e.submission_id).push(e)
+    } else if (!e.submission_id && (!e.task_id || e.task_id === taskId)) {
+      const owners = subsBySession.get(e.session_id) || []
+      if (owners.length === 1) entriesBySub.get(owners[0].id).push(e)
+    }
   }
 
-  const { data: parts, error: pErr } = await db
-    .from('entry_parts')
-    .select('quantity, part_id, parts_catalog ( id, name, unit )')
-    .in('entry_id', taskEntries.map(e => e.id))
-  if (pErr) throw pErr
+  const allEntryIds = [...entriesBySub.values()].flat().map(e => e.id)
+  let partRows = []
+  if (allEntryIds.length > 0) {
+    const { data: parts, error: pErr } = await db
+      .from('entry_parts')
+      .select('quantity, part_id, entry_id, parts_catalog ( id, name, unit )')
+      .in('entry_id', allEntryIds)
+    if (pErr) throw pErr
+    partRows = parts || []
+  }
+  const partsByEntry = new Map()
+  for (const p of partRows) {
+    if (!partsByEntry.has(p.entry_id)) partsByEntry.set(p.entry_id, [])
+    partsByEntry.get(p.entry_id).push(p)
+  }
 
-  const totals = {}
-  ;(parts || []).forEach(p => {
-    const id = p.parts_catalog?.id || p.part_id
-    if (!id) return
-    if (!totals[id]) {
-      totals[id] = {
-        partId: id,
-        name: p.parts_catalog?.name || id,
-        unit: p.parts_catalog?.unit || 'ea',
-        qty: 0,
+  const submissions = subs.map(s => {
+    const subEntries = entriesBySub.get(s.id) || []
+    const totals = {}
+    for (const e of subEntries) {
+      for (const p of (partsByEntry.get(e.id) || [])) {
+        const id = p.parts_catalog?.id || p.part_id
+        if (!id) continue
+        if (!totals[id]) {
+          totals[id] = {
+            partId: id,
+            name: p.parts_catalog?.name || id,
+            unit: p.parts_catalog?.unit || 'ea',
+            qty: 0,
+          }
+        }
+        totals[id].qty += p.quantity || 0
       }
     }
-    totals[id].qty += p.quantity || 0
+    return {
+      ...s,
+      parts: Object.values(totals).filter(p => p.qty > 0).sort((a, b) => b.qty - a.qty),
+      notes: subEntries.map(e => e.note_text).filter(Boolean),
+    }
   })
-  const aggregatedParts = Object.values(totals)
-    .filter(p => p.qty > 0)
-    .sort((a, b) => b.qty - a.qty)
 
-  const notes = taskEntries
-    .map(e => e.note_text)
-    .filter(Boolean)
-
-  return { submission: match, parts: aggregatedParts, notes }
+  const totalHours = submissions.reduce((a, s) => a + (Number(s.hours_worked) || 0), 0)
+  return { submissions, totalHours }
 }
 
 // ─── REALTIME ─────────────────────────────────────────────────────────────────

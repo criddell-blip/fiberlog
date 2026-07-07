@@ -1,10 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useApp } from '../../AppContext'
-import { startSession, saveEntry, db } from '../../lib/supabase'
+import { startSession, saveEntry, getTaskSummary, db } from '../../lib/supabase'
 import { getFootageTypePartMap } from '../../lib/inventory'
 import { FIBER_COUNTS, CONDUIT_SIZES } from '../../lib/footageTypes'
 import { t } from '../../lib/i18n'
+import { useBackClose } from '../../lib/backStack'
 import PartSearch from './workspace/PartSearch'
+import PassdownList, { fmtWhen } from './PassdownList'
 import Icon from '../shared/Icon'
 
 // Tab list is now crew-type aware. Fiber crews see the 4-tab fiber build
@@ -89,7 +91,41 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
   const [draftLoaded, setDraftLoaded] = useState(false)
   const [lastWorkedInfo, setLastWorkedInfo] = useState(null)
   const [flagInfo, setFlagInfo] = useState(null)
+  // Already-submitted passdowns for this task (backlog #34). Under the
+  // is_closed model the task stays open across submits, so the crew need
+  // to SEE that earlier passdowns exist — otherwise a fresh blank draft
+  // reads as "my work disappeared" (the exact confusion that used to make
+  // crews re-create tasks). Rendered as a strip above the tabs; tapping
+  // opens the full read-only list.
+  const [history, setHistory] = useState(null)
+  const [showHistory, setShowHistory] = useState(false)
   const saveTimeoutRef = useRef(null)
+
+  // Back closes the history overlay first when it's open (display-only —
+  // no dirty state to confirm). Registered unconditionally per Rules of
+  // Hooks; depth 0 while closed.
+  useBackClose(showHistory ? 1 : 0, () => setShowHistory(false))
+
+  // task.status in the deps keeps history in sync with the flag flow — a
+  // manager flagging mid-session flips status to 'open', which refetches
+  // here so the flagged passdown's numbers appear in the banner below.
+  useEffect(() => {
+    let cancelled = false
+    getTaskSummary(task.id)
+      .then(data => { if (!cancelled) setHistory(data) })
+      .catch(e => console.warn('Passdown history load failed:', e))
+    return () => { cancelled = true }
+  }, [task.id, task.status])
+
+  // The flagged passdown's prior numbers, pulled from history rather than
+  // a second query — shown in the flag banner so the crew re-enter the
+  // fix from sight, not memory (the draft resets on submit by design).
+  // MUST be user-scoped: history is task-wide, and on a shared/handoff
+  // task a coworker's flagged passdown would otherwise render under
+  // "What you submitted" — the wrong numbers to re-enter.
+  const flaggedSub = flagInfo
+    ? (history?.submissions || []).find(s => s.status === 'flagged' && s.user_id === currentUser?.id)
+    : null
 
   // If this task was previously flagged by the manager, surface the reason
   // so the crew knows what to fix. Only relevant when the task is back to
@@ -470,7 +506,48 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
             {flagInfo.reason && (
               <div style={{ marginTop: 2, fontWeight: 'var(--fw-medium)' }}>{flagInfo.reason}</div>
             )}
+            {/* The flagged passdown's numbers — the draft resets on submit,
+                so without this the crew would re-enter the fix from memory
+                (and quietly undercount). */}
+            {flaggedSub && (
+              <div style={{ marginTop: 4, fontWeight: 'var(--fw-medium)', opacity: 0.9 }}>
+                {lang === 'es' ? 'Lo que enviaste: ' : 'What you submitted: '}
+                {(Number(flaggedSub.hours_worked) || 0).toLocaleString()} hrs
+                {(flaggedSub.parts || []).length > 0 && (
+                  <> · {flaggedSub.parts.slice(0, 4).map(p => `${p.qty.toLocaleString()}× ${p.name}`).join(', ')}
+                  {flaggedSub.parts.length > 4 ? ` +${flaggedSub.parts.length - 4} ${lang === 'es' ? 'más' : 'more'}` : ''}</>
+                )}
+              </div>
+            )}
           </div>
+        </div>
+      )}
+
+      {/* Submitted-passdowns strip (backlog #34) — the task stays open
+          across submits, so surface what's already been turned in. Hidden
+          while a flag banner is up for the SAME single passdown (the
+          banner already tells that story); shown otherwise. */}
+      {(history?.submissions?.length || 0) > 0 && !(flagInfo && history.submissions.length === 1) && (
+        <div
+          onClick={() => setShowHistory(true)}
+          className="banner banner-muted"
+          style={{ cursor: 'pointer', padding: '8px var(--space-4)' }}
+        >
+          <span className="banner-icon" style={{ display: 'inline-flex', color: 'var(--teal-mid)' }}><Icon name="check" size={14} /></span>
+          <span className="banner-body" style={{ fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-semibold)' }}>
+            {history.submissions.length === 1
+              ? (lang === 'es' ? '1 jornada enviada' : '1 passdown submitted')
+              : (lang === 'es'
+                  ? `${history.submissions.length} jornadas enviadas`
+                  : `${history.submissions.length} passdowns submitted`)}
+            {' · '}{(history.totalHours || 0).toLocaleString()} hrs
+            <span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-medium)' }}>
+              {' · '}{lang === 'es' ? 'última' : 'latest'} {fmtWhen(history.submissions[0].created_at)}
+            </span>
+          </span>
+          <span style={{ flexShrink: 0, fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-bold)', color: 'var(--teal-mid)' }}>
+            {lang === 'es' ? 'ver ›' : 'view ›'}
+          </span>
         </div>
       )}
 
@@ -663,6 +740,30 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
           <button className="btn btn-primary" style={{ flex: 2 }} onClick={() => setShowSummary(true)}>{t('wrapUpDay', lang)}</button>
         </div>
       </div>
+
+      {/* Submitted-passdowns history overlay (backlog #34). Read-only —
+          display overlay, so Back/backdrop-click close immediately with
+          no dirty-confirm. Renders the same PassdownList as the closed-
+          task summary so the two views can't drift. */}
+      {showHistory && history && (
+        <div className="overlay open" onClick={e => e.target === e.currentTarget && setShowHistory(false)}>
+          <div className="overlay-sheet" style={{ maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 2, flexShrink: 0 }}>
+              {lang === 'es' ? 'Jornadas enviadas' : 'Submitted passdowns'}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14, flexShrink: 0 }}>
+              {task.name} · {(history.totalHours || 0).toLocaleString()} hrs {lang === 'es' ? 'en total' : 'total'}
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              <PassdownList submissions={history.submissions} />
+            </div>
+            <button className="btn btn-ghost" style={{ width: '100%', marginTop: 12, flexShrink: 0 }}
+              onClick={() => setShowHistory(false)}>
+              {lang === 'es' ? 'Cerrar' : 'Close'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Submit summary sheet */}
       {showSummary && (
