@@ -130,7 +130,7 @@ Some managers are also field workers. They needed to log their own day's work wi
 
 - **Supabase project ID:** `attduslwidxecmjifsnl`
 - **Supabase URL:** `https://attduslwidxecmjifsnl.supabase.co`
-- **Supabase anon key:** in `.env` as `VITE_SUPABASE_ANON_KEY`. Hardcoded fallback in `src/lib/supabase.js` for safety. The key is public by design — RLS in the DB is the access boundary (see backlog #11 — RLS is currently permissive on most tables).
+- **Supabase anon key:** in `.env` as `VITE_SUPABASE_ANON_KEY`. Hardcoded fallback in `src/lib/supabase.js` for safety. The key is public by design — RLS in the DB is the access boundary (tightened May 2026; see backlog #12 for the remaining intentional exceptions).
 - **Repo path on this machine:** `C:\Users\admin\Desktop\fiberlog-react`
 
 ### Environments
@@ -147,45 +147,71 @@ Some managers are also field workers. They needed to log their own day's work wi
 src/
   AppContext.jsx          ← global state, auth, projects, users, realtime subscriptions
   App.jsx                 ← top-level routing: role=owner/manager → ManagerApp (unless viewMode='crew' AND has field crew_type → routes to the appropriate crew shell); crew_type='infrastructure' → InfraCrewApp; everyone else → CrewApp
+  Login.jsx               ← username + password login (auto-domain append, remembered username)
   styles/global.css       ← CSS variables + shared classes (pill, banner, metric, avatar, etc.) for both light + dark theme
   lib/
-    supabase.js           ← Supabase client + DB helpers (projects, users, tasks, etc.)
-    inventory.js          ← all inventory operations (locations, stock, movements, parts, audit)
-    admin.js              ← user management ops (create/update/deactivate/reset password)
-    csvImport.js          ← shared CSV import utilities
+    supabase.js           ← Supabase client + DB helpers (projects, users, tasks, sites, etc.)
+    inventory.js          ← all inventory operations (locations, stock, movements, parts, audit, consumption ledger, Sage export, purchase requests, intake requests)
+    admin.js              ← user management ops (create/update/deactivate/reset password/set email)
+    access.js             ← staff_scope / named-access-type single source of truth (staffScope, visibleManagerTabs, canActAsCrew, inventoryIsLimited)
+    crewTypes.js          ← crewTypeLabel() display map + VALID_FIELD_CREW_TYPES
+    cycleCount.js         ← cycle-count RPC wrappers + BIN:<uuid> barcode helpers
+    backStack.js          ← Back-button coordinator + useBackClose hook
+    i18n.js               ← en/es strings for the crew shells
+    calculations.js (+ calculations.test.js) ← aerial/underground/splice parts math
+    csvImport.js          ← shared CSV import/export utilities
+    footageTypes.js       ← footage "type" option lists (fiber counts, conduit sizes)
+    recencyPill.js, scanFeedback.js ← small shared UI helpers
+    useIsWide.js          ← shared 768px-breakpoint hook (used by both CrewApp and ManagerApp)
   components/
+    shared/               ← Icon.jsx (line icon set), PausedBanner.jsx, ScanInput.jsx (USB scanner + phone camera)
     crew/                 ← UI for non-manager users (logging work, parts used, etc.)
       CrewApp.jsx         ← fiber-crew entry: Project → Phase → Task → Workspace
       ProjectList.jsx, PhaseList.jsx, TaskList.jsx, TaskWorkspace.jsx
       TaskSummaryView.jsx ← read-only inspection of pending/approved/done tasks (parts, hours, notes, status, manager feedback) — both crew shells route here when isReadOnlyTask(task)
       MyStockView.jsx     ← crew's personal-truck inventory view (Load + Return UI)
       CrewMovementSheet.jsx ← unified overlay for load/return (other ops are RPC-supported, UI deferred)
-      workspace/          ← logging-specific subviews (used by both shells)
+      FoundInventorySheet.jsx ← crew "report found inventory" → pending intake request (backlog #19)
+      workspace/          ← PartSearch.jsx (catalog search overlay — the only file left here; the workspace tab bodies live inline in TaskWorkspace.jsx)
       infra/              ← sites-shaped shell for crew_type='infrastructure'
         InfraCrewApp.jsx  ← entry: loads getInfraTree(), runs its own task realtime sub
         SitesList.jsx     ← project's sites, type-filterable (wireless / fiber)
         SiteTaskList.jsx  ← site's tasks + New-task overlay (infra job types)
+    cycleCount/           ← scanner-driven cycle counting (count_runs/sessions/lines/resolutions)
+      CountTab.jsx        ← Inventory → Cycle Count sub-tab (takes over the full panel)
+      CountStartSheet.jsx, CountRunScreen.jsx, CountRunReviewSheet.jsx, CountRunHistorySheet.jsx
+      BinLabelSheet.jsx   ← printable BIN:<uuid> QR labels
     manager/              ← UI for owner/manager users
       ManagerApp.jsx      ← entry, top-level nav (Approvals / Crew / Projects / Reports / Assemblies / Inventory / Admin)
       AdminPanel.jsx      ← admin home — wires Users, Reset-password, BoxHero sync, Crew×Dept permissions
       AdminUsersView.jsx  ← user CRUD + per-user movement permission toggles
       CrewTypePermissionsView.jsx ← crew_type × department matrix (whitelist UI)
-      InventoryView.jsx   ← inventory section (5 sub-tabs + 5 sheet buttons: Import / Receive PO / Reconcile / Sonar / Record movement)
+      InventoryView.jsx   ← inventory section (8 sub-tabs: Stock / Locations / Parts / Activity / Purchase Reqs / Found / Audit / Cycle Count; toolbar "Record movement" button + an 8-item Actions strip: Move stock / Receive PO / Reconcile / Sonar / Fiber jobs / Import CSV / Sage export / Footage map — collapses to a bottom sheet on phone)
       InventoryStockTab.jsx, InventoryLocationsTab.jsx, InventoryPartsTab.jsx,
       InventoryMovementsTab.jsx, InventoryAuditTab.jsx
+      PurchaseRequestsTab.jsx, PurchaseRequestSheet.jsx ← FiberLog-originated PRs (compose, cost history, CSV/email export, lifecycle)
+      IntakeRequestsQueue.jsx ← "Found" sub-tab — approve/reject crew intake requests (mirrors SubmissionsQueue)
+      LocationDetailPanel.jsx ← location drill-in (view stock / count / export / labels / edit)
+      LocationWithBinPicker.jsx ← shared warehouse→bin destination picker
       RecordMovementSheet.jsx ← arbitrary single-movement entry
+      MoveStockSheet.jsx  ← scan-driven stock relocation (transfer)
       ReceivePOSheet.jsx  ← multi-line vendor delivery (creates new parts inline, edits attrs)
       ReconcileSheet.jsx  ← audit CSV round-trip → adjust movements
-      SonarImportSheet.jsx ← daily install report → bulk issue movements
+      SonarImportSheet.jsx ← field-tech install report → bulk transfer movements
+      FiberJobsImportSheet.jsx ← fiber-jobs report → bulk transfer movements
+      BulkSonarProjectsSheet.jsx ← bulk Sonar project → phase mapping
+      SageExportSheet.jsx ← Sage Intacct CSV export (see backlog #4 — shipped prototype)
+      FootageMapSheet.jsx ← footage type → SKU mapping admin (footage_type_part_map)
+      SkuLabelSheet.jsx, AisleSignSheet.jsx ← printable part QR labels / aisle signs
       BulkMoveSheet.jsx, InventoryImportSheet.jsx
       AssemblyEditor.jsx  ← assembly templates (kits crew can pre-fill from)
       ReportsView.jsx, SubmissionsQueue.jsx, ProjectManager.jsx, CrewStatus.jsx
-  lib/
-    useIsWide.js          ← shared 768px-breakpoint hook (used by both CrewApp and ManagerApp)
 supabase/
   functions/
     admin-set-password/index.ts   ← reset another user's password (owners/managers only)
     admin-create-user/index.ts    ← create a new user (creates auth.users + public.users)
+    admin-set-email/index.ts      ← change a user's login email (auth.users + public.users mirror)
+    sonar-webhook/index.ts        ← receives Sonar's scheduled CSV-zip delivery → sonar_pending_imports
 ```
 
 ---
@@ -251,7 +277,7 @@ supabase/
 - `submissions.project_id_override` — nullable FK to projects. If set, `approve_submission` routes auto-deduct to this project's bucket instead of the task's natural project. Phase actuals stay on the natural phase. Persisted by `TaskWorkspace`'s in-task picker.
 
 ### Footage type → part mapping
-- `footage_type_part_map(kind, type_value, part_id, updated_at, updated_by)` — PK `(kind, type_value)`. Maps a crew footage "type" pick to the canonical `parts_catalog` SKU that footage should consume. `kind text CHECK in ('fiber','conduit')`; `type_value` is the picked value (e.g. `'144ct'` strand count, `'2"'` conduit size); `part_id text NOT NULL → parts_catalog(id)`. RLS: auth read, staff write (mirrors `sonar_city_bucket_map` / `sonar_fiber_value_map`). Bump trigger `trg_ftpm_touch_updated_at` on `updated_at`. NOT in the realtime publication. No seed rows yet. Migration `20260624120000_footage_type_part_map.sql`.
+- `footage_type_part_map(kind, type_value, part_id, updated_at, updated_by)` — PK `(kind, type_value)`. Maps a crew footage "type" pick to the canonical `parts_catalog` SKU that footage should consume. `kind text CHECK in ('fiber','conduit')`; `type_value` is the picked value (e.g. `'144ct'` strand count, `'2"'` conduit size); `part_id text NOT NULL → parts_catalog(id)`. RLS: auth read, staff write (mirrors `sonar_city_bucket_map` / `sonar_fiber_value_map`). Bump trigger `trg_ftpm_touch_updated_at` on `updated_at`. NOT in the realtime publication. Curated via the manager **Footage map** sheet (`FootageMapSheet.jsx`); 10 mappings exist as of July 2026. Migration `20260624120000_footage_type_part_map.sql`.
 
 ### Parts catalog
 - `parts_catalog.id` is the SKU (text PK)
@@ -269,10 +295,12 @@ The following tables broadcast changes via Supabase Realtime: `app_settings`, `e
 
 ## Edge functions
 
-Two are deployed and active:
+Four are deployed and active:
 
 - `admin-set-password` — owner/manager resets another user's password. Verifies caller via JWT, uses service_role to update `auth.users`.
 - `admin-create-user` — owner/manager creates a new user. Creates `auth.users` row, then `public.users` with matching UUID. Rolls back the auth row if profile insert fails. Only owners can create owners.
+- `admin-set-email` — owner/manager changes another user's login email (updates `auth.users` AND mirrors into `public.users`). Built for migrating accounts off the synthetic `*.fiberlog.utahbroadband.com` addresses so password-reset emails deliver.
+- `sonar-webhook` — receives Sonar's scheduled "Schedule Delivery" webhook (CSV-zip; handles raw zip / multipart / JSON-URL / raw-CSV shapes). Auth is a `?key=` URL secret vs `SONAR_WEBHOOK_KEY` (no JWT — `verify_jwt=false`). Stores rows in `sonar_pending_imports` for the import sheets to consume.
 
 Pattern for new edge functions: copy `admin-set-password` as the template. JWT verification + service_role for privileged ops.
 
@@ -286,20 +314,30 @@ All `SECURITY DEFINER`, all with `SET search_path = public, pg_temp`. EXECUTE on
 
 | RPC | Called from JS | Purpose |
 |---|---|---|
-| `approve_submission(p_submission_id, p_note)` | `lib/supabase.js` → `approveSubmission` | Atomic + idempotent submission approval. Increments phase actuals when phase is set, mirrors task `status='approved'`, auto-deducts materials (truck → project bucket) for fiber_construction/splice/infrastructure/fiber_tech crews (legacy aerial/underground still in the guard). Bucket lookup: `submissions.project_id_override` → `phases.project_id` → `sites.project_id`. **Backlog #2:** no longer clears `working_counts`/`last_worked_by`/`last_worked_at` — the task stays open across passdowns until a manager closes it via `tasks.is_closed`. |
+| `approve_submission(p_submission_id, p_note)` | `lib/supabase.js` → `approveSubmission` | Atomic + idempotent submission approval. Increments phase actuals when phase is set, mirrors task `status='approved'`, auto-deducts materials (truck → project bucket) for fiber_construction/splice/infrastructure/fiber_tech crews (legacy aerial/underground still in the guard). Bucket lookup: `submissions.project_id_override` → `phases.project_id` → `sites.project_id`. **Backlog #2:** no longer clears `working_counts`/`last_worked_by`/`last_worked_at` — the task stays open across passdowns until a manager closes it via `tasks.is_closed`. **Auto-deduct is submission-scoped** (migration `20260706232824_log_entries_submission_link.sql`): aggregates `entry_parts` for entries with `log_entries.submission_id = p_submission_id`; falls back to the legacy session-scoped WHERE only when the submission has NO linked entries (pre-fix rows). Two coexisting same-day submissions can never double-deduct each other's parts. |
 | `record_crew_movement(operation, part_id, quantity, other_location_id, ...)` | `lib/inventory.js` → `recordCrewMovement` | Single entry point for crew load/return/issue/scrap/transfer. Checks per-user permission, crew_type×department whitelist, then inserts the movement. |
 | `approve_intake_request(p_request_id, p_note)` | `lib/inventory.js` → `approveIntakeRequest` | Backlog #19. Idempotent (anchors on `booked_at`/`movement_id`). Staff-guarded via `is_staff()`. Validates the target is a warehouse, materializes a draft part (`is_active=false`) when the request has no `part_id`, books a `receive` movement (truck-less, into the warehouse → trigger updates stock), flips the request to `approved`. |
 | `reject_intake_request(p_request_id, p_note)` | `lib/inventory.js` → `rejectIntakeRequest` | Backlog #19. Staff-guarded. Flips a pending intake request to `rejected` with a reason; no stock moves. |
 | `save_log_entry(...)` | `lib/supabase.js` → `saveEntry` | Atomic insert of `log_entries` + `entry_parts`. |
 | `replace_assembly(p_assembly jsonb, p_parts jsonb)` | `lib/supabase.js` → `saveAssembly` | Atomic upsert of assembly + replace of `assembly_parts`. |
+| `start_count_run(p_warehouse_id, p_notes, p_is_first_binning)` | `lib/cycleCount.js` → `startCountRun` | Cycle counting. Opens a count run for a warehouse. All cycle-count RPCs are staff-gated (`is_staff()`, 42501 for crew). |
+| `start_or_resume_count_session(p_run_id, p_bin_id)` / `record_count_line(p_session_id, p_part_id, p_counted_qty)` / `delete_count_line(p_line_id)` / `submit_count_session(p_session_id)` | `lib/cycleCount.js` | Per-bin counting session lifecycle: open/resume a session, record a counted line, hard-delete an unexpected (expected_qty=0) line, submit the session. |
+| `end_count_run_and_reconcile(p_run_id)` | `lib/cycleCount.js` → `endCountRunAndReconcile` | Closes a run: books offsetting bin↔bin `transfer` movements for paired variances and creates pending `count_resolutions` for net gains/losses. |
+| `approve_count_resolution(p_resolution_id, p_note)` / `discard_count_resolution(p_resolution_id, p_reason)` / `discard_count_run(p_run_id, p_reason)` | `lib/cycleCount.js` | Manager review of net_gain/net_loss resolutions — approve books an `adjust` movement; discard carries a reason. `discard_count_run` abandons a whole run. |
+| `deactivate_location_with_recovery(p_location_id, p_recovery_items, p_destination_location_id)` | `lib/inventory.js` | Retire a location, optionally moving its residual stock to a destination first. NOTE: the function body still gates on `role = 'owner'` ("Only owners can retire locations") even though the retire UI was opened to all staff June 2026. |
+| `decommission_site_with_recovery(p_site_id, p_recovery_items, p_destination_location_id)` | `lib/supabase.js` | Site decommission + optional physical-equipment recovery movements. |
+| `bulk_assign_pull_location(p_user_ids, p_location_id)` | `lib/inventory.js` → `bulkAssignPullLocation` | Points users' `default_pull_location_id` at a group location, consolidating their personal-truck stock into it (group membership add). |
+| `next_pr_number()` | `lib/inventory.js` | Mints the next purchase-request number (`PR-YYYY-####` from `purchase_requests_seq`). |
 | `is_staff()` | RLS policies | Returns true if `auth.uid()`'s role is owner/manager. STABLE. |
+| `is_owner()` | RLS/RPC guards | Returns true if `auth.uid()`'s role is owner. |
 | `cascade_task_terminal_to_session()` | Trigger only | When task status → pending/approved/done, flips matching `started` work_sessions to `submitted`. |
 | `ensure_crew_truck()` | Trigger only | Auto-creates a personal truck for new crew/contractor users. |
 | `ensure_project_job_site()` | Trigger only | Auto-creates a job_site bucket for new active projects. |
-| `crew_op_perms_touch_updated_at()` | Trigger only | Bumps `updated_at` on `crew_operation_permissions` UPDATE. |
 | `update_inventory_stock_on_movement()` | Trigger only | Maintains `inventory_stock` from `inventory_movements` inserts. |
 | `validate_inventory_location_parent()` | Trigger only | Enforces bin parent rules (only warehouses can be parents, single-level only). |
+| `validate_count_session_bin()` | Trigger only | Guards count-session bin validity. |
 | `increment_phase_actuals(...)` | (legacy, kept for compatibility — `approve_submission` does the work inline now) | |
+| `crew_op_perms_touch_updated_at()`, `app_settings_touch_updated_at()`, `purchase_requests_touch_updated_at()`, `sites_touch_updated_at()`, `ftpm_touch_updated_at()`, `scbm_touch_updated_at()`, `sonar_project_map_touch_updated_at()` | Trigger only | `updated_at` bump triggers for their respective tables. |
 | `increment_session_counts(...)`, `update_session_timestamp()`, `update_updated_at_column()`, `prevent_movement_modification()`, `prevent_movement_delete()` | Triggers / legacy | |
 
 ---
@@ -308,7 +346,7 @@ All `SECURITY DEFINER`, all with `SET search_path = public, pg_temp`. EXECUTE on
 
 `npm test` (one-shot) or `npm run test:watch`. Vitest configured via `package.json` only — no separate config file.
 
-- `src/lib/calculations.test.js` — 34 tests covering bolt-size mapping, lashing math (ceil rounding), structure mappings, mergeParts dedupe. Covers the arithmetic most likely to silently regress when SKU maps or per-100ft ratios get tweaked.
+- `src/lib/calculations.test.js` — 34 tests (28 `it()` blocks + two 3-case `it.each` tables — count the runner output, not the `it(`s) covering bolt-size mapping, lashing math (ceil rounding), structure mappings, mergeParts dedupe. Covers the arithmetic most likely to silently regress when SKU maps or per-100ft ratios get tweaked.
 - No component tests yet. The crew workflow + manager sheets are smoke-tested manually via the deployed app.
 
 ---
@@ -318,7 +356,7 @@ All `SECURITY DEFINER`, all with `SET search_path = public, pg_temp`. EXECUTE on
 ### Code style
 - Functional components with hooks. No class components.
 - Heavy inline styles using CSS variables. No Tailwind, no CSS-in-JS libraries.
-- Theme tokens: `var(--bg)`, `var(--surface)`, `var(--surface2)`, `var(--text)`, `var(--muted)`, `var(--hint)`, `var(--border)`, `var(--border2)`, `var(--orange)`, `var(--orange-lt)`, `var(--orange-dk)`, `var(--teal)`, `var(--teal-lt)`, `var(--teal-mid)`, `var(--amber)`, `var(--amber-lt)`, `var(--red)`, `var(--red-lt)`, `var(--blue)`, `var(--blue-lt)`, `var(--purple)`, `var(--purple-lt)`, `var(--gray-lt)`. Radius tokens: `var(--r)`, `var(--r-sm)`, `var(--r-xs)`.
+- Theme tokens (post-Console redesign, emerald-primary): surfaces `var(--bg)`, `var(--surface)`, `var(--surface2)`, `var(--sidebar)`, `var(--row-divider)`, `var(--text)`, `var(--muted)`, `var(--hint)`, `var(--border)`, `var(--border2)`; the primary is `var(--accent)` / `--accent-dk` / `--accent-lt` / `--accent-mid` (the legacy `--orange*` / `--teal*` tokens are kept as aliases of `--accent*`, so old code still renders correctly); hue families `--amber*`, `--blue*`, `--red*`, `--gray*`, `--purple*`; semantic roles `--accent-bg/fg/border`, `--success-*`, `--warning-*`, `--danger-*`, `--info-*`. Type scale `--fs-xs…--fs-2xl`, weights `--fw-medium…--fw-black`. Radius tokens: `var(--r)`, `var(--r-sm)`, `var(--r-xs)`, `var(--r-pill)`. All defined in `src/styles/global.css` (light `:root` + dormant `[data-theme="dark"]`).
 - Comments explain **why**, not what. Dense at decision points, sparse for obvious code.
 - Helper components/functions go at the bottom of the file (e.g., `pillStyle`, `BinFormSheet` at end of `InventoryLocationsTab.jsx`).
 - Section dividers: `// ─── SECTION NAME ────────────────...`
@@ -355,15 +393,16 @@ Wire a back-closable layer with the `useBackClose(depth, onBack, opts?)` hook:
 
 Call it unconditionally at the top of the component (Rules of Hooks), before any early return; pass `depth 0` while loading/inactive. Push uses `url=null` so the visible path never changes (GitHub Pages `/fiberlog/` base stays intact). The coordinator tolerates React `<StrictMode>`'s mount→cleanup→mount and swallows its own programmatic `history.back()` via a suppress counter.
 
-Shipped: crew narrow screen stack + sign-out dialog (Phase 1, `CrewApp.jsx`/`InfraCrewApp.jsx`); crew overlays/sheets with unsaved-input confirm (Phase 2a — `PartSearch`, `CrewMovementSheet`, the new-task overlays in `TaskList`/`SiteTaskList`, `AerialWorkspace`'s MST/add-pole pickers); manager tab navigation (Phase 3 — any non-home tab → Back returns to the home tab); manager sheets + in-view overlays (Phase 2b — all standalone inventory sheets like Record Movement / Receive PO / the CSV importers / Reconcile / Sage / Bulk Move / labels / Purchase Request / Location Detail, plus the inline overlays in ProjectManager / AdminPanel / AdminUsersView / Inventory{Locations,Parts}Tab / SubmissionsQueue / AssemblyEditor). Standalone sheet components register `useBackClose(1, onClose, …)` *inside themselves* (mounted only when open → depth 1); inline overlays register at the owning view keyed on their open-boolean. Data-entry sheets/forms pass `opts.confirm` reading their own dirty state (window.confirm), display/print/confirm overlays close immediately; the coordinator moves a layer to the top of the stack on activation so an overlay opened over a drilled-in screen (or a nested sheet) receives Back first. Manager in-tab drill-ins (Phase 3 cont. — InventoryView sub-tab → Stock, ProjectManager phase/project detail → list, AdminPanel sub-view/project detail → home) and crew wide-layout sidebar selection (Phase 4 — task → phase/site → picker, plus the My Stock toggle) use depth-valued `useBackClose` the same way the narrow screen stack does. **Back-button coverage is now complete across both shells and both layouts.** The only deliberate non-coverage: click-outside popovers (e.g. InventoryView's "⋯ More" menu) are not Back-wired.
+Shipped: crew narrow screen stack + sign-out dialog (Phase 1, `CrewApp.jsx`/`InfraCrewApp.jsx`); crew overlays/sheets with unsaved-input confirm (Phase 2a — `PartSearch`, `CrewMovementSheet`, `FoundInventorySheet`, the new-task overlays in `TaskList`/`SiteTaskList`; the redesigned `TaskWorkspace` no longer has separate picker overlays of its own); manager tab navigation (Phase 3 — any non-home tab → Back returns to the home tab); manager sheets + in-view overlays (Phase 2b — all standalone inventory sheets like Record Movement / Receive PO / the CSV importers / Reconcile / Sage / Bulk Move / labels / Purchase Request / Location Detail, plus the inline overlays in ProjectManager / AdminPanel / AdminUsersView / Inventory{Locations,Parts}Tab / SubmissionsQueue / AssemblyEditor). Standalone sheet components register `useBackClose(1, onClose, …)` *inside themselves* (mounted only when open → depth 1); inline overlays register at the owning view keyed on their open-boolean. Data-entry sheets/forms pass `opts.confirm` reading their own dirty state (window.confirm), display/print/confirm overlays close immediately; the coordinator moves a layer to the top of the stack on activation so an overlay opened over a drilled-in screen (or a nested sheet) receives Back first. Manager in-tab drill-ins (Phase 3 cont. — InventoryView sub-tab → Stock, ProjectManager phase/project detail → list, AdminPanel sub-view/project detail → home) and crew wide-layout sidebar selection (Phase 4 — task → phase/site → picker, plus the My Stock toggle) use depth-valued `useBackClose` the same way the narrow screen stack does. **Back-button coverage is now complete across both shells and both layouts.** The only deliberate non-coverage: click-outside popovers (e.g. InventoryView's "⋯ More" menu) are not Back-wired.
 
 ### Browser autofill suppression
 For any input that's NOT meant to be filled by the browser's saved-credentials list, use `autoComplete="off"` plus a non-standard `name=` like `name="user-search"`. For password reset / new-password fields, use `autoComplete="new-password"`. Past bug: opening the reset-password sheet was autofilling the user's username into the search field below.
 
 ### Persistence
-- `localStorage.fiberlog_dark_mode` — theme preference
+- `localStorage.fiberlog_dark_mode_v2` — theme preference (key bumped from `fiberlog_dark_mode` when dark Console shipped; the old key is orphaned — see backlog #23)
 - `localStorage.fiberlog_remembered_username` — last login username
 - `localStorage.fiberlog_view_mode` — `'manager' | 'crew'` for the working-manager toggle. Reset to `'manager'` on logout in `AppContext.logout()` so a different next-user doesn't inherit it.
+- `localStorage.fiberlog_counts_<taskId>` — offline fallback mirror of the crew workspace tally draft (`TaskWorkspace.jsx`; the primary store is `tasks.working_counts` — localStorage is only read when that query fails).
 
 ---
 
@@ -398,48 +437,26 @@ npx supabase login                             # auth supabase CLI (first time)
    - Fixes the "approved tasks still show open" bug we kept chasing; the bug was structural, not cosmetic
    - Implementation: add `tasks.is_closed`, `tasks.closed_at`, `tasks.closed_by`. Remove `tasks.status` writes from the submission flow (leave column for now). Update crew + manager rendering to filter by `is_closed`.
    - **DB shipped (July 2026, migration `20260706000000_tasks_is_closed_lifecycle.sql`):** the three columns exist (backfilled `is_closed=true` for existing `approved`/`done` tasks), and `approve_submission` no longer clears the task draft — it only mirrors `status='approved'` (kept as a display column). **Still TODO:** manager UI to close tasks, and crew/manager rendering to filter by `is_closed` instead of `status`.
+   - **`log_entries.submission_id` shipped** (migration `20260706232824_log_entries_submission_link.sql`) — entries now link to their submission (uuid FK, `ON DELETE CASCADE` — deliberate, so deleting a flagged submission in the flag-fix replace flow takes its entries with it; `entry_parts` chain-cascades). Fixes the same-day-second-passdown clobber: two pending submissions on one session used to share session-scoped entries, so approving each deducted the union. `approve_submission`'s auto-deduct is now submission-scoped with a legacy session fallback (fires only when a submission has zero linked entries). Backfill linked 5 unambiguous single-submission-session entries; 3 in a multi-submission session stay NULL (served by the fallback). New entries must set `submission_id` at submit time (`TaskWorkspace.handleSubmit` / `save_log_entry` path — frontend wiring is the remaining piece).
    - **`work_sessions` now one-per-(user, day, task)** (migration `20260706120000_work_sessions_per_task.sql`) — was one-per-day. Under multi-task days the old `(user_id, session_date)` unique key forced every task onto one session row: `task_id` got overwritten to the latest task and `handleSubmit`'s session-scoped cleanup deleted earlier tasks' pending submissions. Key widened to `(user_id, session_date, task_id)` (unique index, not a constraint now; `task_id` stays nullable — NULLs distinct, crew flows always pass it). `startSession` upserts `onConflict: 'user_id,session_date,task_id'`. **`crew_activity_today` rewritten** to stay one row per crew user: LATERAL to the latest session for the "current" task/status, LATERAL sum for the day's `entry_count`/`footage_total`/`hours_worked` (CrewStatus keys on `user_id` + sums, so multiple session rows would have broken it).
 
 3. **Field tech Sonar import → project routing** — backlogged behind Sonar polygon/address data landing in their export. See "Field tech (backlog — blocked)" above. Until then, field techs continue in Sonar standalone.
 
-4. **Sage Intacct daily export** — Edge Function pattern, stamps `exported_at` + `export_batch_id` on included movements. Format spec gathered:
+4. **Sage Intacct export — prototype SHIPPED** (`SageExportSheet.jsx`, wired into the Inventory Actions strip AND ReportsView's Consumption view "Export to Sage" button, which passes the report's current date range in). Manual button per export, in-browser CSV download — no Edge Function.
 
-    Target format: standard Sage Intacct **Inventory Transactions** import template (the comprehensive one — covers transfers, receipts, issues, adjustments via the `TRANSACTIONTYPE` column). Sample template the owner provided was 46 columns; the columns we'd actually populate from FiberLog data:
+    **What exists** (lib layer in `lib/inventory.js`, three-step lifecycle):
+    - `getMovementsForSageExport({since, until, includeExported})` — fetches movements joined with part / from-location / to-location / phase→project. Windows by **effective work date** (`occurred_at ?? created_at` via `movementEffectiveDate()`) so a job imported late still lands in the correct Sage period; skips already-exported rows unless the "Include already exported" toggle is on (re-issue a corrected batch).
+    - `isExportableMovement(m, {strictConsumption})` — the filter. Always excluded: ALL `adjust` movements (count corrections are FiberLog-internal; Sage runs its own physical-inventory reconciliation), truck→truck handoffs, and warehouse-internal moves (bin↔bin / warehouse↔bin under the same parent). Opt-in **Strict consumption** checkbox additionally drops crew loadouts + returns (truck staging), keeping purchases + truck→project consumption + issue/scrap.
+    - `buildSageCsv(movements, opts)` — 18 columns: `TRANSACTIONTYPE, DATE, REFERENCENO, LINE, ITEMID, ITEMDESC, QUANTITY, UNIT, PRICE, FROM_WAREHOUSE, TO_WAREHOUSE, TO_BIN, PROJECTID, CLASSID, DEPARTMENTID, VENDORID, MEMO, FIBERLOG_MOVEMENT_ID`. `DATE` = effective work date. `REFERENCENO` = `SUB-<id8>` when submission-linked else `MV-<id8>`. `PROJECTID` = phase's project name, falling back to the job_site bucket name; `CLASSID` = phase name. `VENDORID` parsed from receive notes (`Vendor: X`). FiberLog location/project names are used directly as codes (no mapping table yet).
+    - `markMovementsExported(ids, {userId, notes})` — inserts a parent row in `inventory_export_batches`, then stamps every movement's `exported_at` (batch's canonical timestamp) + `export_batch_id` in chunks of 100 ids (larger `.in()` lists blow the gateway URL limit → HTTP 400).
+    - Movement-type mapping (`SAGE_TRANSACTION_TYPE`): `receive` → Inventory Receipt, `transfer`/`return` → Inventory Transfer, `issue` → Inventory Issue, `scrap` → Inventory Adjustment (`adjust` is mapped too but never exported — filtered above).
+    - Shares the **consumption ledger definition** with Reports → Consumption (`getConsumptionLedger` = transfers landing in `job_site` buckets, dated by effective work date) so the two can never disagree.
 
-    | Sage column | FiberLog source | Notes |
-    |---|---|---|
-    | `TRANSACTIONTYPE` | constant per `movement_type` | needs the owner's exact Sage template names |
-    | `DATE` | `inventory_movements.created_at` | YYYY-MM-DD |
-    | `STATE` | `Draft` (safe default) or `Post` | configurable |
-    | `LINE` | row index per document | 1, 2, 3… |
-    | `ITEMID` | `parts_catalog.id` | likely matches Sage if both are BoxHero-driven |
-    | `WAREHOUSEID` | `inventory_locations.name` → Sage code | **needs a mapping table** |
-    | `QUANTITY` | `inventory_movements.quantity` | direct |
-    | `UNIT` | `parts_catalog.unit` | Sage values: Count / Length / Time / Volume / Weight |
-    | `PRICE` | `inventory_movements.unit_cost` | optional |
-    | `REFERENCENO` | `inventory_movements.id` or `submission_id` | for Sage→FiberLog traceback |
-    | `MESSAGE` / `MEMO` | `inventory_movements.notes` | auto-deduct text, vendor info |
-    | `INVDOCUMENTENTRY_PROJECTID` | `projects.name` → Sage project code | for project-bucket transfers |
-    | `INVDOCUMENTENTRY_VENDORID` | parsed from receive notes (`Vendor: X`) | optional |
-    | `BINID` | bin name when destination is a bin | optional |
-    | `DEPARTMENTID` | `parts_catalog.department` → Sage code | optional |
-
-    Movement-type mapping:
-    - `receive` → `Inventory Receipt`
-    - `transfer` (incl. crew load + project-bucket auto-deduct) → `Inventory Transfer`
-    - `return` → also `Inventory Transfer` (or a separate "Stock Return" template)
-    - `issue` → `Inventory Issue`
-    - `scrap` → `Inventory Adjustment` (or `Scrap`)
-    - `adjust` → `Inventory Adjustment`
-
-    Open questions before building:
-    1. Sage transaction template names (Sage Intacct lets these be customized per company)
-    2. Do `parts_catalog.id` SKUs match Sage's `ITEMID`? Probably yes (both BoxHero-rooted) but confirm
-    3. Warehouse code mapping (FiberLog uses full names; Sage uses codes)
-    4. Project code mapping (same question for project buckets → Sage project codes)
-    5. Personal trucks: skip or map? Filter them out at export time, or map them all to a single "Crew" warehouse in Sage
-    6. Cadence — daily? Manual button per export?
-    7. `BASECURR` — USD assumed; the field exists for multi-currency setups
+    **Still open (why it's labeled "prototype" in the UI):**
+    1. Sage code mappings — warehouse names, project names, and `parts_catalog.id` SKUs are used verbatim; confirm/map them to the owner's actual Sage codes (transaction-type names are Intacct defaults, customizable per company)
+    2. Bin-source rows leave `FROM_WAREHOUSE` blank (parent warehouse name isn't joined for the from-side yet)
+    3. Cadence/automation — currently a manual button; an Edge-Function scheduled export is the "bigger version"
+    4. `STATE`/`BASECURR` columns from the original 46-column template spec were dropped from the prototype
 
 5. **Per-line `project_id` on `log_entries`** — schema change for field-tech multi-cost-center allocation. Pending field-tech UI workflow decisions (per-customer vs per-day).
 
@@ -515,6 +532,26 @@ npx supabase login                             # auth supabase CLI (first time)
 
 27. **Catalog duplicate + naming cleanup (surfaced by 6/19 reconcile).** Real duplicate SKUs exist: leading-zero twins (`65910`/`0065910`, `311255`/`0311255`, `16282`/`0016282`, `409664`/`0409664`), `-ALB` twins (`600-100032`/`600-100032-ALB`), spacing twins (`MST-2P-50ft`/`MST - 2P 50ft`). Some hold stock and need a **merge** (move stock to canonical → retire twin) — notably `J Type Drive Hook 7/16 x 4-3/4` (a `(920)`-less twin `600-100094` holding 1,097 units) and the per-reel fiber SKUs (5 reels, 41.6k ft in group buckets) if the reel system is ever collapsed into aggregate "Fiber reel - X ct" SKUs. The 6 zero-stock leading-zero twins were already retired June 2026; the stock-holding merges remain.
 
+--- *Items 28–36 from the July 6 2026 full audit (`reports/20260706-audit1/full-audit.md` — evidence + file refs live there).* ---
+
+28. **🔴 `ensure_crew_truck` trigger missing merged crew types.** The trigger's crew_type IN-list still has only legacy values — `fiber_construction` and `field_service` (the June merge targets) are absent, so every new fiber-construction/field-service user gets NO auto-truck (breaks Load + auto-deduct). Proven live: qa.crew was created with 0 trucks. One-line migration widening the IN-list; also sweep for other DB objects with stale crew_type lists.
+
+29. **🔴 Stock tab under-reports + 2 broken searches.** (a) Stock tab showed 80 total for `600-100003-ALB` while the DB holds 480 (400 unbinned at Main WH + 80 group) — the rollup drops warehouse-level "unbinned" stock; the Audit-CSV export was CORRECT. (b) The tab's main search returns nothing for "bolt"/"lag". (c) The bin-rollup search accepts text but never filters. Investigate `InventoryStockTab.jsx`. Strengthens the case for #24(b) (warehouse = label only).
+
+30. **🔴 `deactivate_location_with_recovery` RPC still owner-only.** Live body raises "Only owners can retire locations" while the June work opened retire to all staff in the UI — a manager retiring a location WITH stock recovery hits 42501. One-line change to `is_staff()` (keep parity with `decommission_site_with_recovery`, check it too).
+
+31. **🔴 Multi-word part search returns 0 everywhere.** `searchPartsCatalog` (lib/supabase.js) runs one `%whole phrase%` ilike per column — "lag bolt box" → 0. Same bug re-implemented client-side in `CrewMovementSheet`'s find-a-part `.includes(q)`. Fix: tokenize on whitespace, AND the tokens (chained `.ilike` server-side; `tokens.every(...)` client-side); one shared helper. Confirmed live (clint) + in code.
+
+32. **🔴 Cycle-count end-run 400 with zero UI feedback.** Ending a count run while an abandoned bin session exists returns 400 ("unsubmitted sessions") that surfaces ONLY in the console — user is stuck. Add a toast/banner naming the offending bin(s) with a jump link. (`CountRunScreen.jsx` / `end_count_run_and_reconcile` path.)
+
+33. **🔴 Users-admin role-flip footgun (re-confirmed live).** Load-destinations is only reachable by flipping a manager's access type to Crew; Save then silently demotes (no confirm), and the crew_type field defaults to `fiber_construction` instead of blank (also silently persists for NULL-crew_type users on unrelated edits). Fix: render `LoadDestinationsSection` for any user with a field crew_type; confirm dialog when `role` would change; default crew_type `''`→null. (`AdminUsersView.jsx`.)
+
+34. **Crew passdown visibility on open tasks + `getTaskSummary` rewrite.** (a) Under the is_closed model an open task gives no way to see already-submitted passdowns — reopening shows a blank draft (confirmed disorienting in live runs). Add a compact "Submitted passdowns" strip/history in the workspace or route open+pending to a hybrid summary. (b) `getTaskSummary` scans only the 20 most-recent submissions system-wide and excludes archived — archiving deterministically blanks a task's summary today, and at volume everything older than ~1.3 days blanks. Use the `work_sessions!inner(task_id)` filter pattern (already in TaskWorkspace) + per-submission entries via `log_entries.submission_id`. (c) Mitigate the flag-blank-draft trade-off: show the flagged submission's prior numbers in the flag banner.
+
+35. **i18n: crew language toggle + untranslated surfaces.** No self-service language toggle exists anywhere in the crew shell (login, user chip, sign-out sheet — verified) — a Spanish-speaking crew member cannot switch language at all; `preferred_language` is only settable by managers in Users admin. Whole screens have zero `t()` wiring: `MyStockView`, `CrewMovementSheet`, `FoundInventorySheet`, `SetNewPassword`, TaskList job-type pills, the new Submitted/Approved pills. All dates use browser-locale or hardcoded `en-US`. Sequencing: toggle first (sign-out sheet is the natural home), then per-screen wiring.
+
+36. **Consolidation program (quantified — full detail in the audit report).** Ranked: (1) CSV-import shared layer, ~550–700 LOC dup between Sonar/FiberJobs/Inventory importers, incl. byte-identical Section/MappingRow + webhook panels; (2) #22 queue consolidation, now measured (~80% of IntakeRequestsQueue is copy) — `useRealtimeQueue` hook first; (3) QR label sheets (Sku↔Bin 85% identical) + port AisleSignSheet off the broken multi-page print technique; (4) style/format token dedup (chipStyle ×6, fmtWhen ×8, STATUS_COLORS ×3, location-icon maps ×4); (5) crew-shell chrome + shared `crew/taskState.js` predicates — **fixes a real bug**: `SitesList`/`ProjectList`/`PhaseList` still count `status IN (approved,done)` as complete, so approved-but-open tasks read 100% done in cards while sitting in Active one level deeper; also BulkMoveSheet re-implements LocationWithBinPicker byte-for-byte — adopt the shared one. Anti-goals (measured, don't do): unified MovementSheet, unified CrewShell, generic ResponsiveTable, unified import resolvers. Adjacent quick wins: chunk Sonar/FiberJobs `recordMovementsBatch` calls (InventoryImport already chunks at 100); FK indexes on the hot submission-flow paths (8 indexes, one migration); revoke anon EXECUTE on 5 guarded RPCs; **re-point the test suite** — `calculations.js` (the only tested module, all 34 tests) is unreachable from the app; the real submit math/validateMovement/buildSageCsv have zero coverage. Product decisions parked here too: should `staff_scope='accounting'` see the Approvals queue (today it architecturally can't — the "accounting reviews submissions" workflow is impossible); silent-disabled buttons (no validation messages anywhere in crew flows); crew part search shows non-loadable parts (whitelist only enforced at commit); cycle-count part-picker autosaves qty=1 on tap (phantom-variance risk); stale "Owner only" copy in Admin header.
+
 ---
 
 ## Gotchas worth knowing
@@ -546,9 +583,13 @@ The inventory side has many entry points that all write to `inventory_movements`
 | Crew Return (same RPC) | `return` | caller's truck → warehouse | Permission-checked. Same multi-part cart (one shared destination warehouse, many truck parts). |
 | Crew Issue/Scrap/Transfer | (same RPC, UI not shipped) | caller's truck → (varies) | RPC ready, sheets deferred |
 | Manager Record movement (`RecordMovementSheet`) | any of 6 | any → any | Free-form, no permission filter |
+| Manager Move stock (`MoveStockSheet`) | `transfer` (× N lines) | any → any | Scan-driven relocation via `recordMovementsBatch` |
 | Manager Receive PO (`ReceivePOSheet`) | `receive` (× N lines) | NULL → dest | Can create new parts inline |
 | Manager Reconcile (`ReconcileSheet`) | `adjust` (× N lines) | one-sided | Audit CSV round-trip |
-| Manager Sonar import (`SonarImportSheet`) | `issue` (× N lines) | crew truck → NULL | Mapped per-unique-value, not per-row |
+| Manager Sonar import (`SonarImportSheet`) | `transfer` (× N lines) | crew truck → routed bucket | Destination via `parts_catalog.sonar_routing` (region / gigwave / Fixed Wireless) + `sonar_city_bucket_map`. Stamps `[sonar:<itemId>]` in notes + `consumed_by_user_id`/`phase_id` when known |
+| Manager Fiber-jobs import (`FiberJobsImportSheet`) | `transfer` (× N lines) | crew truck → region bucket | Stamps `[sonar_jobs:…]` marker + `phase_id`/`consumed_by_user_id` |
+| **Found-inventory approval** (`approve_intake_request` RPC) | `receive` | NULL → warehouse | Backlog #19 — books the crew's reported find into stock |
+| **Cycle count** (`end_count_run_and_reconcile` + `approve_count_resolution` RPCs) | `transfer` (paired variances) / `adjust` (net gain/loss on approval) | bin ↔ bin / one-sided | Staff-gated; resolutions reviewed in `CountRunReviewSheet` |
 | **Auto-deduct on approval** (`approve_submission` RPC) | `transfer` (× N parts) | submitter's truck → project bucket | Gated on crew_type ∈ {fiber_construction, splice, infrastructure, fiber_tech} (+ legacy aerial/underground). Honors `project_id_override`. |
 | BoxHero CSV import (`InventoryImportSheet`) | `adjust` baseline + future flows | varies | Initial seed path |
 

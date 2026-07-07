@@ -245,20 +245,13 @@ export async function updateSite(siteId, patch) {
   return data
 }
 
+// Atomic decommission + optional materials recovery.
+//
 // Soft-delete via status='decommissioned'. Sites are FK targets for
 // tasks.site_id, so a hard delete would break historical records.
 // getInfraTree() + getSitesByProject() both filter status='active', so a
 // decommissioned site falls out of the UI immediately while its tasks
 // (and their submissions / movements) remain linked for the audit trail.
-//
-// Routes through the decommission_site_with_recovery RPC with an empty
-// recovery list so this thin helper still does the right thing — and so
-// the owner-only check in the RPC gates any caller that bypasses the UI.
-export async function decommissionSite(siteId) {
-  return decommissionSiteWithRecovery(siteId, [], null)
-}
-
-// Atomic decommission + optional materials recovery.
 //
 // recoveryItems is an array of { partId, quantity, unit } — empty means
 // "decommission only, no transfers." destinationLocationId is required

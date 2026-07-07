@@ -3,14 +3,9 @@
 
 const strings = {
   // ── App / Login ────────────────────────────────────────────────────────────
-  appName:            { en: 'FiberLog',                   es: 'FiberLog' },
-  company:            { en: 'Utah Broadband',             es: 'Utah Broadband' },
-  management:         { en: 'Management',                 es: 'Gerencia' },
   crew:               { en: 'Crew',                       es: 'Cuadrilla' },
   owner:              { en: 'Owner',                      es: 'Propietario' },
   manager:            { en: 'Manager',                    es: 'Gerente' },
-  signOut:            { en: 'Sign out',                   es: 'Cerrar sesión' },
-  close:              { en: 'Close',                      es: 'Cerrar' },
 
   // ── Crew types ─────────────────────────────────────────────────────────────
   aerial:             { en: '🏗️ Aerial',                  es: '🏗️ Aéreo' },
@@ -36,9 +31,7 @@ const strings = {
   // ── Task list ──────────────────────────────────────────────────────────────
   activeTasks:        { en: 'Active tasks',               es: 'Tareas activas' },
   noActiveTasks:      { en: 'No active tasks — add one below', es: 'Sin tareas activas — añade una abajo' },
-  completed:          { en: 'Completed',                  es: 'Completadas' },
   addTask:            { en: 'Add task to this phase',     es: 'Añadir tarea a esta fase' },
-  inProgress:         { en: 'In progress',                es: 'En progreso' },
   done:               { en: 'Done',                       es: 'Hecho' },
   open:               { en: 'Open',                       es: 'Abierto' },
 
@@ -55,10 +48,6 @@ const strings = {
   saving:             { en: 'Saving...',                  es: 'Guardando...' },
 
   // ── Job types ──────────────────────────────────────────────────────────────
-  aerialConstruction: { en: 'Aerial Construction',        es: 'Construcción Aérea' },
-  undergroundJob:     { en: 'Underground',                es: 'Subterráneo' },
-  spliceJob:          { en: 'Splice',                     es: 'Empalme' },
-  fiberPull:          { en: 'Fiber Pull',                 es: 'Jale de Fibra' },
   emergency:          { en: 'Emergency Fix',              es: 'Reparación de Emergencia' },
 
   // ── Task workspace ─────────────────────────────────────────────────────────
@@ -90,18 +79,12 @@ const strings = {
   submitFinalNote:    { en: 'Once you submit, this passdown is final — you can\'t edit it after.',
                         es: 'Una vez enviado, este reporte es definitivo — no se puede editar después.' },
   addPartNotInList:   { en: '＋ Add part not in list',    es: '＋ Añadir parte que no está en la lista' },
-  searchPartPlaceholder: { en: 'Search by name or SKU...', es: 'Buscar por nombre o SKU...' },
 
   // ── Toast messages ─────────────────────────────────────────────────────────
   toastSubmitted:     { en: 'Day submitted — pending approval', es: 'Día enviado — pendiente de aprobación' },
   toastTaskAdded:     { en: 'Task added — tap it to start logging', es: 'Tarea añadida — tócala para empezar' },
   toastFailedSave:    { en: 'Failed to save task — check connection', es: 'Error al guardar tarea — verifica conexión' },
   toastSelectUser:    { en: 'Select a crew member first', es: 'Primero selecciona un miembro de la cuadrilla' },
-
-  // ── Sidebar (wide screen) ──────────────────────────────────────────────────
-  pickTask:           { en: 'Pick a project from the sidebar', es: 'Elige un proyecto del panel lateral' },
-  pickTaskSub:        { en: 'Expand a project → phase → task to start logging', es: 'Expande proyecto → fase → tarea para empezar' },
-  projectsLabel:      { en: 'Projects',                   es: 'Proyectos' },
 }
 
 export function t(key, lang = 'en') {
