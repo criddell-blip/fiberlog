@@ -159,11 +159,17 @@ export default function SubmissionsQueue() {
           .catch(() => {})
       }
       const { data: entries } = await db
-        .from('log_entries').select('id, footage_amt, task_id').eq('session_id', sub.session_id)
-      // Filter to this task's entries if task_id exists on log_entries
-      const filteredEntries = taskId
-        ? (entries || []).filter(e => !e.task_id || e.task_id === taskId)
-        : (entries || [])
+        .from('log_entries').select('id, footage_amt, task_id, submission_id').eq('session_id', sub.session_id)
+      // Prefer entries LINKED to this submission (log_entries.submission_id,
+      // set on every post-July-2026 submit) — with additive same-day
+      // passdowns, session-scoped filtering would show the union of both
+      // passdowns' parts on each. Legacy unlinked rows fall back to the old
+      // session+task scope, excluding entries linked to OTHER submissions.
+      const linked = (entries || []).filter(e => e.submission_id === sub.id)
+      const filteredEntries = linked.length > 0
+        ? linked
+        : (entries || []).filter(e =>
+            !e.submission_id && (taskId ? (!e.task_id || e.task_id === taskId) : true))
       if (!filteredEntries || filteredEntries.length === 0) { setSelectedParts([]); setPartsLoading(false); return }
       const entryIds = filteredEntries.map(e => e.id)
       const { data: parts } = await db

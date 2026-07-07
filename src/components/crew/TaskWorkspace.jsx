@@ -336,30 +336,36 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
         newEntryId = newEntry?.id || null
       }
 
-      // Delete any PRIOR log_entries for this session+task (entry_parts
-      // cascade away via FK). Without this, the manager's parts view
-      // shows duplicates after a flag→resubmit cycle because the parts
-      // query is scoped by session_id, not submission_id.
-      let oldEntriesDel = db
+      // Replace-semantics ONLY for flagged submissions (the flag→fix→
+      // resubmit flow): deleting them cascades their linked log_entries
+      // away (log_entries.submission_id FK, ON DELETE CASCADE). Prior
+      // PENDING or approved submissions on this session are earlier
+      // passdowns from the same day — under the is_closed model those are
+      // additive and MUST survive. (The old code deleted pending too,
+      // which silently destroyed a same-day first passdown.)
+      const { error: flaggedErr } = await db
+        .from('submissions')
+        .delete()
+        .eq('user_id', currentUser.id)
+        .eq('status', 'flagged')
+        .eq('session_id', sid)
+      if (flaggedErr) console.warn('Prior flagged cleanup failed:', flaggedErr)
+
+      // Sweep UNLINKED entries for this session+task (submission_id NULL):
+      // legacy pre-link rows and orphans from a crashed submit (entry saved
+      // but submission insert failed — retrying lands here and dedups).
+      // Entries linked to surviving submissions are never touched.
+      let orphanDel = db
         .from('log_entries')
         .delete()
         .eq('session_id', sid)
         .eq('task_id', task.id)
-      if (newEntryId) oldEntriesDel = oldEntriesDel.neq('id', newEntryId)
-      const { error: oldEntriesErr } = await oldEntriesDel
-      if (oldEntriesErr) console.warn('Prior log_entries cleanup failed:', oldEntriesErr)
+        .is('submission_id', null)
+      if (newEntryId) orphanDel = orphanDel.neq('id', newEntryId)
+      const { error: orphanErr } = await orphanDel
+      if (orphanErr) console.warn('Orphan log_entries cleanup failed:', orphanErr)
 
-      // On re-submit, clear out any prior pending OR flagged submission for
-      // this session so the manager only sees the latest one.
-      const { error: cleanupErr } = await db
-        .from('submissions')
-        .delete()
-        .eq('user_id', currentUser.id)
-        .in('status', ['pending', 'flagged'])
-        .eq('session_id', sid)
-      if (cleanupErr) console.warn('Prior pending/flagged cleanup failed:', cleanupErr)
-
-      const { error } = await db.from('submissions').insert({
+      const { data: newSub, error } = await db.from('submissions').insert({
         session_id: sid, user_id: currentUser.id,
         hours_worked: hoursWorked,
         total_footage: (summary.strandFt || 0) + (summary.fiberFt || 0),
@@ -379,8 +385,20 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
             ? projectIdOverride
             : null,
         status: 'pending',
-      })
+      }).select('id').single()
       if (error) throw error
+
+      // Link the new entry to its submission. approve_submission deducts
+      // per-submission through this link (a session-scoped fallback covers
+      // legacy unlinked rows), which is what lets two same-day passdowns
+      // coexist without double-deducting. RLS permits updating own entries.
+      if (newEntryId && newSub?.id) {
+        const { error: linkErr } = await db
+          .from('log_entries')
+          .update({ submission_id: newSub.id })
+          .eq('id', newEntryId)
+        if (linkErr) console.warn('Entry→submission link failed:', linkErr)
+      }
 
       // Submit succeeded. Mirror status='pending' (display only now — the
       // task's open/closed lifecycle is governed by is_closed, not status),
