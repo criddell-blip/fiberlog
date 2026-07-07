@@ -10,10 +10,14 @@ import {
   getLocations,
   setPartSonarRouting, SONAR_ROUTING_OPTIONS,
   createPart,
-  getPendingSonarImports, getProcessedSonarImports, getPendingSonarImport,
-  markSonarPendingImportApplied, discardSonarPendingImport,
 } from '../../lib/inventory'
-import { parseCsv, readFileAsText } from '../../lib/csvImport'
+import {
+  useCsvFile, useSonarPendingQueue, useEffectiveMap, useAlreadyImportedMarkers,
+} from '../../lib/useCsvImport'
+import {
+  Section, MappingRow, StatusTag, StatusBadge, selectStyle,
+  SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
+} from './importShared'
 import BulkSonarProjectsSheet from './BulkSonarProjectsSheet'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
@@ -102,59 +106,6 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [phases, setPhases] = useState([])  // [{id, name, project_id, project_name, bucket_id}] — picker source
   const [sourceLocations, setSourceLocations] = useState([])  // any active location (warehouse/bin/truck/group) eligible as a Sonar source override
 
-  // ── CSV state ───────────────────────────────────────────────────────────
-  const [fileName, setFileName] = useState('')
-  const [csvRows, setCsvRows] = useState(null)
-  const [error, setError] = useState('')
-  const [parsing, setParsing] = useState(false)
-
-  // Back closes the importer (mounted only when open). Confirm once a CSV is
-  // loaded so a stray Back doesn't throw away mapping work. The nested
-  // BulkSonarProjectsSheet registers its own layer and is closed first.
-  useBackClose(1, onClose, {
-    confirm: () => csvRows == null || window.confirm('Close the Sonar import? Unsaved mapping will be lost.'),
-  })
-  // When the CSV came from a pending webhook delivery, remember its id so
-  // we can flip status='imported' on successful apply.
-  const [activePendingId, setActivePendingId] = useState(null)
-
-  // ── Pending webhook deliveries (Sonar's daily push) ─────────────────────
-  const [pendingImports, setPendingImports] = useState([])
-  const [pendingLoading, setPendingLoading] = useState(true)
-  const refreshPending = async () => {
-    try {
-      const rows = await getPendingSonarImports({ includeProcessed: false, reportType: 'asset_consumption' })
-      setPendingImports(rows)
-    } catch (e) {
-      console.warn('Pending Sonar imports load failed:', e)
-    } finally {
-      setPendingLoading(false)
-    }
-  }
-  useEffect(() => { refreshPending() }, [])
-
-  // Processed (imported + discarded) — audit trail. Lazy-loaded on toggle
-  // so we don't pay the query for managers who only care about pending.
-  const [showProcessed, setShowProcessed] = useState(false)
-  const [processedImports, setProcessedImports] = useState(null)  // null = not loaded yet
-  const [processedLoading, setProcessedLoading] = useState(false)
-  async function toggleProcessed() {
-    const next = !showProcessed
-    setShowProcessed(next)
-    if (next && processedImports === null) {
-      setProcessedLoading(true)
-      try {
-        const rows = await getProcessedSonarImports({ limit: 30, reportType: 'asset_consumption' })
-        setProcessedImports(rows)
-      } catch (e) {
-        console.warn('Processed Sonar imports load failed:', e)
-        setProcessedImports([])
-      } finally {
-        setProcessedLoading(false)
-      }
-    }
-  }
-
   // ── Per-import picks ────────────────────────────────────────────────────
   const [crewMap, setCrewMap] = useState({})          // sonarLoc → user_id
   const [partMap, setPartMap] = useState({})          // sonarModel → part_id
@@ -172,10 +123,37 @@ export default function SonarImportSheet({ onClose, onApplied }) {
 
   const [submitting, setSubmitting] = useState(false)
   const [showBulkProjects, setShowBulkProjects] = useState(false)
-  // Set of sonar item IDs already imported in past movements — populated
-  // by a query when the CSV loads, used to skip re-imports. Covers the
-  // "Looker daily report uses a rolling window" case.
-  const [alreadyImportedItemIds, setAlreadyImportedItemIds] = useState(() => new Set())
+
+  // ── CSV state + webhook queue (shared plumbing) ─────────────────────────
+  const csv = useCsvFile({
+    requiredCols: REQUIRED_COLS,
+    missingColsMessage: missing => `CSV is missing required Sonar columns: ${missing.join(', ')}`,
+    // Successful load resets the per-import picks (persisted maps + routing
+    // picks survive across files by design — only per-file state resets).
+    onLoaded: () => {
+      setExcluded(new Set())
+      setCrewMap({})
+      setPartMap({})
+      setPendingCityMap({})
+      setRowDest({})
+    },
+  })
+  const { fileName, csvRows, error, setError, parsing, handleFile } = csv
+
+  const queue = useSonarPendingQueue('asset_consumption', {
+    csv,
+    currentUserId: currentUser?.id,
+    showToast,
+    discardPrompt: p =>
+      `Discard this pending Sonar import (${p.parsed_row_count} rows from ${new Date(p.received_at).toLocaleString()})? It will stay in the audit log but not be importable.`,
+  })
+
+  // Back closes the importer (mounted only when open). Confirm once a CSV is
+  // loaded so a stray Back doesn't throw away mapping work. The nested
+  // BulkSonarProjectsSheet registers its own layer and is closed first.
+  useBackClose(1, onClose, {
+    confirm: () => csvRows == null || window.confirm('Close the Sonar import? Unsaved mapping will be lost.'),
+  })
 
   // Fetch lookups on mount
   useEffect(() => {
@@ -286,40 +264,10 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     }))
   }, [csvRows])
 
-  // Query past movements for already-imported sonar item IDs whenever
-  // CSV rows change. Last 90 days is a generous re-import window — keeps
-  // the query cheap while covering any realistic rolling-report scenario.
-  useEffect(() => {
-    if (!dedupedRows || dedupedRows.length === 0) {
-      setAlreadyImportedItemIds(new Set())
-      return
-    }
-    let cancelled = false
-    ;(async () => {
-      try {
-        const cutoff = new Date(Date.now() - 90 * 86400 * 1000).toISOString()
-        const { data, error } = await db
-          .from('inventory_movements')
-          .select('notes')
-          .like('notes', '%[sonar:%')
-          .gte('created_at', cutoff)
-        if (error) throw error
-        if (cancelled) return
-        const set = new Set()
-        const re = /\[sonar:([^\]]+)\]/g
-        for (const m of data || []) {
-          let match
-          while ((match = re.exec(m.notes || '')) !== null) {
-            set.add(match[1].trim())
-          }
-        }
-        setAlreadyImportedItemIds(set)
-      } catch (e) {
-        console.warn('Sonar already-imported lookup failed:', e)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [dedupedRows])
+  // Sonar item IDs already imported in past movements (90-day marker scan) —
+  // used to skip re-imports. Covers the "Looker daily report uses a rolling
+  // window" case. Refetches whenever a new CSV is loaded.
+  const alreadyImportedItemIds = useAlreadyImportedMarkers('sonar', dedupedRows)
 
   // ── Unique values extracted from the CSV (over deduped rows) ───────────
   const uniqueSonarLocs = useMemo(() => {
@@ -486,120 +434,14 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     }
   }
 
-  // ── File upload + parse ─────────────────────────────────────────────────
-  async function handleFile(file) {
-    if (!file) return
-    setError(''); setParsing(true)
-    setFileName(file.name)
-    setActivePendingId(null)  // manual upload wipes any prior pending-id linkage
-    try {
-      const text = await readFileAsText(file)
-      loadCsvText(text)
-    } catch (e) {
-      console.error('Sonar parse failed:', e)
-      setError(e.message || String(e))
-      setCsvRows([])
-    } finally {
-      setParsing(false)
-    }
-  }
-
-  // Shared parse path — used by both file upload and pending-import load.
-  // Validates required columns + resets per-import picks.
-  function loadCsvText(text) {
-    const { headers, rows } = parseCsv(text)
-    if (rows.length === 0) {
-      setError('CSV had no data rows')
-      setCsvRows([])
-      return
-    }
-    const missing = REQUIRED_COLS.filter(c => !headers.includes(c))
-    if (missing.length > 0) {
-      setError(`CSV is missing required Sonar columns: ${missing.join(', ')}`)
-      setCsvRows([])
-      return
-    }
-    setCsvRows(rows)
-    setExcluded(new Set())
-    setCrewMap({})
-    setPartMap({})
-    setPendingCityMap({})
-    setRowDest({})
-  }
-
-  // Load a pending webhook delivery into the existing parse flow as if
-  // the manager had just uploaded its CSV manually. The activePendingId
-  // is held until apply (or until the user uploads a different file or
-  // discards the pending row).
-  async function loadPending(pending) {
-    setError(''); setParsing(true)
-    try {
-      const full = await getPendingSonarImport(pending.id)
-      setActivePendingId(pending.id)
-      const label = full.filename || `pending ${new Date(full.received_at).toLocaleString()}`
-      setFileName(`[webhook] ${label}`)
-      loadCsvText(full.raw_csv || '')
-    } catch (e) {
-      console.error('Load pending Sonar import failed:', e)
-      setError(`Could not load pending import: ${e.message || e}`)
-    } finally {
-      setParsing(false)
-    }
-  }
-
-  async function handleDiscardPending(pending) {
-    const reason = window.prompt(
-      `Discard this pending Sonar import (${pending.parsed_row_count} rows from ${new Date(pending.received_at).toLocaleString()})? It will stay in the audit log but not be importable.`,
-      'Test fire / duplicate / not needed'
-    )
-    if (reason === null) return  // cancelled
-    try {
-      await discardSonarPendingImport(pending.id, { reason: reason || 'Discarded', userId: currentUser?.id })
-      // If we're currently editing this one, clear the working state
-      if (activePendingId === pending.id) {
-        setActivePendingId(null)
-        setCsvRows(null)
-        setFileName('')
-      }
-      await refreshPending()
-      showToast('Pending import discarded')
-    } catch (e) {
-      console.error('Discard failed:', e)
-      setError(`Discard failed: ${e.message || e}`)
-    }
-  }
-
   // ── Per-row resolution ──────────────────────────────────────────────────
-  // The merged city map: persisted + this-session pending picks
-  const effectiveCityMap = useMemo(() => {
-    const merged = new Map(persistedCityMap)
-    for (const [k, v] of Object.entries(pendingCityMap)) {
-      if (v) merged.set(k, v)
-      else merged.delete(k)
-    }
-    return merged
-  }, [persistedCityMap, pendingCityMap])
-
-  const effectiveProjectMap = useMemo(() => {
-    const merged = new Map(persistedProjectMap)
-    for (const [k, v] of Object.entries(pendingProjectMap)) {
-      if (v) merged.set(k, v)
-      else merged.delete(k)
-    }
-    return merged
-  }, [persistedProjectMap, pendingProjectMap])
-
+  // Merged maps: persisted (DB) + this-session pending picks
+  const effectiveCityMap = useEffectiveMap(persistedCityMap, pendingCityMap)
+  const effectiveProjectMap = useEffectiveMap(persistedProjectMap, pendingProjectMap)
   // Sonar source string → FiberLog location id (warehouse/bin). When a
   // source has a mapping here, the resolver uses that location as the
   // from_location_id and skips the crew/truck lookup entirely.
-  const effectiveSourceMap = useMemo(() => {
-    const merged = new Map(persistedSourceMap)
-    for (const [k, v] of Object.entries(pendingSourceMap)) {
-      if (v) merged.set(k, v)
-      else merged.delete(k)
-    }
-    return merged
-  }, [persistedSourceMap, pendingSourceMap])
+  const effectiveSourceMap = useEffectiveMap(persistedSourceMap, pendingSourceMap)
 
   function getPartRouting(partId) {
     if (pendingPartRouting[partId]) return pendingPartRouting[partId]
@@ -818,25 +660,6 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     setRowSource(prev => ({ ...prev, [idx]: locationId || null }))
   }
 
-  // Grouped <option>s for the source pickers (source-map + per-row override).
-  function renderSourceOptions() {
-    const groups = [
-      ['warehouse', '🏭 Warehouses'],
-      ['group',     '👥 Shared trailers'],
-      ['truck',     '🚚 Crew trucks'],
-      ['bin',       '🗄️ Bins'],
-    ]
-    return groups.map(([type, label]) => {
-      const locs = sourceLocations.filter(l => l.type === type)
-      if (locs.length === 0) return null
-      return (
-        <optgroup key={type} label={label}>
-          {locs.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-        </optgroup>
-      )
-    })
-  }
-
   async function handleApply() {
     setError('')
     setSubmitting(true)
@@ -876,20 +699,18 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         setError('Nothing ready to apply')
         return
       }
+      // DELIBERATELY atomic (default mode, NOT chunk:true): this writes the
+      // consumption ledger, and the [sonar:] marker dedup can't see rows
+      // written earlier in the SAME session (the marker set only refreshes
+      // when the CSV changes) — a partial write followed by an in-session
+      // re-apply would double-book transfers. All-or-nothing means a
+      // failure writes nothing and re-apply is always safe. Daily
+      // deliveries are far below any payload limit.
       await recordMovementsBatch(movements)
       // If this CSV came from a webhook delivery, mark it imported so it
       // drops out of the pending queue. Non-fatal if it fails (movements
       // are already written) — just log so we can clean up manually.
-      if (activePendingId) {
-        try {
-          await markSonarPendingImportApplied(activePendingId, {
-            movementCount: movements.length,
-            userId: currentUser?.id,
-          })
-        } catch (e) {
-          console.warn('Mark pending imported failed (movements still applied):', e)
-        }
-      }
+      await queue.markApplied(movements.length)
       onApplied(movements.length)
     } catch (e) {
       console.error('Sonar apply failed:', e)
@@ -925,7 +746,12 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             {csvRows ? 'Choose a different file' : 'Choose Sonar CSV'}
             <input
               type="file" accept=".csv,text/csv"
-              onChange={e => handleFile(e.target.files?.[0])}
+              onChange={e => {
+                const f = e.target.files?.[0]
+                if (!f) return
+                queue.clearActive()  // manual upload wipes any prior pending-id linkage
+                handleFile(f)
+              }}
               style={{ display: 'none' }}
             />
           </label>
@@ -946,156 +772,10 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         </div>
 
         {/* Pending webhook deliveries — Sonar's daily push lands here */}
-        {!pendingLoading && pendingImports.length > 0 && (
-          <div style={{
-            marginBottom: 12, padding: 10,
-            border: '1px solid var(--accent-border)',
-            background: 'var(--accent-bg)',
-            borderRadius: 'var(--r-sm)',
-          }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              fontSize: 12, fontWeight: 800, color: 'var(--accent-fg)',
-              textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6,
-            }}>
-              <Icon name="download" size={14} /> Auto-delivered from Sonar ({pendingImports.length})
-            </div>
-            {/* Scroll the list itself, not the whole sheet — a long backlog
-                otherwise buries the part-mapping section below the fold. */}
-            <div style={{ maxHeight: 240, overflowY: 'auto', paddingRight: 2 }}>
-            {pendingImports.map(p => {
-              const isActive = activePendingId === p.id
-              return (
-                <div key={p.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '6px 8px', marginBottom: 4,
-                  background: isActive ? 'var(--orange)' : 'var(--surface)',
-                  color: isActive ? '#fff' : 'var(--text)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--r-sm)',
-                }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 13 }}>
-                      {new Date(p.received_at).toLocaleString()}
-                    </div>
-                    <div style={{ fontSize: 11, color: isActive ? 'rgba(255,255,255,0.85)' : 'var(--hint)' }}>
-                      {p.parsed_row_count} row{p.parsed_row_count === 1 ? '' : 's'}
-                      {p.filename ? ` · ${p.filename}` : ''}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => loadPending(p)}
-                    className="btn"
-                    style={{
-                      padding: '5px 10px', fontSize: 12,
-                      background: isActive ? '#fff' : 'var(--orange)',
-                      color: isActive ? 'var(--orange)' : '#fff',
-                      border: 'none', borderRadius: 'var(--r-xs)',
-                      fontWeight: 'var(--fw-semibold)', cursor: 'pointer',
-                    }}
-                    disabled={parsing || submitting}
-                  >
-                    {isActive ? 'Loaded' : 'Review'}
-                  </button>
-                  <button
-                    onClick={() => handleDiscardPending(p)}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center',
-                      padding: '5px 8px', fontSize: 11,
-                      background: 'transparent',
-                      color: isActive ? 'rgba(255,255,255,0.8)' : 'var(--muted)',
-                      border: 'none', cursor: 'pointer',
-                    }}
-                    title="Discard this delivery"
-                    disabled={parsing || submitting}
-                  >
-                    <Icon name="x" size={13} />
-                  </button>
-                </div>
-              )
-            })}
-            </div>
-          </div>
-        )}
+        <PendingImportsPanel queue={queue} disabled={parsing || submitting} />
 
-        {/* Processed deliveries (imported + discarded) — audit panel.
-            Always-available toggle so the manager can audit even when
-            nothing's pending. */}
-        {!pendingLoading && (
-          <div style={{ marginBottom: 12 }}>
-            <button
-              onClick={toggleProcessed}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--muted)', fontSize: 12,
-                padding: '4px 0', textDecoration: 'underline',
-              }}
-            >
-              <Icon name={showProcessed ? 'chevron-down' : 'chevron-right'} size={13} />
-              {showProcessed ? 'Hide' : 'Show'} recent webhook deliveries (audit)
-            </button>
-            {showProcessed && (
-              <div style={{
-                marginTop: 6, padding: 8,
-                background: 'var(--surface2)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--r-sm)',
-              }}>
-                {processedLoading && (
-                  <div style={{ padding: 12, textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
-                    Loading…
-                  </div>
-                )}
-                {!processedLoading && processedImports && processedImports.length === 0 && (
-                  <div style={{ padding: 12, textAlign: 'center', color: 'var(--hint)', fontSize: 12 }}>
-                    No processed deliveries yet. Once you import or discard a Sonar webhook delivery, it'll show up here.
-                  </div>
-                )}
-                {!processedLoading && processedImports && processedImports.length > 0 && (
-                  <div style={{ maxHeight: 220, overflowY: 'auto' }}>
-                    {processedImports.map(p => {
-                      const isImported = p.status === 'imported'
-                      const isAutoDiscard = p.discard_reason?.startsWith('Auto-discarded')
-                      return (
-                        <div key={p.id} style={{
-                          display: 'flex', alignItems: 'center', gap: 8,
-                          padding: '5px 6px', marginBottom: 2,
-                          fontSize: 11,
-                          borderBottom: '1px solid var(--border)',
-                        }}>
-                          <span
-                            className={isImported ? 'pill pill-success pill-sm' : isAutoDiscard ? 'pill pill-danger pill-sm' : 'pill pill-muted pill-sm'}
-                            style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                          >
-                            {isImported
-                              ? <><Icon name="check" size={12} /> imported</>
-                              : isAutoDiscard
-                                ? <><Icon name="alert" size={12} /> auto-discarded</>
-                                : 'discarded'}
-                          </span>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontWeight: 'var(--fw-semibold)' }}>
-                              {new Date(p.received_at).toLocaleString()}
-                              <span style={{ color: 'var(--hint)', fontWeight: 'normal', marginLeft: 6 }}>
-                                · {p.parsed_row_count} row{p.parsed_row_count === 1 ? '' : 's'}
-                              </span>
-                            </div>
-                            <div style={{ color: 'var(--hint)', fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {isImported
-                                ? `applied ${p.applied_movement_count || 0} movement${p.applied_movement_count === 1 ? '' : 's'}${p.applied_at ? ` at ${new Date(p.applied_at).toLocaleString()}` : ''}`
-                                : (p.error_message || p.discard_reason || 'no reason given')}
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+        {/* Processed deliveries (imported + discarded) — audit panel. */}
+        <ProcessedImportsPanel queue={queue} label="webhook" />
 
         {parsing && <div style={{ padding: 16, color: 'var(--muted)', textAlign: 'center' }}>Parsing…</div>}
 
@@ -1151,14 +831,13 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                           </option>
                         ))}
                       </select>
-                      <select
-                        value={sourceLocId || ''}
-                        onChange={e => handleSourceLocationChange(loc, e.target.value || null)}
+                      <SourceLocationSelect
+                        locations={sourceLocations}
+                        value={sourceLocId}
+                        onChange={v => handleSourceLocationChange(loc, v || null)}
+                        placeholder="…or map to a location (persists)"
                         style={{ ...selectStyle(), fontSize: 11, color: 'var(--muted)' }}
-                      >
-                        <option value="">…or map to a location (persists)</option>
-                        {renderSourceOptions()}
-                      </select>
+                      />
                     </div>
                   </MappingRow>
                 )
@@ -1236,7 +915,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                           <option key={o.id} value={o.id}>{o.label}</option>
                         ))}
                       </select>
-                      <div style={statusBadgeStyle(status.color)}>{status.tag}</div>
+                      <StatusTag tag={status.tag} color={status.color} />
                     </div>
                     {isOpen && (
                       <CreatePartPanel
@@ -1418,14 +1097,13 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                             {/* Per-row source override — pick where the stock
                                 actually came off when the completer isn't the
                                 carrier. Resolves no-crew / no-truck rows. */}
-                            <select
-                              value={rowSource[r.idx] || ''}
-                              onChange={e => setRowSourceLocation(r.idx, e.target.value)}
+                            <SourceLocationSelect
+                              locations={sourceLocations}
+                              value={rowSource[r.idx]}
+                              onChange={v => setRowSourceLocation(r.idx, v)}
+                              placeholder={r.fromLocationId ? 'override source…' : '— pick source —'}
                               style={{ ...selectStyle(), fontSize: 11, marginTop: 4, color: 'var(--muted)', minWidth: 150 }}
-                            >
-                              <option value="">{r.fromLocationId ? 'override source…' : '— pick source —'}</option>
-                              {renderSourceOptions()}
-                            </select>
+                            />
                           </td>
                           <td style={tdStyle()}>
                             {needsPicker ? (
@@ -1449,7 +1127,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                             )}
                           </td>
                           <td style={tdStyle()}>
-                            <StatusBadge status={r.status} />
+                            <StatusBadge status={r.status} map={SONAR_STATUS_MAP} />
                           </td>
                         </tr>
                       )
@@ -1505,82 +1183,28 @@ export default function SonarImportSheet({ onClose, onApplied }) {
 }
 
 // ─── Sub-components ─────────────────────────────────────────────────────
+// Section / MappingRow / StatusTag / StatusBadge / selectStyle /
+// SourceLocationSelect + the webhook panels live in ./importShared (shared
+// with FiberJobsImportSheet). Only the sheet-specific bits stay here.
 
-function Section({ title, subtitle, accent, children }) {
-  return (
-    <div style={{
-      marginBottom: 12, padding: 10,
-      border: `1px solid ${accent}`, borderRadius: 'var(--r-sm)',
-      background: 'var(--surface)',
-    }}>
-      <div style={{
-        fontSize: 12, fontWeight: 800, color: accent,
-        textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 2,
-      }}>{title}</div>
-      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{subtitle}</div>
-      {children}
-    </div>
-  )
+// Status vocabulary for the transactions table — this sheet's resolver
+// failure modes. Rendered by the shared StatusBadge.
+const SONAR_STATUS_MAP = {
+  ready:            { label: 'ready',           color: 'var(--teal-dk)',  bg: 'var(--teal-lt)' },
+  'no-crew':        { label: 'no crew',         color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+  'no-truck':       { label: 'no truck',        color: 'var(--red)',      bg: 'var(--red-lt)' },
+  'no-part':        { label: 'no part',         color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+  'ask':            { label: 'ask: pick dest',  color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+  'no-city':        { label: 'no city',         color: 'var(--red)',      bg: 'var(--red-lt)' },
+  'city-unmapped':  { label: 'city unmapped',   color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+  'project-unmapped': { label: 'project unmapped', color: 'var(--amber)', bg: 'var(--amber-lt)' },
+  'no-project-bucket': { label: 'phase has no bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
+  'no-source-location': { label: 'no source location', color: 'var(--amber)', bg: 'var(--amber-lt)' },
+  'already-imported': { label: 'already imported', color: 'var(--muted)', bg: 'var(--gray-lt)' },
+  'no-gigwave-bucket': { label: 'no Gigwave bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
+  'no-fixed-wireless-bucket': { label: 'no Fixed Wireless bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
+  'unresolved':     { label: 'unresolved',      color: 'var(--amber)',    bg: 'var(--amber-lt)' },
 }
-
-function MappingRow({ primary, secondary, status, children }) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4,
-      padding: '4px 6px', background: 'var(--surface2)', borderRadius: 6,
-    }}>
-      <div style={{ flex: 2, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{primary}</div>
-        {secondary && <div style={{ fontSize: 10, color: 'var(--hint)' }}>{secondary}</div>}
-      </div>
-      <div style={{ flex: 3, minWidth: 0 }}>{children}</div>
-      {status && <div style={statusBadgeStyle(status.color)}>{status.tag}</div>}
-    </div>
-  )
-}
-
-function StatusBadge({ status }) {
-  const map = {
-    ready:            { label: 'ready',           color: 'var(--teal-dk)',  bg: 'var(--teal-lt)' },
-    'no-crew':        { label: 'no crew',         color: 'var(--amber)',    bg: 'var(--amber-lt)' },
-    'no-truck':       { label: 'no truck',        color: 'var(--red)',      bg: 'var(--red-lt)' },
-    'no-part':        { label: 'no part',         color: 'var(--amber)',    bg: 'var(--amber-lt)' },
-    'ask':            { label: 'ask: pick dest',  color: 'var(--amber)',    bg: 'var(--amber-lt)' },
-    'no-city':        { label: 'no city',         color: 'var(--red)',      bg: 'var(--red-lt)' },
-    'city-unmapped':  { label: 'city unmapped',   color: 'var(--amber)',    bg: 'var(--amber-lt)' },
-    'project-unmapped': { label: 'project unmapped', color: 'var(--amber)', bg: 'var(--amber-lt)' },
-    'no-project-bucket': { label: 'phase has no bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
-    'no-source-location': { label: 'no source location', color: 'var(--amber)', bg: 'var(--amber-lt)' },
-    'already-imported': { label: 'already imported', color: 'var(--muted)', bg: 'var(--gray-lt)' },
-    'no-gigwave-bucket': { label: 'no Gigwave bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
-    'no-fixed-wireless-bucket': { label: 'no Fixed Wireless bucket', color: 'var(--red)', bg: 'var(--red-lt)' },
-    'unresolved':     { label: 'unresolved',      color: 'var(--amber)',    bg: 'var(--amber-lt)' },
-  }
-  const m = map[status] || map.ready
-  return (
-    <span style={{
-      fontSize: 10, fontWeight: 700, padding: '2px 6px',
-      borderRadius: 8, background: m.bg, color: m.color,
-    }}>{m.label}</span>
-  )
-}
-
-const selectStyle = () => ({
-  width: '100%',
-  padding: '4px 6px',
-  fontSize: 11,
-  border: '1px solid var(--border2)',
-  borderRadius: 4,
-  background: 'var(--bg)',
-  color: 'var(--text)',
-})
-
-const statusBadgeStyle = (color) => ({
-  flexShrink: 0, fontSize: 10, fontWeight: 700,
-  padding: '2px 8px', borderRadius: 10,
-  background: 'var(--bg)', color,
-  border: `1px solid ${color}`,
-})
 
 const thStyle = (extra = {}) => ({
   padding: '6px 8px', fontSize: 11, fontWeight: 700,

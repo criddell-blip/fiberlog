@@ -7,6 +7,7 @@ import {
   getPhasesWithBuckets,
   getSonarProjectMap,
 } from '../../lib/inventory'
+import { selectStyle } from './importShared'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 
@@ -343,7 +344,7 @@ export default function BulkSonarProjectsSheet({ onClose, onDone }) {
                                 value={r.projectId}
                                 onChange={e => setRowProject(idx, e.target.value)}
                                 disabled={isAlreadyMapped || submitting}
-                                style={{ width: '100%', padding: '4px 6px', fontSize: 12, border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', background: 'var(--surface2)' }}
+                                style={selectStyle()}
                               >
                                 <option value="">— pick —</option>
                                 {projects.map(p => (
@@ -357,7 +358,7 @@ export default function BulkSonarProjectsSheet({ onClose, onDone }) {
                                 value={r.phaseName}
                                 onChange={e => setRowPhaseName(idx, e.target.value)}
                                 disabled={isAlreadyMapped || submitting}
-                                style={{ width: '100%', padding: '4px 6px', fontSize: 12, border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', background: 'var(--surface2)' }}
+                                style={selectStyle()}
                               />
                             </td>
                             <td style={tdStyle}>

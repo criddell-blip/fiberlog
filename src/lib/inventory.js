@@ -864,14 +864,30 @@ export async function recordMovement({
   return data
 }
 
-export async function recordMovementsBatch(movements) {
-  if (!Array.isArray(movements) || movements.length === 0) return []
+// Batch insert of inventory movements.
+//
+// Default (`chunk: false`) — EXACT legacy behavior: validate every row up
+// front (throw on the first bad one, before any network round trip), then
+// one atomic insert. All-or-nothing; returns the inserted rows' ids.
+//
+// `chunk: true` — the chunked-insert-with-single-row-fallback loop that
+// used to be copy-pasted at the call sites (BulkMoveSheet /
+// InventoryImportSheet) for large imports. Inserts `chunkSize` rows at a
+// time; when a chunk fails (validation OR insert), each of its rows is
+// retried individually so one bad row can't sink its neighbors. Never
+// throws for row-level failures — returns `{ inserted, errors }` where
+// errors is [{ movement, message }]. NOT atomic: earlier chunks stay
+// written if a later one fails (movements are append-only — callers that
+// need all-or-nothing must use the default mode). `onProgress({ done,
+// total, inserted, errors })` fires after each chunk for progress UIs.
+export async function recordMovementsBatch(movements, { chunk = false, chunkSize = 100, onProgress } = {}) {
+  if (!Array.isArray(movements) || movements.length === 0) {
+    return chunk ? { inserted: [], errors: [] } : []
+  }
 
-  // Validate every row up front. Throwing here rather than after the round
-  // trip lets the existing chunk-and-fall-back-to-single-row callers
-  // (BulkMoveSheet, InventoryImportSheet) isolate the bad row without
+  // Validate a row. Throwing here rather than after the round trip avoids
   // wasting a network insert that the DB would have rejected anyway.
-  movements.forEach((m, i) => {
+  const validate = (m, i) => {
     if (!m.created_by) throw new Error(`row ${i}: created_by required`)
     if (!m.part_id) throw new Error(`row ${i}: part_id required`)
     if (!m.quantity || Number(m.quantity) <= 0) throw new Error(`row ${i}: quantity must be > 0`)
@@ -880,9 +896,9 @@ export async function recordMovementsBatch(movements) {
     } catch (e) {
       throw new Error(`row ${i}: ${e.message}`)
     }
-  })
+  }
 
-  const payload = movements.map(m => ({
+  const toPayload = m => ({
     movement_type: m.movement_type,
     part_id: m.part_id,
     quantity: Number(m.quantity),
@@ -903,10 +919,49 @@ export async function recordMovementsBatch(movements) {
     // omit it → NULL → reports/Sage COALESCE(occurred_at, created_at).
     occurred_at: m.occurred_at || null,
     created_by: m.created_by,
-  }))
-  const { data, error } = await db.from('inventory_movements').insert(payload).select('id')
-  if (error) throw error
-  return data || []
+  })
+
+  if (!chunk) {
+    movements.forEach(validate)
+    const { data, error } = await db.from('inventory_movements').insert(movements.map(toPayload)).select('id')
+    if (error) throw error
+    return data || []
+  }
+
+  const insertRows = async rows => {
+    const { data, error } = await db.from('inventory_movements').insert(rows.map(toPayload)).select('id')
+    if (error) throw error
+    return data || []
+  }
+
+  const inserted = []
+  const errors = []
+  for (let i = 0; i < movements.length; i += chunkSize) {
+    const slice = movements.slice(i, i + chunkSize)
+    try {
+      slice.forEach(validate)
+      inserted.push(...await insertRows(slice))
+    } catch {
+      // Chunk failed — isolate the bad row(s) by retrying one at a time.
+      // Real overall index in the message so the manager can find the row.
+      for (let j = 0; j < slice.length; j++) {
+        const m = slice[j]
+        try {
+          validate(m, i + j)
+          inserted.push(...await insertRows([m]))
+        } catch (rowErr) {
+          errors.push({ movement: m, message: rowErr.message })
+        }
+      }
+    }
+    onProgress?.({
+      done: Math.min(i + slice.length, movements.length),
+      total: movements.length,
+      inserted: inserted.length,
+      errors,
+    })
+  }
+  return { inserted, errors }
 }
 
 // ─── CREW SELF-SERVICE ──────────────────────────────────────────────────────

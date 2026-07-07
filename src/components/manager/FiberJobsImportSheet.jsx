@@ -6,12 +6,16 @@ import {
   recordMovementsBatch,
   getSonarProjectMap, setSonarProjectPhase, getPhasesWithBuckets,
   getSonarSourceLocationMap, setSonarSourceLocation, getLocations,
-  getPendingSonarImports, getProcessedSonarImports, getPendingSonarImport,
-  markSonarPendingImportApplied, discardSonarPendingImport,
   getFiberValueMap, setFiberValueMap, FIBER_QTY_MODE_OPTIONS,
   parseFiberRow, isFiberValueIgnored, FIBER_NON_MATERIAL_COLUMNS,
 } from '../../lib/inventory'
-import { parseCsv, readFileAsText } from '../../lib/csvImport'
+import {
+  useCsvFile, useSonarPendingQueue, useEffectiveMap, useAlreadyImportedMarkers,
+} from '../../lib/useCsvImport'
+import {
+  Section, MappingRow, StatusBadge, selectStyle,
+  SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
+} from './importShared'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 
@@ -57,57 +61,6 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   const [persistedSourceMap, setPersistedSourceMap] = useState(() => new Map())  // sonar_source(username) UPPER → location id
   const [pendingSourceMap, setPendingSourceMap] = useState({})  // session edits, mirrors persistedSourceMap
 
-  // CSV state
-  const [fileName, setFileName] = useState('')
-  const [csvHeaders, setCsvHeaders] = useState([])
-  const [csvRows, setCsvRows] = useState(null)
-  const [activePendingId, setActivePendingId] = useState(null)
-
-  // Back closes the importer (mounted only when open). Confirm once a CSV is
-  // loaded so mapping work isn't lost to a stray Back.
-  useBackClose(1, onClose, {
-    confirm: () => csvRows == null || window.confirm('Close the fiber-jobs import? Unsaved mapping will be lost.'),
-  })
-  const [parsing, setParsing] = useState(false)
-  const [error, setError] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-
-  // Pending deliveries (fiber_jobs only)
-  const [pendingImports, setPendingImports] = useState([])
-  const [pendingLoading, setPendingLoading] = useState(true)
-  const refreshPending = async () => {
-    try {
-      const rows = await getPendingSonarImports({ includeProcessed: false, reportType: 'fiber_jobs' })
-      setPendingImports(rows)
-    } catch (e) {
-      console.warn('Pending fiber-jobs imports load failed:', e)
-    } finally {
-      setPendingLoading(false)
-    }
-  }
-  useEffect(() => { refreshPending() }, [])
-
-  // Processed (audit panel)
-  const [showProcessed, setShowProcessed] = useState(false)
-  const [processedImports, setProcessedImports] = useState(null)
-  const [processedLoading, setProcessedLoading] = useState(false)
-  async function toggleProcessed() {
-    const next = !showProcessed
-    setShowProcessed(next)
-    if (next && processedImports === null) {
-      setProcessedLoading(true)
-      try {
-        const rows = await getProcessedSonarImports({ limit: 30, reportType: 'fiber_jobs' })
-        setProcessedImports(rows)
-      } catch (e) {
-        console.warn('Processed fiber-jobs load failed:', e)
-        setProcessedImports([])
-      } finally {
-        setProcessedLoading(false)
-      }
-    }
-  }
-
   // Per-import picks
   const [crewMap, setCrewMap] = useState({})            // username → user_id
   const [pendingProjectMap, setPendingProjectMap] = useState({})  // project UPPER → phase id
@@ -117,8 +70,35 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   const [rowMaterialOverride, setRowMaterialOverride] = useState({})
   const [rowSource, setRowSource] = useState({})        // row idx → source location id (per-row override)
   const [rowExtraMaterials, setRowExtraMaterials] = useState({})  // job idx → [{sku, qty}] materials added by hand (Sonar job had none/missing)
-  // Already-imported [sonar_jobs:...] markers from past movements (90d window).
-  const [alreadyImportedKeys, setAlreadyImportedKeys] = useState(() => new Set())
+  const [submitting, setSubmitting] = useState(false)
+
+  // CSV state + webhook queue (shared plumbing)
+  const csv = useCsvFile({
+    requiredCols: REQUIRED_COLS,
+    missingColsMessage: missing => `CSV missing required columns: ${missing.join(', ')}`,
+    // Successful load resets the per-import picks (persisted maps survive).
+    onLoaded: () => {
+      setCrewMap({})
+      setPendingProjectMap({})
+      setExcluded(new Set())
+      setRowMaterialOverride({})
+    },
+  })
+  const { fileName, csvHeaders, csvRows, error, setError, parsing, handleFile } = csv
+
+  const queue = useSonarPendingQueue('fiber_jobs', {
+    csv,
+    currentUserId: currentUser?.id,
+    showToast,
+    discardPrompt: p =>
+      `Discard this pending fiber-jobs import (${p.parsed_row_count} rows from ${new Date(p.received_at).toLocaleString()})?`,
+  })
+
+  // Back closes the importer (mounted only when open). Confirm once a CSV is
+  // loaded so mapping work isn't lost to a stray Back.
+  useBackClose(1, onClose, {
+    confirm: () => csvRows == null || window.confirm('Close the fiber-jobs import? Unsaved mapping will be lost.'),
+  })
 
   // Fetch lookups on mount
   useEffect(() => {
@@ -176,75 +156,6 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     return () => { cancelled = true }
   }, [])
 
-  // CSV load — shared by file upload + pending-import load
-  function loadCsvText(text) {
-    const { headers, rows } = parseCsv(text)
-    if (rows.length === 0) {
-      setError('CSV had no data rows'); setCsvRows([]); return
-    }
-    const missing = REQUIRED_COLS.filter(c => !headers.includes(c))
-    if (missing.length > 0) {
-      setError(`CSV missing required columns: ${missing.join(', ')}`); setCsvRows([])
-      return
-    }
-    setCsvHeaders(headers)
-    setCsvRows(rows)
-    setCrewMap({})
-    setPendingProjectMap({})
-    setExcluded(new Set())
-    setRowMaterialOverride({})
-  }
-
-  async function handleFile(file) {
-    if (!file) return
-    setError(''); setParsing(true)
-    setFileName(file.name)
-    setActivePendingId(null)
-    try {
-      const text = await readFileAsText(file)
-      loadCsvText(text)
-    } catch (e) {
-      console.error('Parse failed:', e)
-      setError(e.message || String(e)); setCsvRows([])
-    } finally {
-      setParsing(false)
-    }
-  }
-
-  async function loadPending(pending) {
-    setError(''); setParsing(true)
-    try {
-      const full = await getPendingSonarImport(pending.id)
-      setActivePendingId(pending.id)
-      const label = full.filename || `pending ${new Date(full.received_at).toLocaleString()}`
-      setFileName(`[webhook] ${label}`)
-      loadCsvText(full.raw_csv || '')
-    } catch (e) {
-      console.error('Load pending failed:', e)
-      setError(`Could not load pending import: ${e.message || e}`)
-    } finally {
-      setParsing(false)
-    }
-  }
-
-  async function handleDiscardPending(pending) {
-    const reason = window.prompt(
-      `Discard this pending fiber-jobs import (${pending.parsed_row_count} rows from ${new Date(pending.received_at).toLocaleString()})?`,
-      'Test fire / duplicate / not needed'
-    )
-    if (reason === null) return
-    try {
-      await discardSonarPendingImport(pending.id, { reason: reason || 'Discarded', userId: currentUser?.id })
-      if (activePendingId === pending.id) {
-        setActivePendingId(null); setCsvRows(null); setFileName('')
-      }
-      await refreshPending()
-      showToast('Pending import discarded')
-    } catch (e) {
-      setError(`Discard failed: ${e.message || e}`)
-    }
-  }
-
   // Material columns = headers minus required + non-material columns
   const materialColumns = useMemo(() => {
     return csvHeaders.filter(h => !FIBER_NON_MATERIAL_COLUMNS.has(h))
@@ -277,22 +188,10 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   }, [uniqueUsernames, crewUsers])
 
   // Auto-seed project → phase via existing map
-  const effectiveProjectMap = useMemo(() => {
-    const merged = new Map(persistedProjectMap)
-    for (const [k, v] of Object.entries(pendingProjectMap)) {
-      if (v) merged.set(k, v); else merged.delete(k)
-    }
-    return merged
-  }, [persistedProjectMap, pendingProjectMap])
+  const effectiveProjectMap = useEffectiveMap(persistedProjectMap, pendingProjectMap)
 
   // Sonar username → mapped source location (persisted + session edits).
-  const effectiveSourceMap = useMemo(() => {
-    const merged = new Map(persistedSourceMap)
-    for (const [k, v] of Object.entries(pendingSourceMap)) {
-      if (v) merged.set(k, v); else merged.delete(k)
-    }
-    return merged
-  }, [persistedSourceMap, pendingSourceMap])
+  const effectiveSourceMap = useEffectiveMap(persistedSourceMap, pendingSourceMap)
 
   // A crew member's own home location: their shared pull location (group/
   // trailer) when active, else their personal truck. Mirrors getMyTruck so
@@ -323,25 +222,6 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     setRowSource(prev => ({ ...prev, [idx]: locationId || null }))
   }
 
-  // Grouped <option>s for the source pickers.
-  function renderSourceOptions() {
-    const groups = [
-      ['warehouse', '🏭 Warehouses'],
-      ['group',     '👥 Shared trailers'],
-      ['truck',     '🚚 Crew trucks'],
-      ['bin',       '🗄️ Bins'],
-    ]
-    return groups.map(([type, label]) => {
-      const locs = sourceLocations.filter(l => l.type === type)
-      if (locs.length === 0) return null
-      return (
-        <optgroup key={type} label={label}>
-          {locs.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-        </optgroup>
-      )
-    })
-  }
-
   // Unique (column, value) combos that need a map entry
   const valueMappingsNeeded = useMemo(() => {
     if (!csvRows) return []
@@ -360,6 +240,10 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     }
     return out
   }, [csvRows, materialColumns, valueMap])
+
+  // Already-imported [sonar_jobs:<acct>_YYYY-MM-DD_<type>] markers from past
+  // movements (90-day window) — refreshed whenever a new CSV is loaded.
+  const alreadyImportedKeys = useAlreadyImportedMarkers('sonar_jobs', csvRows)
 
   // Per-row parsed material lines
   const resolved = useMemo(() => {
@@ -438,38 +322,6 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       }
     })
   }, [csvRows, crewMap, trucksByUser, pullByUser, activeLocIds, effectiveSourceMap, rowSource, crewUsers, materialColumns, valueMap, effectiveProjectMap, phases, rowMaterialOverride, rowExtraMaterials, alreadyImportedKeys])
-
-  // Already-imported lookup vs past movements (90-day window)
-  useEffect(() => {
-    if (!resolved || resolved.length === 0) {
-      setAlreadyImportedKeys(new Set()); return
-    }
-    let cancelled = false
-    ;(async () => {
-      try {
-        const cutoff = new Date(Date.now() - 90 * 86400 * 1000).toISOString()
-        const { data, error } = await db
-          .from('inventory_movements')
-          .select('notes')
-          .like('notes', '%[sonar_jobs:%')
-          .gte('created_at', cutoff)
-        if (error) throw error
-        if (cancelled) return
-        const set = new Set()
-        const re = /\[sonar_jobs:([^\]]+)\]/g
-        for (const m of data || []) {
-          let match
-          while ((match = re.exec(m.notes || '')) !== null) set.add(match[1].trim())
-        }
-        setAlreadyImportedKeys(set)
-      } catch (e) {
-        console.warn('Already-imported lookup failed:', e)
-      }
-    })()
-    return () => { cancelled = true }
-    // resolved depends on many things; we just want to refresh once when csvRows is set
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [csvRows])
 
   // Handlers for value-map picker
   async function handleValueMapChange(columnName, valueText, fields) {
@@ -596,23 +448,20 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       if (movements.length === 0) {
         setError('Nothing ready to apply'); setSubmitting(false); return
       }
+      // DELIBERATELY atomic (default mode, NOT chunk:true): this writes the
+      // consumption ledger, and the [sonar_jobs:] markers are per-JOB while
+      // one job expands to N movement lines — a partial write would leave a
+      // job's marker present with some lines missing, so a later retry
+      // would skip the whole job and silently under-count materials. The
+      // in-session marker set also never refreshes mid-CSV, so partial +
+      // re-apply could equally double-book. All-or-nothing sidesteps both:
+      // failure writes nothing, re-apply is always safe.
       await recordMovementsBatch(movements)
-      if (activePendingId) {
-        try {
-          await markSonarPendingImportApplied(activePendingId, {
-            movementCount: movements.length,
-            userId: currentUser?.id,
-          })
-        } catch (e) {
-          console.warn('Mark pending imported failed (movements still applied):', e)
-        }
-      }
+      await queue.markApplied(movements.length)
       // Clear local state so the apply button can't re-fire against the
       // same dataset even if the parent's close callback misbehaves.
-      setCsvRows(null)
-      setCsvHeaders([])
-      setFileName('')
-      setActivePendingId(null)
+      csv.clear()
+      queue.clearActive()
       setCrewMap({})
       setPendingProjectMap({})
       setExcluded(new Set())
@@ -653,7 +502,12 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             {csvRows ? 'Choose a different file' : 'Choose fiber jobs CSV'}
             <input
               type="file" accept=".csv,text/csv"
-              onChange={e => handleFile(e.target.files?.[0])}
+              onChange={e => {
+                const f = e.target.files?.[0]
+                if (!f) return
+                queue.clearActive()  // manual upload wipes any prior pending-id linkage
+                handleFile(f)
+              }}
               style={{ display: 'none' }}
             />
           </label>
@@ -665,133 +519,10 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         </div>
 
         {/* Pending deliveries (fiber_jobs only) */}
-        {!pendingLoading && pendingImports.length > 0 && (
-          <div style={{
-            marginBottom: 12, padding: 10,
-            border: '1px solid var(--accent-border)',
-            background: 'var(--accent-bg)',
-            borderRadius: 'var(--r-sm)',
-          }}>
-            <div style={{
-              fontSize: 12, fontWeight: 800, color: 'var(--accent-fg)',
-              textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6,
-              display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              <Icon name="download" size={14} /> Auto-delivered from Sonar ({pendingImports.length})
-            </div>
-            {/* Scroll the list itself, not the whole sheet — otherwise a long
-                backlog (we saw 13) buries the part-mapping section below the
-                fold. ~4 rows visible with a partial 5th to signal more. */}
-            <div style={{ maxHeight: 240, overflowY: 'auto', paddingRight: 2 }}>
-            {pendingImports.map(p => {
-              const isActive = activePendingId === p.id
-              return (
-                <div key={p.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '6px 8px', marginBottom: 4,
-                  background: isActive ? 'var(--orange)' : 'var(--surface)',
-                  color: isActive ? '#fff' : 'var(--text)',
-                  border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
-                }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 13 }}>
-                      {new Date(p.received_at).toLocaleString()}
-                    </div>
-                    <div style={{ fontSize: 11, color: isActive ? 'rgba(255,255,255,0.85)' : 'var(--hint)' }}>
-                      {p.parsed_row_count} row{p.parsed_row_count === 1 ? '' : 's'}
-                      {p.filename ? ` · ${p.filename}` : ''}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => loadPending(p)}
-                    className="btn"
-                    style={{
-                      padding: '5px 10px', fontSize: 12,
-                      background: isActive ? '#fff' : 'var(--orange)',
-                      color: isActive ? 'var(--orange)' : '#fff',
-                      border: 'none', borderRadius: 'var(--r-xs)',
-                      fontWeight: 'var(--fw-semibold)', cursor: 'pointer',
-                    }}
-                    disabled={parsing || submitting}
-                  >
-                    {isActive ? 'Loaded' : 'Review'}
-                  </button>
-                  <button
-                    onClick={() => handleDiscardPending(p)}
-                    style={{
-                      padding: '5px 8px', fontSize: 11,
-                      background: 'transparent',
-                      color: isActive ? 'rgba(255,255,255,0.8)' : 'var(--muted)',
-                      border: 'none', cursor: 'pointer',
-                    }}
-                    title="Discard"
-                    disabled={parsing || submitting}
-                  >
-                    <span style={{ display: 'inline-flex' }}><Icon name="x" size={12} /></span>
-                  </button>
-                </div>
-              )
-            })}
-            </div>
-          </div>
-        )}
+        <PendingImportsPanel queue={queue} disabled={parsing || submitting} />
 
         {/* Processed audit */}
-        {!pendingLoading && (
-          <div style={{ marginBottom: 12 }}>
-            <button
-              onClick={toggleProcessed}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--muted)', fontSize: 12,
-                padding: '4px 0', textDecoration: 'underline',
-              }}
-            >
-              <Icon name={showProcessed ? 'chevron-down' : 'chevron-right'} size={12} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 3 }} />{showProcessed ? 'Hide' : 'Show'} recent fiber-jobs deliveries (audit)
-            </button>
-            {showProcessed && processedImports && (
-              <div style={{
-                marginTop: 6, padding: 8,
-                background: 'var(--surface2)', border: '1px solid var(--border)',
-                borderRadius: 'var(--r-sm)',
-              }}>
-                {processedLoading && <div style={{ padding: 12, textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>Loading…</div>}
-                {!processedLoading && processedImports.length === 0 && (
-                  <div style={{ padding: 12, textAlign: 'center', color: 'var(--hint)', fontSize: 12 }}>
-                    No processed deliveries yet.
-                  </div>
-                )}
-                {!processedLoading && processedImports.map(p => {
-                  const isImported = p.status === 'imported'
-                  return (
-                    <div key={p.id} style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      padding: '5px 6px', marginBottom: 2,
-                      fontSize: 11, borderBottom: '1px solid var(--border)',
-                    }}>
-                      <span className={isImported ? 'pill pill-success pill-sm' : 'pill pill-muted pill-sm'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        {isImported ? <><Icon name="check" size={11} /> imported</> : 'discarded'}
-                      </span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 'var(--fw-semibold)' }}>
-                          {new Date(p.received_at).toLocaleString()}
-                          <span style={{ color: 'var(--hint)', fontWeight: 'normal', marginLeft: 6 }}>
-                            · {p.parsed_row_count} row{p.parsed_row_count === 1 ? '' : 's'}
-                          </span>
-                        </div>
-                        <div style={{ color: 'var(--hint)', fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {isImported
-                            ? `applied ${p.applied_movement_count || 0} movement${p.applied_movement_count === 1 ? '' : 's'}`
-                            : (p.error_message || p.discard_reason || 'no reason given')}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )}
+        <ProcessedImportsPanel queue={queue} label="fiber-jobs" />
 
         {parsing && <div style={{ padding: 16, color: 'var(--muted)', textAlign: 'center' }}>Parsing…</div>}
 
@@ -850,14 +581,13 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
                           </option>
                         ))}
                       </select>
-                      <select
-                        value={mappedLocId || ''}
-                        onChange={e => handleSourceLocationChange(uname, e.target.value || null)}
+                      <SourceLocationSelect
+                        locations={sourceLocations}
+                        value={mappedLocId}
+                        onChange={v => handleSourceLocationChange(uname, v || null)}
+                        placeholder="…or pull from a location (persists)"
                         style={{ ...selectStyle(), fontSize: 11, color: 'var(--muted)' }}
-                      >
-                        <option value="">…or pull from a location (persists)</option>
-                        {renderSourceOptions()}
-                      </select>
+                      />
                     </div>
                   </MappingRow>
                 )
@@ -1027,12 +757,6 @@ function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, 
 function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, sourceLocations = [], rowSourceId = '', onSetSource, onAddMaterial, onSetMaterial, onRemoveMaterial }) {
   const isReady = job.rowStatus === 'ready'
   const isAlreadyImported = job.rowStatus === 'already-imported'
-  const srcGroups = [
-    ['warehouse', '🏭 Warehouses'],
-    ['group',     '👥 Shared trailers'],
-    ['truck',     '🚚 Crew trucks'],
-    ['bin',       '🗄️ Bins'],
-  ]
   return (
     <div style={{
       padding: '8px 10px', borderBottom: '1px solid var(--border)',
@@ -1060,30 +784,19 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
           {!isAlreadyImported && (
             <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ fontSize: 10, color: 'var(--hint)' }}>source:</span>
-              <select
+              <SourceLocationSelect
+                locations={sourceLocations}
                 value={rowSourceId}
-                onChange={e => onSetSource(e.target.value)}
+                onChange={v => onSetSource(v)}
+                placeholder={job.sourceLocId
+                  ? (sourceLocations.find(l => l.id === job.sourceLocId)?.name || 'override source…')
+                  : '— pick source —'}
                 style={{ ...selectStyle(), fontSize: 11, minWidth: 150, color: 'var(--muted)' }}
-              >
-                <option value="">
-                  {job.sourceLocId
-                    ? (sourceLocations.find(l => l.id === job.sourceLocId)?.name || 'override source…')
-                    : '— pick source —'}
-                </option>
-                {srcGroups.map(([type, label]) => {
-                  const locs = sourceLocations.filter(l => l.type === type)
-                  if (locs.length === 0) return null
-                  return (
-                    <optgroup key={type} label={label}>
-                      {locs.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                    </optgroup>
-                  )
-                })}
-              </select>
+              />
             </div>
           )}
         </div>
-        <JobStatusBadge status={job.rowStatus} />
+        <StatusBadge status={job.rowStatus} map={JOB_STATUS_MAP} />
       </div>
       {/* Material lines — always shown for a non-imported job so a job that
           came in with NO materials (contractor jobs / drop fixes) can still
@@ -1156,74 +869,19 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
 }
 
 // ─── Sub-components ─────────────────────────────────────────────────────
-function Section({ title, subtitle, accent, children }) {
-  return (
-    <div style={{
-      marginBottom: 12, padding: 10,
-      border: `1px solid ${accent}`, borderRadius: 'var(--r-sm)',
-      background: 'var(--surface)',
-    }}>
-      <div style={{ fontSize: 12, fontWeight: 800, color: accent, textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 2 }}>{title}</div>
-      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{subtitle}</div>
-      {children}
-    </div>
-  )
-}
+// Section / MappingRow / StatusBadge / selectStyle / SourceLocationSelect
+// + the webhook panels live in ./importShared (shared with
+// SonarImportSheet). Only the sheet-specific bits stay here.
 
-function MappingRow({ primary, secondary, status, children }) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4,
-      padding: '4px 6px', background: 'var(--surface2)', borderRadius: 6,
-    }}>
-      <div style={{ flex: 2, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{primary}</div>
-        {secondary && <div style={{ fontSize: 10, color: 'var(--hint)' }}>{secondary}</div>}
-      </div>
-      <div style={{ flex: 3, minWidth: 0 }}>{children}</div>
-      {status && <div style={statusBadgeStyle(status.color)}>{status.tag}</div>}
-    </div>
-  )
-}
-
-function JobStatusBadge({ status }) {
-  const map = {
-    ready:             { label: 'ready',           color: 'var(--teal-dk)',  bg: 'var(--teal-lt)' },
-    'no-crew':         { label: 'no crew',         color: 'var(--amber)',    bg: 'var(--amber-lt)' },
-    'no-truck':        { label: 'no truck',        color: 'var(--red)',      bg: 'var(--red-lt)' },
-    'no-project':      { label: 'no project',      color: 'var(--amber)',    bg: 'var(--amber-lt)' },
-    'project-unmapped':{ label: 'project unmapped',color: 'var(--amber)',    bg: 'var(--amber-lt)' },
-    'no-project-bucket':{label: 'no bucket',       color: 'var(--red)',      bg: 'var(--red-lt)' },
-    'no-materials':    { label: 'no materials',    color: 'var(--hint)',     bg: 'var(--gray-lt)' },
-    'already-imported':{ label: 'already imported',color: 'var(--muted)',    bg: 'var(--gray-lt)' },
-  }
-  const s = map[status] || map.ready
-  return (
-    <span style={{
-      padding: '2px 8px', borderRadius: 999,
-      background: s.bg, color: s.color,
-      fontSize: 10, fontWeight: 700,
-      textTransform: 'uppercase', letterSpacing: '.04em',
-      flexShrink: 0,
-    }}>{s.label}</span>
-  )
-}
-
-function selectStyle() {
-  return {
-    width: '100%', padding: '4px 6px',
-    fontSize: 12, border: '1px solid var(--border2)',
-    borderRadius: 'var(--r-xs)', background: 'var(--surface2)',
-    color: 'var(--text)',
-  }
-}
-
-function statusBadgeStyle(color) {
-  return {
-    padding: '2px 8px', borderRadius: 999,
-    border: `1px solid ${color}`,
-    color, fontSize: 10, fontWeight: 700,
-    textTransform: 'uppercase', letterSpacing: '.04em',
-    flexShrink: 0,
-  }
+// Status vocabulary for the job rows — this sheet's resolver failure
+// modes. Rendered by the shared StatusBadge.
+const JOB_STATUS_MAP = {
+  ready:             { label: 'ready',           color: 'var(--teal-dk)',  bg: 'var(--teal-lt)' },
+  'no-crew':         { label: 'no crew',         color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+  'no-truck':        { label: 'no truck',        color: 'var(--red)',      bg: 'var(--red-lt)' },
+  'no-project':      { label: 'no project',      color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+  'project-unmapped':{ label: 'project unmapped',color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+  'no-project-bucket':{label: 'no bucket',       color: 'var(--red)',      bg: 'var(--red-lt)' },
+  'no-materials':    { label: 'no materials',    color: 'var(--hint)',     bg: 'var(--gray-lt)' },
+  'already-imported':{ label: 'already imported',color: 'var(--muted)',    bg: 'var(--gray-lt)' },
 }

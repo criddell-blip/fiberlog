@@ -29,8 +29,6 @@ const STAGES = {
   done:      'done',
 }
 
-const CHUNK_SIZE = 100
-
 // Location types whose stock we're allowed to auto-zero during the post-import
 // sweep. Trucks hold a crew member's live on-truck count and job_site buckets
 // are the Sage consumption ledger — zeroing either would corrupt real records,
@@ -315,29 +313,18 @@ export default function InventoryImportSheet({ locations, currentUser, onClose, 
       console.warn(LOG_PREFIX, movementsSkipped, 'movements skipped because parts missing:', skippedSkusSample)
     }
 
-    let created = 0
-    const errors = []
-    for (let i = 0; i < movementsToInsert.length; i += CHUNK_SIZE) {
-      const chunk = movementsToInsert.slice(i, i + CHUNK_SIZE)
-      try {
-        const inserted = await recordMovementsBatch(chunk)
-        created += inserted.length
-      } catch (e) {
-        for (const m of chunk) {
-          try {
-            await recordMovementsBatch([m])
-            created++
-          } catch (rowErr) {
-            errors.push({ part_id: m.part_id, qty: m.quantity, message: rowErr.message })
-          }
-        }
-      }
-      setProgress(p => ({
-        ...p,
-        done: Math.min(i + chunk.length, movementsToInsert.length),
-        errors,
-      }))
-    }
+    // Chunked insert with single-row fallback lives inside
+    // recordMovementsBatch now ({ chunk: true }); onProgress keeps the
+    // progress bar + running error list live after each chunk.
+    const mapErrors = errs => errs.map(e => ({ part_id: e.movement.part_id, qty: e.movement.quantity, message: e.message }))
+    const res = await recordMovementsBatch(movementsToInsert, {
+      chunk: true,
+      onProgress: ({ done, errors: errs }) => {
+        setProgress(p => ({ ...p, done, errors: mapErrors(errs) }))
+      },
+    })
+    const created = res.inserted.length
+    const errors = mapErrors(res.errors)
 
     setResults({
       created,
