@@ -215,11 +215,32 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
 
         // Show "continued from X" indicator if someone else worked on this task
         if (data.last_worked_by && data.last_worked_by !== currentUser?.id && data.last_user) {
+          // Does the coworker's draft actually contain anything? Tasks are
+          // shared by design (handoffs, multi-crew passdowns), but the
+          // working draft is per-TASK not per-person — continuing here
+          // edits THEIR unsaved work. An empty draft is just a trail
+          // (they opened it and left); a non-empty one deserves an
+          // explicit opt-in so nobody wanders into a coworker's day by
+          // accident (July 2026, Chris's call: shared + warning).
+          const draftHasWork =
+            (wc.counts && Object.values(wc.counts).some(v => Number(v) > 0)) ||
+            (wc.extraParts && wc.extraParts.length > 0) ||
+            (wc.conduitSizes && Object.values(wc.conduitSizes).some(v => String(v || '').trim() !== '')) ||
+            !!String(wc.note || '').trim()
           setLastWorkedInfo({
             name: data.last_user.name,
             initials: data.last_user.initials,
             at: data.last_worked_at,
+            hasWork: draftHasWork,
           })
+          if (draftHasWork) {
+            const ok = window.confirm(
+              lang === 'es'
+                ? `Esta tarea tiene trabajo SIN ENVIAR de ${data.last_user.name}. Si continúas aquí, editas SU borrador.\n\n¿Continuar?`
+                : `This task has UNSUBMITTED work by ${data.last_user.name}. Continuing here edits THEIR draft.\n\nContinue?`
+            )
+            if (!ok) { onBack(); return }
+          }
         }
 
         setDraftLoaded(true)
@@ -544,6 +565,17 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
             {' · '}{(history.totalHours || 0).toLocaleString()} hrs
             <span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-medium)' }}>
               {' · '}{lang === 'es' ? 'última' : 'latest'} {fmtWhen(history.submissions[0].created_at, lang)}
+              {/* Shared tasks: make coworkers' involvement visible at a
+                  glance, not just inside the drill-in. */}
+              {(() => {
+                const others = [...new Set(history.submissions
+                  .filter(s => s.user_id !== currentUser?.id)
+                  .map(s => s.users?.name)
+                  .filter(Boolean))]
+                if (others.length === 0) return null
+                const label = others.length === 1 ? others[0] : `${others[0]} +${others.length - 1}`
+                return <> · {lang === 'es' ? 'incluye a' : 'includes'} {label}</>
+              })()}
             </span>
           </span>
           <span style={{ flexShrink: 0, fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-bold)', color: 'var(--teal-mid)' }}>
@@ -552,13 +584,17 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
         </div>
       )}
 
-      {/* "Continued from X" indicator — visible when picking up someone else's draft */}
+      {/* "Continued from X" indicator — visible when picking up someone
+          else's draft. AMBER when their draft holds real unsent work
+          (editing here changes it — the confirm on entry already opted
+          in); quiet teal when it's just an activity trail. */}
       {lastWorkedInfo && (
-        <div className="banner banner-success" style={{ padding: '6px var(--space-4)' }}>
-          <span className="banner-icon" style={{ display: 'inline-flex' }}><Icon name="rotate" size={13} /></span>
+        <div className={`banner ${lastWorkedInfo.hasWork ? 'banner-warning' : 'banner-success'}`} style={{ padding: '6px var(--space-4)' }}>
+          <span className="banner-icon" style={{ display: 'inline-flex' }}><Icon name={lastWorkedInfo.hasWork ? 'alert' : 'rotate'} size={13} /></span>
           <span className="banner-body" style={{ fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-semibold)' }}>
-            {lang === 'es' ? 'Continuando desde ' : 'Continuing from '}
-            {lastWorkedInfo.name}
+            {lastWorkedInfo.hasWork
+              ? (lang === 'es' ? `Editando el borrador SIN ENVIAR de ${lastWorkedInfo.name}` : `Editing ${lastWorkedInfo.name}'s UNSUBMITTED draft`)
+              : (lang === 'es' ? `Continuando desde ${lastWorkedInfo.name}` : `Continuing from ${lastWorkedInfo.name}`)}
             {lastWorkedInfo.at && (
               <span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-medium)', marginLeft: 4 }}>
                 · {new Date(lastWorkedInfo.at).toLocaleString(lang === 'es' ? 'es' : 'en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
