@@ -127,8 +127,21 @@ function InfraSidebar({
   projects, selTask, view, onSelectMyStock, onSelectTask, onSelectSite,
   currentUser, onUserTap, darkMode, toggleDarkMode, exitCrewMode,
 }) {
-  const [expandedProject, setExpandedProject] = useState(projects[0]?.id || null)
+  // Remember which project this user last had open (see CrewSidebar — the
+  // old auto-expand-first default opened Heber for everyone). Keyed by
+  // user id; collapsed on first-ever login.
+  const expandKey = 'fiberlog_expanded_project_' + (currentUser?.id || 'anon')
+  const [expandedProject, setExpandedProject] = useState(() => {
+    try { return localStorage.getItem(expandKey) || null } catch { return null }
+  })
   const [expandedSite, setExpandedSite] = useState(null)
+  function expandProject(id) {
+    setExpandedProject(id)
+    try {
+      if (id) localStorage.setItem(expandKey, id)
+      else localStorage.removeItem(expandKey)
+    } catch {}
+  }
 
   const isMyStock = view === 'mystock'
 
@@ -221,9 +234,9 @@ function InfraSidebar({
                   // project's first site so the right panel updates instead
                   // of feeling like nothing happened.
                   if (isExpP) {
-                    setExpandedProject(null)
+                    expandProject(null)
                   } else {
-                    setExpandedProject(p.id)
+                    expandProject(p.id)
                     if (p.sites && p.sites.length > 0) {
                       onSelectSite(p, p.sites[0])
                     }

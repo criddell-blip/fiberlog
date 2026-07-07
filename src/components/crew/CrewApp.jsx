@@ -117,8 +117,23 @@ function CrewSidebar({
   projects, selTask, view, onSelectMyStock, onSelectTask, onSelectPhase,
   currentUser, onUserTap, darkMode, toggleDarkMode, exitCrewMode,
 }) {
-  const [expandedProject, setExpandedProject] = useState(projects[0]?.id || null)
+  // Remember which project this user last had open — field crews work one
+  // project for weeks, and the old default (auto-expand projects[0]) made
+  // every login open on the alphabetical first project (Heber) regardless
+  // of who signed in. Keyed by user id so a shared device doesn't leak one
+  // crew's project onto the next login. Collapsed on first-ever login.
+  const expandKey = 'fiberlog_expanded_project_' + (currentUser?.id || 'anon')
+  const [expandedProject, setExpandedProject] = useState(() => {
+    try { return localStorage.getItem(expandKey) || null } catch { return null }
+  })
   const [expandedPhase, setExpandedPhase] = useState(null)
+  function expandProject(id) {
+    setExpandedProject(id)
+    try {
+      if (id) localStorage.setItem(expandKey, id)
+      else localStorage.removeItem(expandKey)
+    } catch {}
+  }
 
   const isMyStock = view === 'mystock'
 
@@ -215,9 +230,9 @@ function CrewSidebar({
                   // right panel stayed on the previous project's work, which
                   // read as "nothing happened".
                   if (isExpP) {
-                    setExpandedProject(null)
+                    expandProject(null)
                   } else {
-                    setExpandedProject(p.id)
+                    expandProject(p.id)
                     if (p.phases && p.phases.length > 0) {
                       onSelectPhase(p, p.phases[0])
                     }
