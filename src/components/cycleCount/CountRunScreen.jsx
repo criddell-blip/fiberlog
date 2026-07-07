@@ -114,7 +114,13 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
   // state. Fires once per mount.
   useEffect(() => {
     if (!initialBinId) return
-    loadBin(initialBinId).catch(e => console.warn('Auto-load initial bin failed:', e))
+    // Surface the failure — the user explicitly asked for this bin ("Count
+    // this bin" jump); landing on the empty state with no explanation reads
+    // as a dead button.
+    loadBin(initialBinId).catch(e => {
+      console.warn('Auto-load initial bin failed:', e)
+      showToast('Could not open that bin — pick it from the list')
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -198,6 +204,19 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
     }
   }
 
+  // Deliberate list selection from the part picker (no barcode in hand).
+  // Unlike a scan — where instant +1 IS the gesture — a pick used to
+  // auto-save qty=1 before the user touched the stepper, writing a count
+  // they never entered. Defer instead: open the qty sheet and save only on
+  // confirm (Cancel = nothing written).
+  function handlePickPart(part) {
+    const existing = lines.find(l => l.part_id === part.id)
+    setQtySheetLine(existing || {
+      id: `pick-${part.id}`, session_id: activeSession.id, part_id: part.id,
+      expected_qty: 0, counted_qty: null, part, _pickerNew: true,
+    })
+  }
+
   // Mark an expected-but-not-found part as counted ZERO (clears it from the
   // "still missing" list and creates the shortage variance at end of run).
   async function handleCountZero(line) {
@@ -219,11 +238,17 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
   async function handleQtySave(line, qty) {
     const numeric = Number(qty)
     if (isNaN(numeric) || numeric < 0) { setQtySheetLine(null); return }
-    setLines(prev => prev.map(l => l.id === line.id ? { ...l, counted_qty: numeric } : l))
+    // Upsert: picker-originated lines (_pickerNew) aren't in `lines` yet —
+    // the pick deliberately defers any write until this confirm.
+    setLines(prev => prev.some(l => l.id === line.id)
+      ? prev.map(l => l.id === line.id ? { ...l, counted_qty: numeric } : l)
+      : [...prev, { ...line, counted_qty: numeric }])
     setQtySheetLine(null)
     markSaving(line.part_id, true)
     try {
       await recordCountLine({ sessionId: activeSession.id, partId: line.part_id, countedQty: numeric })
+      // A brand-new line needs its real row id (remove + submit key on it).
+      if (line._pickerNew) await refreshLines(activeSession.id)
     } catch (e) {
       console.error('Save qty failed:', e)
       showToast('Save failed: ' + e.message)
@@ -301,7 +326,28 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
       setRun(result)
     } catch (e) {
       console.error('End run failed:', e)
-      showToast(e.message || 'Could not end run')
+      // The RPC refuses to reconcile while ANY bin session in the run is
+      // unsubmitted (ERRCODE 22023, "Run <uuid> has unsubmitted sessions —
+      // submit them first") — including bins abandoned in an earlier visit
+      // that aren't the on-screen activeSession. The raw message names a
+      // UUID, not bins, and the July 2026 audit showed a toast alone reads
+      // as "nothing happened". So: refetch sessions, name the open bins,
+      // and reopen the confirm dialog — it renders the same list as a
+      // persistent warning with the End button disabled.
+      if (e?.code === '22023' || /unsubmitted session/i.test(e?.message || '')) {
+        let openBins = []
+        try {
+          const fresh = await getRunSessions(run.id)
+          setSessions(fresh)
+          openBins = fresh.filter(s => s.status !== 'submitted').map(s => s.location?.name || s.location_id)
+        } catch { /* fall through to the generic wording */ }
+        showToast(openBins.length
+          ? `Can't end run — these bins are still open: ${openBins.join(', ')}`
+          : "Can't end run — a bin is still unsubmitted. Submit it first.", 6000)
+        setShowEndConfirm(true)
+      } else {
+        showToast(e.message || 'Could not end run', 5000)
+      }
     } finally {
       setBusy(false)
     }
@@ -356,6 +402,15 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
 
   const uncountedCount = lines.filter(l => l.counted_qty == null).length
 
+  // Bins the server WILL refuse to reconcile past: unsubmitted sessions that
+  // aren't the one open on screen. The active bin auto-submits in
+  // handleEndRun when fully counted; an abandoned one can't be — it may have
+  // uncounted lines that are only resolvable by resuming it. Drives the
+  // proactive warning + disabled End button in the confirm dialog (the RPC
+  // hard-rejects with 22023 otherwise, and that failure used to be silent).
+  const blockedBins = sessions.filter(s =>
+    s.status !== 'submitted' && (!activeSession || s.id !== activeSession.id))
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Top bar */}
@@ -372,8 +427,11 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
             {' '}{sessions.length} bin{sessions.length === 1 ? '' : 's'} counted
           </div>
         </div>
+        {/* Fire-and-forget session refresh on open so the confirm dialog's
+            open-bins warning reflects the DB, not a stale list (a bin
+            abandoned in an earlier visit must show up there). */}
         <button
-          onClick={() => setShowEndConfirm(true)}
+          onClick={() => { refreshSessions(); setShowEndConfirm(true) }}
           className="btn btn-primary"
           style={{ padding: '8px 14px', fontSize: 'var(--fs-sm)' }}
           disabled={busy}
@@ -633,7 +691,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
       {/* Part picker */}
       {showPartPicker && activeSession && (
         <PartPickerSheet
-          onPick={async (p) => { setShowPartPicker(false); await loadPart(p.id) }}
+          onPick={(p) => { setShowPartPicker(false); handlePickPart(p) }}
           onClose={() => setShowPartPicker(false)}
         />
       )}
@@ -674,6 +732,22 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
                   <Icon name="alert" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />You still have an open bin with {uncountedCount} uncounted lines — finish it first.
                 </div>
               )}
+              {/* Unsubmitted bins NOT on screen (abandoned earlier) — the
+                  server hard-rejects the reconcile until each is submitted,
+                  so warn here instead of letting End fail. */}
+              {blockedBins.length > 0 && (
+                <div style={{ color: 'var(--amber)', marginTop: 8, fontWeight: 'var(--fw-bold)' }}>
+                  <Icon name="alert" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />
+                  {blockedBins.length === 1 ? 'One bin is' : `${blockedBins.length} bins are`} still unsubmitted
+                  — the run can't end until each is finished:
+                  <div style={{ marginTop: 4 }}>
+                    {blockedBins.map(s => s.location?.name || s.location_id).join(' · ')}
+                  </div>
+                  <div style={{ marginTop: 4, fontWeight: 'var(--fw-medium)', color: 'var(--muted)' }}>
+                    Submit the bin you're counting now, then resume each of these from the bin list — or discard the whole run.
+                  </div>
+                </div>
+              )}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowEndConfirm(false)}>
@@ -683,7 +757,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
                 className="btn btn-primary"
                 style={{ flex: 2 }}
                 onClick={handleEndRun}
-                disabled={busy || (activeSession && uncountedCount > 0)}
+                disabled={busy || (activeSession && uncountedCount > 0) || blockedBins.length > 0}
               >
                 {run.is_first_binning ? 'Finish + write transfers' : 'End + reconcile'}
               </button>
@@ -861,7 +935,16 @@ function QtyOverrideSheet({ line, onSave, onClose }) {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" style={{ flex: 2 }} onClick={() => onSave(line, num)}>Save count</button>
+          <button
+            className="btn btn-primary"
+            style={{ flex: 2 }}
+            // A picker-opened line with the input untouched has nothing to
+            // save — writing a counted-0 unexpected line would just be
+            // clutter in a Cancel-means-nothing flow. Existing lines can
+            // legitimately save 0 (counted and found empty).
+            disabled={val === '' && line.counted_qty == null}
+            onClick={() => onSave(line, num)}
+          >Save count</button>
         </div>
       </div>
     </div>
@@ -1099,14 +1182,18 @@ function PartPickerSheet({ onPick, onClose }) {
   const [results, setResults] = useState([])
   const [searching, setSearching] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
+  // A failed search must not masquerade as "No matches" — that reads as
+  // "the part doesn't exist" and pushes the counter toward creating a dupe.
+  const [searchFailed, setSearchFailed] = useState(false)
 
   useEffect(() => {
-    if (!q || q.length < 2) { setResults([]); return }
+    if (!q || q.length < 2) { setResults([]); setSearchFailed(false); return }
     let cancelled = false
     setSearching(true)
+    setSearchFailed(false)
     searchPartsCatalog(q, { limit: 12 })
       .then(r => { if (!cancelled) setResults(r || []) })
-      .catch(e => console.warn('Part search:', e))
+      .catch(e => { console.warn('Part search:', e); if (!cancelled) setSearchFailed(true) })
       .finally(() => { if (!cancelled) setSearching(false) })
     return () => { cancelled = true }
   }, [q])
@@ -1125,7 +1212,9 @@ function PartPickerSheet({ onPick, onClose }) {
     )
   }
 
-  const canCreate = q.trim().length >= 2 && !searching
+  // No create offer on a FAILED search — "0 results" there is unknown, not
+  // "missing from catalog", and creating would mint a duplicate SKU.
+  const canCreate = q.trim().length >= 2 && !searching && !searchFailed
 
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -1152,8 +1241,8 @@ function PartPickerSheet({ onPick, onClose }) {
             <div style={{ padding: 14, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Searching…</div>
           )}
           {!searching && q.length >= 2 && results.length === 0 && (
-            <div style={{ padding: 14, textAlign: 'center', color: 'var(--hint)', fontSize: 13 }}>
-              No matches
+            <div style={{ padding: 14, textAlign: 'center', color: searchFailed ? 'var(--danger-fg)' : 'var(--hint)', fontSize: 13 }}>
+              {searchFailed ? 'Search failed — check connection and try again' : 'No matches'}
             </div>
           )}
           {results.map(p => (

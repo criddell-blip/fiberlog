@@ -18,7 +18,7 @@ import Icon from '../shared/Icon'
 //      queue list above the Start CTA. Tap one to review.
 //   3. No active run, no pending reviews → just the empty-state CTA.
 export default function CountTab({ onExitTab, jumpTo }) {
-  const { currentUser } = useApp()
+  const { currentUser, showToast } = useApp()
   const [activeRun, setActiveRun] = useState(null)
   const [pendingRuns, setPendingRuns] = useState([])
   const [showStart, setShowStart] = useState(false)
@@ -47,6 +47,9 @@ export default function CountTab({ onExitTab, jumpTo }) {
       setPendingRuns(queue)
     } catch (e) {
       console.warn('CountTab load failed:', e)
+      // A silent failure here hides an in-progress run behind the "Start"
+      // empty state — the counter could unknowingly start a duplicate run.
+      showToast('Could not load count runs — reopen the tab to retry')
     } finally {
       setLoading(false)
     }
