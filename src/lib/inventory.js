@@ -169,9 +169,12 @@ export async function fetchAllRows(buildQuery, { maxRows = Infinity } = {}) {
 }
 
 export async function getStockByLocation(locationId) {
+  // department rides along for the crew sheet's whitelist badges (a part
+  // is "not loadable" when crew_type_part_restrictions excludes its
+  // department) — see CrewMovementSheet.
   const data = await fetchAllRows(() => db
     .from('inventory_stock')
-    .select('quantity, last_movement_at, parts_catalog(id, name, unit, category, material_group, is_active)')
+    .select('quantity, last_movement_at, parts_catalog(id, name, unit, category, material_group, department, is_active)')
     .eq('location_id', locationId)
     .order('part_id'))
   return data

@@ -45,6 +45,7 @@ const strings = {
   notesPlaceholder:   { en: 'e.g. 650ft span, flagged pole at #17', es: 'Ej. tramo 200m, poste marcado en #17' },
   cancel:             { en: 'Cancel',                     es: 'Cancelar' },
   startTask:          { en: 'Start this task',            es: 'Iniciar esta tarea' },
+  taskNameHint:       { en: 'Give the task a name to start', es: 'Ponle un nombre a la tarea para empezar' },
   saving:             { en: 'Saving...',                  es: 'Guardando...' },
 
   // ── Job types ──────────────────────────────────────────────────────────────

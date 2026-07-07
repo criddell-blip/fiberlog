@@ -351,6 +351,12 @@ export default function TaskList({ project, phase, onSelect, onBack, onUserTap }
               <textarea placeholder={t('notesPlaceholder', lang)} value={taskNotes} onChange={e => setTaskNotes(e.target.value)} style={{ minHeight: 60 }} />
             </div>
 
+            {/* Why Start is disabled — never a silent dead button. */}
+            {!taskName.trim() && (
+              <div style={{ marginBottom: 8, fontSize: 11, color: 'var(--hint)', textAlign: 'center' }}>
+                {t('taskNameHint', lang)}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowNewTask(false)}>{t('cancel', lang)}</button>
               <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleCreateTask} disabled={saving || !taskName.trim()}>

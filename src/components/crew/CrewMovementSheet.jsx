@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovement, getMyAllowedLoadDestinations, groupLocationsByAisle } from '../../lib/inventory'
+import { getCrewTypePartRestrictions } from '../../lib/admin'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 
@@ -21,7 +22,7 @@ import Icon from '../shared/Icon'
 //                  it + defaults qty to the full on-truck amount, so the crew
 //                  skips the part picker and just confirms where it goes.
 export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onComplete, prefillPartId = null }) {
-  const { showToast } = useApp()
+  const { showToast, lang, currentUser } = useApp()
 
   // The "other" side of the move: source for load, destination for return.
   const [otherLocationId, setOtherLocationId] = useState('')
@@ -77,6 +78,26 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   // exactly as before.
   const [allowedDestinations, setAllowedDestinations] = useState([])
   const [destinationLocationId, setDestinationLocationId] = useState('')
+
+  // crew_type × department whitelist — a client mirror of the check inside
+  // record_crew_movement, so restricted parts are visibly badged in the
+  // pickers instead of burning a commit-time 403 (July 2026 audit: crews
+  // wasted searches on parts they could never load). null = unrestricted
+  // (owner, no crew_type, no rows for this crew_type, or lookup failed —
+  // fail open: the RPC stays the real enforcement).
+  const [allowedDepts, setAllowedDepts] = useState(null)
+  useEffect(() => {
+    const ct = currentUser?.crew_type
+    if (!ct || currentUser?.role === 'owner') return
+    getCrewTypePartRestrictions()
+      .then(rows => {
+        const mine = rows.filter(r => r.crew_type === ct).map(r => r.department)
+        setAllowedDepts(mine.length > 0 ? new Set(mine) : null)
+      })
+      .catch(e => console.warn('Whitelist load failed (badges off):', e))
+  }, [currentUser?.id, currentUser?.crew_type])
+  // Parts with a NULL department bypass the whitelist (matches the RPC).
+  const isRestrictedDept = dept => !!(allowedDepts && dept && !allowedDepts.has(dept))
 
   // Load mode supports two views: by-location (pick warehouse/bin, see parts
   // there) and by-part (search a part, see all locations stocking it). Part
@@ -299,6 +320,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
         unit: group.unit,
         category: group.category,
         material_group: group.material_group,
+        department: group.department,
       },
     }])
   }
@@ -315,11 +337,30 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   function validate() {
     if (!otherLocationId) return isLoad ? 'Pick a source location' : 'Pick a destination warehouse'
     if (!selectedPartId) return 'Pick a part'
+    // Whitelist re-check: covers the prefill-return path (pickers bypassed,
+    // so the badge gate never ran) and the race where a part was picked
+    // before the async whitelist fetch resolved. The RPC would 403 anyway —
+    // this just says so before commit instead of after.
+    const dept = selectedPart?.parts_catalog?.department
+    if (isRestrictedDept(dept)) {
+      return lang === 'es'
+        ? `Las piezas de ${dept} no están en la lista de tu cuadrilla`
+        : `${dept} parts aren't on your crew's allowed list`
+    }
     const q = Number(quantity)
     if (!q || q <= 0) return 'Quantity must be greater than 0'
-    if (q > availableQty) return `Only ${availableQty} available`
     return null
   }
+
+  // Over-draw = asking for more than the source shows on hand. Policy
+  // (July 2026, backlog #17): warn loudly but ALLOW — transition-period
+  // counts aren't fully trusted, the DB tolerates negative stock, and
+  // negative on-hand renders red in MyStockView. The review step is
+  // forced for any over-draw (see handlePrimary) so it can't slip
+  // through the single-part fast path unseen. The RPC never enforced
+  // availability, so this is purely a client-side policy choice.
+  const curQty = Number(quantity) || 0
+  const curOverDraw = !!selectedPartId && curQty > availableQty
 
   // ── Multi-part cart helpers ────────────────────────────────────────────────
   const lineKey = l => `${l.partId}|${l.otherLocationId || ''}`
@@ -339,17 +380,20 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
       otherLocationId,                                   // load: source; return: shared dest
       otherLabel: otherLocations.find(l => l.id === otherLocationId)?.name || '',
       availableQty,
+      overDraw: q > availableQty,
     }
   }
 
-  // Merge a line into a list by (part, location): sum qty, cap at availableQty.
+  // Merge a line into a list by (part, location): sum qty. No cap —
+  // over-draw is allowed (warn-but-allow, #17); recompute the flag so a
+  // merged line that crosses on-hand still warns in the cart + review.
   function mergeLine(list, line) {
     const idx = list.findIndex(l => lineKey(l) === lineKey(line))
     if (idx < 0) return [...list, line]
     const next = [...list]
     const sum = next[idx].qty + line.qty
-    const cap = next[idx].availableQty != null ? next[idx].availableQty : sum
-    next[idx] = { ...next[idx], qty: Math.min(sum, cap) }
+    const avail = next[idx].availableQty != null ? next[idx].availableQty : Infinity
+    next[idx] = { ...next[idx], qty: sum, overDraw: sum > avail }
     return next
   }
 
@@ -389,8 +433,11 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   function handlePrimary() {
     const all = buildEffectiveLines()
     if (all.length === 0) { setError(isLoad ? 'Add a part to load' : 'Add a part to return'); return }
-    // Confirm everything except the safe fast path (single part → own truck).
-    const needsConfirm = isReturn || all.length > 1 || (isLoad && !!destForLoad)
+    // Confirm everything except the safe fast path (single part → own
+    // truck) — and ALWAYS confirm over-draw, so going negative is a
+    // reviewed decision, never a fat-finger.
+    const anyOverDraw = all.some(l => l.overDraw)
+    const needsConfirm = isReturn || all.length > 1 || (isLoad && !!destForLoad) || anyOverDraw
     if (needsConfirm && !confirming) {
       setConfirmLines(all)
       setError(null)
@@ -465,6 +512,11 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   // Current-selection validity (string error | null) — reused by the Add
   // button so validate() isn't re-run several times per render.
   const curError = validate()
+  // When the qty field is already showing its own red message, the Add-
+  // button hint and footer hint suppress theirs — one message, one place
+  // (three stacked copies of "Quantity must be greater than 0" on a phone
+  // was the reviewer's fair complaint).
+  const qtyErrorShown = quantity !== '' && curQty <= 0
   // What Submit will send: queued lines + the in-progress part (if valid).
   const effectiveCount = buildEffectiveLines().length
 
@@ -511,14 +563,22 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                 <div key={i} style={{
                   display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px',
                   borderBottom: i < confirmLines.length - 1 ? '1px solid var(--border)' : 'none',
+                  background: l.overDraw ? 'var(--amber-lt)' : 'transparent',
                 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.partName}</div>
                     {isLoad && l.otherLabel && (
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>from {l.otherLabel}</div>
                     )}
+                    {l.overDraw && (
+                      <div style={{ fontSize: 11, color: 'var(--amber)', fontWeight: 700 }}>
+                        {lang === 'es'
+                          ? `Solo ${Number(l.availableQty || 0).toLocaleString()} disponibles — quedará negativo`
+                          : `Only ${Number(l.availableQty || 0).toLocaleString()} on hand — will go negative`}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ flexShrink: 0, fontWeight: 700, fontSize: 14 }}>
+                  <div style={{ flexShrink: 0, fontWeight: 700, fontSize: 14, color: l.overDraw ? 'var(--amber)' : 'inherit' }}>
                     <span className="mono">{l.qty.toLocaleString()}</span>{' '}
                     <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 12 }}>{l.unit || 'ea'}</span>
                   </div>
@@ -590,8 +650,13 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
               borderRadius: 'var(--r-sm)',
               background: 'var(--surface)',
             }}>
-              {filteredGroups.map(group => (
-                <div key={group.partId} style={{ borderBottom: '1px solid var(--border)' }}>
+              {filteredGroups.map(group => {
+                // Restricted = the crew_type whitelist would 403 this part at
+                // commit. Keep it visible (so parts don't mysteriously vanish
+                // from search) but greyed, badged, and unpickable.
+                const restricted = isRestrictedDept(group.department)
+                return (
+                <div key={group.partId} style={{ borderBottom: '1px solid var(--border)', opacity: restricted ? 0.55 : 1 }}>
                   {/* Part header */}
                   <div style={{
                     padding: '6px 12px', background: 'var(--surface2)',
@@ -607,6 +672,17 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'var(--font-mono)' }}>
                       {group.partId} · {group.totalQty.toLocaleString()} {group.unit || 'ea'} across {group.locations.length} location{group.locations.length === 1 ? '' : 's'}
+                      {/* Badge lives on the SKU line, not the nowrap name line —
+                          long part names would ellipsize it out of view at 390px. */}
+                      {restricted && (
+                        <span style={{
+                          marginLeft: 6, fontSize: 10, fontWeight: 700, fontFamily: 'inherit',
+                          padding: '1px 7px', borderRadius: 999,
+                          background: 'var(--gray-lt)', color: 'var(--muted)',
+                        }}>
+                          {lang === 'es' ? 'No disponible para tu cuadrilla' : 'Not loadable for your crew'}
+                        </span>
+                      )}
                     </div>
                   </div>
                   {/* Per-location rows */}
@@ -615,13 +691,14 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                     return (
                       <div
                         key={loc.locationId}
-                        onClick={() => pickPartAtLocation(group, loc)}
+                        onClick={() => { if (!restricted) pickPartAtLocation(group, loc) }}
+                        title={restricted ? `${group.department} parts aren't on your crew's allowed list` : undefined}
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10,
                           padding: '8px 12px',
                           background: isSel ? 'var(--orange-lt)' : 'transparent',
                           borderLeft: isSel ? '3px solid var(--orange)' : '3px solid transparent',
-                          cursor: 'pointer',
+                          cursor: restricted ? 'not-allowed' : 'pointer',
                           fontSize: 12,
                         }}
                       >
@@ -635,7 +712,8 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                     )
                   })}
                 </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )}
@@ -656,6 +734,18 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                 <span className="mono">{availableQty.toLocaleString()}</span> on your truck · pick where it goes
               </div>
+              {/* Prefill bypasses the pickers, so the whitelist badge has to
+                  live here too — otherwise this path 403s blind at commit.
+                  validate() blocks the submit; this explains why. */}
+              {isRestrictedDept(selectedPart.parts_catalog?.department) && (
+                <div style={{
+                  marginTop: 4, display: 'inline-block',
+                  fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 999,
+                  background: 'var(--gray-lt)', color: 'var(--muted)',
+                }}>
+                  {lang === 'es' ? 'No disponible para tu cuadrilla' : 'Not loadable for your crew'}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -777,24 +867,42 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                 const pc = r.parts_catalog
                 const qty = Number(r.quantity || 0)
                 const isSel = pc?.id === selectedPartId
+                // Same whitelist badge as find-a-part mode. Applies to
+                // Return too — the RPC checks the whitelist on every crew
+                // operation, so a restricted part on the truck can't be
+                // returned either; we mirror rather than diverge.
+                const restricted = isRestrictedDept(pc?.department)
                 return (
                   <div
                     key={pc?.id || i}
-                    onClick={() => setSelectedPartId(pc?.id)}
+                    onClick={() => { if (!restricted) setSelectedPartId(pc?.id) }}
+                    title={restricted ? `${pc?.department} parts aren't on your crew's allowed list` : undefined}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 10,
                       padding: '8px 12px',
                       borderBottom: i < partList.length - 1 ? '1px solid var(--border)' : 'none',
                       background: isSel ? 'var(--orange-lt)' : 'transparent',
                       borderLeft: isSel ? '3px solid var(--orange)' : '3px solid transparent',
-                      cursor: 'pointer',
+                      cursor: restricted ? 'not-allowed' : 'pointer',
+                      opacity: restricted ? 0.55 : 1,
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="part-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {pc?.name || pc?.id}
                       </div>
-                      <div className="part-id">{pc?.id}</div>
+                      <div className="part-id">
+                        {pc?.id}
+                        {restricted && (
+                          <span style={{
+                            marginLeft: 6, fontSize: 10, fontWeight: 700,
+                            padding: '1px 7px', borderRadius: 999,
+                            background: 'var(--gray-lt)', color: 'var(--muted)',
+                          }}>
+                            {lang === 'es' ? 'No disponible para tu cuadrilla' : 'Not loadable for your crew'}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="part-qty" style={{ flexShrink: 0 }}>
                       {qty.toLocaleString()} <span className="part-unit" style={{ fontWeight: 400 }}>{pc?.unit || 'ea'}</span>
@@ -811,23 +919,50 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
           <div className="field">
             <label>
               Quantity
-              {availableQty > 0 && (
-                <span style={{ marginLeft: 8, color: 'var(--muted)', fontWeight: 400, fontSize: 11 }}>
-                  (max {availableQty.toLocaleString()})
-                </span>
-              )}
+              <span style={{ marginLeft: 8, color: 'var(--muted)', fontWeight: 400, fontSize: 11 }}>
+                {/* Negative on-hand is an expected state under warn-but-allow —
+                    show the real number, not "none". */}
+                {availableQty !== 0
+                  ? `(${availableQty.toLocaleString()} ${lang === 'es' ? 'disponibles' : 'on hand'})`
+                  : (lang === 'es' ? '(nada disponible)' : '(none on hand)')}
+              </span>
             </label>
             <input
               type="number"
               value={quantity}
               onChange={e => setQuantity(e.target.value)}
               min="0"
-              max={availableQty || undefined}
               step="any"
               autoComplete="off"
               name="crew-movement-quantity"
-              style={{ fontSize: 16 }}
+              style={{
+                fontSize: 16,
+                borderColor: curOverDraw ? 'var(--amber)' : undefined,
+              }}
             />
+            {/* Live validation — never a silently-dead button. Zero/invalid
+                qty is an error (blocks); over-draw is a WARNING (allowed,
+                #17 warn-but-allow — review step still forces a look). */}
+            {quantity !== '' && curQty <= 0 && (
+              <div style={{ marginTop: 4, fontSize: 11, fontWeight: 600, color: 'var(--red)' }}>
+                {lang === 'es' ? 'La cantidad debe ser mayor que 0' : 'Quantity must be greater than 0'}
+              </div>
+            )}
+            {curOverDraw && curQty > 0 && (
+              <div style={{
+                marginTop: 6, padding: '8px 10px',
+                background: 'var(--amber-lt)', color: 'var(--amber)',
+                borderRadius: 'var(--r-sm)', fontSize: 11, fontWeight: 700,
+              }}>
+                {isLoad
+                  ? (lang === 'es'
+                      ? `Cargando ${curQty.toLocaleString()} — solo hay ${availableQty.toLocaleString()}. La fuente quedará en negativo.`
+                      : `Loading ${curQty.toLocaleString()} — only ${availableQty.toLocaleString()} on hand. The source will go negative.`)
+                  : (lang === 'es'
+                      ? `Devolviendo ${curQty.toLocaleString()} — tu camión solo muestra ${availableQty.toLocaleString()}. Quedará en negativo.`
+                      : `Returning ${curQty.toLocaleString()} — your truck only shows ${availableQty.toLocaleString()}. It will go negative.`)}
+              </div>
+            )}
           </div>
         )}
 
@@ -850,6 +985,14 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
           >
             <Icon name="plus" size={14} /> Add another part
           </button>
+        )}
+        {/* Why Add is disabled — validation should never be a silent dead
+            button (July 2026 audit). Suppressed while the qty field shows
+            the same message. */}
+        {selectedPartId && curError && !qtyErrorShown && (
+          <div style={{ marginTop: -8, marginBottom: 12, fontSize: 11, color: 'var(--muted)', textAlign: 'center' }}>
+            {curError}
+          </div>
         )}
 
         {/* Cart — the parts queued for this submit. */}
@@ -958,23 +1101,37 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
             </button>
           </div>
         ) : (
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose} disabled={submitting}>
-              Cancel
-            </button>
-            <button
-              className="btn btn-primary"
-              style={{ flex: 2 }}
-              onClick={handlePrimary}
-              disabled={submitting || effectiveCount === 0}
-            >
-              {submitting
-                ? 'Saving…'
-                : effectiveCount === 0
-                  ? (isLoad ? 'Load' : 'Return')
-                  : `${isLoad ? 'Load' : 'Return'} ${effectiveCount} part${effectiveCount === 1 ? '' : 's'}`}
-            </button>
-          </div>
+          <>
+            {/* Why the primary button is disabled — a dead button with no
+                explanation was the audit's top crew-flow complaint.
+                Suppressed while the qty field shows the same message. */}
+            {effectiveCount === 0 && !submitting && !qtyErrorShown && (
+              <div style={{ marginBottom: 8, fontSize: 11, color: 'var(--hint)', textAlign: 'center' }}>
+                {curError && selectedPartId
+                  ? curError
+                  : (lang === 'es'
+                      ? 'Elige una pieza y una cantidad para continuar'
+                      : 'Pick a part and enter a quantity to continue')}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose} disabled={submitting}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 2 }}
+                onClick={handlePrimary}
+                disabled={submitting || effectiveCount === 0}
+              >
+                {submitting
+                  ? 'Saving…'
+                  : effectiveCount === 0
+                    ? (isLoad ? 'Load' : 'Return')
+                    : `${isLoad ? 'Load' : 'Return'} ${effectiveCount} part${effectiveCount === 1 ? '' : 's'}`}
+              </button>
+            </div>
+          </>
         )}
       </div>
     </div>

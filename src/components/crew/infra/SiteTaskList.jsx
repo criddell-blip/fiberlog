@@ -201,6 +201,12 @@ export default function SiteTaskList({ project, site, onSelect, onBack, onUserTa
               />
             </div>
 
+            {/* Why Create is disabled — never a silent dead button. */}
+            {!taskName.trim() && (
+              <div style={{ marginTop: 12, fontSize: 11, color: 'var(--hint)', textAlign: 'center' }}>
+                Give the task a name to create it
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
               <button
                 className="btn btn-ghost"
