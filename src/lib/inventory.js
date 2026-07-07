@@ -141,13 +141,40 @@ export async function deactivateLocationWithRecovery(locationId, recoveryItems, 
 
 // ─── STOCK ───────────────────────────────────────────────────────────────────
 
+// Supabase/PostgREST silently caps ANY un-paginated select at 1,000 rows
+// (server-side db-max-rows; a client .limit() above that is clamped, not
+// honored). inventory_stock crossed that (~1,400 rows July 2026), and which
+// rows survive the cap follows physical heap order — so the most recently
+// touched rows are the ones that vanish. That's how the Stock tab reported
+// 80 units for a part that had 480 (July 2026 audit, backlog #29). Every
+// read that can return >1,000 inventory_stock rows must page through here.
+// buildQuery must return a FRESH builder on each call (builders are
+// single-use) and include a stable .order() so pages don't shear if a
+// concurrent write moves rows between requests.
+const FETCH_PAGE = 1000
+// Exported: any full-table read that feeds MOVEMENT WRITES (ReconcileSheet's
+// live-stock resolve, orphan sweeps) must page too — a truncated row reading
+// as "0 on hand" turns into a wrong adjust movement.
+export async function fetchAllRows(buildQuery, { maxRows = Infinity } = {}) {
+  const all = []
+  for (let from = 0; all.length < maxRows; from += FETCH_PAGE) {
+    const { data, error } = await buildQuery().range(from, from + FETCH_PAGE - 1)
+    if (error) throw error
+    all.push(...(data || []))
+    if (!data || data.length < FETCH_PAGE) break
+  }
+  // The loop can overshoot maxRows by up to a page — clamp so callers'
+  // ceilings (e.g. the audit export's 20k) are exact.
+  return all.length > maxRows ? all.slice(0, maxRows) : all
+}
+
 export async function getStockByLocation(locationId) {
-  const { data, error } = await db
+  const data = await fetchAllRows(() => db
     .from('inventory_stock')
     .select('quantity, last_movement_at, parts_catalog(id, name, unit, category, material_group, is_active)')
     .eq('location_id', locationId)
-  if (error) throw error
-  return (data || [])
+    .order('part_id'))
+  return data
     .filter(r => Number(r.quantity) !== 0)
     .sort((a, b) => (a.parts_catalog?.name || '').localeCompare(b.parts_catalog?.name || ''))
 }
@@ -161,8 +188,13 @@ export async function getStockByLocation(locationId) {
 // drops the caller's truck (or whatever pull location they're loading
 // INTO) so they don't see it as a possible source.
 export async function getAllStockGrouped({ excludeLocationId = null, excludeTypes = [] } = {}) {
-  const [stockRes, partsRes, locsRes] = await Promise.all([
-    db.from('inventory_stock').select('part_id, location_id, quantity'),
+  const [stockRows, partsRes, locsRes] = await Promise.all([
+    // Full-table stock read — must page (see fetchAllRows). Parts and
+    // locations are safely under the 1,000-row cap (~700 / ~250 rows).
+    fetchAllRows(() => db
+      .from('inventory_stock')
+      .select('part_id, location_id, quantity')
+      .order('part_id').order('location_id')),
     db.from('parts_catalog')
       .select('id, name, nickname, attributes, unit, category, material_group, department')
       .eq('is_active', true),
@@ -170,7 +202,6 @@ export async function getAllStockGrouped({ excludeLocationId = null, excludeType
       .select('id, name, type, parent_location_id, assigned_to')
       .eq('is_active', true),
   ])
-  if (stockRes.error) throw stockRes.error
   if (partsRes.error) throw partsRes.error
   if (locsRes.error) throw locsRes.error
 
@@ -182,7 +213,7 @@ export async function getAllStockGrouped({ excludeLocationId = null, excludeType
   )
 
   const byPart = new Map()
-  for (const r of stockRes.data || []) {
+  for (const r of stockRows) {
     const qty = Number(r.quantity || 0)
     if (qty <= 0) continue
     const part = partById.get(r.part_id)
@@ -282,12 +313,15 @@ export async function getPartLocations(partId) {
 }
 
 export async function getStockSummary() {
-  const { data, error } = await db
+  // Full-table read — must page. Un-paginated, this truncated at 1,000 of
+  // ~1,400 rows and the "all locations" Stock view silently under-counted
+  // (root cause of the July 2026 audit's 80-vs-480 mismatch, backlog #29).
+  const data = await fetchAllRows(() => db
     .from('inventory_stock')
     .select('part_id, quantity, parts_catalog(id, name, unit, category, material_group, is_active)')
-  if (error) throw error
+    .order('part_id').order('location_id'))
   const byPart = new Map()
-  for (const row of data || []) {
+  for (const row of data) {
     const qty = Number(row.quantity) || 0
     if (qty === 0) continue
     const cur = byPart.get(row.part_id)
@@ -636,12 +670,13 @@ export async function discardSonarPendingImport(id, { reason, userId }) {
 // Returns Map<location_id, { distinctParts, totalUnits }>. Used by the
 // Locations tab to badge each card with what's actually inside.
 export async function getStockCountsByLocation() {
-  const { data, error } = await db
+  // Full-table read — must page past the 1,000-row PostgREST cap.
+  const data = await fetchAllRows(() => db
     .from('inventory_stock')
     .select('location_id, quantity')
-  if (error) throw error
+    .order('part_id').order('location_id'))
   const m = new Map()
-  for (const r of data || []) {
+  for (const r of data) {
     const qty = Number(r.quantity) || 0
     if (qty === 0) continue
     const cur = m.get(r.location_id) || { distinctParts: 0, totalUnits: 0 }
@@ -656,12 +691,13 @@ export async function getStockCountsByLocation() {
 // to sort drafts by stock volume (so high-volume drafts surface first).
 // Returns Map<part_id, totalQty>.
 export async function getStockTotalsByPart() {
-  const { data, error } = await db
+  // Full-table read — must page past the 1,000-row PostgREST cap.
+  const data = await fetchAllRows(() => db
     .from('inventory_stock')
     .select('part_id, quantity')
-  if (error) throw error
+    .order('part_id').order('location_id'))
   const totals = new Map()
-  for (const row of data || []) {
+  for (const row of data) {
     totals.set(row.part_id, (totals.get(row.part_id) || 0) + Number(row.quantity || 0))
   }
   return totals
@@ -683,7 +719,9 @@ export async function getStockForWarehouseTree(warehouseId) {
   const locIds = (locs || []).map(l => l.id)
   if (locIds.length === 0) return []
 
-  const { data: stock, error: stockErr } = await db
+  // Paged: the Main Warehouse tree is already ~900 stock rows — an
+  // un-paginated read would silently drop rows once it crosses 1,000.
+  const stock = await fetchAllRows(() => db
     .from('inventory_stock')
     .select(`
       quantity, last_movement_at, location_id,
@@ -691,8 +729,8 @@ export async function getStockForWarehouseTree(warehouseId) {
       location:inventory_locations(id, name, type, parent_location_id)
     `)
     .in('location_id', locIds)
-  if (stockErr) throw stockErr
-  return (stock || []).filter(r => Number(r.quantity) !== 0)
+    .order('part_id').order('location_id'))
+  return stock.filter(r => Number(r.quantity) !== 0)
 }
 
 // Per-location, non-zero stock rows for a set of parts. Used by the import
@@ -707,15 +745,18 @@ export async function getStockRowsForParts(partIds) {
   const out = []
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK)
-    const { data, error } = await db
+    // Paged per chunk: 200 widely-dispersed parts could cross PostgREST's
+    // 1,000-row cap, and this feeds balancing ADJUST movements — a dropped
+    // row would zero the wrong location (same class as backlog #29).
+    const data = await fetchAllRows(() => db
       .from('inventory_stock')
       .select(`
         part_id, location_id, quantity,
         location:inventory_locations(id, name, type, parent_location_id)
       `)
       .in('part_id', chunk)
-    if (error) throw error
-    for (const r of data || []) {
+      .order('part_id').order('location_id'))
+    for (const r of data) {
       if (Number(r.quantity) !== 0) out.push(r)
     }
   }
@@ -1034,12 +1075,13 @@ export async function exportLocationStockCSV(location) {
 
   // Get stock at all scope-relevant locations. inventory_stock.last_movement_at
   // already tracks the last touch per (part, location) — use it directly
-  // instead of a separate movements round trip.
-  const { data: stock, error: stockErr } = await db
+  // instead of a separate movements round trip. Paged: a warehouse-tree
+  // scope can exceed the 1,000-row PostgREST cap.
+  const stock = await fetchAllRows(() => db
     .from('inventory_stock')
     .select('location_id, part_id, quantity, last_movement_at, parts_catalog (id, name, category, department, material_group, unit)')
     .in('location_id', locationIds)
-  if (stockErr) throw stockErr
+    .order('part_id').order('location_id'))
 
   // Resolve parent warehouse name for a bin-only export so the Location
   // column reads as the warehouse, not "Aisle 3 B-2".
@@ -1508,40 +1550,48 @@ export async function getStockForAudit({
   materialGroup = null,
   staleDays = null,
 } = {}) {
-  let q = db
-    .from('inventory_stock')
-    .select(`
-      quantity, last_movement_at, location_id, part_id,
-      parts_catalog!inner(id, name, unit, category, department, material_group, item_type, is_active),
-      location:inventory_locations!inner(
-        id, name, type, parent_location_id,
-        assigned_user:users!inventory_locations_assigned_to_fkey(id, name)
-      )
-    `)
-    .limit(20000)   // safety ceiling for big audits
+  // Builder factory: fetchAllRows needs a fresh builder per page, so the
+  // filter chain is composed inside it. The old single-shot version had a
+  // .limit(20000) "safety ceiling" — but PostgREST clamps any limit to its
+  // server-side 1,000-row max, so a cross-warehouse audit was silently
+  // truncated once the table crossed 1,000 rows. Paging fixes that; the
+  // 20k ceiling survives as fetchAllRows' maxRows.
+  const buildQuery = () => {
+    let q = db
+      .from('inventory_stock')
+      .select(`
+        quantity, last_movement_at, location_id, part_id,
+        parts_catalog!inner(id, name, unit, category, department, material_group, item_type, is_active),
+        location:inventory_locations!inner(
+          id, name, type, parent_location_id,
+          assigned_user:users!inventory_locations_assigned_to_fkey(id, name)
+        )
+      `)
 
-  if (Array.isArray(locationIds) && locationIds.length > 0) {
-    q = q.in('location_id', locationIds)
+    if (Array.isArray(locationIds) && locationIds.length > 0) {
+      q = q.in('location_id', locationIds)
+    }
+
+    if (partStatus === 'active') q = q.eq('parts_catalog.is_active', true)
+    if (partStatus === 'draft')  q = q.eq('parts_catalog.is_active', false)
+
+    if (department)    q = q.eq('parts_catalog.department', department)
+    if (materialGroup) q = q.eq('parts_catalog.material_group', materialGroup)
+
+    if (staleDays != null && Number(staleDays) > 0) {
+      const cutoff = new Date()
+      cutoff.setDate(cutoff.getDate() - Number(staleDays))
+      q = q.lt('last_movement_at', cutoff.toISOString())
+    }
+
+    return q.order('location_id').order('part_id')
   }
 
-  if (partStatus === 'active') q = q.eq('parts_catalog.is_active', true)
-  if (partStatus === 'draft')  q = q.eq('parts_catalog.is_active', false)
-
-  if (department)    q = q.eq('parts_catalog.department', department)
-  if (materialGroup) q = q.eq('parts_catalog.material_group', materialGroup)
-
-  if (staleDays != null && Number(staleDays) > 0) {
-    const cutoff = new Date()
-    cutoff.setDate(cutoff.getDate() - Number(staleDays))
-    q = q.lt('last_movement_at', cutoff.toISOString())
-  }
-
-  const { data, error } = await q
-  if (error) throw error
+  const data = await fetchAllRows(buildQuery, { maxRows: 20000 })
 
   // Stock-level filter happens client-side since it's a numeric comparison
   // on quantity (inventory_stock has rows with zero qty too).
-  let rows = data || []
+  let rows = data
   if (stockLevel === 'with') {
     rows = rows.filter(r => Number(r.quantity) > 0)
   } else if (stockLevel === 'zero_negative') {

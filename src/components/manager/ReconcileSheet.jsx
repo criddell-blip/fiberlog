@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { db } from '../../lib/supabase'
-import { recordMovementsBatch } from '../../lib/inventory'
+import { recordMovementsBatch, fetchAllRows } from '../../lib/inventory'
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
@@ -394,27 +394,35 @@ const tdStyle = (extra = {}) => ({
 // ─── CSV → live-stock resolver ──────────────────────────────────────────
 
 async function resolveAgainstLiveStock(csvRows) {
-  // Fetch current stock + all parts + all locations in three quick reads
-  const [stockRes, partsRes, locsRes] = await Promise.all([
-    db.from('inventory_stock').select('part_id, quantity, location_id'),
-    db.from('parts_catalog').select('id, name, unit, is_active'),
+  // Fetch current stock + all parts + all locations. Stock AND parts page
+  // through fetchAllRows — PostgREST silently caps un-paginated reads at
+  // 1,000 rows, and inventory_stock is past that (backlog #29). This
+  // function feeds ADJUST MOVEMENTS: a truncated stock row would read as
+  // "0 on hand" and post an inflated adjustment on the next reconcile.
+  const [stockRows, partRows, locsRes] = await Promise.all([
+    fetchAllRows(() => db
+      .from('inventory_stock')
+      .select('part_id, quantity, location_id')
+      .order('part_id').order('location_id')),
+    fetchAllRows(() => db
+      .from('parts_catalog')
+      .select('id, name, unit, is_active')
+      .order('id')),
     db.from('inventory_locations')
       .select('id, name, type, parent_location_id, assigned_user:users!inventory_locations_assigned_to_fkey(id, name)')
       .eq('is_active', true),
   ])
-  if (stockRes.error) throw stockRes.error
-  if (partsRes.error) throw partsRes.error
   if (locsRes.error)  throw locsRes.error
 
   // (part_id, location_id) → quantity
   const stockMap = new Map()
-  for (const s of stockRes.data || []) {
+  for (const s of stockRows) {
     stockMap.set(`${s.part_id}|${s.location_id}`, Number(s.quantity) || 0)
   }
 
   // SKU upper → part
   const partBySku = new Map()
-  for (const p of partsRes.data || []) {
+  for (const p of partRows) {
     partBySku.set(String(p.id).toUpperCase(), p)
   }
 

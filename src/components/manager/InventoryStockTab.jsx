@@ -211,13 +211,16 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
   }, [scope, binScope, search, refreshKey])
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return rows
-    const q = search.toLowerCase()
-    return rows.filter(r =>
-      (r.name || '').toLowerCase().includes(q) ||
-      (r.part_id || '').toLowerCase().includes(q) ||
-      (r.category || '').toLowerCase().includes(q)
-    )
+    // Tokenized: split on whitespace; EVERY token must match name, SKU, or
+    // category (case-insensitive). AND-across-tokens makes multi-word
+    // queries like "lag bolt box" narrow the list instead of requiring the
+    // whole phrase to appear verbatim (July 2026 audit, backlog #29).
+    const tokens = search.toLowerCase().split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) return rows
+    return rows.filter(r => {
+      const hay = `${r.name || ''} ${r.part_id || ''} ${r.category || ''}`.toLowerCase()
+      return tokens.every(t => hay.includes(t))
+    })
   }, [rows, search])
 
   const totalLines = rows.length
