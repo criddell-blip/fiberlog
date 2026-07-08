@@ -1,0 +1,16 @@
+{
+  "note": "Resolves YOUR_PICK_name values (from decisions-asset-parts.csv) to catalog SKUs, computed 2026-07-08 against the live parts_catalog. Keyed by lowercased typed name. method: exact-name / substring-name / normalized-id / exact-id / new (no catalog match → mint NEW- part). flag=review means the model→name pairing looked possibly misaligned and should be confirmed.",
+  "resolutions": {
+    "hc16mt6xp-up-ac":                        { "sku": "NEW-HC16MT6XP-UP-AC", "name": "HC16MT6XP-UP-AC (AC 16-port switch)", "unit": "ea", "routing": "ask", "method": "new" },
+    "eer 6 plus":                             { "sku": "NEW-EERO-6-PLUS", "name": "Eero 6 Plus", "unit": "ea", "routing": "ask", "method": "new" },
+    "cambium cbrs radio":                     { "sku": "3094HH", "name": "Cambium CBRS Radio", "unit": "ea", "routing": "none", "method": "exact-name" },
+    "netpower lite 7r":                       { "sku": "netPower Lite 7R", "name": "MikroTik Router, netPower Lite 7R", "unit": "ea", "routing": "ask", "method": "substring-name", "flag": "review" },
+    "remote power switched pdu, np-1601du":   { "sku": "NP-1601DU", "name": "Remote Power Switched PDU, NP-1601DU", "unit": "ea", "routing": "ask", "method": "exact-name" },
+    "remote power switched pdu, np-10du":     { "sku": "NP-10DU", "name": "Remote Power Switched PDU, NP-10DU", "unit": "ea", "routing": "ask", "method": "exact-name" },
+    "s5720-56c-hi-ac":                        { "sku": "NEW-S5720-56C-HI-AC", "name": "S5720-56C-HI-AC (Huawei switch)", "unit": "ea", "routing": "ask", "method": "new", "flag": "review" },
+    "mimosa b24":                             { "sku": "NEW-MIMOSA-B24", "name": "Mimosa B24", "unit": "ea", "routing": "ask", "method": "new" },
+    "hc16mt6xp-up-dc":                        { "sku": "HC16MT6XP_UP_DC", "name": "16 Ports Switch (DC)", "unit": "ea", "routing": "ask", "method": "normalized-id", "flag": "review" },
+    "hc24gt4xp-ac":                           { "sku": "NEW-HC24GT4XP-AC", "name": "HC24GT4XP-AC (24-port switch)", "unit": "ea", "routing": "ask", "method": "new" },
+    "w48-18h5-wph":                           { "sku": "W48-18H5-WPH", "name": "High Performance Antenna", "unit": "ea", "routing": "ask", "method": "exact-id" }
+  }
+}

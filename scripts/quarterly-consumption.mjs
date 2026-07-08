@@ -188,6 +188,48 @@ const phasesRef = readJson(path.join(REFS, 'phases.json'))
 const mapsRef = readJson(path.join(REFS, 'maps.json'))
 const markersRef = readJson(path.join(REFS, 'markers.json'))
 const partMatches = readJson(path.join(REFS, 'part-matches.json'))
+const nameResolutions = fs.existsSync(path.join(REFS, 'name-resolutions.json'))
+  ? readJson(path.join(REFS, 'name-resolutions.json')).resolutions : {}
+
+// Turn a human name into a stable NEW-<slug> SKU for parts not in the catalog.
+function mintNewSku(name) {
+  const slug = String(name).toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32)
+  return 'NEW-' + (slug || 'PART')
+}
+// Resolve a typed YOUR_PICK_name → { sku, name, unit, routing }. Uses the
+// verified name-resolutions map (catalog match), else mints a NEW- draft part.
+function resolveTypedName(nm) {
+  const hit = nameResolutions[nm.toLowerCase()]
+  if (hit) return hit
+  return { sku: mintNewSku(nm), name: nm, unit: 'ea', routing: 'ask', method: 'new' }
+}
+
+// Levenshtein (small strings) — tolerate typos in decision-sheet user names.
+function lev(a, b) {
+  a = a.toLowerCase(); b = b.toLowerCase()
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
+  for (let j = 0; j <= b.length; j++) d[0][j] = j
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+  return d[a.length][b.length]
+}
+// Resolve a typed user name → user id: exact → email-prefix → levenshtein<=2.
+function resolveTypedUser(nm) {
+  const t = nm.toLowerCase()
+  let u = users.find(x => x.name.toLowerCase() === t) ||
+          users.find(x => (x.email || '').toLowerCase().startsWith(t + '@'))
+  if (u) return u
+  const near = users.map(x => ({ x, d: lev(x.name, nm) })).filter(o => o.d <= 2).sort((a, b) => a.d - b.d)
+  return near.length ? near[0].x : null
+}
+// Resolve a typed location name → id: exact (ci) → unique active-location substring.
+function resolveTypedLocation(nm) {
+  const t = nm.toLowerCase()
+  const exact = locations.find(l => l.name.toLowerCase() === t)
+  if (exact) return exact
+  const subs = locations.filter(l => l.is_active && l.name.toLowerCase().includes(t))
+  return subs.length === 1 ? subs[0] : null
+}
 
 // users ordered by name (as the app loads them)
 const users = usersRef.rows.map(([id, name, email, role, crew_type, pull]) => ({ id, name, email, role, crew_type, default_pull_location_id: pull }))
@@ -276,11 +318,11 @@ for (const d of decUsers) {
   const ps = pick(d.YOUR_PICK_source_location)
   if (!key) continue
   if (ps) {
-    const loc = locsByNameLower.get(ps.toLowerCase())
+    const loc = resolveTypedLocation(ps)
     if (loc) sourceMap.set(key.toUpperCase(), loc.id)
     else console.warn(`decisions-users: unknown location name "${ps}" for "${key}"`)
   } else if (pu) {
-    const u = users.find(x => x.name.toLowerCase() === pu.toLowerCase() || (x.email || '').toLowerCase().startsWith(pu.toLowerCase() + '@'))
+    const u = resolveTypedUser(pu)
     if (u) {
       if (pick(d.kind) === 'username') fiberUserPicks.set(key, u.id)
       else crewMap[key] = u.id
@@ -300,12 +342,22 @@ for (const [sku, [name, unit]] of Object.entries(partMatches.sku_units)) {
   if (!partInfo.has(sku)) partInfo.set(sku, { name, unit, routing: 'ask', method: 'value-map' })
 }
 for (const d of decAssetParts) {
-  const model = pick(d.model), sku = pick(d.YOUR_PICK_sku)
-  if (!model || !sku) continue
-  if (sku.toLowerCase() === 'skip' || sku.toLowerCase() === 'ignore') { partMap[model] = '__SKIP__'; continue }
-  partMap[model] = sku
-  if (!partInfo.has(sku)) partInfo.set(sku, { name: pick(d.YOUR_PICK_name) || sku, unit: 'ea', routing: 'ask', method: 'decision' })
-  else partInfo.get(sku).method = 'decision'
+  const model = pick(d.model)
+  let sku = pick(d.YOUR_PICK_sku)
+  const nm = pick(d.YOUR_PICK_name)
+  if (!model || (!sku && !nm)) continue
+  if ((sku || nm).toLowerCase() === 'skip' || (sku || nm).toLowerCase() === 'ignore') { partMap[model] = '__SKIP__'; continue }
+  if (sku) {
+    // explicit SKU pick (existing catalog id or invented NEW-...)
+    partMap[model] = sku
+    if (!partInfo.has(sku)) partInfo.set(sku, { name: nm || sku, unit: 'ea', routing: 'ask', method: 'decision' })
+    else partInfo.get(sku).method = 'decision'
+  } else {
+    // name-only pick: resolve name → catalog SKU (or mint NEW-)
+    const r = resolveTypedName(nm)
+    partMap[model] = r.sku
+    if (!partInfo.has(r.sku)) partInfo.set(r.sku, { name: r.name, unit: r.unit || 'ea', routing: r.routing || 'ask', method: r.method })
+  }
 }
 
 // routing decisions: per-SKU policy override or fixed bucket
