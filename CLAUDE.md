@@ -62,7 +62,7 @@ Infrastructure crew gets a **sites-shaped shell** — same overall flow as fiber
   1. `submission.project_id_override` (manual override from the workspace picker)
   2. `phases.project_id` (fiber path — derive from the task's phase)
   3. `sites.project_id` (infra path — derive from the task's site)
-- Phase actuals still increment only when `phase_id IS NOT NULL` (no "site actuals" concept). The crew_type guard is `{fiber_construction, splice, infrastructure, fiber_tech}` (plus legacy `aerial`/`underground` still in the IN-list for back-compat).
+- Phase actuals still increment only when `phase_id IS NOT NULL` (no "site actuals" concept). The crew_type guard is `{fiber_construction, field_service, infrastructure}` (plus legacy `aerial`/`underground`/`splice`/`fiber_tech` still in the IN-list for back-compat).
 - All 7 infra projects (Fixed Wireless, Gigwave, Heber, Ogden Valley, Park City, Wasatch Front, West Mountain) have project buckets. Wasatch Front + West Mountain were backfilled when the auto-deduct path was wired — they pre-dated `trg_ensure_project_job_site` and never got auto-created. The backfill migration is idempotent so it's safe to rerun.
 
 **Per-site attributes the owner cares about:** name / type / category / address / status. Tower height, power source, etc. are intentionally NOT stored.
@@ -95,7 +95,7 @@ Some managers are also field workers. They needed to log their own day's work wi
 
 **Same identity, same truck.** No account sprawl. All inventory, audit trail, and approval flows use the same `user_id`.
 
-**Auto-deduct caveat:** `approve_submission` still requires `crew_type ∈ {fiber_construction, splice, infrastructure, fiber_tech}` (plus legacy `aerial`/`underground`) for the truck → project bucket transfer to fire. A manager with `crew_type = 'drop'` (or `'locator'`/`'install'`/`'contractor'`) can log work in crew mode but their approvals won't auto-deduct. Documented; not enforced in the router because the manager might legitimately want to log non-deducting work.
+**Auto-deduct caveat:** `approve_submission` still requires `crew_type ∈ {fiber_construction, field_service, infrastructure}` (plus legacy `aerial`/`underground`/`splice`/`fiber_tech`) for the truck → project bucket transfer to fire. A manager with `crew_type = 'install'` or `'contractor'` (or legacy `'drop'`/`'locator'`) can log work in crew mode but their approvals won't auto-deduct. Documented; not enforced in the router because the manager might legitimately want to log non-deducting work.
 
 **What this is NOT:** a unified app shell. Crew users (`role = 'crew'`) never see the manager portal and never interact with `viewMode`. The toggle is staff-only.
 
@@ -327,7 +327,7 @@ All `SECURITY DEFINER`, all with `SET search_path = public, pg_temp`. EXECUTE on
 
 | RPC | Called from JS | Purpose |
 |---|---|---|
-| `approve_submission(p_submission_id, p_note)` | `lib/supabase.js` → `approveSubmission` | Atomic + idempotent submission approval. Increments phase actuals when phase is set, mirrors task `status='approved'`, auto-deducts materials (truck → project bucket) for fiber_construction/splice/infrastructure/fiber_tech crews (legacy aerial/underground still in the guard). Bucket lookup: `submissions.project_id_override` → `phases.project_id` → `sites.project_id`. **Backlog #2:** no longer clears `working_counts`/`last_worked_by`/`last_worked_at` — the task stays open across passdowns until a manager closes it via `tasks.is_closed`. **Auto-deduct is submission-scoped** (migration `20260706232824_log_entries_submission_link.sql`): aggregates `entry_parts` for entries with `log_entries.submission_id = p_submission_id`; falls back to the legacy session-scoped WHERE only when the submission has NO linked entries (pre-fix rows). Two coexisting same-day submissions can never double-deduct each other's parts. |
+| `approve_submission(p_submission_id, p_note)` | `lib/supabase.js` → `approveSubmission` | Atomic + idempotent submission approval. Increments phase actuals when phase is set, mirrors task `status='approved'`, auto-deducts materials (truck → project bucket) for fiber_construction/field_service/infrastructure crews (legacy aerial/underground/splice/fiber_tech still in the guard). Bucket lookup: `submissions.project_id_override` → `phases.project_id` → `sites.project_id`. **Backlog #2:** no longer clears `working_counts`/`last_worked_by`/`last_worked_at` — the task stays open across passdowns until a manager closes it via `tasks.is_closed`. **Auto-deduct is submission-scoped** (migration `20260706232824_log_entries_submission_link.sql`): aggregates `entry_parts` for entries with `log_entries.submission_id = p_submission_id`; falls back to the legacy session-scoped WHERE only when the submission has NO linked entries (pre-fix rows). Two coexisting same-day submissions can never double-deduct each other's parts. |
 | `record_crew_movement(operation, part_id, quantity, other_location_id, ...)` | `lib/inventory.js` → `recordCrewMovement` | Single entry point for crew load/return/issue/scrap/transfer. Checks per-user permission, crew_type×department whitelist, then inserts the movement. |
 | `approve_intake_request(p_request_id, p_note)` | `lib/inventory.js` → `approveIntakeRequest` | Backlog #19. Idempotent (anchors on `booked_at`/`movement_id`). Staff-guarded via `is_staff()`. Validates the target is a warehouse, materializes a draft part (`is_active=false`) when the request has no `part_id`, books a `receive` movement (truck-less, into the warehouse → trigger updates stock), flips the request to `approved`. |
 | `reject_intake_request(p_request_id, p_note)` | `lib/inventory.js` → `rejectIntakeRequest` | Backlog #19. Staff-guarded. Flips a pending intake request to `rejected` with a reason; no stock moves. |
@@ -609,7 +609,7 @@ The inventory side has many entry points that all write to `inventory_movements`
 | Manager Fiber-jobs import (`FiberJobsImportSheet`) | `transfer` (× N lines) | crew truck → region bucket | Stamps `[sonar_jobs:…]` marker + `phase_id`/`consumed_by_user_id` |
 | **Found-inventory approval** (`approve_intake_request` RPC) | `receive` | NULL → warehouse | Backlog #19 — books the crew's reported find into stock |
 | **Cycle count** (`end_count_run_and_reconcile` + `approve_count_resolution` RPCs) | `transfer` (paired variances) / `adjust` (net gain/loss on approval) | bin ↔ bin / one-sided | Staff-gated; resolutions reviewed in `CountRunReviewSheet` |
-| **Auto-deduct on approval** (`approve_submission` RPC) | `transfer` (× N parts) | submitter's truck → project bucket | Gated on crew_type ∈ {fiber_construction, splice, infrastructure, fiber_tech} (+ legacy aerial/underground). Honors `project_id_override`. |
+| **Auto-deduct on approval** (`approve_submission` RPC) | `transfer` (× N parts) | submitter's truck → project bucket | Gated on crew_type ∈ {fiber_construction, field_service, infrastructure} (+ legacy aerial/underground/splice/fiber_tech). Honors `project_id_override`. |
 | BoxHero CSV import (`InventoryImportSheet`) | `adjust` baseline + future flows | varies | Initial seed path |
 
 Things to remember when adding a new entry point:
