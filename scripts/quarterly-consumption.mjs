@@ -902,6 +902,12 @@ const fiberInQ = fiberOut.filter(r => r.in_quarter === 'yes')
 const fiberJobsInQ = fiberRowStats.filter(r => r.dateStr && inQuarter(r.dateStr))
 
 const dupTotal = dedupedRows.reduce((s, d) => s + d.dupCount, 0)
+// Rollup coverage — what the consumption CSVs actually count vs what's excluded.
+const readyAssetQ = assetInQ.filter(r => r.status === 'ready').length
+const readyFiberLinesQ = fiberInQ.filter(r => r.status === 'ready').length
+const excludedAssetQ = assetInQ.length - readyAssetQ
+const rollupProjectQty = byProject.reduce((s, r) => s + r.qty_total, 0)
+const rollupAlready = byProject.reduce((s, r) => s + r.qty_already_in_fiberlog, 0)
 const summary = `# Q2 2026 consumption enrichment — run ${new Date().toISOString().slice(0, 16)}
 
 ## Inputs
@@ -917,6 +923,13 @@ ${tally(assetInQ, 'status').map(([s, n]) => `- ${s}: ${n}`).join('\n')}
 
 ## Fiber material-line status (in-quarter)
 ${tally(fiberInQ, 'status').map(([s, n]) => `- ${s}: ${n}`).join('\n')}
+
+## What the consumption rollups count (out/consumption-2026Q2-by-*.csv)
+- ONLY fully-resolved (status=ready) in-quarter rows are summed.
+- Asset installs counted: ${readyAssetQ} of ${assetInQ.length}  (excluded & flagged: ${excludedAssetQ} — ${assetInQ.filter(r => r.status === 'ask').length} need-routing + ${assetInQ.filter(r => r.status === 'no-part').length} no-part)
+- Fiber material lines counted: ${readyFiberLinesQ} of ${fiberInQ.length}
+- Total units in by-project rollup: ${rollupProjectQty}  (of which already in the FiberLog ledger: ${rollupAlready}, net-new: ${rollupProjectQty - rollupAlready})
+- Excluded rows remain in the enriched CSVs with status/needs set — nothing is dropped silently.
 
 ## Already imported into FiberLog (marker match)
 - Asset installs: ${assetOut.filter(r => r.already_imported === 'yes').length}
