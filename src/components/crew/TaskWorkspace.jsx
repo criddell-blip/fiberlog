@@ -128,6 +128,41 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     ? (history?.submissions || []).find(s => s.status === 'flagged' && s.user_id === currentUser?.id)
     : null
 
+  // Restore the flagged passdown's materials into the editable draft so the
+  // crew can EDIT the fix instead of re-typing every part from the banner.
+  // Background: submit resets working_counts to {} (backlog #2, so the next
+  // day's passdown starts clean), and a manager flag happens later — so when
+  // the crew reopen a flagged task the tally is empty. The manager's flag is
+  // "fix this ONE thing," not "redo the whole passdown," so an empty tally
+  // reads as "all my material disappeared." We repopulate from the flagged
+  // submission's parts (as "added" parts — the assembly-count breakdown wasn't
+  // preserved past submit, but the materials themselves are exact), plus its
+  // hours + note. The resubmit path already deletes the flagged submission and
+  // writes a fresh one, so this closes the flag→fix→resubmit loop. Guarded:
+  // runs ONCE per mount (key={task.id} remounts per task) and only while the
+  // draft is still empty, so it never clobbers work the crew — or a coworker
+  // on a shared task — already began.
+  const flagRestoredRef = useRef(false)
+  useEffect(() => {
+    if (!draftLoaded || flagRestoredRef.current || !flaggedSub) return
+    const draftHasWork =
+      Object.values(counts).some(v => Number(v) > 0) ||
+      extraParts.length > 0 ||
+      Object.values(conduitSizes).some(v => String(v || '').trim() !== '') ||
+      !!String(note).trim()
+    // Even if we skip (draft already has work), mark restored so we don't
+    // keep re-checking on every history refresh.
+    flagRestoredRef.current = true
+    if (draftHasWork) return
+    const restored = (flaggedSub.parts || [])
+      .filter(p => (p.partId || p.id) && Number(p.qty) > 0)
+      .map(p => ({ id: p.partId || p.id, name: p.name, unit: p.unit || 'ea', qty: Number(p.qty) }))
+    if (restored.length > 0) setExtraParts(restored)
+    if (typeof flaggedSub.hours_worked === 'number') setHoursWorked(flaggedSub.hours_worked)
+    const firstNote = (flaggedSub.notes || []).find(n => String(n || '').trim())
+    if (firstNote) setNote(firstNote)
+  }, [draftLoaded, flaggedSub, counts, extraParts.length, conduitSizes, note])
+
   // If this task was previously flagged by the manager, surface the reason
   // so the crew knows what to fix. Only relevant when the task is back to
   // 'open' (the flow when manager flags: submission='flagged', task reverts
