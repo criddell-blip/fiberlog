@@ -883,8 +883,16 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                     </div>
                     <div className="part-id">{p.id}</div>
                   </div>
-                  <span className="part-qty" style={{ minWidth: 28, textAlign: 'center' }}>{p.qty}</span>
-                  <span className="part-unit">{p.unit}</span>
+                  <button
+                    className="tally-btn tally-sm tally-minus"
+                    onClick={() => setExtraParts(prev => prev.map(ep => ep.id === p.id ? { ...ep, qty: Math.max(1, ep.qty - 1) } : ep))}
+                  >−</button>
+                  <span className="part-qty" style={{ minWidth: 28, textAlign: 'center' }}>{p.qty.toLocaleString()}</span>
+                  <button
+                    className="tally-btn tally-sm tally-plus"
+                    onClick={() => setExtraParts(prev => prev.map(ep => ep.id === p.id ? { ...ep, qty: ep.qty + 1 } : ep))}
+                  >+</button>
+                  <span className="part-unit" style={{ minWidth: 14 }}>{p.unit}</span>
                   <button
                     onClick={() => setExtraParts(prev => prev.filter(ep => ep.id !== p.id))}
                     className="tally-btn tally-sm"
@@ -904,7 +912,9 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
             {showPartSearch && (
               <PartSearch
                 onSelect={p => {
-                  setExtraParts(prev => [...prev, { id: p.id, name: p.name, unit: p.unit || 'ea', qty: 1 }])
+                  setExtraParts(prev => prev.some(ep => ep.id === p.id)
+                    ? prev.map(ep => ep.id === p.id ? { ...ep, qty: ep.qty + 1 } : ep)
+                    : [...prev, { id: p.id, name: p.name, unit: p.unit || 'ea', qty: 1 }])
                   setShowPartSearch(false)
                 }}
                 onClose={() => setShowPartSearch(false)}
