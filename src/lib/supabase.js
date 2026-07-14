@@ -594,6 +594,25 @@ export async function approveSubmission(id, note) {
   if (error) throw error
 }
 
+// Manager edit-then-approve: atomically replace a PENDING submission's parts
+// (consolidated onto one linked entry) and optionally correct hours, then the
+// manager approves normally — approve_submission reads the live entry_parts, so
+// the deduction reflects these edits. Backed by replace_submission_parts, which
+// is staff-guarded and pending-only (raises after approval). `parts` items are
+// {part_id, qty}; unit isn't sent (it lives in parts_catalog). Pass hours as a
+// number to overwrite submissions.hours_worked, or omit to leave it.
+export async function saveSubmissionParts(id, parts, hours) {
+  const { data, error } = await db.rpc('replace_submission_parts', {
+    p_submission_id: id,
+    p_parts: (parts || [])
+      .filter(p => p.part_id && p.qty > 0)
+      .map(p => ({ part_id: p.part_id, quantity: p.qty })),
+    p_hours: typeof hours === 'number' ? hours : null,
+  })
+  if (error) throw error
+  return data
+}
+
 // Crew-side read-only view of everything submitted against a task: ALL
 // passdowns (newest first), each with its own parts + notes. Consumed by
 // TaskSummaryView (closed tasks) and TaskWorkspace's history strip (open

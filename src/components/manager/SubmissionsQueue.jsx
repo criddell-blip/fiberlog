@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
-import { approveSubmission, setTaskClosed, db } from '../../lib/supabase'
+import { approveSubmission, saveSubmissionParts, setTaskClosed, db } from '../../lib/supabase'
 import { useApp } from '../../AppContext'
 import useRealtimeQueue from '../../lib/useRealtimeQueue'
+import { useBackClose } from '../../lib/backStack'
 import ReviewQueue, { ReviewActions, InitialsAvatar, StatusPill, fmtShortDateTime } from './ReviewQueue'
+import PartSearch from '../crew/workspace/PartSearch'
 import Icon from '../shared/Icon'
 
 // The core daily manager flow — crew passdown review. Built on the shared
@@ -75,6 +77,15 @@ export default function SubmissionsQueue() {
   const [filter, setFilter] = useState('pending')
   const [showArchived, setShowArchived] = useState(false)
   const [expandedProjects, setExpandedProjects] = useState({})
+  // Manager edit-then-approve (pending submissions only). editParts mirrors
+  // selectedParts but carries part_id for the write-back; editHours mirrors
+  // sel.hours_worked. Reset whenever a different submission is opened or the
+  // overlay closes so edit state never leaks between submissions.
+  const [editMode, setEditMode] = useState(false)
+  const [editParts, setEditParts] = useState([])
+  const [editHours, setEditHours] = useState(0)
+  const [showPartSearch, setShowPartSearch] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => { loadSubmissions() }, [])
 
@@ -87,6 +98,26 @@ export default function SubmissionsQueue() {
       loadSubmissions()
       if (type === 'INSERT') showToast('New submission received')
     },
+  })
+
+  // Dirty = the editable copy diverges from what's loaded. Drives Save
+  // enablement AND the Back/Cancel discard confirm below.
+  const editDirty = editMode && !!selected && (
+    editHours !== (Number(selected.hours_worked) || 0) ||
+    editParts.length !== selectedParts.length ||
+    editParts.some(ep => {
+      const o = selectedParts.find(s => s.part_id === ep.part_id)
+      return !o || o.qty !== ep.qty
+    })
+  )
+
+  // Hardware/browser Back guard for edit mode (project convention: data-entry
+  // Back confirms when dirty). Registered here at the component top level —
+  // renderDetail is a plain render helper, not a component, so it can't hold
+  // hooks. Depth 1 while editing; the nested PartSearch (also depth 1) activates
+  // later so Back closes it first, then exits edit mode, then the overlay.
+  useBackClose(editMode ? 1 : 0, () => { setShowPartSearch(false); setEditMode(false) }, {
+    confirm: () => !editDirty || window.confirm('Discard changes?'),
   })
 
   async function loadSubmissions() {
@@ -118,6 +149,8 @@ export default function SubmissionsQueue() {
     setPartsLoading(true)
     setSelectedParts([])
     setSelTaskClosed(null)
+    // A fresh submission — drop any in-flight edit state from the last one.
+    setEditMode(false); setEditParts([]); setShowPartSearch(false)
     try {
       // Use task_id not session_id - one session can span multiple tasks
       const taskId = sub.work_sessions?.task_id
@@ -145,7 +178,8 @@ export default function SubmissionsQueue() {
       const totals = {}
       ;(parts || []).forEach(p => {
         const id = p.parts_catalog?.id || p.part_id || 'unknown'
-        if (!totals[id]) totals[id] = { name: p.parts_catalog?.name || p.part_id || id, unit: p.parts_catalog?.unit || 'ea', qty: 0 }
+        // part_id is carried so the manager edit path can write it back.
+        if (!totals[id]) totals[id] = { part_id: id, name: p.parts_catalog?.name || p.part_id || id, unit: p.parts_catalog?.unit || 'ea', qty: 0 }
         totals[id].qty += p.quantity || 0
       })
       setSelectedParts(Object.values(totals).filter(p => p.qty > 0))
@@ -191,6 +225,32 @@ export default function SubmissionsQueue() {
       await loadSubmissions()
     } catch (e) { showToast('Flag failed: ' + e.message) }
     finally { setActing(false) }
+  }
+
+  // Enter edit mode — seed the editable copy from the currently-loaded parts
+  // (deep-copied so cancelling discards) and the submission's hours.
+  function startEdit(sel) {
+    setEditParts(selectedParts.map(p => ({ ...p })))
+    setEditHours(Number(sel.hours_worked) || 0)
+    setEditMode(true)
+  }
+
+  // Save the edited parts + hours via the replace_submission_parts RPC, then
+  // re-aggregate from the DB so the read-only view reflects the DB truth. The
+  // submission stays pending — the manager then clicks Approve normally, and
+  // approve_submission deducts the edited quantities.
+  async function handleSaveEdits(sub) {
+    setSaving(true)
+    try {
+      await saveSubmissionParts(sub.id, editParts, editHours)
+      setEditMode(false); setShowPartSearch(false)
+      showToast('Changes saved')
+      // Reflect the new hours on the selected row without a full refetch.
+      setSelected(prev => prev && prev.id === sub.id ? { ...prev, hours_worked: editHours } : prev)
+      await loadSubmissions()
+      await loadPartsForSubmission({ ...sub, hours_worked: editHours })
+    } catch (e) { showToast('Save failed: ' + e.message) }
+    finally { setSaving(false) }
   }
 
   // Backlog #2: close the task once its work is done — the daily flow is
@@ -271,7 +331,7 @@ export default function SubmissionsQueue() {
       emptyIcon="layers"
       emptyMessage={`No ${showArchived ? 'archived' : (filter === 'all' ? '' : filter + ' ')}submissions`}
       selected={selected}
-      onCloseDetail={() => setSelected(null)}
+      onCloseDetail={() => { setSelected(null); setEditMode(false); setEditParts([]); setShowPartSearch(false) }}
       renderDetail={renderDetail}
     >
       {sortedProjects.map(([projName, subs]) => {
@@ -345,6 +405,8 @@ export default function SubmissionsQueue() {
   )
 
   function renderDetail(sel) {
+    const isPending = sel.status === 'pending'
+    const dirty = editDirty  // computed at component scope (also drives the Back guard)
     return (
       <>
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 2 }}>{sel.users?.name}</div>
@@ -376,7 +438,13 @@ export default function SubmissionsQueue() {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
           {[
-            { label: 'Hours', value: sel.hours_worked || 0 },
+            { label: 'Hours', value: editMode ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                <button className="tally-btn tally-sm tally-minus" onClick={() => setEditHours(h => Math.max(0, Math.round((h - 0.5) * 2) / 2))}>−</button>
+                <span className="mono" style={{ minWidth: 30, fontSize: 15 }}>{editHours.toFixed(1)}</span>
+                <button className="tally-btn tally-sm tally-plus" onClick={() => setEditHours(h => Math.min(16, Math.round((h + 0.5) * 2) / 2))}>+</button>
+              </div>
+            ) : (sel.hours_worked || 0) },
             sel.total_poles > 0 && { label: 'Poles', value: sel.total_poles },
             sel.total_strand_ft > 0 && { label: 'Strand', value: `${(sel.total_strand_ft||0).toLocaleString()}ft` },
             sel.total_fiber_ft > 0 && { label: 'Fiber', value: `${(sel.total_fiber_ft||0).toLocaleString()}ft` },
@@ -393,9 +461,34 @@ export default function SubmissionsQueue() {
           ))}
         </div>
 
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>Parts logged</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>
+          Parts logged{editMode ? ' — editing' : ''}
+        </div>
         {partsLoading ? (
           <div style={{ textAlign: 'center', padding: 16, color: 'var(--muted)', fontSize: 13 }}>Loading parts...</div>
+        ) : editMode ? (
+          <div style={{ marginBottom: 14 }}>
+            {editParts.length > 0 && (
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', maxHeight: 220, overflowY: 'auto' }}>
+                {editParts.map((p, i) => (
+                  <div key={p.part_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: i < editParts.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                      <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'var(--font-mono)' }}>{p.part_id}</div>
+                    </div>
+                    <button className="tally-btn tally-sm tally-minus" onClick={() => setEditParts(prev => prev.map((x, j) => j === i ? { ...x, qty: Math.max(1, x.qty - 1) } : x))}>−</button>
+                    <span className="mono" style={{ minWidth: 30, textAlign: 'center', fontSize: 13, fontWeight: 700 }}>{p.qty.toLocaleString()}</span>
+                    <button className="tally-btn tally-sm tally-plus" onClick={() => setEditParts(prev => prev.map((x, j) => j === i ? { ...x, qty: x.qty + 1 } : x))}>+</button>
+                    <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 16 }}>{p.unit}</span>
+                    <button onClick={() => setEditParts(prev => prev.filter((_, j) => j !== i))} className="tally-btn tally-sm" style={{ background: 'var(--red-lt)', color: 'var(--red)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="x" size={14} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button onClick={() => setShowPartSearch(true)} className="add-dashed" style={{ width: '100%', padding: 10, marginTop: 8, fontSize: 13 }}>
+              + Add a part
+            </button>
+          </div>
         ) : selectedParts.length > 0 ? (
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', marginBottom: 14, maxHeight: 200, overflowY: 'auto' }}>
             {selectedParts.map((p, i) => (
@@ -411,23 +504,44 @@ export default function SubmissionsQueue() {
           <div style={{ fontSize: 13, color: 'var(--hint)', marginBottom: 14, textAlign: 'center', padding: 12 }}>No parts logged</div>
         )}
 
-        <ReviewActions
-          isPending={sel.status === 'pending'}
-          note={note}
-          onNoteChange={setNote}
-          noteLabel="Note (optional)"
-          notePlaceholder="Add a note..."
-          noteMinHeight={56}
-          acting={acting}
-          danger={{ label: 'Flag', icon: 'flag', onClick: () => handleFlag(sel) }}
-          primary={{ label: 'Approve', icon: 'check', busyLabel: 'Saving...', onClick: () => handleApprove(sel) }}
-          banner={STATUS_COLORS[sel.status] || {}}
-        />
+        {editMode ? (
+          // Edit-then-approve: Save leaves the submission PENDING (approve is a
+          // separate, deliberate step — it posts the irreversible deduction).
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost" style={{ flex: 1 }} disabled={saving}
+              onClick={() => { if (!editDirty || window.confirm('Discard changes?')) { setEditMode(false); setShowPartSearch(false) } }}>Cancel</button>
+            <button className="btn btn-primary" style={{ flex: 2 }} disabled={saving || !dirty}
+              onClick={() => handleSaveEdits(sel)}>{saving ? 'Saving…' : 'Save changes'}</button>
+          </div>
+        ) : (
+          <>
+            <ReviewActions
+              isPending={isPending}
+              note={note}
+              onNoteChange={setNote}
+              noteLabel="Note (optional)"
+              notePlaceholder="Add a note..."
+              noteMinHeight={56}
+              acting={acting}
+              danger={{ label: 'Flag', icon: 'flag', onClick: () => handleFlag(sel) }}
+              primary={{ label: 'Approve', icon: 'check', busyLabel: 'Saving...', onClick: () => handleApprove(sel) }}
+              banner={STATUS_COLORS[sel.status] || {}}
+            />
+            {/* Fix wrong materials/hours in place instead of flagging back to
+                the crew. Pending-only; approve reads the edited entry_parts. */}
+            {isPending && (
+              <button onClick={() => startEdit(sel)} disabled={partsLoading}
+                style={{ width: '100%', marginTop: 8, padding: 10, background: 'var(--bg)', border: '1px solid var(--border2)', borderRadius: 'var(--r-sm)', color: 'var(--text)', cursor: partsLoading ? 'default' : 'pointer', fontSize: 13, fontWeight: 700, opacity: partsLoading ? 0.6 : 1 }}>
+                <Icon name="edit" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Edit materials &amp; hours
+              </button>
+            )}
+          </>
+        )}
 
         {/* Backlog #2: close the task once its work is truly done. The
             task stays open across passdowns otherwise — approving alone
             no longer completes it. */}
-        {sel.work_sessions?.task_id && (
+        {!editMode && sel.work_sessions?.task_id && (
           selTaskClosed ? (
             <div style={{ width: '100%', marginTop: 8, padding: 10, textAlign: 'center', background: 'var(--teal-lt)', borderRadius: 'var(--r-sm)', color: 'var(--teal-mid)', fontSize: 13, fontWeight: 700 }}>
               <Icon name="check" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Task closed
@@ -450,6 +564,21 @@ export default function SubmissionsQueue() {
           >
             <Icon name="box" size={14} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Archive this submission
           </button>
+        )}
+
+        {/* Add-part catalog search (reused crew overlay). Stacks over the
+            detail overlay and self-registers hardware-Back. Re-selecting an
+            existing part bumps its qty rather than duplicating the row. */}
+        {showPartSearch && (
+          <PartSearch
+            onSelect={p => {
+              setEditParts(prev => prev.some(x => x.part_id === p.id)
+                ? prev.map(x => x.part_id === p.id ? { ...x, qty: x.qty + 1 } : x)
+                : [...prev, { part_id: p.id, name: p.name, unit: p.unit || 'ea', qty: 1 }])
+              setShowPartSearch(false)
+            }}
+            onClose={() => setShowPartSearch(false)}
+          />
         )}
       </>
     )
