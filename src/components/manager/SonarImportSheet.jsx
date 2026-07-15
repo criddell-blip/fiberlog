@@ -18,6 +18,7 @@ import {
   Section, MappingRow, StatusTag, StatusBadge, selectStyle,
   SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
 } from './importShared'
+import PartSearch from '../crew/workspace/PartSearch'
 import BulkSonarProjectsSheet from './BulkSonarProjectsSheet'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
@@ -116,6 +117,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   // inline "create draft" form instead of (well, alongside) the SKU
   // picker. One row at a time — null means none open.
   const [creatingForModel, setCreatingForModel] = useState(null)
+  const [pickingModel, setPickingModel] = useState(null)  // model whose SKU is being picked via PartSearch
   const [pendingPartRouting, setPendingPartRouting] = useState({}) // part_id → policy
   const [rowDest, setRowDest] = useState({})          // row idx → bucket id (per-row override / ask-resolution)
   const [rowSource, setRowSource] = useState({})      // row idx → source location id (per-row source override when the completer isn't the carrier)
@@ -876,18 +878,14 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                         <div style={{ fontSize: 10, color: 'var(--hint)' }}>{n} row{n === 1 ? '' : 's'}</div>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <select
-                          value={partId || ''}
-                          onChange={e => setPartMap(prev => ({ ...prev, [model]: e.target.value }))}
-                          style={selectStyle()}
+                        <button
+                          type="button"
+                          onClick={() => setPickingModel(model)}
+                          title="Search the catalog for a part to map this Sonar model to"
+                          style={{ ...selectStyle(), textAlign: 'left', cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: partId ? 'var(--text)' : 'var(--muted)' }}
                         >
-                          <option value="">— pick part —</option>
-                          {parts.map(p => (
-                            <option key={p.id} value={p.id}>
-                              {p.name} ({p.id}){p.is_active === false ? ' — draft' : ''}
-                            </option>
-                          ))}
-                        </select>
+                          {pickedPart ? `${pickedPart.name} (${pickedPart.id})${isDraft ? ' — draft' : ''}` : '🔍 pick part…'}
+                        </button>
                         {!partId && !isOpen && (
                           <button
                             type="button"
@@ -936,6 +934,16 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                 )
               })}
             </Section>
+          )}
+
+          {/* Searchable part picker for the model→SKU mapping above. Active
+              parts only (drafts are curated separately; use "+ Create draft"). */}
+          {pickingModel && (
+            <PartSearch
+              activeOnly
+              onSelect={p => { setPartMap(prev => ({ ...prev, [pickingModel]: p.id })); setPickingModel(null) }}
+              onClose={() => setPickingModel(null)}
+            />
           )}
 
           {/* Project mappings — Sonar's Project column → FiberLog phase.

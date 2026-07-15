@@ -1,27 +1,39 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { searchParts } from '../../../lib/supabase'
 import { useBackClose } from '../../../lib/backStack'
 
-export default function PartSearch({ onSelect, onClose, filter }) {
+export default function PartSearch({ onSelect, onClose, filter, activeOnly = false }) {
   // Mounted only while open, so depth is always 1. Display-only (picking a part
   // is the action) — Back closes it with no confirm.
   useBackClose(1, onClose)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
+  const debounceRef = useRef(null)
+  // Monotonic request id: bumped on every keystroke so a slow in-flight
+  // response can't overwrite results for a newer query (out-of-order guard).
+  const reqRef = useRef(0)
 
-  async function handleSearch(q) {
+  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current) }, [])
+
+  function handleSearch(q) {
     setQuery(q)
-    if (q.length < 2) { setResults([]); return }
+    // Debounce: each searchParts call fans out to 9 parallel column queries,
+    // so firing per-keystroke is wasteful. Wait for a ~250ms pause.
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    const myReq = ++reqRef.current
+    if (q.trim().length < 2) { setResults([]); setLoading(false); return }
     setLoading(true)
-    try {
-      const data = await searchParts(q)
-      setResults(data)
-    } catch (e) {
-      console.warn('Part search failed:', e)
-    } finally {
-      setLoading(false)
-    }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const data = await searchParts(q, { activeOnly })
+        if (myReq === reqRef.current) setResults(data)
+      } catch (e) {
+        console.warn('Part search failed:', e)
+      } finally {
+        if (myReq === reqRef.current) setLoading(false)
+      }
+    }, 250)
   }
 
   return (
@@ -49,7 +61,7 @@ export default function PartSearch({ onSelect, onClose, filter }) {
           </div>
         )}
 
-        {!loading && results.length === 0 && query.length >= 2 && (
+        {!loading && results.length === 0 && query.trim().length >= 2 && (
           <div style={{ textAlign: 'center', padding: 20, color: 'var(--hint)', fontSize: 13 }}>
             No parts found — try a different term or SKU
           </div>

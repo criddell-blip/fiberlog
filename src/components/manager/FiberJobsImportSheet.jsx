@@ -17,6 +17,7 @@ import {
   SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
 } from './importShared'
 import { useBackClose } from '../../lib/backStack'
+import PartSearch from '../crew/workspace/PartSearch'
 import Icon from '../shared/Icon'
 
 // Importer for Sonar's "All fiber all jobs" report — the companion to
@@ -697,6 +698,8 @@ function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, 
   const [qtyMode, setQtyMode] = useState('fixed_unit')
   const [pairColumn, setPairColumn] = useState('')
   const [saved, setSaved] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const pickedPart = sku ? parts.find(p => p.id === sku) : null
 
   async function save() {
     if (qtyMode !== 'ignore' && !sku) return
@@ -706,6 +709,14 @@ function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, 
   }
 
   return (
+    <>
+    {picking && (
+      <PartSearch
+        activeOnly
+        onSelect={p => { setSku(p.id); setSaved(false); setPicking(false) }}
+        onClose={() => setPicking(false)}
+      />
+    )}
     <div style={{
       display: 'grid',
       gridTemplateColumns: '2fr 2fr 1.6fr 1.6fr auto',
@@ -719,15 +730,15 @@ function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, 
         <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{valueText}</div>
         <div style={{ fontSize: 10, color: 'var(--hint)' }}>{rowCount} row{rowCount === 1 ? '' : 's'}</div>
       </div>
-      <select
-        value={sku}
-        onChange={e => { setSku(e.target.value); setSaved(false) }}
+      <button
+        type="button"
+        onClick={() => setPicking(true)}
         disabled={qtyMode === 'ignore'}
-        style={selectStyle()}
+        title="Search the catalog for a SKU"
+        style={{ ...selectStyle(), textAlign: 'left', cursor: qtyMode === 'ignore' ? 'default' : 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: sku ? 'var(--text)' : 'var(--muted)', opacity: qtyMode === 'ignore' ? 0.5 : 1 }}
       >
-        <option value="">— pick SKU —</option>
-        {parts.map(p => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
-      </select>
+        {pickedPart ? `${pickedPart.name} (${pickedPart.id})` : sku ? sku : '🔍 pick SKU…'}
+      </button>
       <select
         value={qtyMode}
         onChange={e => { setQtyMode(e.target.value); setSaved(false) }}
@@ -750,6 +761,7 @@ function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, 
         {saved ? 'Saved' : 'Save'}
       </button>
     </div>
+    </>
   )
 }
 
@@ -757,7 +769,22 @@ function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, 
 function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, sourceLocations = [], rowSourceId = '', onSetSource, onAddMaterial, onSetMaterial, onRemoveMaterial }) {
   const isReady = job.rowStatus === 'ready'
   const isAlreadyImported = job.rowStatus === 'already-imported'
+  // Which line's SKU is being picked via the search overlay:
+  // { kind: 'manual', index } | { kind: 'override', columnName }
+  const [picking, setPicking] = useState(null)
   return (
+    <>
+    {picking && (
+      <PartSearch
+        activeOnly
+        onSelect={p => {
+          if (picking.kind === 'manual') onSetMaterial(picking.index, { sku: p.id })
+          else onSetOverride(picking.columnName, { sku: p.id })
+          setPicking(null)
+        }}
+        onClose={() => setPicking(null)}
+      />
+    )}
     <div style={{
       padding: '8px 10px', borderBottom: '1px solid var(--border)',
       background: isExcluded ? 'var(--gray-lt)' : isAlreadyImported ? 'var(--gray-lt)' : isReady ? 'transparent' : 'var(--amber-lt)',
@@ -813,14 +840,14 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
               {/* Manual line: own SKU + qty + remove, edits rowExtraMaterials. */}
               {line._manual ? (
                 <>
-                  <select
-                    value={line.sku || ''}
-                    onChange={e => onSetMaterial(line._manualIndex, { sku: e.target.value })}
-                    style={{ ...selectStyle(), flex: 1, maxWidth: 260 }}
+                  <button
+                    type="button"
+                    onClick={() => setPicking({ kind: 'manual', index: line._manualIndex })}
+                    title="Search the catalog for a SKU"
+                    style={{ ...selectStyle(), flex: 1, maxWidth: 260, textAlign: 'left', cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: line.sku ? 'var(--text)' : 'var(--muted)' }}
                   >
-                    <option value="">— pick SKU —</option>
-                    {parts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
+                    {line.sku ? `${parts.find(p => p.id === line.sku)?.name || line.sku} (${line.sku})` : '🔍 pick SKU…'}
+                  </button>
                   <input
                     type="number" min="0" value={line.qty || ''} placeholder="qty"
                     onChange={e => onSetMaterial(line._manualIndex, { qty: e.target.value })}
@@ -833,14 +860,14 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
                 </>
               ) : (line.status === 'unmapped' || line.status === 'manual') ? (
                 <>
-                  <select
-                    value={line.sku || ''}
-                    onChange={e => onSetOverride(line.columnName, { sku: e.target.value })}
-                    style={{ ...selectStyle(), maxWidth: 200 }}
+                  <button
+                    type="button"
+                    onClick={() => setPicking({ kind: 'override', columnName: line.columnName })}
+                    title="Search the catalog for a SKU"
+                    style={{ ...selectStyle(), maxWidth: 200, textAlign: 'left', cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: line.sku ? 'var(--text)' : 'var(--muted)' }}
                   >
-                    <option value="">— pick SKU —</option>
-                    {parts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
+                    {line.sku ? `${parts.find(p => p.id === line.sku)?.name || line.sku} (${line.sku})` : '🔍 pick SKU…'}
+                  </button>
                   <input
                     type="number"
                     value={line.qty || ''}
@@ -848,7 +875,24 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
                     onChange={e => onSetOverride(line.columnName, { qty: e.target.value })}
                     style={{ width: 60, padding: '3px 6px', fontSize: 11, border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', background: 'var(--surface2)' }}
                   />
+                  {/* Skip a compound / non-material cell (e.g. "NID Installed,
+                      195 ft conduit") — dismisses the one-cell=one-SKU guess so
+                      you can add the real materials below with "Add material".
+                      Excluded lines are skipped at apply. */}
+                  <button type="button" onClick={() => onSetOverride(line.columnName, { exclude: true })}
+                    title="Skip this cell — add the materials individually below"
+                    style={{ height: 24, padding: '0 8px', background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 'var(--r-xs)', cursor: 'pointer', flexShrink: 0, fontSize: 10, fontWeight: 600 }}>
+                    skip
+                  </button>
                 </>
+              ) : line.status === 'excluded' ? (
+                <span style={{ color: 'var(--hint)', textDecoration: 'line-through', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  skipped
+                  <button type="button" onClick={() => onSetOverride(line.columnName, { exclude: false })}
+                    title="Undo skip" style={{ background: 'transparent', border: 'none', color: 'var(--accent-dk)', cursor: 'pointer', fontSize: 10, fontWeight: 600, textDecoration: 'none', padding: 0 }}>
+                    undo
+                  </button>
+                </span>
               ) : line.status === 'ready' ? (
                 <span style={{ fontWeight: 600, color: 'var(--success-fg)' }}>
                   {line.qty} × {parts.find(p => p.id === line.sku)?.name || line.sku}
@@ -862,9 +906,15 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
             style={{ alignSelf: 'flex-start', marginTop: 2, fontSize: 11, fontWeight: 600, color: 'var(--accent-dk)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 0', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <Icon name="plus" size={12} /> Add material
           </button>
+          {job.lines.some(l => (l.status === 'unmapped' || l.status === 'manual') && !l._manual) && (
+            <div style={{ fontSize: 10, color: 'var(--hint)', marginTop: 1 }}>
+              Cell lists several materials? Skip it and add each one here.
+            </div>
+          )}
         </div>
       )}
     </div>
+    </>
   )
 }
 

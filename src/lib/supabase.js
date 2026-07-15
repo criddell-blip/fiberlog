@@ -38,7 +38,7 @@ export const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 // Single OR-query would be 1 round trip vs 8, but parallel queries avoid
 // the PostgREST escaping hazard when the user's query contains commas
 // (real-world example: "Bolt, Thimble Eye 5/8").
-export async function searchPartsCatalog(query, { cols = 'id, name, nickname, unit', limit = 20 } = {}) {
+export async function searchPartsCatalog(query, { cols = 'id, name, nickname, unit', limit = 20, activeOnly = false } = {}) {
   const q = String(query ?? '').trim()
   if (!q) return []
   // Tokenize on whitespace and AND the tokens within each column — chained
@@ -65,6 +65,10 @@ export async function searchPartsCatalog(query, { cols = 'id, name, nickname, un
   const results = await Promise.all(
     searchedCols.map(col => {
       let qb = db.from('parts_catalog').select(cols)
+      // activeOnly hides draft parts (is_active=false) — the import mapping
+      // pickers want real catalog SKUs only, matching their is_active=true
+      // dropdowns. Crew search leaves it off (drafts can be legit finds).
+      if (activeOnly) qb = qb.eq('is_active', true)
       for (const tok of tokens) qb = qb.ilike(col, `%${tok}%`)
       return qb.order('name').limit(limit)
     })
@@ -481,10 +485,11 @@ export async function deleteAssembly(id) {
   if (error) throw error
 }
 
-export async function searchParts(query) {
+export async function searchParts(query, { activeOnly = false } = {}) {
   return searchPartsCatalog(query, {
     cols: 'id, name, nickname, unit, category, department, material_group',
     limit: 20,
+    activeOnly,
   })
 }
 
