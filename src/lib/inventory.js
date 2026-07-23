@@ -1863,31 +1863,64 @@ const SAGE_TRANSACTION_TYPE = {
 // we need to populate the Sage columns. Personal trucks are filtered at
 // export-time (see buildSageCsv) — they're FiberLog-internal staging,
 // not Sage-relevant.
+// PostgREST caps a single response at 1000 rows. Any bulk read that can exceed
+// that (the Sage export + the consumption ledger routinely span thousands of
+// movements) MUST page or it silently truncates — and because the truncation
+// drops the TAIL of the sort order, an ascending-by-date query loses the NEWEST
+// rows, i.e. exactly the recent consumption you most need. This helper pages
+// through until a short page signals the end. The caller's query MUST carry a
+// fully-deterministic order (a unique tiebreaker like id) so rows sharing an
+// identical created_at — batch-inserted auto-deduct rows do — can't be skipped
+// or repeated across a page boundary.
+const PG_PAGE = 1000
+async function fetchAllPaged(makeQuery) {
+  let from = 0
+  const out = []
+  for (;;) {
+    const { data, error } = await makeQuery().range(from, from + PG_PAGE - 1)
+    if (error) throw error
+    const rows = data || []
+    out.push(...rows)
+    if (rows.length < PG_PAGE) break
+    from += PG_PAGE
+  }
+  return out
+}
+
 export async function getMovementsForSageExport({ since, until, includeExported = false } = {}) {
   // FK constraints must be referenced by full constraint name (matches
   // the rest of the codebase's PostgREST embed pattern). The column-name
   // shorthand silently broke this query in the first cut — looked like
   // "no movements" because the preflight was rejecting the join.
-  let q = db.from('inventory_movements')
-    .select(`
-      id, movement_type, quantity, unit, unit_cost, notes, created_at, occurred_at,
-      exported_at, export_batch_id, submission_id, task_id, vendor_invoice,
-      part:parts_catalog(id, name, unit, department, material_group, category),
-      from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type, parent_location_id, project_id),
-      to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type, parent_location_id, project_id),
-      phase:phases!inventory_movements_phase_id_fkey(id, name, project_id, project:projects(id, name))
-    `)
-    .order('created_at', { ascending: true })
+  //
   // Window by EFFECTIVE (work) date = occurred_at ?? created_at, so a job
   // imported in a later month lands in the correct Sage period. `created_at >=
   // since` is a SAFE lower-bound prefilter (a work-in-range row was imported
   // at/after the work, so created_at >= since too); we intentionally do NOT
   // bound created_at on the upper side (a late import would be dropped). The
   // exact effective-date window is applied in JS below.
-  if (since) q = q.gte('created_at', since)
-  if (!includeExported) q = q.is('exported_at', null)
-  const { data, error } = await q
-  if (error) throw error
+  //
+  // Paged (see fetchAllPaged): a single period can hold far more than 1000
+  // movements, and an unpaged ascending fetch returned only the oldest 1000 —
+  // silently dropping every recent (e.g. this-month) consumption row. The
+  // (created_at, id) order makes paging exact across identical timestamps.
+  const makeQuery = () => {
+    let q = db.from('inventory_movements')
+      .select(`
+        id, movement_type, quantity, unit, unit_cost, notes, created_at, occurred_at,
+        exported_at, export_batch_id, submission_id, task_id, vendor_invoice,
+        part:parts_catalog(id, name, unit, department, material_group, category),
+        from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type, parent_location_id, project_id),
+        to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type, parent_location_id, project_id),
+        phase:phases!inventory_movements_phase_id_fkey(id, name, project_id, project:projects(id, name))
+      `)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+    if (since) q = q.gte('created_at', since)
+    if (!includeExported) q = q.is('exported_at', null)
+    return q
+  }
+  const data = await fetchAllPaged(makeQuery)
   const sinceT = since ? new Date(since).getTime() : null
   const untilT = until ? new Date(until).getTime() : null
   return (data || []).filter(m => {
@@ -1921,21 +1954,28 @@ export async function getMovementsForSageExport({ since, until, includeExported 
 // in-range one. The caller applies the exact effective-date window (which needs
 // occurred_at ?? created_at and can't be expressed as a single PostgREST filter).
 export async function getConsumptionLedger({ sinceCreated = null } = {}) {
-  let q = db.from('inventory_movements')
-    .select(`
-      id, movement_type, quantity, unit, notes, created_at, occurred_at,
-      part_id, consumed_by_user_id, phase_id, task_id,
-      part:parts_catalog(id, name, unit, department, material_group, item_type, boxhero_id),
-      to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type, project_id, project:projects(id, name)),
-      phase:phases!inventory_movements_phase_id_fkey(id, name, project:projects(id, name)),
-      consumer:users!inventory_movements_consumed_by_user_id_fkey(id, name, initials, crew_type),
-      task:tasks(name, site:sites(name, project:projects(id, name)))
-    `)
-    .eq('movement_type', 'transfer')
-    .order('created_at', { ascending: false })
-  if (sinceCreated) q = q.gte('created_at', sinceCreated)
-  const { data, error } = await q
-  if (error) throw error
+  // Paged (see fetchAllPaged): transfers alone can exceed PostgREST's 1000-row
+  // cap over a wide window. Unpaged, this newest-first query would silently
+  // drop the OLDEST rows — so a long look-back would miss early consumption.
+  // Stable (created_at, id) order keeps paging exact across identical timestamps.
+  const makeQuery = () => {
+    let q = db.from('inventory_movements')
+      .select(`
+        id, movement_type, quantity, unit, notes, created_at, occurred_at,
+        part_id, consumed_by_user_id, phase_id, task_id,
+        part:parts_catalog(id, name, unit, department, material_group, item_type, boxhero_id),
+        to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type, project_id, project:projects(id, name)),
+        phase:phases!inventory_movements_phase_id_fkey(id, name, project:projects(id, name)),
+        consumer:users!inventory_movements_consumed_by_user_id_fkey(id, name, initials, crew_type),
+        task:tasks(name, site:sites(name, project:projects(id, name)))
+      `)
+      .eq('movement_type', 'transfer')
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+    if (sinceCreated) q = q.gte('created_at', sinceCreated)
+    return q
+  }
+  const data = await fetchAllPaged(makeQuery)
   // Consumption only = landed in a project bucket. movement_type is already
   // transfer; this drops truck↔truck / warehouse↔warehouse staging.
   return (data || []).filter(m => m.to_location?.type === 'job_site')
