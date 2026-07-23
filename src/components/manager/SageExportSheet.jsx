@@ -88,6 +88,24 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
     return c
   }, [exportable])
 
+  // Dry-run: build + download the EXACT same CSV as a real export but WITHOUT
+  // stamping exported_at. Lets the accountant inspect what a batch would look
+  // like — or re-pull an already-exported batch (with "Include already
+  // exported" on) — with zero side effects. Committing the batch (mark
+  // exported) stays a separate, deliberate click via handleDownload. Filename
+  // is prefixed PREVIEW so it can't be mistaken for a delivered batch.
+  function handlePreview() {
+    if (exportable.length === 0) {
+      setError('Nothing to preview in this range')
+      return
+    }
+    setError('')
+    const csv = buildSageCsv(movements, filterOpts)  // same filter as the real export
+    const filename = `sage_PREVIEW_${since}_to_${until}.csv`
+    downloadTextAsFile(filename, csv)
+    showToast(`Previewed ${exportable.length} movement${exportable.length === 1 ? '' : 's'} — not marked exported`)
+  }
+
   async function handleDownload() {
     if (exportable.length === 0) {
       setError('Nothing to export in this range')
@@ -128,7 +146,9 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
           Builds a Sage Inventory Transactions CSV from FiberLog movements in the picked range.
           Internal staging (truck → truck and warehouse↔bin within the same warehouse) plus count
           corrections (adjusts) are always filtered. Toggle <em>Strict consumption</em> to also drop
-          crew loadouts + returns. Downloaded movements get marked exported so the next batch skips them.
+          crew loadouts + returns. <strong>Preview CSV</strong> downloads the file to inspect with no side
+          effects; <strong>Download + mark exported</strong> also stamps the rows so the next batch skips them.
+          To re-view an already-exported batch (e.g. Grady's earlier export), turn on <em>Include already exported</em>.
         </div>
 
         {/* Filter row */}
@@ -274,6 +294,17 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexShrink: 0 }}>
           <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose} disabled={submitting}>
             Close
+          </button>
+          <button
+            className="btn btn-ghost"
+            style={{ flex: 1.6, border: '1px solid var(--border2)' }}
+            onClick={handlePreview}
+            disabled={submitting || exportable.length === 0}
+            title="Download the CSV to inspect it — does NOT mark anything exported"
+          >
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Icon name="eye" size={16} /> Preview CSV (no mark)
+            </span>
           </button>
           <button
             className="btn btn-primary"
