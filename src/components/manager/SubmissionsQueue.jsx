@@ -26,6 +26,21 @@ const STATUS_OPTIONS = [
   { id: 'all',      label: 'All statuses' },
 ]
 
+// Footage / count rollups the manager can correct in edit mode. These live on
+// the submission itself (not entry_parts), and approve_submission reads them
+// straight for phase actuals — so a wrong strand/fiber number can be fixed here
+// instead of flagged back. total_footage is derived (strand + fiber) on save.
+const FOOTAGE_FIELDS = [
+  { key: 'total_strand_ft',    label: 'Strand',    unit: 'ft' },
+  { key: 'total_fiber_ft',     label: 'Fiber',     unit: 'ft' },
+  { key: 'total_conduit_ft',   label: 'Conduit',   unit: 'ft' },
+  { key: 'total_poles',        label: 'Poles',     unit: '' },
+  { key: 'total_mst_hst',      label: 'MST/HST',   unit: '' },
+  { key: 'total_splice_cases', label: 'Cases',     unit: '' },
+  { key: 'total_handholes',    label: 'Handholes', unit: '' },
+  { key: 'total_vaults',       label: 'Vaults',    unit: '' },
+]
+
 // Tasks anchor on either a phase (fiber crews) or a site (infra crews) —
 // never both. submissionLocation picks the right one so the queue's grouping,
 // labels, and overlay all show real project/location names regardless of
@@ -84,6 +99,9 @@ export default function SubmissionsQueue() {
   const [editMode, setEditMode] = useState(false)
   const [editParts, setEditParts] = useState([])
   const [editHours, setEditHours] = useState(0)
+  // Footage/count rollups being edited (keyed by FOOTAGE_FIELDS[].key). Kept
+  // as raw strings so the fields can be cleared while typing; coerced on save.
+  const [editTotals, setEditTotals] = useState({})
   const [showPartSearch, setShowPartSearch] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -104,6 +122,7 @@ export default function SubmissionsQueue() {
   // enablement AND the Back/Cancel discard confirm below.
   const editDirty = editMode && !!selected && (
     editHours !== (Number(selected.hours_worked) || 0) ||
+    FOOTAGE_FIELDS.some(f => (Number(editTotals[f.key]) || 0) !== (Number(selected[f.key]) || 0)) ||
     editParts.length !== selectedParts.length ||
     editParts.some(ep => {
       const o = selectedParts.find(s => s.part_id === ep.part_id)
@@ -150,7 +169,7 @@ export default function SubmissionsQueue() {
     setSelectedParts([])
     setSelTaskClosed(null)
     // A fresh submission — drop any in-flight edit state from the last one.
-    setEditMode(false); setEditParts([]); setShowPartSearch(false)
+    setEditMode(false); setEditParts([]); setEditTotals({}); setShowPartSearch(false)
     try {
       // Use task_id not session_id - one session can span multiple tasks
       const taskId = sub.work_sessions?.task_id
@@ -191,8 +210,29 @@ export default function SubmissionsQueue() {
     setActing(true)
     try {
       await approveSubmission(sub.id, note)
-      setSelected(null); setNote('')
       showToast(`Approved — ${sub.users?.name}`)
+
+      // Offer to close the task in the same beat. Backlog #2 decoupled the
+      // task lifecycle from approval — a task stays open across passdowns so
+      // the crew can keep logging the same day — but the common case at
+      // approval is "this work is done." Rather than make the manager hunt
+      // for the separate Close-task button below, ask right here. Only prompt
+      // when the task is confirmed still open (selTaskClosed === false); a
+      // null (parts still loading) or already-closed task skips the prompt.
+      const taskId = sub.work_sessions?.task_id
+      if (taskId && selTaskClosed === false) {
+        const closeIt = window.confirm(
+          `Approved ${sub.users?.name}'s passdown.\n\n` +
+          `Is this task finished? Click OK to close it (removes it from the ` +
+          `crew's active list), or Cancel to keep it open for more passdowns.`
+        )
+        if (closeIt) {
+          try { await setTaskClosed(taskId, true, currentUser?.id) }
+          catch (e) { showToast('Close task failed: ' + e.message) }
+        }
+      }
+
+      setSelected(null); setNote('')
       await loadSubmissions()
       reload()
     } catch (e) { showToast('Approve failed: ' + e.message) }
@@ -232,6 +272,7 @@ export default function SubmissionsQueue() {
   function startEdit(sel) {
     setEditParts(selectedParts.map(p => ({ ...p })))
     setEditHours(Number(sel.hours_worked) || 0)
+    setEditTotals(Object.fromEntries(FOOTAGE_FIELDS.map(f => [f.key, Number(sel[f.key]) || 0])))
     setEditMode(true)
   }
 
@@ -243,12 +284,37 @@ export default function SubmissionsQueue() {
     setSaving(true)
     try {
       await saveSubmissionParts(sub.id, editParts, editHours)
+
+      // Footage/count rollups aren't part of replace_submission_parts (it only
+      // touches entry_parts + hours). approve_submission reads these total_*
+      // columns straight for phase actuals, so correcting a wrong strand/fiber
+      // number here flows through on approval. total_footage is derived. Guard
+      // on actuals_applied_at IS NULL (pending-only) so an already-approved
+      // submission can never be mutated, even if the UI slipped.
+      const clamp = k => Math.max(0, Number(editTotals[k]) || 0)
+      const strand = clamp('total_strand_ft')
+      const fiber = clamp('total_fiber_ft')
+      const nextTotals = {
+        total_strand_ft: strand,
+        total_fiber_ft: fiber,
+        total_footage: strand + fiber,
+        total_conduit_ft: clamp('total_conduit_ft'),
+        total_poles: clamp('total_poles'),
+        total_mst_hst: clamp('total_mst_hst'),
+        total_splice_cases: clamp('total_splice_cases'),
+        total_handholes: clamp('total_handholes'),
+        total_vaults: clamp('total_vaults'),
+      }
+      const { error: totErr } = await db.from('submissions')
+        .update(nextTotals).eq('id', sub.id).is('actuals_applied_at', null)
+      if (totErr) throw totErr
+
       setEditMode(false); setShowPartSearch(false)
       showToast('Changes saved')
-      // Reflect the new hours on the selected row without a full refetch.
-      setSelected(prev => prev && prev.id === sub.id ? { ...prev, hours_worked: editHours } : prev)
+      // Reflect the new hours + footage on the selected row without a full refetch.
+      setSelected(prev => prev && prev.id === sub.id ? { ...prev, hours_worked: editHours, ...nextTotals } : prev)
       await loadSubmissions()
-      await loadPartsForSubmission({ ...sub, hours_worked: editHours })
+      await loadPartsForSubmission({ ...sub, hours_worked: editHours, ...nextTotals })
     } catch (e) { showToast('Save failed: ' + e.message) }
     finally { setSaving(false) }
   }
@@ -331,7 +397,7 @@ export default function SubmissionsQueue() {
       emptyIcon="layers"
       emptyMessage={`No ${showArchived ? 'archived' : (filter === 'all' ? '' : filter + ' ')}submissions`}
       selected={selected}
-      onCloseDetail={() => { setSelected(null); setEditMode(false); setEditParts([]); setShowPartSearch(false) }}
+      onCloseDetail={() => { setSelected(null); setEditMode(false); setEditParts([]); setEditTotals({}); setShowPartSearch(false) }}
       renderDetail={renderDetail}
     >
       {sortedProjects.map(([projName, subs]) => {
@@ -436,30 +502,51 @@ export default function SubmissionsQueue() {
           )
         })()}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
-          {[
-            { label: 'Hours', value: editMode ? (
+        {editMode ? (
+          // Editable footage/count grid — Hours plus every footage rollup shown
+          // regardless of value so a wrong (or missing) strand/fiber/etc. can be
+          // corrected or zeroed out. approve reads these straight for phase actuals.
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
+            <div style={{ background: 'var(--bg)', borderRadius: 'var(--r-sm)', padding: 10, textAlign: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                 <button className="tally-btn tally-sm tally-minus" onClick={() => setEditHours(h => Math.max(0, Math.round((h - 0.5) * 2) / 2))}>−</button>
                 <span className="mono" style={{ minWidth: 30, fontSize: 15 }}>{editHours.toFixed(1)}</span>
                 <button className="tally-btn tally-sm tally-plus" onClick={() => setEditHours(h => Math.min(16, Math.round((h + 0.5) * 2) / 2))}>+</button>
               </div>
-            ) : (sel.hours_worked || 0) },
-            sel.total_poles > 0 && { label: 'Poles', value: sel.total_poles },
-            sel.total_strand_ft > 0 && { label: 'Strand', value: `${(sel.total_strand_ft||0).toLocaleString()}ft` },
-            sel.total_fiber_ft > 0 && { label: 'Fiber', value: `${(sel.total_fiber_ft||0).toLocaleString()}ft` },
-            sel.total_mst_hst > 0 && { label: 'MST/HST', value: sel.total_mst_hst },
-            sel.total_splice_cases > 0 && { label: 'Cases', value: sel.total_splice_cases },
-            sel.total_conduit_ft > 0 && { label: 'Conduit', value: `${(sel.total_conduit_ft||0).toLocaleString()}ft` },
-            sel.total_handholes > 0 && { label: 'HH', value: sel.total_handholes },
-            sel.total_vaults > 0 && { label: 'Vaults', value: sel.total_vaults },
-          ].filter(Boolean).map(s => (
-            <div key={s.label} style={{ background: 'var(--bg)', borderRadius: 'var(--r-sm)', padding: 10, textAlign: 'center' }}>
-              <div style={{ fontSize: 16, fontWeight: 800 }}>{s.value}</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.label}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>Hours</div>
             </div>
-          ))}
-        </div>
+            {FOOTAGE_FIELDS.map(f => (
+              <div key={f.key} style={{ background: 'var(--bg)', borderRadius: 'var(--r-sm)', padding: 10, textAlign: 'center' }}>
+                <input
+                  type="number" min="0" inputMode="decimal"
+                  value={editTotals[f.key] ?? ''}
+                  onChange={e => setEditTotals(prev => ({ ...prev, [f.key]: e.target.value }))}
+                  style={{ width: '100%', padding: '2px 4px', textAlign: 'center', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border2)', color: 'var(--orange)', fontSize: 16, fontWeight: 800, outline: 'none' }}
+                />
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{f.label}{f.unit ? ` (${f.unit})` : ''}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
+            {[
+              { label: 'Hours', value: (sel.hours_worked || 0) },
+              sel.total_poles > 0 && { label: 'Poles', value: sel.total_poles },
+              sel.total_strand_ft > 0 && { label: 'Strand', value: `${(sel.total_strand_ft||0).toLocaleString()}ft` },
+              sel.total_fiber_ft > 0 && { label: 'Fiber', value: `${(sel.total_fiber_ft||0).toLocaleString()}ft` },
+              sel.total_mst_hst > 0 && { label: 'MST/HST', value: sel.total_mst_hst },
+              sel.total_splice_cases > 0 && { label: 'Cases', value: sel.total_splice_cases },
+              sel.total_conduit_ft > 0 && { label: 'Conduit', value: `${(sel.total_conduit_ft||0).toLocaleString()}ft` },
+              sel.total_handholes > 0 && { label: 'HH', value: sel.total_handholes },
+              sel.total_vaults > 0 && { label: 'Vaults', value: sel.total_vaults },
+            ].filter(Boolean).map(s => (
+              <div key={s.label} style={{ background: 'var(--bg)', borderRadius: 'var(--r-sm)', padding: 10, textAlign: 'center' }}>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>{s.value}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>
           Parts logged{editMode ? ' — editing' : ''}
