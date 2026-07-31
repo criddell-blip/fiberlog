@@ -68,10 +68,31 @@ function reconcile() {
     window.history.pushState({ __fiberlogBack: armed }, '')
   }
   while (armed > target) {
+    // Only pop an entry we actually own. If the top of the browser stack isn't
+    // one of ours (bookkeeping drifted — a coalesced/lost pop, or a StrictMode
+    // race), STOP navigating and just resync the counter, so a stale over-count
+    // can NEVER step past the app's base entry and eject the user. Our pushes
+    // (and the veto re-arm) stamp `state.__fiberlogBack`; the app base does not.
+    const st = window.history.state
+    if (!st || st.__fiberlogBack == null) { armed = target; break }
     armed--
     suppressPops++
     window.history.back()  // async; the resulting popstate is swallowed below
   }
+}
+
+// Reconcile is scheduled as a microtask, not run inline, so StrictMode's dev-only
+// mount→cleanup→mount double-invoke of the registration effect collapses to ONE
+// reconcile against the FINAL layer set (net-zero history ops) instead of a
+// push → history.back()(pending) → push race that truncates forward history and
+// desyncs `armed`. Microtasks drain before the next input event, so a synthetic
+// entry is always armed before the user could press Back. Rapid real open/close
+// nets out the same way.
+let reconcileScheduled = false
+function scheduleReconcile() {
+  if (reconcileScheduled) return
+  reconcileScheduled = true
+  queueMicrotask(() => { reconcileScheduled = false; reconcile() })
 }
 
 function onPop() {
@@ -138,7 +159,7 @@ export function useBackClose(depth, onBack, opts = {}) {
     return () => {
       const idx = layers.indexOf(layer)
       if (idx !== -1) layers.splice(idx, 1)
-      reconcile()
+      scheduleReconcile()
     }
   }, [])
 
@@ -158,6 +179,6 @@ export function useBackClose(depth, onBack, opts = {}) {
       }
       layer.prevDepth = depth
     }
-    reconcile()
+    scheduleReconcile()
   }, [depth])
 }
