@@ -22,3 +22,6 @@ supabase/.temp/
 # Claude Code session data — ignore everything except shared project subagents
 .claude/*
 !.claude/agents/
+
+# Local MCP config — holds a Supabase access token, never commit
+.mcp.json
