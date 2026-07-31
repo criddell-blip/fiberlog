@@ -4,6 +4,10 @@ import { startSession, saveEntry, getTaskSummary, db } from '../../lib/supabase'
 import { getFootageTypePartMap } from '../../lib/inventory'
 import { FIBER_COUNTS, CONDUIT_SIZES } from '../../lib/footageTypes'
 import { mergePartsById } from '../../lib/shared'
+import {
+  sumLines, toggleLine, setLineFt as setLineFtIn, removalLosesWork,
+  linesToParts, typeLabel, hasFootageLines, migrateLegacyFootage,
+} from '../../lib/footageLines'
 import { t } from '../../lib/i18n'
 import { useBackClose } from '../../lib/backStack'
 import PartSearch from './workspace/PartSearch'
@@ -62,19 +66,33 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
   const [note, setNote] = useState('')
   const [showSummary, setShowSummary] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [fiberCount, setFiberCount] = useState('')
   const [partQtyOverrides, setPartQtyOverrides] = useState({})
   const [extraParts, setExtraParts] = useState([])
   const [showPartSearch, setShowPartSearch] = useState(false)
-  const [conduitSizes, setConduitSizes] = useState({ 'bore-ft': '', 'plow-ft': '' })
+  // Per-assembly footage TYPE breakdown: { [assemblyId]: [{ type, ft }] } in
+  // tap order. Replaces the old scalar fiberCount + one-size-per-slot
+  // conduitSizes: a crew pulls 144ct AND 288ct on the same span, and picking
+  // a second chip used to silently re-point ALL the footage at the new type,
+  // so the wrong cable got deducted at approval.
+  //
+  // counts[assemblyId] stays the AUTHORITATIVE total feet — summary, the
+  // total_*_ft rollups and the +/- tally all read it. This map only says how
+  // that total splits across types, so submit can consume the right SKU per
+  // line. Invariant: when an assembly has >=1 line, counts[id] === sum of ft.
+  const [footageLines, setFootageLines] = useState({})
   // Footage type → SKU map (fiber count / conduit size → canonical part). Lets
   // logged fiber/conduit footage consume the matching material at submit.
   // Empty until the manager maps a type; unmapped types stay footage-only.
   const [footageMap, setFootageMap] = useState({ fiber: {}, conduit: {} })
+  // Tracked separately from the map: it starts empty, so "no SKU for this
+  // type" is indistinguishable from "hasn't loaded yet" and the unmapped hint
+  // would flash on every card mid-fetch. Set on SUCCESS only — if the fetch
+  // fails we stay quiet rather than telling the crew their fiber is unmapped.
+  const [footageMapLoaded, setFootageMapLoaded] = useState(false)
   useEffect(() => {
     let cancelled = false
     getFootageTypePartMap()
-      .then(m => { if (!cancelled) setFootageMap(m) })
+      .then(m => { if (!cancelled) { setFootageMap(m); setFootageMapLoaded(true) } })
       .catch(e => console.warn('Footage type→part map load failed:', e))
     return () => { cancelled = true }
   }, [])
@@ -148,7 +166,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     const draftHasWork =
       Object.values(counts).some(v => Number(v) > 0) ||
       extraParts.length > 0 ||
-      Object.values(conduitSizes).some(v => String(v || '').trim() !== '') ||
+      hasFootageLines(footageLines) ||
       !!String(note).trim()
     // Even if we skip (draft already has work), mark restored so we don't
     // keep re-checking on every history refresh.
@@ -161,7 +179,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     if (typeof flaggedSub.hours_worked === 'number') setHoursWorked(flaggedSub.hours_worked)
     const firstNote = (flaggedSub.notes || []).find(n => String(n || '').trim())
     if (firstNote) setNote(firstNote)
-  }, [draftLoaded, flaggedSub, counts, extraParts.length, conduitSizes, note])
+  }, [draftLoaded, flaggedSub, counts, extraParts.length, footageLines, note])
 
   // If this task was previously flagged by the manager, surface the reason
   // so the crew knows what to fix. Only relevant when the task is back to
@@ -240,8 +258,15 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
         if (wc.counts) setCounts(wc.counts)
         if (wc.partQtyOverrides) setPartQtyOverrides(wc.partQtyOverrides)
         if (wc.extraParts) setExtraParts(wc.extraParts)
-        if (wc.conduitSizes) setConduitSizes(wc.conduitSizes)
-        if (wc.fiberCount) setFiberCount(wc.fiberCount)
+        // Draft-shape migration (multi-type footage, July 2026). Drafts written
+        // before this shipped carry a scalar `fiberCount` + a one-size-per-slot
+        // `conduitSizes`, with the feet living only in `counts`. Crews have open
+        // drafts at any given moment, so fold them into a single line each —
+        // dropping them would silently stop the cable deducting at approval.
+        // Reads wc.counts internally, NOT the counts state — that setState
+        // hasn't committed yet inside this same effect.
+        const lines = migrateLegacyFootage(wc)
+        if (Object.keys(lines).length > 0) setFootageLines(lines)
         if (wc.note) setNote(wc.note)
         if (typeof wc.hoursWorked === 'number') setHoursWorked(wc.hoursWorked)
         // Project-routing override (Flavor A). Persisted in working_counts so
@@ -257,9 +282,15 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
           // (they opened it and left); a non-empty one deserves an
           // explicit opt-in so nobody wanders into a coworker's day by
           // accident (July 2026, Chris's call: shared + warning).
+          // Reads the RAW wc, before the shape migration above, so it has to
+          // understand both. Note the legacy scalar fiberCount was never
+          // checked here at all — a coworker's fiber pick could be clobbered
+          // with no warning. Fixed in passing.
           const draftHasWork =
             (wc.counts && Object.values(wc.counts).some(v => Number(v) > 0)) ||
             (wc.extraParts && wc.extraParts.length > 0) ||
+            hasFootageLines(wc.footageLines) ||
+            !!String(wc.fiberCount || '').trim() ||
             (wc.conduitSizes && Object.values(wc.conduitSizes).some(v => String(v || '').trim() !== '')) ||
             !!String(wc.note || '').trim()
           setLastWorkedInfo({
@@ -292,7 +323,19 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     if (!draftLoaded || !currentUser?.id) return
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     saveTimeoutRef.current = setTimeout(async () => {
-      const draft = { counts, partQtyOverrides, extraParts, conduitSizes, fiberCount, note, hoursWorked, projectIdOverride }
+      const draft = {
+        counts, partQtyOverrides, extraParts, footageLines, note, hoursWorked, projectIdOverride,
+        // Legacy mirror, ONE RELEASE ONLY. Deploys go straight to ~20 live
+        // users; a rollback to the previous bundle would read footageLines it
+        // doesn't understand and blank every crew's type pick mid-day. Old
+        // code reading these gets the first type + the full counts total —
+        // exactly its old behavior. Delete once this has been live a week.
+        fiberCount: (footageLines['fiber-ft'] || [])[0]?.type || '',
+        conduitSizes: {
+          'bore-ft': (footageLines['bore-ft'] || [])[0]?.type || '',
+          'plow-ft': (footageLines['plow-ft'] || [])[0]?.type || '',
+        },
+      }
       try {
         const { error } = await db.from('tasks').update({
           working_counts: draft,
@@ -307,14 +350,51 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       }
     }, 800)
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current) }
-  }, [counts, partQtyOverrides, extraParts, conduitSizes, fiberCount, note, hoursWorked, projectIdOverride, task.id, currentUser?.id, draftLoaded])
+  }, [counts, partQtyOverrides, extraParts, footageLines, note, hoursWorked, projectIdOverride, task.id, currentUser?.id, draftLoaded])
 
   function adjust(id, delta) {
     setCounts(prev => ({ ...prev, [id]: Math.max(0, (prev[id] || 0) + delta) }))
   }
 
   function setFootage(id, val) {
-    setCounts(prev => ({ ...prev, [id]: parseFloat(val) || 0 }))
+    const ft = parseFloat(val) || 0
+    setCounts(prev => ({ ...prev, [id]: ft }))
+    // With exactly ONE type picked the card's header input IS that line's
+    // input (keeps the single-type flow identical to before multi-select), so
+    // mirror it. With 2+ lines the header is read-only and derived, so this
+    // never fires; with 0 lines (strand, untyped footage) it's a no-op.
+    setFootageLines(prev => {
+      const lines = prev[id]
+      if (!lines || lines.length !== 1) return prev
+      return { ...prev, [id]: [{ ...lines[0], ft }] }
+    })
+  }
+
+  // THE single writer for footageLines. counts[id] must equal the sum of the
+  // lines whenever any type is picked — if they drift, total_fiber_ft and the
+  // consumed SKU quantities tell two different stories and inventory deducts
+  // feet nobody logged, with nothing to flag it. A second writer reopens that.
+  function writeLines(id, lines) {
+    setFootageLines(prev => ({ ...prev, [id]: lines }))
+    if (lines.length > 0) setCounts(prev => ({ ...prev, [id]: sumLines(lines) }))
+  }
+
+  function toggleFootageType(id, type) {
+    const lines = footageLines[id] || []
+    // Confirm only when the removal actually takes feet off the total —
+    // dropping the last line merely un-types footage that stays in counts.
+    if (removalLosesWork(lines, type)) {
+      const ft = lines.find(l => l.type === type)?.ft || 0
+      const msg = t('dropTypeConfirm', lang)
+        .replace('{type}', type)
+        .replace('{ft}', Number(ft).toLocaleString())
+      if (!window.confirm(msg)) return
+    }
+    writeLines(id, toggleLine(lines, type, counts[id] || 0))
+  }
+
+  function setLineFt(id, type, val) {
+    writeLines(id, setLineFtIn(footageLines[id] || [], type, val))
   }
 
   const allParts = useMemo(() => {
@@ -358,31 +438,21 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       .reduce((a, asm) => a + (counts[asm.id] || 0), 0)
   }, [counts, ALL_ASSEMBLIES])
 
-  // Material consumed from footage: resolve the crew's fiber-count / conduit-
-  // size pick + footage into the mapped SKU (qty = feet). Unmapped or untyped
-  // footage produces nothing (stays a stat, as before). These are merged into
-  // the submitted parts so they deduct like any other material at approval.
-  const footageParts = useMemo(() => {
-    const out = []
+  // Material consumed from footage: resolve each picked fiber-count / conduit-
+  // size + its feet into the mapped SKU (qty = that line's feet). Unmapped or
+  // untyped footage produces nothing (stays a stat, as before). These are
+  // merged into the submitted parts so they deduct like any other material at
+  // approval — mergePartsById keys on part id, so distinct types stay distinct
+  // and two types mapped to the SAME sku sum correctly.
+  const footageParts = useMemo(() => linesToParts({
+    assemblies: ALL_ASSEMBLIES,
+    footageLines,
+    footageMap,
     // Don't emit a footage SKU that's already an assembly part (e.g. if a
     // conduit size is mis-mapped to the tracer-wire SKU the bore/plow assembly
     // already derives) — that would double-count. Assembly part wins.
-    const assemblyIds = new Set(allParts.map(p => p.id))
-    const fiberFt = counts['fiber-ft'] || 0
-    const fiberHit = fiberCount && footageMap.fiber?.[fiberCount]
-    if (fiberFt > 0 && fiberHit && !assemblyIds.has(fiberHit.partId)) {
-      out.push({ id: fiberHit.partId, name: fiberHit.name, unit: fiberHit.unit || 'ft', qty: fiberFt, fromFootage: true })
-    }
-    for (const cid of ['bore-ft', 'plow-ft']) {
-      const ft = counts[cid] || 0
-      const sz = conduitSizes[cid]
-      const hit = sz && footageMap.conduit?.[sz]
-      if (ft > 0 && hit && !assemblyIds.has(hit.partId)) {
-        out.push({ id: hit.partId, name: hit.name, unit: hit.unit || 'ft', qty: ft, fromFootage: true })
-      }
-    }
-    return out
-  }, [counts, fiberCount, conduitSizes, footageMap, allParts])
+    assemblyPartIds: new Set(allParts.map(p => p.id)),
+  }), [footageLines, footageMap, allParts, ALL_ASSEMBLIES])
 
   async function handleSubmit() {
     if (!currentUser?.id) { showToast(t('toastSelectUser', lang)); return }
@@ -706,7 +776,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       {(summary.strandFt > 0 || summary.fiberFt > 0 || summary.boreFt > 0 || summary.plowFt > 0) && (
         <div className="banner banner-accent" style={{ gap: 16, flexWrap: 'wrap' }}>
           {summary.strandFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('strandLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.strandFt.toLocaleString()} ft</span></div>}
-          {summary.fiberFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('fiberLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.fiberFt.toLocaleString()} ft {fiberCount}</span></div>}
+          {summary.fiberFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('fiberLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.fiberFt.toLocaleString()} ft {typeLabel(footageLines['fiber-ft'])}</span></div>}
           {summary.boreFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('boreLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.boreFt.toLocaleString()} ft</span></div>}
           {summary.plowFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('plowLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.plowFt.toLocaleString()} ft</span></div>}
         </div>
@@ -736,11 +806,24 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                         center) but overrides flex+width so the input stays a compact
                         box on the right side of the card instead of stretching, and
                         keeps the orange tint as the visual cue that this is the
-                        editable numeric field. */}
-                    <input type="number" value={count || ''} placeholder="0"
-                      className="footage-input"
-                      onChange={e => setFootage(asm.id, e.target.value)}
-                      style={{ flex: '0 0 auto', width: 96, color: 'var(--orange)' }} />
+                        editable numeric field.
+
+                        Once a SECOND type is picked this stops being an input and
+                        becomes the derived total — two editable sources for one
+                        number is a divergence bug factory, and the per-type rows
+                        below are the honest place to edit. One type (or none)
+                        keeps the box exactly as it was. */}
+                    {(footageLines[asm.id] || []).length > 1 ? (
+                      <div className="footage-input" style={{
+                        flex: '0 0 auto', width: 96, color: 'var(--orange)',
+                        background: 'var(--surface2)', opacity: 0.85,
+                      }}>{count.toLocaleString()}</div>
+                    ) : (
+                      <input type="number" value={count || ''} placeholder="0"
+                        className="footage-input"
+                        onChange={e => setFootage(asm.id, e.target.value)}
+                        style={{ flex: '0 0 auto', width: 96, color: 'var(--orange)' }} />
+                    )}
                     <span style={{ fontSize: 12, color: 'var(--muted)' }}>ft</span>
                   </div>
                 ) : (
@@ -754,41 +837,21 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                 )}
               </div>
 
-              {/* Conduit size picker */}
-              {asm.isConduit && count > 0 && (
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 6 }}>{t('conduitSize', lang)}</div>
-                  <div className="select-row" style={{ marginTop: 0 }}>
-                    {CONDUIT_SIZES.map(sz => (
-                      <button
-                        key={sz}
-                        onClick={() => setConduitSizes(prev => ({ ...prev, [asm.id]: sz }))}
-                        className={`select-chip${conduitSizes[asm.id] === sz ? ' active' : ''}`}
-                      >{sz}</button>
-                    ))}
-                  </div>
-                  {conduitSizes[asm.id] && (
-                    <div style={{ fontSize: 11, color: 'var(--orange)', marginTop: 6, fontWeight: 600 }}>
-                      {count.toLocaleString()} ft of {conduitSizes[asm.id]} conduit + tracer wire + pull tape
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Fiber count picker */}
-              {asm.isFiber && count > 0 && (
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 6 }}>{t('fiberCount', lang)}</div>
-                  <div className="select-row" style={{ marginTop: 0 }}>
-                    {FIBER_COUNTS.map(fc => (
-                      <button
-                        key={fc}
-                        onClick={() => setFiberCount(fc)}
-                        className={`select-chip${fiberCount === fc ? ' active' : ''}`}
-                      >{fc}</button>
-                    ))}
-                  </div>
-                </div>
+              {/* Fiber-count / conduit-size picker. Gated on lines too, not just
+                  count: two lines both sitting at 0 ft make count 0, and with the
+                  header read-only (2+ lines) an unmount here would leave the crew
+                  no way to type anything at all. */}
+              {(asm.isFiber || asm.isConduit) && (count > 0 || (footageLines[asm.id] || []).length > 0) && (
+                <FootageTypePicker
+                  asm={asm}
+                  lines={footageLines[asm.id] || []}
+                  total={count}
+                  map={asm.isFiber ? footageMap.fiber : footageMap.conduit}
+                  mapLoaded={footageMapLoaded}
+                  lang={lang}
+                  onToggle={type => toggleFootageType(asm.id, type)}
+                  onFt={(type, val) => setLineFt(asm.id, type, val)}
+                />
               )}
             </div>
           )
@@ -849,7 +912,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
             <div className="metric-grid">
               {[
                 summary.strandFt > 0 && { label: t('strandLabel', lang), value: `${summary.strandFt.toLocaleString()} ft` },
-                summary.fiberFt > 0 && { label: t('fiberLabel', lang), value: `${summary.fiberFt.toLocaleString()} ft ${fiberCount}` },
+                summary.fiberFt > 0 && { label: t('fiberLabel', lang), value: `${summary.fiberFt.toLocaleString()} ft` },
                 summary.boreFt > 0 && { label: t('boreLabel', lang), value: `${summary.boreFt.toLocaleString()} ft` },
                 summary.plowFt > 0 && { label: t('plowLabel', lang), value: `${summary.plowFt.toLocaleString()} ft` },
                 summary.poles > 0 && { label: t('polesLabel', lang), value: summary.poles },
@@ -864,6 +927,23 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                 </div>
               ))}
             </div>
+
+            {/* Footage-by-type breakdown. The metric tiles carry the totals (a
+                type suffix overflowed the narrow grid cell once there could be
+                several); this says what those totals are made of. It's also the
+                only place a type whose SKU is unmapped — or shadowed by an
+                assembly part — still shows its feet before the crew sign off. */}
+            {ALL_ASSEMBLIES.some(a => (footageLines[a.id] || []).length > 0) && (
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.5 }}>
+                <div style={{ fontWeight: 600, marginBottom: 2 }}>{t('footageBreakdown', lang)}</div>
+                {ALL_ASSEMBLIES.filter(a => (footageLines[a.id] || []).length > 0).map(a => (
+                  <div key={a.id}>
+                    {a.label}: {(footageLines[a.id] || [])
+                      .map(l => `${(Number(l.ft) || 0).toLocaleString()} ft ${l.type}`).join(' · ')}
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 6 }}>{t('partsAdjust', lang)}</div>
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', marginBottom: 10, maxHeight: 220, overflowY: 'auto', padding: '0 12px' }}>
@@ -880,9 +960,14 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                     className="tally-btn tally-sm tally-minus"
                     onClick={() => setPartQtyOverrides(prev => { const cur = prev[p.id] !== undefined ? prev[p.id] : p.qty; const next = Math.max(0, cur - 1); return next === 0 ? { ...prev, [p.id]: -1 } : { ...prev, [p.id]: next } })}
                   >−</button>
-                  <span className="part-qty" style={{ minWidth: 28, textAlign: 'center' }}>
-                    {(partQtyOverrides[p.id] !== undefined ? partQtyOverrides[p.id] : p.qty).toLocaleString()}
-                  </span>
+                  {/* Typed entry as well as the steppers — 250 of a part is 250
+                      taps otherwise. min 0 matches the − button, which treats
+                      reaching 0 as "remove this line". */}
+                  <QtyInput
+                    value={partQtyOverrides[p.id] !== undefined ? partQtyOverrides[p.id] : p.qty}
+                    min={0}
+                    onCommit={n => setPartQtyOverrides(prev => ({ ...prev, [p.id]: n === 0 ? -1 : n }))}
+                  />
                   <button
                     className="tally-btn tally-sm tally-plus"
                     onClick={() => setPartQtyOverrides(prev => { const cur = prev[p.id] !== undefined ? prev[p.id] : p.qty; return { ...prev, [p.id]: cur + 1 } })}
@@ -892,13 +977,16 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
               ))}
               {footageParts.map(p => (
                 <div
-                  key={'fp-'+p.id}
+                  key={'fp-'+p.srcKey}
                   className="parts-row"
                   style={{ gap: 8, background: 'var(--accent-bg)', margin: '0 -12px', padding: '10px 12px' }}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="part-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {p.name} <span className="pill pill-accent pill-sm" style={{ marginLeft: 4 }}>from footage</span>
+                      {/* The type label carries "this came from footage" plus the
+                          breakdown — two rows of the same SKU name are otherwise
+                          indistinguishable when two types map to one part. */}
+                      {p.name} <span className="pill pill-accent pill-sm" style={{ marginLeft: 4 }}>{p.srcType}</span>
                     </div>
                     <div className="part-id">{p.id}</div>
                   </div>
@@ -922,7 +1010,13 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                     className="tally-btn tally-sm tally-minus"
                     onClick={() => setExtraParts(prev => prev.map(ep => ep.id === p.id ? { ...ep, qty: Math.max(1, ep.qty - 1) } : ep))}
                   >−</button>
-                  <span className="part-qty" style={{ minWidth: 28, textAlign: 'center' }}>{p.qty.toLocaleString()}</span>
+                  {/* min 1 mirrors the − button's clamp: an added part is
+                      removed with the × on the right, not by typing 0. */}
+                  <QtyInput
+                    value={p.qty}
+                    min={1}
+                    onCommit={n => setExtraParts(prev => prev.map(ep => ep.id === p.id ? { ...ep, qty: n } : ep))}
+                  />
                   <button
                     className="tally-btn tally-sm tally-plus"
                     onClick={() => setExtraParts(prev => prev.map(ep => ep.id === p.id ? { ...ep, qty: ep.qty + 1 } : ep))}
@@ -993,5 +1087,129 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
         </div>
       )}
     </div>
+  )
+}
+
+// ─── FOOTAGE TYPE PICKER ─────────────────────────────────────────────────────
+// Multi-select chips + one feet input per selected type. With a SINGLE type
+// selected there's no per-line row at all — the card's header input drives it,
+// so the common case looks and behaves exactly as it did before multi-select.
+// The per-line rows only appear once there's genuinely something to split.
+function FootageTypePicker({ asm, lines, total, map, mapLoaded, lang, onToggle, onFt }) {
+  const values = asm.isFiber ? FIBER_COUNTS : CONDUIT_SIZES
+  const heading = asm.isFiber ? t('tapFiberTypes', lang) : t('tapConduitSizes', lang)
+  const multi = lines.length > 1
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, marginBottom: 6 }}>{heading}</div>
+      <div className="select-row" style={{ marginTop: 0 }}>
+        {values.map(v => (
+          <button
+            key={v}
+            onClick={() => onToggle(v)}
+            // Chips are toggles now rather than a radio group, so they get
+            // tapped a lot more. Bumped thumb target inline instead of editing
+            // the shared .select-chip — FootageMapSheet renders it too.
+            style={{ padding: '8px 12px' }}
+            className={`select-chip${lines.some(l => l.type === v) ? ' active' : ''}`}
+          >{v}</button>
+        ))}
+      </div>
+
+      {multi && lines.map(l => {
+        const unmapped = mapLoaded && !map?.[l.type]
+        return (
+          <div key={l.type} style={{ marginTop: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ flex: '0 0 auto', minWidth: 52, fontSize: 12, fontWeight: 700, color: 'var(--orange)' }}>{l.type}</span>
+              <input type="number" value={l.ft || ''} placeholder="0"
+                className="footage-input"
+                onChange={e => onFt(l.type, e.target.value)}
+                style={{ flex: 1, minWidth: 0, fontSize: 17, padding: '6px 10px' }} />
+              <span style={{ flex: '0 0 auto', fontSize: 12, color: 'var(--muted)' }}>ft</span>
+            </div>
+            {unmapped && (
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2, marginLeft: 60 }}>
+                {t('noSkuMapped', lang)}
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {multi && (
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+          marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)',
+        }}>
+          <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>{t('totalWord', lang)}</span>
+          <span className="mono" style={{ fontSize: 15, fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>
+            {total.toLocaleString()} ft
+          </span>
+        </div>
+      )}
+
+      {/* Single-type: the original inline confirmation line, now translated —
+          it was hardcoded English in front of Spanish-speaking crews. */}
+      {lines.length === 1 && asm.isConduit && (
+        <div style={{ fontSize: 11, color: 'var(--orange)', marginTop: 6, fontWeight: 600 }}>
+          {t('conduitLineHint', lang).replace('{ft}', total.toLocaleString()).replace('{size}', lines[0].type)}
+        </div>
+      )}
+      {lines.length === 1 && mapLoaded && !map?.[lines[0].type] && (
+        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>{t('noSkuMapped', lang)}</div>
+      )}
+    </div>
+  )
+}
+
+// typeLabel / hasFootageLines and the rest of the footage-line logic live in
+// lib/footageLines.js — it's a money path (it decides which SKU leaves the
+// truck), so it's extracted and unit-tested rather than inline here.
+
+// ─── QUANTITY INPUT ──────────────────────────────────────────────────────────
+// Typed quantity next to the −/+ steppers on the submit sheet. Tapping + 250
+// times to log a box of connectors was the whole problem.
+//
+// Holds its own draft string rather than binding straight to the number,
+// because both lists DROP a row at qty 0 (allParts filters `qty > 0`;
+// partQtyOverrides uses -1 as the remove sentinel). Committing on every
+// keystroke would make the row vanish the instant you cleared the box to
+// retype — so a partial/empty entry is held locally and only resolved on blur.
+function QtyInput({ value, min = 0, onCommit }) {
+  const [draft, setDraft] = useState(String(value))
+  // Re-sync when the steppers (or a footage edit) change the value out from
+  // under us. Skipped while focused so it can't fight the user mid-type.
+  const [focused, setFocused] = useState(false)
+  useEffect(() => { if (!focused) setDraft(String(value)) }, [value, focused])
+
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      value={draft}
+      onFocus={e => { setFocused(true); e.target.select() }}
+      onChange={e => {
+        setDraft(e.target.value)
+        const n = parseFloat(e.target.value)
+        // Only commit a positive number live. 0 and empty wait for blur, so
+        // clearing the field doesn't delete the row under the cursor.
+        if (Number.isFinite(n) && n > 0) onCommit(n)
+      }}
+      onBlur={() => {
+        setFocused(false)
+        const n = parseFloat(draft)
+        if (!Number.isFinite(n)) { setDraft(String(value)); return }  // empty → leave as-was
+        const next = Math.max(min, n)
+        setDraft(String(next))
+        onCommit(next)
+      }}
+      className="part-qty"
+      style={{
+        width: 56, minWidth: 56, textAlign: 'center', padding: '4px 2px',
+        border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)',
+        background: 'var(--bg)', color: 'var(--text)', fontWeight: 700,
+      }}
+    />
   )
 }
