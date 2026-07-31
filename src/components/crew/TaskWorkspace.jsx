@@ -2,11 +2,12 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { useApp } from '../../AppContext'
 import { startSession, saveEntry, getTaskSummary, db } from '../../lib/supabase'
 import { getFootageTypePartMap } from '../../lib/inventory'
-import { FIBER_COUNTS, CONDUIT_SIZES } from '../../lib/footageTypes'
+import { FOOTAGE_TYPE_VALUES, FOOTAGE_HEADING_KEYS } from '../../lib/footageTypes'
 import { mergePartsById } from '../../lib/shared'
 import {
   sumLines, toggleLine, setLineFt as setLineFtIn, removalLosesWork,
   linesToParts, typeLabel, hasFootageLines, migrateLegacyFootage,
+  footageKind, autoPickType,
 } from '../../lib/footageLines'
 import { t } from '../../lib/i18n'
 import { useBackClose } from '../../lib/backStack'
@@ -53,6 +54,13 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     ...(ASSEMBLIES.infrastructure || []),
   ], [assemblies])
 
+  // id → assembly, so the footage writers can resolve an assembly's kind
+  // without re-scanning the list on every keystroke.
+  const asmById = useMemo(
+    () => Object.fromEntries(ALL_ASSEMBLIES.map(a => [a.id, a])),
+    [ALL_ASSEMBLIES]
+  )
+
   // Default tab honors the user's crew_type — infra users land on the
   // Infrastructure tab, fiber crews land on Aerial as before.
   const defaultTab = currentUser?.crew_type === 'infrastructure' ? 'infrastructure' : 'aerial'
@@ -83,7 +91,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
   // Footage type → SKU map (fiber count / conduit size → canonical part). Lets
   // logged fiber/conduit footage consume the matching material at submit.
   // Empty until the manager maps a type; unmapped types stay footage-only.
-  const [footageMap, setFootageMap] = useState({ fiber: {}, conduit: {} })
+  const [footageMap, setFootageMap] = useState({})
   // Tracked separately from the map: it starts empty, so "no SKU for this
   // type" is indistinguishable from "hasn't loaded yet" and the unmapped hint
   // would flash on every card mid-fetch. Set on SUCCESS only — if the fetch
@@ -180,6 +188,31 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     const firstNote = (flaggedSub.notes || []).find(n => String(n || '').trim())
     if (firstNote) setNote(firstNote)
   }, [draftLoaded, flaggedSub, counts, extraParts.length, footageLines, note])
+
+  // Backfill single-chip types onto a draft that predates them. A draft saved
+  // before strand became a typed kind carries counts['strand-ft'] with no
+  // lines at all — and once the strand-ft per_ft assembly row is removed, that
+  // draft would submit zero strand. Runs once, after BOTH the draft and the
+  // assembly list are in hand, and only ever ADDS a line whose ft equals
+  // counts[id], so the counts === sum(lines) invariant still holds.
+  const seededRef = useRef(false)
+  useEffect(() => {
+    if (!draftLoaded || seededRef.current || ALL_ASSEMBLIES.length === 0) return
+    seededRef.current = true
+    setFootageLines(prev => {
+      let next = prev
+      for (const asm of ALL_ASSEMBLIES) {
+        const kind = footageKind(asm)
+        const ft = Number(counts[asm.id]) || 0
+        if (!kind || ft <= 0 || (prev[asm.id] || []).length > 0) continue
+        const auto = autoPickType([], FOOTAGE_TYPE_VALUES[kind])
+        if (!auto) continue
+        if (next === prev) next = { ...prev }
+        next[asm.id] = [{ type: auto, ft }]
+      }
+      return next
+    })
+  }, [draftLoaded, ALL_ASSEMBLIES, counts])
 
   // If this task was previously flagged by the manager, surface the reason
   // so the crew knows what to fix. Only relevant when the task is back to
@@ -358,14 +391,26 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
 
   function setFootage(id, val) {
     const ft = parseFloat(val) || 0
+    const wasZero = !((counts[id] || 0) > 0)
     setCounts(prev => ({ ...prev, [id]: ft }))
-    // With exactly ONE type picked the card's header input IS that line's
-    // input (keeps the single-type flow identical to before multi-select), so
-    // mirror it. With 2+ lines the header is read-only and derived, so this
-    // never fires; with 0 lines (strand, untyped footage) it's a no-op.
     setFootageLines(prev => {
-      const lines = prev[id]
-      if (!lines || lines.length !== 1) return prev
+      const lines = prev[id] || []
+      // Single-chip kinds (strand) get their one type created on the FIRST
+      // feet typed. Without this, strand would regress from "type feet, done"
+      // to "type feet AND remember to tap the only chip, or nothing deducts" —
+      // the exact silent-zero this change exists to avoid. Gated on the
+      // 0 → positive transition so a crew who deliberately un-taps the chip
+      // doesn't have it forced back on the next keystroke.
+      if (lines.length === 0) {
+        const auto = wasZero && ft > 0
+          ? autoPickType(lines, FOOTAGE_TYPE_VALUES[footageKind(asmById[id])])
+          : null
+        return auto ? { ...prev, [id]: [{ type: auto, ft }] } : prev
+      }
+      // With exactly ONE type picked the card's header input IS that line's
+      // input (keeps the single-type flow identical to before multi-select),
+      // so mirror it. With 2+ lines the header is read-only and derived.
+      if (lines.length !== 1) return prev
       return { ...prev, [id]: [{ ...lines[0], ft }] }
     })
   }
@@ -444,15 +489,13 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
   // merged into the submitted parts so they deduct like any other material at
   // approval — mergePartsById keys on part id, so distinct types stay distinct
   // and two types mapped to the SAME sku sum correctly.
+  // The collision guard now lives inside linesToParts and is scoped to each
+  // assembly's OWN parts, so this no longer depends on allParts at all.
   const footageParts = useMemo(() => linesToParts({
     assemblies: ALL_ASSEMBLIES,
     footageLines,
     footageMap,
-    // Don't emit a footage SKU that's already an assembly part (e.g. if a
-    // conduit size is mis-mapped to the tracer-wire SKU the bore/plow assembly
-    // already derives) — that would double-count. Assembly part wins.
-    assemblyPartIds: new Set(allParts.map(p => p.id)),
-  }), [footageLines, footageMap, allParts, ALL_ASSEMBLIES])
+  }), [footageLines, footageMap, ALL_ASSEMBLIES])
 
   async function handleSubmit() {
     if (!currentUser?.id) { showToast(t('toastSelectUser', lang)); return }
@@ -775,7 +818,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
           above the assembly list so the crew can see the day's footage at a glance. */}
       {(summary.strandFt > 0 || summary.fiberFt > 0 || summary.boreFt > 0 || summary.plowFt > 0) && (
         <div className="banner banner-accent" style={{ gap: 16, flexWrap: 'wrap' }}>
-          {summary.strandFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('strandLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.strandFt.toLocaleString()} ft</span></div>}
+          {summary.strandFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('strandLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.strandFt.toLocaleString()} ft {typeLabel(footageLines['strand-ft'])}</span></div>}
           {summary.fiberFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('fiberLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.fiberFt.toLocaleString()} ft {typeLabel(footageLines['fiber-ft'])}</span></div>}
           {summary.boreFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('boreLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.boreFt.toLocaleString()} ft</span></div>}
           {summary.plowFt > 0 && <div style={{ fontSize: 'var(--fs-sm)' }}><span style={{ color: 'var(--muted)', fontWeight: 'var(--fw-semibold)' }}>{t('plowLabel', lang)} </span><span style={{ fontWeight: 'var(--fw-black)', color: 'var(--orange)' }}>{summary.plowFt.toLocaleString()} ft</span></div>}
@@ -789,6 +832,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
         )}
         {tabAsms.map(asm => {
           const count = counts[asm.id] || 0
+          const kind = footageKind(asm)
           return (
             <div key={asm.id} style={{
               background: 'var(--surface)', border: '1px solid var(--border)',
@@ -837,16 +881,16 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                 )}
               </div>
 
-              {/* Fiber-count / conduit-size picker. Gated on lines too, not just
-                  count: two lines both sitting at 0 ft make count 0, and with the
-                  header read-only (2+ lines) an unmount here would leave the crew
-                  no way to type anything at all. */}
-              {(asm.isFiber || asm.isConduit) && (count > 0 || (footageLines[asm.id] || []).length > 0) && (
+              {/* Footage type picker (fiber count / conduit size / strand size).
+                  Gated on lines too, not just count: two lines both sitting at
+                  0 ft make count 0, and with the header read-only (2+ lines) an
+                  unmount here would leave the crew no way to type anything. */}
+              {kind && (count > 0 || (footageLines[asm.id] || []).length > 0) && (
                 <FootageTypePicker
-                  asm={asm}
+                  kind={kind}
                   lines={footageLines[asm.id] || []}
                   total={count}
-                  map={asm.isFiber ? footageMap.fiber : footageMap.conduit}
+                  map={footageMap[kind]}
                   mapLoaded={footageMapLoaded}
                   lang={lang}
                   onToggle={type => toggleFootageType(asm.id, type)}
@@ -1095,9 +1139,12 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
 // selected there's no per-line row at all — the card's header input drives it,
 // so the common case looks and behaves exactly as it did before multi-select.
 // The per-line rows only appear once there's genuinely something to split.
-function FootageTypePicker({ asm, lines, total, map, mapLoaded, lang, onToggle, onFt }) {
-  const values = asm.isFiber ? FIBER_COUNTS : CONDUIT_SIZES
-  const heading = asm.isFiber ? t('tapFiberTypes', lang) : t('tapConduitSizes', lang)
+function FootageTypePicker({ kind, lines, total, map, mapLoaded, lang, onToggle, onFt }) {
+  // Registry-driven rather than branched per kind, so adding a kind is one
+  // entry in footageTypes.js — and so a kind can never be handed another
+  // kind's chip list by an else-fallthrough.
+  const values = FOOTAGE_TYPE_VALUES[kind] || []
+  const heading = t(FOOTAGE_HEADING_KEYS[kind], lang)
   const multi = lines.length > 1
   return (
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
@@ -1151,7 +1198,7 @@ function FootageTypePicker({ asm, lines, total, map, mapLoaded, lang, onToggle, 
 
       {/* Single-type: the original inline confirmation line, now translated —
           it was hardcoded English in front of Spanish-speaking crews. */}
-      {lines.length === 1 && asm.isConduit && (
+      {lines.length === 1 && kind === 'conduit' && (
         <div style={{ fontSize: 11, color: 'var(--orange)', marginTop: 6, fontWeight: 600 }}>
           {t('conduitLineHint', lang).replace('{ft}', total.toLocaleString()).replace('{size}', lines[0].type)}
         </div>

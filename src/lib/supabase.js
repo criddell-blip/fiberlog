@@ -422,6 +422,7 @@ export async function getAssemblies() {
       isHandhole: a.is_handhole || false,
       isVault: a.is_vault || false,
       isConduit: a.is_conduit || false,
+      isStrand: a.is_strand || false,
       parts: (a.assembly_parts || [])
         .sort((x, y) => (x.sort_order || 0) - (y.sort_order || 0))
         .map(ap => ({
@@ -464,6 +465,7 @@ export async function saveAssembly(asm) {
       is_handhole: asm.isHandhole || false,
       is_vault: asm.isVault || false,
       is_conduit: asm.isConduit || false,
+      is_strand: asm.isStrand || false,
       is_active: asm.is_active !== false,
       sort_order: asm.sort_order || 0,
     },

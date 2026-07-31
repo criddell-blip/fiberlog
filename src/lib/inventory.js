@@ -3,6 +3,7 @@
 // from the rest of supabase.js so we can extract it later if needed.
 
 import { db, searchPartsCatalog } from './supabase'
+import { FOOTAGE_TYPE_VALUES } from './footageTypes'
 
 // Natural / "logical" name compare. Beats plain localeCompare on alnum bin
 // labels: "A2" < "A10" instead of "A10" < "A2". Used everywhere bins or
@@ -2748,7 +2749,9 @@ export async function getFootageTypePartMap() {
     .from('footage_type_part_map')
     .select('kind, type_value, part_id, part:parts_catalog!footage_type_part_map_part_id_fkey(id, name, unit)')
   if (error) throw error
-  const out = { fiber: {}, conduit: {} }
+  // Seed every known kind so "no mappings curated yet" reads as {} rather than
+  // undefined — the picker and FootageMapSheet both index into these directly.
+  const out = Object.fromEntries(Object.keys(FOOTAGE_TYPE_VALUES).map(k => [k, {}]))
   for (const r of data || []) {
     if (!out[r.kind]) out[r.kind] = {}
     out[r.kind][r.type_value] = {
@@ -2760,7 +2763,7 @@ export async function getFootageTypePartMap() {
   return out
 }
 
-// Upsert one mapping (kind = 'fiber' | 'conduit'). Staff-only via RLS.
+// Upsert one mapping (kind = 'fiber' | 'conduit' | 'strand'). Staff-only via RLS.
 export async function setFootageTypePart(kind, typeValue, partId) {
   const { data: { user } } = await db.auth.getUser()
   const { error } = await db
