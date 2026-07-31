@@ -197,7 +197,7 @@ src/
       AdminPanel.jsx      ← admin home — wires Users, Reset-password, BoxHero sync, Crew×Dept permissions
       AdminUsersView.jsx  ← user CRUD + per-user movement permission toggles
       CrewTypePermissionsView.jsx ← crew_type × department matrix (whitelist UI)
-      InventoryView.jsx   ← inventory section (8 sub-tabs: Stock / Locations / Parts / Activity / Purchase Reqs / Found / Audit / Cycle Count; toolbar "Record movement" button + an 8-item Actions strip: Move stock / Receive PO / Reconcile / Sonar / Fiber jobs / Import CSV / Sage export / Footage map — collapses to a bottom sheet on phone)
+      InventoryView.jsx   ← inventory section (8 sub-tabs: Stock / Locations / Parts / Activity / Purchase Reqs / Found / Audit / Cycle Count; toolbar "Record movement" button + an 8-item Actions strip: Move stock / Receive PO / Reconcile / Sonar / Fiber jobs / Import CSV / Sage export / Footage map — collapses to a bottom sheet on phone). Parts tab has a filter-respecting catalog CSV export (filter in the filename); Activity tab has a date-ranged raw-history CSV export (July 2026) — unlike Sage it keeps adjusts / truck→truck / bin moves, and it's the only way full movement history leaves the app. Both use the shared escapeCsvField + downloadTextAsFile from lib/csvImport.js (the BOM-writing download helper) — do NOT add another private CSV escaper, five legacy copies already exist.
       InventoryStockTab.jsx, InventoryLocationsTab.jsx, InventoryPartsTab.jsx,
       InventoryMovementsTab.jsx, InventoryAuditTab.jsx
       PurchaseRequestsTab.jsx, PurchaseRequestSheet.jsx ← FiberLog-originated PRs (compose, cost history, CSV/email export, lifecycle)
