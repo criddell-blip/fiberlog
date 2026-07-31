@@ -53,11 +53,19 @@ export function inventoryIsLimited(user) {
 
 // ─── Access types (the named picker at user create/edit) ──────────────────
 // Each maps to a concrete {role, staff_scope, crew_type-handling}. `needsCrew`
-// flags the two types that show a crew_type picker; the rest force crew_type
-// NULL (so non-crew staff never carry a stale field tag).
+// flags the types that SHOW a crew_type picker; the rest force crew_type NULL
+// (so non-field staff never carry a stale field tag).
+//
+// The picker is effectively required for Crew, and OPTIONAL for Working
+// manager + Owner — accessTypeToFields does `crewType || null`, so those two
+// save cleanly as NULL for someone who does no field work. An owner who is
+// also a field worker (July 2026: Chris) used to have no way to express that
+// at all: Owner forced crew_type NULL on every save, so canActAsCrew() could
+// never be satisfied and the crew-mode pill stayed permanently disabled with
+// no admin escape hatch.
 export const ACCESS_TYPES = [
-  { id: 'owner',           label: 'Owner',             role: 'owner',      scope: 'full',       needsCrew: false, ownerOnly: true,
-    desc: 'Full admin; can create other owners.' },
+  { id: 'owner',           label: 'Owner',             role: 'owner',      scope: 'full',       needsCrew: true, ownerOnly: true,
+    desc: 'Full admin; can create other owners. Optional crew type lets them log their own work in crew mode.' },
   { id: 'full_manager',    label: 'Full manager',      role: 'manager',    scope: 'full',       needsCrew: false,
     desc: 'All tabs. No field crew_type, so no crew mode.' },
   { id: 'working_manager', label: 'Working manager',   role: 'manager',    scope: 'full',       needsCrew: true,
@@ -86,7 +94,9 @@ export function accessTypeForUser(user) {
 }
 
 // Map an access-type id (+ chosen crew_type) to the persisted user fields.
-// crew_type is forced NULL for every non-crew-carrying type.
+// crew_type is forced NULL for every type that doesn't carry one, and stays
+// optional (`|| null`) for the ones that do — "no crew type" is a valid save
+// for an Owner or Working manager.
 export function accessTypeToFields(typeId, crewType) {
   const t = ACCESS_TYPES.find(a => a.id === typeId) || ACCESS_TYPES[0]
   return {
