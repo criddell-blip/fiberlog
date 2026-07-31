@@ -294,6 +294,7 @@ The common reason to flag a passdown is "the materials aren't right." Rather tha
 
 ### Footage type → part mapping
 - `footage_type_part_map(kind, type_value, part_id, updated_at, updated_by)` — PK `(kind, type_value)`. Maps a crew footage "type" pick to the canonical `parts_catalog` SKU that footage should consume. `kind text CHECK in ('fiber','conduit')`; `type_value` is the picked value (e.g. `'144ct'` strand count, `'2"'` conduit size); `part_id text NOT NULL → parts_catalog(id)`. RLS: auth read, staff write (mirrors `sonar_city_bucket_map` / `sonar_fiber_value_map`). Bump trigger `trg_ftpm_touch_updated_at` on `updated_at`. NOT in the realtime publication. Curated via the manager **Footage map** sheet (`FootageMapSheet.jsx`); 10 mappings exist as of July 2026. Migration `20260624120000_footage_type_part_map.sql`.
+- **Multi-type footage (July 2026).** The crew's fiber-count / conduit-size chips are **multi-select** — a crew pulling 144ct and 288ct on the same span logs each with its own footage, and each consumes its own SKU. The breakdown lives in `tasks.working_counts.footageLines` (`{ [assemblyId]: [{ type, ft }] }`); `counts[assemblyId]` remains the authoritative total feet that feeds `summary` and the `submissions.total_*_ft` rollups, and the invariant is `counts[id] === sum(lines[id].ft)` — the pure logic (and that invariant) is in `src/lib/footageLines.js` with tests, because it decides which SKU leaves the truck. Legacy drafts carrying the old scalar `fiberCount` / one-size-per-slot `conduitSizes` are migrated on load by `migrateLegacyFootage`; the autosave still writes those two keys as a **rollback mirror** that should be deleted a week after deploy. No schema change was needed — `entry_parts` has no uniqueness on `(entry_id, part_id)` and `approve_submission` aggregates `GROUP BY part_id`.
 
 ### Parts catalog
 - `parts_catalog.id` is the SKU (text PK)
@@ -363,10 +364,11 @@ All `SECURITY DEFINER`, all with `SET search_path = public, pg_temp`. EXECUTE on
 
 `npm test` (one-shot) or `npm run test:watch`. Vitest configured via `package.json` only — no separate config file.
 
-**50 tests across 3 suites** (re-pointed July 2026 — the old `calculations.js` + its 34 tests were DELETED after the audit proved the module unreachable from the app; the suite was guarding dead code):
+**79 tests across 4 suites** (re-pointed July 2026 — the old `calculations.js` + its 34 tests were DELETED after the audit proved the module unreachable from the app; the suite was guarding dead code). Note `npm test` from the repo root also scans `.claude/worktrees/*`, so a checkout with sibling worktrees reports a multiple of these numbers — the real count is what a clean clone runs:
 - `src/lib/inventory.test.js` — `validateMovement`'s full endpoint matrix (mirrors the DB `movement_endpoints_valid` CHECK), `buildSageCsv` (18-column order, movement-type → Sage mapping, effective dates, CSV escaping), `isExportableMovement` exclusion rules, `movementEffectiveDate`.
 - `src/lib/shared.test.js` — `mergePartsById` (the submit-path dedupe) and `matchesAllTokens` (multi-word search semantics).
 - `src/lib/useCsvImport.test.js` — `extractMarkerKeys` (the double-import guard's marker parser, incl. `sonar` vs `sonar_jobs` prefix isolation).
+- `src/lib/footageLines.test.js` — the multi-type footage breakdown: `linesToParts` (one SKU per picked type, unmapped/zero/assembly-shadowed skips, two-types-one-SKU), the `counts === sum(lines)` invariant across an edit sequence, and `migrateLegacyFootage` (legacy scalar drafts → lines).
 - No component tests yet (no jsdom/testing-library in devDeps). The crew workflow + manager sheets are smoke-tested via QA persona runs (see `qa-harness/README.md`) and manually on the deployed app.
 
 ---

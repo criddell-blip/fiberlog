@@ -63,6 +63,16 @@ const strings = {
   polesLabel:         { en: 'poles',                      es: 'postes' },
   conduitSize:        { en: 'Conduit size',               es: 'Tamaño de tubería' },
   fiberCount:         { en: 'Fiber count',                es: 'Conteo de fibra' },
+  // Multi-type footage (July 2026). The pickers are multi-select now, so the
+  // headings ask for every type rather than naming a single one. {ft} / {type}
+  // / {size} are .replace()d at the call site — t() has no interpolation.
+  tapFiberTypes:      { en: 'Tap each fiber type you pulled', es: 'Toca cada tipo de fibra que jalaste' },
+  tapConduitSizes:    { en: 'Tap each conduit size you used', es: 'Toca cada tamaño de tubería que usaste' },
+  totalWord:          { en: 'Total',                      es: 'Total' },
+  noSkuMapped:        { en: 'No material mapped — footage only', es: 'Sin material asignado — solo metraje' },
+  dropTypeConfirm:    { en: 'Remove {type}? Its {ft} ft come off the total.', es: '¿Quitar {type}? Sus {ft} pies se restan del total.' },
+  conduitLineHint:    { en: '{ft} ft of {size} conduit + tracer wire + pull tape', es: '{ft} pies de tubería de {size} + cable trazador + cinta guía' },
+  footageBreakdown:   { en: 'Footage by type',             es: 'Metraje por tipo' },
   partTypes:          { en: 'part types',                 es: 'tipos de partes' },
   review:             { en: 'Review',                     es: 'Revisar' },
   wrapUpDay:          { en: 'Wrap up day →',              es: 'Terminar día →' },
