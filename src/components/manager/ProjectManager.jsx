@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import {
-  db, addTask, setTaskClosed,
+  db, addTask, addInfraTask, setTaskClosed,
   getSitesByProject, addSite, updateSite,
   decommissionSiteWithRecovery,
   getTaskCountsBySite, getTasksBySite, getMaterialsAtSite,
@@ -22,6 +22,17 @@ const JOB_TYPES = [
   { id: 'splice',      label: 'Splice',       icon: '🔌' },
   { id: 'fiber_pull',  label: 'Fiber Pull',   icon: '📦' },
   { id: 'emergency',   label: 'Emergency',    icon: '⚡' },
+]
+
+// Infra job types for the manager-side "Add task" at a site. Ids MUST stay in
+// sync with SiteTaskList.jsx's list — the crew shell renders task_type back, so
+// a divergent id would surface there as a raw string.
+const INFRA_JOB_TYPES = [
+  { id: 'maintenance', label: 'Maintenance', icon: '🔧' },
+  { id: 'build',       label: 'Build',       icon: '🏗️' },
+  { id: 'swap',        label: 'Swap',        icon: '🔁' },
+  { id: 'audit',       label: 'Audit',       icon: '🔍' },
+  { id: 'emergency',   label: 'Emergency',   icon: '⚡' },
 ]
 
 const TARGET_FIELDS = [
@@ -128,6 +139,15 @@ export default function ProjectManager() {
   const [siteAddress, setSiteAddress] = useState('')
   const [siteNotes, setSiteNotes] = useState('')
   const [siteSaving, setSiteSaving] = useState(false)
+  // Manager-side infra task creation. Deliberately separate state from the
+  // fiber add-task form above (taskName/taskNotes/taskJobType) — those are
+  // bound to a different overlay with its own discard-confirm, and sharing
+  // them would cross-contaminate both.
+  const [showAddSiteTask, setShowAddSiteTask] = useState(false)
+  const [infraTaskName, setInfraTaskName] = useState('')
+  const [infraTaskNotes, setInfraTaskNotes] = useState('')
+  const [infraTaskType, setInfraTaskType] = useState('maintenance')
+  const [infraTaskSaving, setInfraTaskSaving] = useState(false)
 
   // Sites search / filter — Gigwave has 128 sites, the unfiltered list is
   // unscrollable. Empty query + 'all' type = no-op.
@@ -182,6 +202,9 @@ export default function ProjectManager() {
   })
   useBackClose(showAddSite ? 1 : 0, () => setShowAddSite(false), {
     confirm: () => !(siteName.trim() || siteAddress.trim() || siteNotes.trim()) || window.confirm('Discard this site?'),
+  })
+  useBackClose(showAddSiteTask ? 1 : 0, () => setShowAddSiteTask(false), {
+    confirm: () => !(infraTaskName.trim() || infraTaskNotes.trim()) || window.confirm('Discard this task?'),
   })
   useBackClose(editSite ? 1 : 0, () => setEditSite(null))
   useBackClose(confirmDeleteTask ? 1 : 0, () => setConfirmDeleteTask(null))
@@ -503,6 +526,37 @@ export default function ProjectManager() {
       showToast('Failed: ' + e.message)
     } finally {
       setTaskSaving(false)
+    }
+  }
+
+  // Manager-side infra task creation. Mirrors handleDeleteTask's infra branch,
+  // inverted: patch the open modal + the per-site badge in place rather than
+  // refetching. getTasksBySite orders created_at DESC so the new row belongs on
+  // top, and addInfraTask's select() already joins `creator`, so it renders
+  // identically to a fetched row.
+  async function handleAddSiteTask() {
+    if (!infraTaskName.trim() || !siteTasksModal?.siteId) return
+    const sid = siteTasksModal.siteId
+    setInfraTaskSaving(true)
+    try {
+      const saved = await addInfraTask(
+        sid, infraTaskName.trim(), infraTaskType, infraTaskNotes.trim(), currentUser?.id
+      )
+      setSiteTasksModal(m => m && ({ ...m, rows: [saved, ...m.rows] }))
+      // Unconditional, unlike the guarded decrement on delete: getTaskCountsBySite
+      // only emits keys for sites that already have tasks, so a site going 0 → 1
+      // has to create its key here or the badge stays blank.
+      setSiteTaskCounts(prev => ({ ...prev, [sid]: (prev[sid] || 0) + 1 }))
+      setInfraTaskName('')
+      setInfraTaskNotes('')
+      setInfraTaskType('maintenance')
+      setShowAddSiteTask(false)
+      showToast('Task added')
+    } catch(e) {
+      console.error('Add site task failed:', e)
+      showToast('Add task failed: ' + e.message)
+    } finally {
+      setInfraTaskSaving(false)
     }
   }
 
@@ -1431,9 +1485,20 @@ export default function ProjectManager() {
         {siteTasksModal && (
           <div className="overlay open" onClick={e => e.target === e.currentTarget && setSiteTasksModal(null)}>
             <div className="overlay-sheet">
-              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Tasks at site</div>
-              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
-                {siteTasksModal.siteName}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 14 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Tasks at site</div>
+                  <div style={{ fontSize: 13, color: 'var(--muted)' }}>{siteTasksModal.siteName}</div>
+                </div>
+                {/* Until now this view was read-only, so putting work on an
+                    infra site's board meant asking a crew member to create the
+                    task from their phone — addInfraTask's only caller was the
+                    crew shell. */}
+                <button onClick={() => setShowAddSiteTask(true)} style={{
+                  flexShrink: 0, padding: '7px 12px', background: 'var(--orange)', color: '#fff',
+                  border: 'none', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                }}><Icon name="plus" size={13} /> Add task</button>
               </div>
               {siteTasksModal.loading && (
                 <div style={{ textAlign: 'center', padding: 20, color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
@@ -1490,6 +1555,49 @@ export default function ProjectManager() {
             <DeleteTaskConfirm task={confirmDeleteTask}
               onCancel={() => setConfirmDeleteTask(null)}
               onConfirm={() => handleDeleteTask(confirmDeleteTask)} />
+
+            {/* Nested add-task sheet, same stacking trick as the confirm above.
+                The backdrop click is safe: e.target is THIS overlay, so the
+                parent modal's own e.target === e.currentTarget guard won't fire. */}
+            {showAddSiteTask && (
+              <div className="overlay open" onClick={e => e.target === e.currentTarget && setShowAddSiteTask(false)}>
+                <div className="overlay-sheet">
+                  <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Add task</div>
+                  <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
+                    At {siteTasksModal.siteName}
+                  </div>
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>Job type</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {INFRA_JOB_TYPES.map(jt => (
+                        <button key={jt.id}
+                          className={`job-chip${infraTaskType === jt.id ? ' selected' : ''}`}
+                          onClick={() => setInfraTaskType(jt.id)}>{jt.icon} {jt.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>Task name</label>
+                    <input type="text" placeholder="e.g. Replace sector radio" autoFocus
+                      autoComplete="off" name="site-task-name"
+                      value={infraTaskName} onChange={e => setInfraTaskName(e.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>Notes (optional)</label>
+                    <textarea placeholder="Scope notes, access details..." style={{ minHeight: 56 }}
+                      value={infraTaskNotes} onChange={e => setInfraTaskNotes(e.target.value)} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn btn-ghost" style={{ flex: 1 }}
+                      onClick={() => setShowAddSiteTask(false)} disabled={infraTaskSaving}>Cancel</button>
+                    <button className="btn btn-primary" style={{ flex: 2 }}
+                      onClick={handleAddSiteTask} disabled={infraTaskSaving || !infraTaskName.trim()}>
+                      {infraTaskSaving ? 'Saving...' : 'Add task'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

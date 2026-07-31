@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { crewTypeLabel } from '../../lib/crewTypes'
-import { visibleManagerTabs, canActAsCrew } from '../../lib/access'
+import { crewTypeLabel, VALID_FIELD_CREW_TYPES } from '../../lib/crewTypes'
+import { visibleManagerTabs, canActAsCrew, staffScope } from '../../lib/access'
+import { updateUserMetadata } from '../../lib/admin'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
 import { useBackClose } from '../../lib/backStack'
@@ -52,31 +53,63 @@ function ThemeToggle({ darkMode, onToggle }) {
   )
 }
 
-function SwitchToCrewButton({ currentUser, enterCrewMode }) {
-  // Single source of truth: only full-scope staff with a field crew_type may
-  // act as crew (warehouse + accounting are excluded by canActAsCrew).
+// Two-part pill. The body is "go" (using the crew_type already on the row);
+// the chevron is "go as something else" — it persists a new crew_type, then
+// goes. When the row has NO crew_type the whole pill opens the picker: it used
+// to be a dead disabled button whose only escape hatch was the Admin → Users
+// crew-type dropdown, which wasn't even rendered for owners. That was the trap.
+//
+// Still scope-gated. canActAsCrew() rejects warehouse/accounting on SCOPE
+// regardless of crew_type, so handing them a picker would only let them write
+// a value they could never use — they keep the plain disabled pill.
+function SwitchToCrewButton({ currentUser, enterCrewMode, onOpenCrewPicker }) {
   const canCrew = canActAsCrew(currentUser)
+  const isFullStaff = staffScope(currentUser) === 'full'
+
+  const base = {
+    display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px',
+    border: `1px solid ${isFullStaff ? 'var(--accent)' : 'var(--border2)'}`,
+    background: isFullStaff ? 'var(--accent-lt)' : 'transparent',
+    color: isFullStaff ? 'var(--accent-dk)' : 'var(--hint)',
+    cursor: isFullStaff ? 'pointer' : 'not-allowed',
+    fontSize: 11.5, fontWeight: 600,
+  }
+
+  if (!isFullStaff) {
+    return (
+      <button disabled style={{ ...base, borderRadius: 999, flexShrink: 0 }}
+        title="Only full-access staff can switch to crew mode.">
+        <Icon name="truck" size={13} /><span>Crew mode</span>
+      </button>
+    )
+  }
+
   return (
-    <button
-      onClick={canCrew ? enterCrewMode : undefined}
-      disabled={!canCrew}
-      title={canCrew
-        ? `Switch to ${crewTypeLabel(currentUser.crew_type)} crew view to log your own work`
-        : 'Only working managers (full access + a field crew_type) can switch to crew mode.'}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px',
-        borderRadius: 999, border: `1px solid ${canCrew ? 'var(--accent)' : 'var(--border2)'}`,
-        background: canCrew ? 'var(--accent-lt)' : 'transparent',
-        color: canCrew ? 'var(--accent-dk)' : 'var(--hint)',
-        cursor: canCrew ? 'pointer' : 'not-allowed', fontSize: 11.5, fontWeight: 600, flexShrink: 0,
-      }}>
-      <Icon name="truck" size={13} /><span>Crew mode</span>
-    </button>
+    <div style={{ display: 'inline-flex', flexShrink: 0, minWidth: 0 }}>
+      <button
+        onClick={canCrew ? enterCrewMode : onOpenCrewPicker}
+        title={canCrew
+          ? `Switch to ${crewTypeLabel(currentUser.crew_type)} crew view to log your own work`
+          : 'Pick a field crew type to start logging your own work'}
+        style={{ ...base, borderRadius: '999px 0 0 999px', borderRight: 'none', minWidth: 0 }}>
+        <Icon name="truck" size={13} />
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {canCrew ? crewTypeLabel(currentUser.crew_type) : 'Crew mode…'}
+        </span>
+      </button>
+      <button
+        onClick={onOpenCrewPicker}
+        aria-label="Enter crew mode as a different crew type"
+        title="Enter crew mode as a different crew type"
+        style={{ ...base, borderRadius: '0 999px 999px 0', padding: '5px 8px' }}>
+        <Icon name="chevron-down" size={12} />
+      </button>
+    </div>
   )
 }
 
 // ─── Console sidebar (shared by desktop rail + phone drawer) ─────────────────
-function ConsoleSidebar({ nav, tab, onNavigate, currentUser, selectUser, darkMode, toggleDarkMode, enterCrewMode, onClose }) {
+function ConsoleSidebar({ nav, tab, onNavigate, currentUser, selectUser, darkMode, toggleDarkMode, enterCrewMode, onOpenCrewPicker, onClose }) {
   return (
     <div style={{
       width: onClose ? 300 : 236, flexShrink: 0, background: 'var(--sidebar)',
@@ -127,7 +160,8 @@ function ConsoleSidebar({ nav, tab, onNavigate, currentUser, selectUser, darkMod
       <div style={{ flexShrink: 0, borderTop: '1px solid var(--border)', padding: 12 }}>
         <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
           <ThemeToggle darkMode={darkMode} onToggle={toggleDarkMode} />
-          <SwitchToCrewButton currentUser={currentUser} enterCrewMode={enterCrewMode} />
+          <SwitchToCrewButton currentUser={currentUser} enterCrewMode={enterCrewMode}
+            onOpenCrewPicker={onOpenCrewPicker} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{
@@ -149,7 +183,7 @@ function ConsoleSidebar({ nav, tab, onNavigate, currentUser, selectUser, darkMod
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function ManagerApp() {
-  const { projects, loading, error, reload, currentUser, selectUser, darkMode, toggleDarkMode, enterCrewMode } = useApp()
+  const { projects, loading, error, reload, currentUser, selectUser, darkMode, toggleDarkMode, enterCrewMode, refreshUsers, showToast } = useApp()
   const isWide = useIsWide()
 
   // Visible tabs come from the staff access scope (see lib/access.js):
@@ -178,6 +212,45 @@ export default function ManagerApp() {
   // own deeper layers, so Back unwinds detail → sub-tab → tab → home.
   useBackClose(drawerOpen ? 1 : 0, () => setDrawerOpen(false))
   useBackClose(tab !== homeTab ? 1 : 0, () => setTab(homeTab))
+
+  // "Enter crew mode as…" picker. State lives HERE, not in ConsoleSidebar —
+  // the sidebar is rendered twice (desktop rail + phone drawer) and unmounts
+  // with the drawer, so hoisting gives one overlay and one Back layer.
+  const [crewPicker, setCrewPicker] = useState(false)
+  const [crewPickerSaving, setCrewPickerSaving] = useState(false)
+  useBackClose(crewPicker ? 1 : 0, () => setCrewPicker(false))
+
+  // Persist the chosen field crew type, then enter crew mode — one action.
+  // Routing keys off users.crew_type (App.jsx), so switching fiber ↔ infra is
+  // a save, not a live toggle. refreshUsers() re-points currentUser at the
+  // saved row, and THAT is what makes App.jsx re-route; awaiting it before
+  // enterCrewMode() avoids a frame where viewMode is 'crew' but canActAsCrew
+  // is still false (which would silently bounce back to the manager shell).
+  async function pickCrewTypeAndEnter(nextType) {
+    if (!currentUser?.id) return
+    setCrewPickerSaving(true)
+    try {
+      if (currentUser.crew_type !== nextType) {
+        await updateUserMetadata(currentUser.id, { crew_type: nextType })
+        await refreshUsers()
+      }
+      setCrewPicker(false)
+      enterCrewMode()
+    } catch (e) {
+      showToast('Could not switch crew type: ' + e.message)
+    } finally {
+      setCrewPickerSaving(false)
+    }
+  }
+
+  const crewPickerOverlay = crewPicker ? (
+    <CrewTypePickerSheet
+      currentUser={currentUser}
+      saving={crewPickerSaving}
+      onPick={pickCrewTypeAndEnter}
+      onCancel={() => setCrewPicker(false)}
+    />
+  ) : null
 
   function navigate(id) { setTab(id); setDrawerOpen(false) }
 
@@ -219,10 +292,12 @@ export default function ManagerApp() {
           currentUser={currentUser} selectUser={selectUser}
           darkMode={darkMode} toggleDarkMode={toggleDarkMode}
           enterCrewMode={enterCrewMode}
+          onOpenCrewPicker={() => setCrewPicker(true)}
         />
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {content}
         </div>
+        {crewPickerOverlay}
       </div>
     )
   }
@@ -262,12 +337,58 @@ export default function ManagerApp() {
               currentUser={currentUser} selectUser={selectUser}
               darkMode={darkMode} toggleDarkMode={toggleDarkMode}
               enterCrewMode={enterCrewMode}
+              onOpenCrewPicker={() => setCrewPicker(true)}
               onClose={() => setDrawerOpen(false)}
             />
           </div>
           <style>{`@keyframes drawerIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }`}</style>
         </div>
       )}
+      {crewPickerOverlay}
+    </div>
+  )
+}
+
+// ─── Crew-type picker ────────────────────────────────────────────────────────
+// "Enter crew mode as…" — saves the crew type and opens the matching shell in
+// one action. zIndex overrides .overlay's 100 because the phone nav drawer
+// sits at 200 and this sheet is rendered as a sibling of it.
+function CrewTypePickerSheet({ currentUser, saving, onPick, onCancel }) {
+  return (
+    <div className="overlay open" style={{ zIndex: 300 }}
+      onClick={e => e.target === e.currentTarget && !saving && onCancel()}>
+      <div className="overlay-sheet" style={{ maxWidth: 460, width: '100%', margin: '0 auto' }}>
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Enter crew mode as…</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
+          Saves your crew type, then opens the matching crew app. Your manager access is
+          unchanged — use the ⚙️ Manager pill to come back.
+        </div>
+        {VALID_FIELD_CREW_TYPES.map(ct => {
+          const current = currentUser?.crew_type === ct
+          return (
+            <button key={ct} onClick={() => onPick(ct)} disabled={saving} style={{
+              width: '100%', minHeight: 46, textAlign: 'left', marginBottom: 6,
+              padding: '10px 12px', borderRadius: 'var(--r-sm)',
+              border: `1.5px solid ${current ? 'var(--accent)' : 'var(--border2)'}`,
+              background: current ? 'var(--accent-lt)' : 'var(--bg)',
+              cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.6 : 1,
+            }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: current ? 'var(--accent-dk)' : 'var(--text)' }}>
+                {crewTypeLabel(ct)}{current ? ' · current' : ''}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
+                {ct === 'infrastructure' ? 'Sites shell — towers / MDU' : 'Phases + tasks shell'}
+                {/* approve_submission's auto-deduct guard covers
+                    fiber_construction / field_service / infrastructure only, so
+                    'install' logs work fine but moves no material on approval. */}
+                {ct === 'install' ? ' · approvals will NOT auto-deduct materials' : ''}
+              </div>
+            </button>
+          )
+        })}
+        <button className="btn btn-ghost" style={{ width: '100%', marginTop: 8 }}
+          onClick={onCancel} disabled={saving}>Cancel</button>
+      </div>
     </div>
   )
 }

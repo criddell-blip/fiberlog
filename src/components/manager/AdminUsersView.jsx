@@ -16,13 +16,28 @@ import {
 } from '../../lib/inventory'
 import Icon from '../shared/Icon'
 
-const CREW_TYPE_OPTIONS = [
-  { id: 'fiber_construction', label: '🏗️ Fiber construction' },
-  { id: 'field_service',  label: '🛠️ Field service' },
-  { id: 'install',        label: '🏠 Install' },
-  { id: 'infrastructure', label: '📡 Infrastructure (tower/site)' },
-  { id: 'contractor',     label: '🧰 Contractor' },
-]
+// Assignable field crew types, derived from VALID_FIELD_CREW_TYPES so this
+// list can never drift from the one App.jsx actually routes on. The explicit
+// labels (rather than plain crewTypeLabel) only exist to carry the emoji and
+// the "(tower/site)" hint.
+const CREW_TYPE_LABELS = {
+  fiber_construction: '🏗️ Fiber construction',
+  field_service:      '🛠️ Field service',
+  install:            '🏠 Install',
+  infrastructure:     '📡 Infrastructure (tower/site)',
+}
+const CREW_TYPE_OPTIONS = VALID_FIELD_CREW_TYPES.map(id => ({
+  id, label: CREW_TYPE_LABELS[id] || crewTypeLabel(id),
+}))
+
+// 'contractor' is a legal users.crew_type but is NOT a field crew type —
+// canActAsCrew() rejects it, so offering it to staff produced an owner or
+// working manager who silently could never enter crew mode. It stays
+// available for the non-staff access types (where it still drives the
+// crew_type × department whitelist) and in the bulk-assign filter, so
+// existing contractor-tagged users remain selectable.
+const CONTRACTOR_CREW_TYPE = { id: 'contractor', label: '🧰 Contractor' }
+const CREW_TYPE_FILTER_OPTIONS = [...CREW_TYPE_OPTIONS, CONTRACTOR_CREW_TYPE]
 
 // Soft cross-crew detection: infer a likely crew_type from a trailer name's
 // keywords. Used only for the "Assign anyway?" amber warning on the per-user
@@ -715,7 +730,16 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
                 return (
                   <button
                     key={a.id}
-                    onClick={() => !disabled && setAccessType(a.id)}
+                    onClick={() => {
+                      if (disabled) return
+                      setAccessType(a.id)
+                      // Owner + Working manager take an OPTIONAL crew type, but
+                      // the form defaults NEW users to fiber_construction (a
+                      // convenience for the common Crew case). Carrying that
+                      // default into an admin type would silently tag an owner
+                      // as fiber crew, so reset to whatever they actually have.
+                      if (a.id === 'owner' || a.id === 'full_manager') setCrewType(user?.crew_type ?? '')
+                    }}
                     disabled={disabled}
                     style={{
                       textAlign: 'left',
@@ -736,8 +760,11 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
             </div>
           </div>
 
-          {/* Crew type — only for the access types that carry one (Crew +
-              Working manager). Everyone else persists crew_type = NULL. */}
+          {/* Crew type — only for the access types that carry one (Crew,
+              Working manager, Owner). Everyone else persists crew_type = NULL.
+              Contractor is offered only to the non-staff types (scope === null):
+              canActAsCrew() rejects it, so a staff member tagged 'contractor'
+              could never actually enter crew mode. */}
           {selectedType.needsCrew && (
             <div className="field">
               <label>Crew type</label>
@@ -747,12 +774,16 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
                 style={{ width: '100%' }}
               >
                 <option value="">— None —</option>
-                {CREW_TYPE_OPTIONS.map(ct => (
+                {(selectedType.scope === null
+                  ? [...CREW_TYPE_OPTIONS, CONTRACTOR_CREW_TYPE]
+                  : CREW_TYPE_OPTIONS
+                ).map(ct => (
                   <option key={ct.id} value={ct.id}>{ct.label}</option>
                 ))}
               </select>
               <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
-                Determines which assemblies crew see, and (for working managers) which crew view they switch into.
+                Determines which assemblies crew see, and (for owners / working managers) which
+                crew view they switch into. Leave as “None” if this person does no field work.
               </div>
             </div>
           )}
@@ -1593,7 +1624,9 @@ function BulkAssignPullLocationSheet({ users, truckLocations, onCancel, onComple
             style={{ padding: '6px 10px', fontSize: 12, borderRadius: 'var(--r-xs)', border: '1.5px solid var(--border2)', background: 'var(--surface2)' }}
           >
             <option value="all">All crew types</option>
-            {CREW_TYPE_OPTIONS.map(ct => (
+            {/* Includes contractor: this filters EXISTING users, and
+                contractor-tagged rows must stay selectable here. */}
+            {CREW_TYPE_FILTER_OPTIONS.map(ct => (
               <option key={ct.id} value={ct.id}>{ct.label}</option>
             ))}
           </select>
