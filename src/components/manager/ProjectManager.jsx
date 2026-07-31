@@ -446,16 +446,31 @@ export default function ProjectManager() {
       }
       await db.from('tasks').delete().eq('id', task.id)
 
-      setProjects(prev => prev.map(p => {
-        if (p.id !== selProject?.id) return p
-        const updatedPhases = p.phases.map(ph =>
-          ph.id === selPhase.id ? { ...ph, tasks: ph.tasks.filter(t => t.id !== task.id) } : ph
+      // Fiber path: patch the open phase's task list in place.
+      if (selPhase) {
+        setProjects(prev => prev.map(p => {
+          if (p.id !== selProject?.id) return p
+          const updatedPhases = p.phases.map(ph =>
+            ph.id === selPhase.id ? { ...ph, tasks: ph.tasks.filter(t => t.id !== task.id) } : ph
+          )
+          const updated = { ...p, phases: updatedPhases }
+          setSelProject(updated)
+          setSelPhase({ ...selPhase, tasks: selPhase.tasks.filter(t => t.id !== task.id) })
+          return updated
+        }))
+      }
+
+      // Infra path: drop the row from the open "Tasks at site" modal and
+      // decrement that site's task-count badge (the selPhase state above
+      // doesn't exist for infra — tasks are anchored to a site, not a phase).
+      if (siteTasksModal) {
+        setSiteTasksModal(m => m && ({ ...m, rows: m.rows.filter(r => r.id !== task.id) }))
+        const sid = siteTasksModal.siteId
+        setSiteTaskCounts(prev =>
+          sid && sid in prev ? { ...prev, [sid]: Math.max(0, (prev[sid] || 0) - 1) } : prev
         )
-        const updated = { ...p, phases: updatedPhases }
-        setSelProject(updated)
-        setSelPhase({ ...selPhase, tasks: selPhase.tasks.filter(t => t.id !== task.id) })
-        return updated
-      }))
+      }
+
       setConfirmDeleteTask(null)
       showToast('Task deleted')
     } catch(e) {
@@ -897,23 +912,10 @@ export default function ProjectManager() {
             </div>
           )}
 
-          {/* Delete task confirmation */}
-          {confirmDeleteTask && (
-            <div className="overlay open" onClick={e => e.target === e.currentTarget && setConfirmDeleteTask(null)}>
-              <div className="overlay-sheet">
-                <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Delete task?</div>
-                <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 20 }}>
-                  "{confirmDeleteTask.name}" and all its logged data will be permanently removed.
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setConfirmDeleteTask(null)}>Cancel</button>
-                  <button className="btn btn-danger" style={{ flex: 2 }} onClick={() => handleDeleteTask(confirmDeleteTask)}>
-                    Delete task
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Delete task confirmation (shared with the infra site-tasks view) */}
+          <DeleteTaskConfirm task={confirmDeleteTask}
+            onCancel={() => setConfirmDeleteTask(null)}
+            onConfirm={() => handleDeleteTask(confirmDeleteTask)} />
 
           {/* Add task overlay */}
           {showAddTask && (
@@ -1470,11 +1472,24 @@ export default function ProjectManager() {
                   }}>
                     {t.status}
                   </span>
+                  {/* Delete a site task created in error — same cascade + confirm
+                      as the fiber phase view (previously infra had no delete). */}
+                  <button onClick={() => setConfirmDeleteTask(t)}
+                    title="Delete task"
+                    style={{ background: 'var(--red-lt)', border: 'none', borderRadius: 'var(--r-xs)', padding: '4px 8px', cursor: 'pointer', fontSize: 13, color: 'var(--red)', display: 'inline-flex' }}>
+                    <Icon name="trash" size={14} />
+                  </button>
                 </div>
               ))}
               <button className="btn btn-ghost" style={{ width: '100%', marginTop: 12 }}
                 onClick={() => setSiteTasksModal(null)}>Close</button>
             </div>
+
+            {/* Confirm renders above the site-tasks sheet (later in DOM = on top).
+                Shares confirmDeleteTask state + handleDeleteTask with the fiber view. */}
+            <DeleteTaskConfirm task={confirmDeleteTask}
+              onCancel={() => setConfirmDeleteTask(null)}
+              onConfirm={() => handleDeleteTask(confirmDeleteTask)} />
           </div>
         )}
 
@@ -1825,6 +1840,29 @@ export default function ProjectManager() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// Shared delete-task confirm — used by both the fiber phase view and the infra
+// "Tasks at site" modal (separate render branches, one confirm). Deleting
+// cascades through the task's sessions / entries / submissions (handleDeleteTask).
+function DeleteTaskConfirm({ task, onCancel, onConfirm }) {
+  if (!task) return null
+  return (
+    <div className="overlay open" onClick={e => e.target === e.currentTarget && onCancel()}>
+      <div className="overlay-sheet">
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Delete task?</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 20 }}>
+          "{task.name}" and all its logged data will be permanently removed.
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</button>
+          <button className="btn btn-danger" style={{ flex: 2 }} onClick={onConfirm}>
+            Delete task
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
