@@ -60,6 +60,14 @@ function getDateRange(preset) {
   }
 }
 
+// The date inputs are calendar days in the *user's* timezone, but created_at is
+// timestamptz. Sending a naive "YYYY-MM-DDT00:00:00" makes Postgres read it as
+// UTC, which slides the window 6-7h and files every evening passdown under the
+// next day (10 of the 21 approved submissions land on a different UTC day than
+// Mountain day). Parse as local, send the absolute instant.
+const dayStart = d => new Date(`${d}T00:00:00`).toISOString()
+const dayEnd = d => new Date(`${d}T23:59:59.999`).toISOString()
+
 const PRESETS = [
   { id: 'this_week', label: 'This week' },
   { id: 'last_week', label: 'Last week' },
@@ -162,8 +170,8 @@ export default function ReportsView() {
         `)
         .eq('status', 'approved')
         .eq('archived', false)
-        .gte('created_at', dateFrom + 'T00:00:00')
-        .lte('created_at', dateTo + 'T23:59:59')
+        .gte('created_at', dayStart(dateFrom))
+        .lte('created_at', dayEnd(dateTo))
         .order('created_at', { ascending: false })
 
       const { data: subs, error: subErr } = await subQuery
@@ -269,8 +277,8 @@ export default function ReportsView() {
   async function loadConsumption() {
     setLoading(true)
     try {
-      const fromISO = dateFrom + 'T00:00:00'
-      const toISO = dateTo + 'T23:59:59.999'
+      const fromISO = dayStart(dateFrom)
+      const toISO = dayEnd(dateTo)
       const ledger = await getConsumptionLedger({ sinceCreated: fromISO })
       const fromT = new Date(fromISO).getTime()
       const toT = new Date(toISO).getTime()
@@ -382,13 +390,17 @@ export default function ReportsView() {
       .eq('project_id', selProject)
       .order('sequence_order')
 
-    // Get approved submissions for this project — respect the date filter
+    // Get approved submissions for this project — respect the date filter.
+    // sites is joined alongside phases so infra (site-anchored, phase_id NULL)
+    // passdowns aren't silently dropped: the old filter matched on phase NAME,
+    // so anything without a phase fell out and the PDF undercounted vs the
+    // Reports list, which does include site work.
     let subsQuery = db
       .from('submissions')
       .select(`
         *, users!submissions_user_id_fkey(name, crew_type),
         work_sessions!submissions_session_id_fkey(
-          tasks(name, phases(name))
+          tasks(name, phases(id, name, project_id), sites(id, name, project_id))
         )
       `)
       .eq('status', 'approved')
@@ -396,24 +408,51 @@ export default function ReportsView() {
 
     if (isFiltered) {
       subsQuery = subsQuery
-        .gte('created_at', dateFrom + 'T00:00:00')
-        .lte('created_at', dateTo + 'T23:59:59')
+        .gte('created_at', dayStart(dateFrom))
+        .lte('created_at', dayEnd(dateTo))
     }
 
     const { data: subs } = await subsQuery
 
+    // Match on project_id, not phase name — a renamed phase used to drop its
+    // whole history out of the report, and same-named phases in two projects
+    // would have cross-contaminated.
     const projSubs = (subs || []).map(s => ({
       ...s,
       _session: Array.isArray(s.work_sessions) ? s.work_sessions[0] : s.work_sessions
-    })).filter(s =>
-      phases?.some(ph => ph.name === s._session?.tasks?.phases?.name)
-    )
+    })).filter(s => {
+      const t = s._session?.tasks
+      return t?.phases?.project_id === selProject || t?.sites?.project_id === selProject
+    })
 
-    // === Fiber & Conduit breakdown ===
-    // Pull entry_parts for these submissions' sessions to break out counts/sizes
-    const sessionIds = projSubs.map(s => s.session_id).filter(Boolean)
+    // === Fiber & Conduit breakdown + parts-derived footage ===
+    // Pull entry_parts for these submissions' sessions. Two jobs:
+    //   1. the Materials Detail breakdowns (fiber by count, conduit by size)
+    //   2. parts-derived strand/fiber/conduit totals to print NEXT TO the
+    //      crew-typed submissions.total_* rollups. The two read different
+    //      columns and silently disagree whenever someone logs a reel without
+    //      filling the footage box (or vice versa) — showing both makes the
+    //      gap visible instead of leaving the smaller number to stand alone.
+    const sessionIds = [...new Set(projSubs.map(s => s.session_id).filter(Boolean))]
     const fiberBreakdown = {}  // { '144 ct': qty, '12 ct': qty, ... }
     const conduitBreakdown = {}  // { '2"': qty, '1 1/4"': qty, ... }
+
+    // session_id → the phase/site it belongs to, so parts land in the same
+    // group as the rollups. A session hangs off exactly one task, so this holds
+    // even for legacy log_entries whose submission_id is NULL.
+    const sessionGroup = {}
+    projSubs.forEach(s => {
+      const t = s._session?.tasks
+      if (!s.session_id || !t) return
+      if (t.phases?.id) sessionGroup[s.session_id] = 'ph:' + t.phases.id
+      else if (t.sites?.id) sessionGroup[s.session_id] = 'si:' + t.sites.id
+    })
+    // group key → { strand, fiber, conduit }; '' is the project-wide total.
+    const partsFt = {}
+    const bump = (key, field, qty) => {
+      if (!partsFt[key]) partsFt[key] = { strand: 0, fiber: 0, conduit: 0 }
+      partsFt[key][field] += qty
+    }
 
     if (sessionIds.length > 0) {
       const { data: sessionEntries } = await db
@@ -421,11 +460,14 @@ export default function ReportsView() {
         .select('id, session_id')
         .in('session_id', sessionIds)
 
+      const entrySession = {}
+      ;(sessionEntries || []).forEach(e => { entrySession[e.id] = e.session_id })
+
       const eIds = (sessionEntries || []).map(e => e.id)
       if (eIds.length > 0) {
         const { data: eParts } = await db
           .from('entry_parts')
-          .select('quantity, parts_catalog ( name, unit, material_group )')
+          .select('entry_id, quantity, parts_catalog ( name, unit, material_group )')
           .in('entry_id', eIds)
 
         ;(eParts || []).forEach(ep => {
@@ -434,30 +476,22 @@ export default function ReportsView() {
           const name = pc.name || ''
           const qty = ep.quantity || 0
           if (qty <= 0) return
+          const group = sessionGroup[entrySession[ep.entry_id]] || null
+          const add = (field) => { bump('', field, qty); if (group) bump(group, field, qty) }
 
-          // Fiber: material_group = 'Fiber' AND name contains 'N ct'
-          if (pc.material_group === 'Fiber') {
-            const m = name.match(/(\d+)\s*ct/i)
-            if (m) {
-              const label = `${m[1]} ct`
-              fiberBreakdown[label] = (fiberBreakdown[label] || 0) + qty
-            }
+          const ct = fiberCountLabel(pc)
+          if (ct) {
+            fiberBreakdown[ct] = (fiberBreakdown[ct] || 0) + qty
+            add('fiber')
           }
 
-          // Conduit: name starts with 'Conduit ' and isn't a fitting
-          const isConduitLinear =
-            /^conduit\s/i.test(name) &&
-            !/coupler|plug|standoff|bracket|rigid metal/i.test(name)
-
-          if (isConduitLinear) {
-            // Extract size: everything after "Conduit " up to the first non-size word
-            // Examples: 'Conduit 1 1/2"' → '1 1/2"', 'Conduit 2" power' → '2" power'
-            const m = name.match(/^conduit\s+(.+?)\s*$/i)
-            if (m) {
-              const label = m[1].trim()
-              conduitBreakdown[label] = (conduitBreakdown[label] || 0) + qty
-            }
+          const size = conduitSizeLabel(name)
+          if (size) {
+            conduitBreakdown[size] = (conduitBreakdown[size] || 0) + qty
+            add('conduit')
           }
+
+          if (isLinearStrand(name)) add('strand')
         })
       }
     }
@@ -478,6 +512,14 @@ export default function ReportsView() {
     const totalHH = projSubs.reduce((a, s) => a + (s.total_handholes || 0), 0)
     const totalVaults = projSubs.reduce((a, s) => a + (s.total_vaults || 0), 0)
 
+    // Project-wide parts-derived footage, and whether it's worth explaining the
+    // two-source split at all (no gap = no note, keeps clean reports clean).
+    const projParts = partsFt[''] || { strand: 0, fiber: 0, conduit: 0 }
+    const hasFootageGap =
+      Math.abs(projParts.strand - totalStrand) >= 1 ||
+      Math.abs(projParts.fiber - totalFiber) >= 1 ||
+      Math.abs(projParts.conduit - totalConduit) >= 1
+
     function pct(actual, target) {
       if (!target || target === 0) return 0
       return Math.min(100, Math.round((actual / target) * 100))
@@ -491,7 +533,19 @@ export default function ReportsView() {
       </div>`
     }
 
-    function statRow(label, actual, target, unit) {
+    // Second line under a stat: what the *parts* on those passdowns add up to,
+    // when it disagrees with the crew-typed rollup by more than rounding. Both
+    // numbers are real — the rollup is what the crew reported, the parts figure
+    // is what was actually deducted from the truck.
+    function partsNote(actual, parts, unit) {
+      if (parts == null || Math.abs(parts - actual) < 1) return ''
+      const delta = parts - actual
+      return `<div style="font-size:10.5px;color:#C08A2E;margin-top:2px">
+        Parts logged: ${parts.toLocaleString()} ${unit} (${delta > 0 ? '+' : ''}${delta.toLocaleString()})
+      </div>`
+    }
+
+    function statRow(label, actual, target, unit, parts) {
       // When filtered by time, suppress targets — comparing a week's work to a project total is misleading
       if (isFiltered) {
         return `
@@ -500,6 +554,7 @@ export default function ReportsView() {
               <span style="color:#888780">${label}</span>
               <span style="color:#F0EFE8;font-weight:700">${actual.toLocaleString()} ${unit}</span>
             </div>
+            ${partsNote(actual, parts, unit)}
           </div>`
       }
       const p = pct(actual, target)
@@ -509,6 +564,7 @@ export default function ReportsView() {
             <span style="color:#888780">${label}</span>
             <span style="color:#F0EFE8;font-weight:700">${actual.toLocaleString()} ${unit} ${target > 0 ? `<span style="color:#555550">/ ${target.toLocaleString()} ${unit} (${p}%)</span>` : ''}</span>
           </div>
+          ${partsNote(actual, parts, unit)}
           ${target > 0 ? bar(p) : ''}
         </div>`
     }
@@ -516,7 +572,8 @@ export default function ReportsView() {
     const reportDate = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
     const phasesHTML = (phases || []).map(ph => {
-      const phSubs = projSubs.filter(s => s._session?.tasks?.phases?.name === ph.name)
+      const phSubs = projSubs.filter(s => s._session?.tasks?.phases?.id === ph.id)
+      const phParts = partsFt['ph:' + ph.id] || null
       const phStrand = phSubs.reduce((a,s) => a + (s.total_strand_ft||0), 0)
       const phFiber = phSubs.reduce((a,s) => a + (s.total_fiber_ft||0), 0)
       const phConduit = phSubs.reduce((a,s) => a + (s.total_conduit_ft||0), 0)
@@ -525,8 +582,11 @@ export default function ReportsView() {
       const phHH = phSubs.reduce((a,s) => a + (s.total_handholes||0), 0)
       const phVaults = phSubs.reduce((a,s) => a + (s.total_vaults||0), 0)
 
-      // Skip phases with no activity when filtered — keeps weekly reports focused
+      // Skip phases with no activity when filtered — keeps weekly reports
+      // focused. Parts count as activity too, so a phase where the crew logged
+      // reels but left the footage boxes at 0 still shows up.
       const phaseTotal = phStrand + phFiber + phConduit + phMst + phCases + phHH + phVaults
+        + (phParts ? phParts.strand + phParts.fiber + phParts.conduit : 0)
       if (isFiltered && phaseTotal === 0) return ''
 
       return `
@@ -534,13 +594,40 @@ export default function ReportsView() {
           <div style="font-size:15px;font-weight:700;color:#F0EFE8;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #2E2E2B">
             ${ph.name}
           </div>
-          ${statRow('Strand', phStrand, ph.strand_ft_target || 0, 'ft')}
-          ${statRow('Fiber', phFiber, ph.fiber_ft || 0, 'ft')}
-          ${statRow('Conduit', phConduit, ph.conduit_ft_target || 0, 'ft')}
+          ${statRow('Strand', phStrand, ph.strand_ft_target || 0, 'ft', phParts?.strand)}
+          ${statRow('Fiber', phFiber, ph.fiber_ft || 0, 'ft', phParts?.fiber)}
+          ${statRow('Conduit', phConduit, ph.conduit_ft_target || 0, 'ft', phParts?.conduit)}
           ${statRow('MST/HST', phMst, ph.mst_hst_target || 0, 'units')}
           ${statRow('Splice cases', phCases, ph.splice_case_target || 0, 'cases')}
           ${statRow('Handholes', phHH, ph.handhole_target || 0, 'ea')}
           ${statRow('Vaults', phVaults, ph.vault_target || 0, 'ea')}
+        </div>`
+    }).join('')
+
+    // Site-anchored (infra) passdowns. They have no phase, so they'd otherwise
+    // contribute to the totals with nowhere to be broken out. No targets —
+    // sites have no target columns, so every row is bare actuals.
+    const siteGroups = {}
+    projSubs.forEach(s => {
+      const site = s._session?.tasks?.sites
+      if (!site?.id) return
+      if (!siteGroups[site.id]) siteGroups[site.id] = { name: site.name, subs: [] }
+      siteGroups[site.id].subs.push(s)
+    })
+    const sitesHTML = Object.entries(siteGroups).map(([siteId, g]) => {
+      const sum = k => g.subs.reduce((a, s) => a + (s[k] || 0), 0)
+      const sp = partsFt['si:' + siteId] || null
+      const hrs = sum('hours_worked')
+      return `
+        <div style="background:#1C1C1A;border:1px solid #2E2E2B;border-radius:10px;padding:16px;margin-bottom:12px">
+          <div style="font-size:15px;font-weight:700;color:#F0EFE8;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #2E2E2B">
+            ${g.name}
+          </div>
+          ${statRow('Hours', hrs, 0, 'hrs')}
+          ${statRow('Strand', sum('total_strand_ft'), 0, 'ft', sp?.strand)}
+          ${statRow('Fiber', sum('total_fiber_ft'), 0, 'ft', sp?.fiber)}
+          ${statRow('Conduit', sum('total_conduit_ft'), 0, 'ft', sp?.conduit)}
+          ${statRow('MST/HST', sum('total_mst_hst'), 0, 'units')}
         </div>`
     }).join('')
 
@@ -581,9 +668,9 @@ export default function ReportsView() {
     ${[
       { label: 'Total hours', value: totalHours.toFixed(1) },
       { label: 'Poles hung', value: totalPoles.toLocaleString() },
-      { label: 'Strand', value: totalStrand.toLocaleString() + ' ft' },
-      { label: 'Fiber', value: totalFiber.toLocaleString() + ' ft' },
-      { label: 'Conduit', value: totalConduit.toLocaleString() + ' ft' },
+      { label: 'Strand', value: totalStrand.toLocaleString() + ' ft', raw: totalStrand, parts: projParts.strand, unit: 'ft' },
+      { label: 'Fiber', value: totalFiber.toLocaleString() + ' ft', raw: totalFiber, parts: projParts.fiber, unit: 'ft' },
+      { label: 'Conduit', value: totalConduit.toLocaleString() + ' ft', raw: totalConduit, parts: projParts.conduit, unit: 'ft' },
       { label: 'MST/HST', value: totalMst },
       { label: 'Splice cases', value: totalCases },
       { label: 'Handholes', value: totalHH },
@@ -591,11 +678,26 @@ export default function ReportsView() {
       <div style="background:#1C1C1A;border:1px solid #2E2E2B;border-radius:8px;padding:12px;text-align:center">
         <div style="font-size:20px;font-weight:800;color:#F5871F">${s.value}</div>
         <div style="font-size:10px;color:#888780;margin-top:2px">${s.label}</div>
+        ${s.parts != null && Math.abs(s.parts - s.raw) >= 1
+          ? `<div style="font-size:9.5px;color:#C08A2E;margin-top:3px">${s.parts.toLocaleString()} ${s.unit} in parts</div>` : ''}
       </div>`).join('')}
   </div>
 
+  ${hasFootageGap ? `
+  <div style="background:#2A2314;border:1px solid #5C4A1E;border-radius:8px;padding:12px 14px;margin-bottom:20px;font-size:11.5px;color:#D6B45E;line-height:1.5">
+    <strong>Two sources, two numbers.</strong> The headline figures are the footage the crew
+    entered on their passdowns. The amber figures are what the parts logged on those same
+    passdowns add up to — the quantities you see in the Reports list. Where they differ,
+    someone logged a reel without filling the footage box (or the reverse).
+  </div>` : ''}
+
+  ${phasesHTML || !sitesHTML ? `
   <div style="font-size:13px;font-weight:700;color:#555550;text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">${isFiltered ? 'Activity by Phase' : 'Phase Breakdown'}</div>
-  ${phasesHTML || '<div style="text-align:center;padding:40px;color:#555550;font-size:13px">No activity in this range</div>'}
+  ${phasesHTML || '<div style="text-align:center;padding:40px;color:#555550;font-size:13px">No activity in this range</div>'}` : ''}
+
+  ${sitesHTML ? `
+  <div style="font-size:13px;font-weight:700;color:#555550;text-transform:uppercase;letter-spacing:.06em;margin:24px 0 12px">Activity by Site</div>
+  ${sitesHTML}` : ''}
 
   ${(fiberEntries.length > 0 || conduitEntries.length > 0) ? `
   <div style="font-size:13px;font-weight:700;color:#555550;text-transform:uppercase;letter-spacing:.06em;margin:24px 0 12px">Materials Detail</div>
@@ -666,7 +768,6 @@ export default function ReportsView() {
   const userLabel = selUser === 'all' ? 'All crew' : (users.find(u => u.id === selUser)?.name || 'Crew')
   const groupLabel = groupBy === 'part' ? 'parts' : groupBy === 'person' ? 'people' : 'projects'
   const selProj = selProject !== 'all' ? projects.find(p => p.id === selProject) : null
-  const isInfraOnly = selProj && (!selProj.phases || selProj.phases.length === 0)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -821,14 +922,12 @@ export default function ReportsView() {
                   <Icon name="receipt" size={14} /> Export to Sage
                 </button>
               )}
-              {/* Progress PDF is fiber/passdown-only (organized by phases) — hidden
-                  in consumption mode, disabled for infra-only projects. */}
+              {/* Progress PDF is passdown-only — hidden in consumption mode.
+                  No longer gated on the project having phases: site-anchored
+                  infra passdowns now get their own "Activity by Site" section
+                  instead of being dropped from the totals. */}
               {mode === 'passdowns' && (
-                <button onClick={generateProjectReport}
-                  disabled={isInfraOnly}
-                  title={isInfraOnly ? 'Progress PDF is fiber-only (organized by phases). Infra projects don’t use phases yet.' : ''}
-                  className="chip"
-                  style={{ opacity: isInfraOnly ? 0.5 : 1, cursor: isInfraOnly ? 'not-allowed' : 'pointer' }}>
+                <button onClick={generateProjectReport} className="chip">
                   <Icon name="receipt" size={14} /> Progress PDF
                 </button>
               )}
@@ -911,6 +1010,45 @@ export default function ReportsView() {
       )}
     </div>
   )
+}
+
+// ─── Part classification for the Progress PDF ────────────────────────────────
+// These decide which catalog rows count as linear fiber / conduit / strand.
+// Kept name-driven because the catalog is Sage-named (see docs/HISTORY.md) and
+// material_group has already been renamed once under us.
+
+// Fiber reels: "R-288-1C - 288 ct sm fiber", "Fiber reel - 144 ct sm fiber".
+// Was gated on material_group === 'Fiber', but every fiber-count SKU in the
+// catalog is 'Fiber cable' — so the panel silently rendered empty and the PDF
+// undercounted fiber by 100%. Match the family prefix so a future rename to
+// 'Fiber trunk'/'Fiber drop' doesn't break it the same way, and require the
+// "N ct" token so 'Fiber' hardware/accessories stay out.
+function fiberCountLabel(pc) {
+  if (!/^fiber/i.test(pc?.material_group || '')) return null
+  const m = (pc?.name || '').match(/(\d+)\s*ct\b/i)
+  return m ? `${m[1]} ct` : null
+}
+
+// Fittings and mounts are 'ea' items, not linear conduit — never count them.
+const CONDUIT_FITTING = /coupler|plug|standoff|bracket|rigid metal/i
+
+// Conduit sold by the foot. Two naming shapes live in the catalog:
+//   'Conduit 2" - Grey'                                  → size trails the word
+//   '2" PVC Conduit, Schedule 40, Bell End, 10\' Length'  → size leads it
+// Only the first was matched before, so the vendor-named PVC SKUs (69198 /
+// 0069198) dropped out of the breakdown entirely.
+function conduitSizeLabel(name) {
+  if (!/conduit/i.test(name) || CONDUIT_FITTING.test(name)) return null
+  let m = name.match(/^conduit\s+(.+?)\s*$/i)
+  if (m) return m[1].trim()
+  m = name.match(/^([\d\s./-]*["'])\s*(?:\w+\s+)?conduit\b/i)
+  return m && m[1].trim() ? m[1].trim() : null
+}
+
+// Strand sold by the foot — currently just the EHS reel. The lookalikes
+// ("Strand Splice", "Strandvise", "…Single Strand") are per-each hardware.
+function isLinearStrand(name) {
+  return /^strand[,\s]/i.test(name) && !/splice|vise|grip|clamp/i.test(name)
 }
 
 function PartRow({ part, rows, stock, barcode }) {
