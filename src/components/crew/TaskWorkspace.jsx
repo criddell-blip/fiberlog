@@ -960,9 +960,14 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                     className="tally-btn tally-sm tally-minus"
                     onClick={() => setPartQtyOverrides(prev => { const cur = prev[p.id] !== undefined ? prev[p.id] : p.qty; const next = Math.max(0, cur - 1); return next === 0 ? { ...prev, [p.id]: -1 } : { ...prev, [p.id]: next } })}
                   >−</button>
-                  <span className="part-qty" style={{ minWidth: 28, textAlign: 'center' }}>
-                    {(partQtyOverrides[p.id] !== undefined ? partQtyOverrides[p.id] : p.qty).toLocaleString()}
-                  </span>
+                  {/* Typed entry as well as the steppers — 250 of a part is 250
+                      taps otherwise. min 0 matches the − button, which treats
+                      reaching 0 as "remove this line". */}
+                  <QtyInput
+                    value={partQtyOverrides[p.id] !== undefined ? partQtyOverrides[p.id] : p.qty}
+                    min={0}
+                    onCommit={n => setPartQtyOverrides(prev => ({ ...prev, [p.id]: n === 0 ? -1 : n }))}
+                  />
                   <button
                     className="tally-btn tally-sm tally-plus"
                     onClick={() => setPartQtyOverrides(prev => { const cur = prev[p.id] !== undefined ? prev[p.id] : p.qty; return { ...prev, [p.id]: cur + 1 } })}
@@ -1005,7 +1010,13 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                     className="tally-btn tally-sm tally-minus"
                     onClick={() => setExtraParts(prev => prev.map(ep => ep.id === p.id ? { ...ep, qty: Math.max(1, ep.qty - 1) } : ep))}
                   >−</button>
-                  <span className="part-qty" style={{ minWidth: 28, textAlign: 'center' }}>{p.qty.toLocaleString()}</span>
+                  {/* min 1 mirrors the − button's clamp: an added part is
+                      removed with the × on the right, not by typing 0. */}
+                  <QtyInput
+                    value={p.qty}
+                    min={1}
+                    onCommit={n => setExtraParts(prev => prev.map(ep => ep.id === p.id ? { ...ep, qty: n } : ep))}
+                  />
                   <button
                     className="tally-btn tally-sm tally-plus"
                     onClick={() => setExtraParts(prev => prev.map(ep => ep.id === p.id ? { ...ep, qty: ep.qty + 1 } : ep))}
@@ -1155,3 +1166,50 @@ function FootageTypePicker({ asm, lines, total, map, mapLoaded, lang, onToggle, 
 // typeLabel / hasFootageLines and the rest of the footage-line logic live in
 // lib/footageLines.js — it's a money path (it decides which SKU leaves the
 // truck), so it's extracted and unit-tested rather than inline here.
+
+// ─── QUANTITY INPUT ──────────────────────────────────────────────────────────
+// Typed quantity next to the −/+ steppers on the submit sheet. Tapping + 250
+// times to log a box of connectors was the whole problem.
+//
+// Holds its own draft string rather than binding straight to the number,
+// because both lists DROP a row at qty 0 (allParts filters `qty > 0`;
+// partQtyOverrides uses -1 as the remove sentinel). Committing on every
+// keystroke would make the row vanish the instant you cleared the box to
+// retype — so a partial/empty entry is held locally and only resolved on blur.
+function QtyInput({ value, min = 0, onCommit }) {
+  const [draft, setDraft] = useState(String(value))
+  // Re-sync when the steppers (or a footage edit) change the value out from
+  // under us. Skipped while focused so it can't fight the user mid-type.
+  const [focused, setFocused] = useState(false)
+  useEffect(() => { if (!focused) setDraft(String(value)) }, [value, focused])
+
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      value={draft}
+      onFocus={e => { setFocused(true); e.target.select() }}
+      onChange={e => {
+        setDraft(e.target.value)
+        const n = parseFloat(e.target.value)
+        // Only commit a positive number live. 0 and empty wait for blur, so
+        // clearing the field doesn't delete the row under the cursor.
+        if (Number.isFinite(n) && n > 0) onCommit(n)
+      }}
+      onBlur={() => {
+        setFocused(false)
+        const n = parseFloat(draft)
+        if (!Number.isFinite(n)) { setDraft(String(value)); return }  // empty → leave as-was
+        const next = Math.max(min, n)
+        setDraft(String(next))
+        onCommit(next)
+      }}
+      className="part-qty"
+      style={{
+        width: 56, minWidth: 56, textAlign: 'center', padding: '4px 2px',
+        border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)',
+        background: 'var(--bg)', color: 'var(--text)', fontWeight: 700,
+      }}
+    />
+  )
+}
