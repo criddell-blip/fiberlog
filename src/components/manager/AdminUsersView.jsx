@@ -410,6 +410,10 @@ function tinyBtn(variant, disabled) {
 
 function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = [], onChangeEmail, onCancel, onSubmit }) {
   const isNew = mode === 'new'
+  // Needed for the self-demotion guard below — an owner editing their own row
+  // must not be able to drop their own owner access.
+  const { currentUser } = useApp()
+  const isSelf = !isNew && !!user?.id && user.id === currentUser?.id
 
   // For new users, "username" is the user-facing field. For existing users
   // we treat email as read-only and only edit metadata.
@@ -521,6 +525,18 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
     }
     if (!ACCESS_TYPES.find(a => a.id === accessType)) { setError('Pick an access type'); return }
     if (accessType === 'owner' && cannotPickOwner) { setError('Only owners can create other owners'); return }
+
+    // An owner can't strip their OWN owner access. This is a one-way door:
+    // cannotPickOwner is `!isOwner`, so the moment the save lands you'd be a
+    // manager who can no longer select the Owner type — and if you were the
+    // only owner, nobody else can restore it either. Recovery would mean
+    // editing the DB by hand. Mirrors the existing "can't deactivate
+    // yourself" rule. Changing your CREW TYPE is unaffected: that keeps
+    // access type Owner, so role never changes.
+    if (!isNew && isSelf && user?.role === 'owner' && accessFields.role !== 'owner') {
+      setError("You can't remove your own owner access — another owner has to do it.")
+      return
+    }
 
     // Role changes are a big deal — a manager silently demoted to crew
     // loses the manager portal on next load. The July 2026 audit caught
