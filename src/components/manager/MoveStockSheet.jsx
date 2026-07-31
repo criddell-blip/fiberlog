@@ -4,7 +4,7 @@ import ScanInput from '../shared/ScanInput'
 import Icon from '../shared/Icon'
 import { useBackClose } from '../../lib/backStack'
 import { scanFeedback, unlockAudio } from '../../lib/scanFeedback'
-import { getLocations, recordMovementsBatch, compareNamesNatural } from '../../lib/inventory'
+import { getLocations, recordMovementsBatch, compareNamesNatural, confirmNegativeStock } from '../../lib/inventory'
 import { getPartBySku, getBinById, isBinCode, parseBinCode } from '../../lib/cycleCount'
 
 // Scan-to-move — the RC Willey RF-gun "scan stuff to relocate it" flow.
@@ -81,18 +81,22 @@ export default function MoveStockSheet({ onClose, onDone }) {
 
   async function commit() {
     if (!source || !dest || lines.length === 0) return
+    const payload = lines.map(l => ({
+      movement_type: 'transfer',
+      part_id: l.part.id,
+      quantity: l.qty,
+      unit: l.part.unit || null,
+      from_location_id: source.id,
+      to_location_id: dest.id,
+      notes: 'Scan-to-move',
+      created_by: currentUser?.id,
+    }))
+    // Warn before moving more than the source holds — this is the flow that
+    // drove 92 warehouse rows negative during the first-time binning pass.
+    if (!(await confirmNegativeStock(payload))) return
     setSaving(true)
     try {
-      await recordMovementsBatch(lines.map(l => ({
-        movement_type: 'transfer',
-        part_id: l.part.id,
-        quantity: l.qty,
-        unit: l.part.unit || null,
-        from_location_id: source.id,
-        to_location_id: dest.id,
-        notes: 'Scan-to-move',
-        created_by: currentUser?.id,
-      })))
+      await recordMovementsBatch(payload)
       onDone?.(lines.length)
     } catch (e) {
       console.error('Move commit failed:', e)

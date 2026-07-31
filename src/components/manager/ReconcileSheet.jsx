@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { db } from '../../lib/supabase'
-import { recordMovementsBatch, fetchAllRows } from '../../lib/inventory'
+import { recordMovementsBatch, fetchAllRows, confirmNegativeStock } from '../../lib/inventory'
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
@@ -156,6 +156,8 @@ export default function ReconcileSheet({ onClose, onApplied }) {
         setError('Nothing to apply.')
         return
       }
+      // Reconcile writes one-sided negative adjusts — warn if one dips below zero.
+      if (!(await confirmNegativeStock(movements))) return
       await recordMovementsBatch(movements)
       showToast(`Applied ${movements.length} adjustments`)
       onApplied(movements.length)
