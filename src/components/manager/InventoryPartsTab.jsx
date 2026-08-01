@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../AppContext'
-import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, getPartLocations, SONAR_ROUTING_OPTIONS } from '../../lib/inventory'
+import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, getPartLocations, deleteDraftPart, SONAR_ROUTING_OPTIONS } from '../../lib/inventory'
 import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
 import SkuLabelSheet from './SkuLabelSheet'
 import BulkMoveSheet from './BulkMoveSheet'
@@ -261,6 +261,22 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
     }
   }
 
+  // Hard-delete a mistake draft. The DB blocks it (FK) once anything
+  // references the part — that error comes back as the friendly
+  // "has history, retire instead" message from deleteDraftPart.
+  async function handleDeleteDraft(part) {
+    if (!window.confirm(`Permanently delete draft "${part.name}" (${part.id})?\n\nOnly possible while nothing references it. This cannot be undone.`)) return
+    try {
+      await deleteDraftPart(part.id)
+      setSelectedIds(prev => { const n = new Set(prev); n.delete(part.id); return n })
+      await load()
+      onChanged?.()
+      showToast(`Deleted draft ${part.id}`)
+    } catch (e) {
+      showToast(e.message || 'Delete failed')
+    }
+  }
+
   async function handleQuickDeactivate(part) {
     if (!window.confirm(`Deactivate "${part.name}"?`)) return
     try {
@@ -461,7 +477,14 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
             const actionButtons = (
               <>
                 {!readOnly && (!p.is_active ? (
-                  <button onClick={() => handleQuickActivate(p)} style={quickBtnStyle('teal')}>Activate</button>
+                  <>
+                    <button onClick={() => handleQuickActivate(p)} style={quickBtnStyle('teal')}>Activate</button>
+                    <button
+                      onClick={() => handleDeleteDraft(p)}
+                      style={quickBtnStyle('red')}
+                      title="Permanently delete this draft (only possible while nothing references it)"
+                    >Delete</button>
+                  </>
                 ) : (
                   <button onClick={() => handleQuickDeactivate(p)} style={quickBtnStyle('amber')}>Retire</button>
                 ))}
@@ -816,6 +839,7 @@ function quickBtnStyle(variant) {
   }
   if (variant === 'teal')  return { ...base, color: 'var(--accent-dk)', borderColor: 'var(--accent)' }
   if (variant === 'amber') return { ...base, color: 'var(--amber)', borderColor: 'var(--amber)' }
+  if (variant === 'red')   return { ...base, color: 'var(--red)', borderColor: 'var(--red)' }
   return { ...base, color: 'var(--muted)' }
 }
 
