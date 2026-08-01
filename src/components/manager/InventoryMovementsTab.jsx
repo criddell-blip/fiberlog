@@ -78,13 +78,20 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
         // the row was inserted. Imports make them differ; exporting both
         // sidesteps the "which day was this really" argument.
         const eff = movementEffectiveDate(m)
+        // Adjusts carry their direction in which endpoint is set (to = up,
+        // from = down) — spell it out in Type, and sign the qty so a
+        // spreadsheet SUM over adjusts nets out correctly.
+        const isAdjust = m.movement_type === 'adjust'
+        const adjustDown = isAdjust && !m.to_location && !!m.from_location
+        const typeLabel = isAdjust ? (adjustDown ? 'adjust down' : 'adjust up') : m.movement_type
+        const qtySigned = adjustDown ? -Math.abs(Number(m.quantity)) : Number(m.quantity)
         lines.push([
           eff ? String(eff).slice(0, 10) : '',
           m.created_at ? String(m.created_at).slice(0, 10) : '',
-          m.movement_type,
+          typeLabel,
           m.part?.id || m.part_id || '',
           m.part?.name || '',
-          Number(m.quantity),
+          qtySigned,
           m.unit || m.part?.unit || 'ea',
           m.from_location?.name || (m.movement_type === 'receive' ? 'Vendor' : ''),
           m.to_location?.name || (m.movement_type === 'issue' || m.movement_type === 'scrap' ? 'Consumed' : ''),
