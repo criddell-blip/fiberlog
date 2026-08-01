@@ -1,8 +1,19 @@
 import { useState, useEffect } from 'react'
-import { getRecentMovements } from '../../lib/inventory'
+import { useApp } from '../../AppContext'
+import { getRecentMovements, getMovementsForActivityExport, movementEffectiveDate } from '../../lib/inventory'
+import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
 import { fmtWhen } from '../../lib/format'
 import { chipStyle, cardSurface, LoadingBlock, EmptyState } from './chrome'
 import Icon from '../shared/Icon'
+
+// Local calendar date as YYYY-MM-DD (toISOString would shift the day in
+// negative-offset timezones — same trap SageExportSheet documents).
+function isoLocalDate(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
 
 // Movement-type accents. Receive/issue are the in/out pair; the rest keep
 // distinct hues so the activity feed is scannable at a glance.
@@ -25,10 +36,75 @@ const TYPE_LABELS = {
 }
 
 export default function InventoryMovementsTab({ locations, refreshKey }) {
+  const { showToast } = useApp()
   const [movements, setMovements] = useState([])
   const [loading, setLoading] = useState(true)
   const [filterType, setFilterType] = useState('all')
   const [filterLocation, setFilterLocation] = useState('all')
+  // Export date range — applies ONLY to the CSV export; the live feed above
+  // stays "200 most recent" regardless. Defaults to the last 30 days.
+  const [exportFrom, setExportFrom] = useState(() =>
+    isoLocalDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)))
+  const [exportTo, setExportTo] = useState(() => isoLocalDate(new Date()))
+  const [exporting, setExporting] = useState(false)
+
+  // Full movement history as a file. Honors the tab's type + location filters
+  // plus the date range. Deliberately NOT the Sage exclusion rules — adjusts,
+  // truck→truck handoffs and warehouse↔bin shuffles are exactly the rows an
+  // investigation needs, and this is the only place they can leave the app.
+  async function handleExportCsv() {
+    if (!exportFrom || !exportTo) { showToast('Pick a from and to date'); return }
+    setExporting(true)
+    try {
+      const MAX = 20000
+      const rows = await getMovementsForActivityExport({
+        // Local calendar day → absolute instants (same conversion the Sage
+        // sheet uses, so the two exports agree about what "July 30" means).
+        since: new Date(`${exportFrom}T00:00:00`).toISOString(),
+        until: new Date(`${exportTo}T23:59:59.999`).toISOString(),
+        type: filterType === 'all' ? null : filterType,
+        locationId: filterLocation === 'all' ? null : filterLocation,
+        maxRows: MAX,
+      })
+      if (rows.length === 0) { showToast('No movements in that range'); return }
+      const headers = [
+        'Date', 'Recorded', 'Type', 'SKU', 'Part', 'Qty', 'Unit',
+        'From', 'To', 'By', 'Vendor/Invoice', 'Notes', 'Movement ID',
+      ]
+      const lines = [headers.map(escapeCsvField).join(',')]
+      for (const m of rows) {
+        // Two date columns on purpose: Date is the effective/work date
+        // (occurred_at ?? created_at — what reporting uses), Recorded is when
+        // the row was inserted. Imports make them differ; exporting both
+        // sidesteps the "which day was this really" argument.
+        const eff = movementEffectiveDate(m)
+        lines.push([
+          eff ? String(eff).slice(0, 10) : '',
+          m.created_at ? String(m.created_at).slice(0, 10) : '',
+          m.movement_type,
+          m.part?.id || m.part_id || '',
+          m.part?.name || '',
+          Number(m.quantity),
+          m.unit || m.part?.unit || 'ea',
+          m.from_location?.name || (m.movement_type === 'receive' ? 'Vendor' : ''),
+          m.to_location?.name || (m.movement_type === 'issue' || m.movement_type === 'scrap' ? 'Consumed' : ''),
+          m.created_by_user?.name || '',
+          m.vendor_invoice || '',
+          m.notes || '',
+          m.id,
+        ].map(escapeCsvField).join(','))
+      }
+      downloadTextAsFile(`fiberlog-activity-${exportFrom}_to_${exportTo}.csv`, lines.join('\n'))
+      showToast(rows.length === MAX
+        ? `Exported ${MAX.toLocaleString()} movements — RANGE CAPPED, narrow the dates for the rest`
+        : `Exported ${rows.length.toLocaleString()} movements`)
+    } catch (e) {
+      console.error('Activity export failed:', e)
+      showToast('Export failed: ' + e.message)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   async function load() {
     setLoading(true)
@@ -72,6 +148,26 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
           </option>
         ))}
       </select>
+
+      {/* Export bar. The feed above shows the 200 most recent; this is how the
+          FULL history leaves the app (the Sage export deliberately drops
+          adjusts / truck→truck / bin moves — this one keeps everything). */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+        padding: '8px 10px', marginBottom: 12,
+        background: 'var(--surface2)', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)',
+      }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)' }}>Export history</span>
+        <input type="date" value={exportFrom} onChange={e => setExportFrom(e.target.value)}
+          style={{ height: 30, padding: '0 8px', border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', fontSize: 12, background: 'var(--surface)' }} />
+        <span style={{ fontSize: 11, color: 'var(--hint)' }}>to</span>
+        <input type="date" value={exportTo} onChange={e => setExportTo(e.target.value)}
+          style={{ height: 30, padding: '0 8px', border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', fontSize: 12, background: 'var(--surface)' }} />
+        <button onClick={handleExportCsv} disabled={exporting}
+          style={{ ...chipStyle(false), marginLeft: 'auto', opacity: exporting ? 0.6 : 1 }}>
+          <Icon name="download" size={13} /> {exporting ? 'Exporting…' : 'Export CSV'}
+        </button>
+      </div>
 
       {loading ? (
         <LoadingBlock />

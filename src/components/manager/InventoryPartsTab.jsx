@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../AppContext'
 import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, getPartLocations, SONAR_ROUTING_OPTIONS } from '../../lib/inventory'
+import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
 import SkuLabelSheet from './SkuLabelSheet'
 import BulkMoveSheet from './BulkMoveSheet'
 import PurchaseRequestSheet from './PurchaseRequestSheet'
@@ -208,6 +209,33 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   }
   const allVisibleSelected = filtered.length > 0 && filtered.every(p => selectedIds.has(p.id))
 
+  // Plain parts-catalog export — what the current filter + search show, one
+  // row per part. On Hand comes from the stockTotals map the tab already
+  // loads, summed across every location (a parts list without on-hand is
+  // half useless on a warehouse floor).
+  function handleExportCsv() {
+    const headers = [
+      'SKU', 'Name', 'Nickname', 'Unit', 'Department', 'Item Type',
+      'Material Group', 'Category', 'Status', 'Barcode', 'BoxHero ID', 'On Hand',
+    ]
+    const lines = [headers.map(escapeCsvField).join(',')]
+    for (const p of filtered) {
+      lines.push([
+        p.id, p.name || '', p.nickname || '', p.unit || 'ea',
+        p.department || '', p.item_type || '', p.material_group || '',
+        p.category || '', p.is_active ? 'active' : 'draft',
+        p.barcode || '', p.boxhero_id || '',
+        Number(stockTotals.get(p.id) || 0),
+      ].map(escapeCsvField).join(','))
+    }
+    const stamp = new Date().toISOString().slice(0, 10)
+    // Filter in the filename: a "-draft-" file and an "-active-" file must
+    // never be mistaken for one another once they're both on a clipboard.
+    const scope = search.trim() ? `${filter}-search` : filter
+    downloadTextAsFile(`fiberlog-parts-${scope}-${stamp}.csv`, lines.join('\n'))
+    showToast(`Exported ${filtered.length} parts`)
+  }
+
   async function handleSave(updates) {
     try {
       await updatePart(editing.id, updates)
@@ -344,13 +372,27 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           )}
         </div>
         {filtered.length > 0 && (
-          <button
-            onClick={allVisibleSelected ? clearSelection : selectAllVisible}
-            title="Tip: shift-click a part to select a range"
-            style={chipStyle(false)}
-          >
-            {allVisibleSelected ? 'Deselect all' : `Select all ${filtered.length}`}
-          </button>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+            {/* Exports exactly what the current filter + search show, so the
+                file always matches the screen. The filter goes in the filename
+                — two printed lists with identical names but different truth is
+                how count sheets go wrong. */}
+            <button
+              onClick={handleExportCsv}
+              title="Download the parts shown below as a CSV"
+              style={chipStyle(false)}
+            >
+              <Icon name="download" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 5 }} />
+              Export CSV
+            </button>
+            <button
+              onClick={allVisibleSelected ? clearSelection : selectAllVisible}
+              title="Tip: shift-click a part to select a range"
+              style={chipStyle(false)}
+            >
+              {allVisibleSelected ? 'Deselect all' : `Select all ${filtered.length}`}
+            </button>
+          </div>
         )}
       </div>
 

@@ -131,7 +131,9 @@ export function buildUnmatchedCsv(unmatchedSkus) {
   return lines.join('\n')
 }
 
-function escapeCsvField(v) {
+// Exported so new exports can share ONE escaper — the repo already grew six
+// private copies of this function before it was exported; don't add a seventh.
+export function escapeCsvField(v) {
   const s = String(v == null ? '' : v)
   if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"'
   return s
