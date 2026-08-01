@@ -1539,6 +1539,44 @@ export async function createPart({ id, name, unit, department, material_group, b
   return Array.isArray(data) && data.length > 0 ? data[0] : null
 }
 
+// Hard-delete a DRAFT part created by mistake. Guards:
+//   - only drafts (is_active=false) — the .eq below makes the delete a no-op
+//     for active parts even if the UI check is bypassed;
+//   - any FK reference (movements, stock, log entries, assemblies, …) blocks
+//     the delete at the DB level (23503) — that's the "it has history, retire
+//     it instead" case, surfaced as a friendly error.
+export async function deleteDraftPart(partId) {
+  if (!partId) throw new Error('Part SKU is required')
+  // assembly_parts is the ONE referencing table with ON DELETE CASCADE —
+  // deleting the part would silently strip it out of assembly kits instead
+  // of blocking. Pre-check and refuse so no kit is quietly edited.
+  const { data: asmRows, error: asmErr } = await db
+    .from('assembly_parts')
+    .select('assembly_id')
+    .eq('part_id', partId)
+    .limit(1)
+  if (asmErr) throw asmErr
+  if (asmRows && asmRows.length > 0) {
+    throw new Error('This draft is used in an assembly kit — remove it from the assembly first, then delete.')
+  }
+  const { data, error } = await db
+    .from('parts_catalog')
+    .delete()
+    .eq('id', partId)
+    .eq('is_active', false)
+    .select('id')
+  if (error) {
+    if (error.code === '23503') {
+      throw new Error('This draft has history (movements, stock, or log entries reference it) — it can\'t be deleted. Leave it as a draft or activate and retire it.')
+    }
+    throw error
+  }
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error('Nothing deleted — the part is active (only drafts can be deleted) or already gone.')
+  }
+  return data[0]
+}
+
 // Stamp provenance onto an already-created part (e.g. the draft that
 // approve_intake_request materializes server-side — the RPC writes the new
 // part_id back onto the request, and the queue stamps it right after).
