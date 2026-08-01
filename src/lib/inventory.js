@@ -1392,15 +1392,18 @@ export async function getPartsCatalogIndex() {
   return { byId, byName, all: data || [] }
 }
 
-// Get all parts with full metadata. Filtering and search happen in the UI
-// since the dataset (~600 rows) is small enough to load once.
+// Get all parts with full metadata. Filtering and search happen in the UI.
+// Paged: the catalog (~890 rows incl. drafts, July 2026) is close to
+// PostgREST's 1000-row response cap, and an unpaged read would silently drop
+// the alphabetical tail — the Parts tab and the catalog export would both
+// ship incomplete without anything looking wrong. `(name, id)` order gives
+// fetchAllRows the unique tiebreaker its contract requires.
 export async function getAllParts() {
-  const { data, error } = await db
+  return fetchAllRows(() => db
     .from('parts_catalog')
     .select('*')
     .order('name', { ascending: true })
-  if (error) throw error
-  return data || []
+    .order('id', { ascending: true }))
 }
 
 // Build a category string in the same `Department / Material Group` pattern
@@ -1924,6 +1927,48 @@ export async function getMovementsForSageExport({ since, until, includeExported 
   const sinceT = since ? new Date(since).getTime() : null
   const untilT = until ? new Date(until).getTime() : null
   return (data || []).filter(m => {
+    const eff = movementEffectiveDate(m)
+    if (!eff) return false
+    const t = new Date(eff).getTime()
+    if (sinceT != null && t < sinceT) return false
+    if (untilT != null && t > untilT) return false
+    return true
+  })
+}
+
+// Movements for the Activity tab's CSV export. Modeled on the Sage fetch
+// above — same paging, same (created_at, id) exactness, same hybrid date
+// strategy (SQL lower bound on created_at, exact effective-date window in JS
+// so a late import isn't dropped) — but deliberately different in what it
+// keeps: NO isExportableMovement filter and no exported_at clause. This is
+// raw history; the adjusts, truck→truck handoffs and warehouse↔bin shuffles
+// that Sage drops are precisely the rows an investigation needs (the July
+// 2026 binning mess was invisible in every other export).
+//
+// maxRows caps a runaway range so a phone can't hang building a giant file —
+// same idiom as getStockForAudit. Callers detect the cap by length === maxRows.
+export async function getMovementsForActivityExport({ since, until, type = null, locationId = null, maxRows = 20000 } = {}) {
+  const makeQuery = () => {
+    let q = db.from('inventory_movements')
+      .select(`
+        id, movement_type, quantity, unit, unit_cost, notes, created_at, occurred_at,
+        submission_id, task_id, vendor_invoice,
+        part:parts_catalog(id, name, unit),
+        from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type),
+        to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type),
+        created_by_user:users!inventory_movements_created_by_fkey(id, name, initials)
+      `)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+    if (since) q = q.gte('created_at', since)
+    if (type) q = q.eq('movement_type', type)
+    if (locationId) q = q.or(`from_location_id.eq.${locationId},to_location_id.eq.${locationId}`)
+    return q
+  }
+  const data = await fetchAllRows(makeQuery, { maxRows })
+  const sinceT = since ? new Date(since).getTime() : null
+  const untilT = until ? new Date(until).getTime() : null
+  return data.filter(m => {
     const eff = movementEffectiveDate(m)
     if (!eff) return false
     const t = new Date(eff).getTime()
