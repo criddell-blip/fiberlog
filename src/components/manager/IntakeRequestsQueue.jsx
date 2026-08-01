@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getIntakeRequests, approveIntakeRequest, rejectIntakeRequest } from '../../lib/inventory'
+import { getIntakeRequests, approveIntakeRequest, rejectIntakeRequest, stampPartCreatedVia } from '../../lib/inventory'
+import { db } from '../../lib/supabase'
 import { useApp } from '../../AppContext'
 import useRealtimeQueue from '../../lib/useRealtimeQueue'
 import ReviewQueue, { ReviewActions, InitialsAvatar, StatusPill, fmtShortDateTime } from './ReviewQueue'
@@ -34,7 +35,7 @@ function unitOf(r) {
 }
 
 export default function IntakeRequestsQueue() {
-  const { showToast, reload } = useApp()
+  const { showToast, reload, currentUser } = useApp()
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
@@ -68,6 +69,28 @@ export default function IntakeRequestsQueue() {
     setActing(true)
     try {
       await approveIntakeRequest(r.id, note)
+      // Draft requests (no part_id yet) get their part materialized inside
+      // the RPC, which writes the new part_id back onto the request — stamp
+      // that draft's provenance so it doesn't sit in the Parts tab as a
+      // mystery. Best-effort: a stamp failure must not fail the approval.
+      if (!r.part_id) {
+        try {
+          const { data: fresh } = await db
+            .from('inventory_intake_requests')
+            .select('part_id')
+            .eq('id', r.id)
+            .maybeSingle()
+          if (fresh?.part_id) {
+            await stampPartCreatedVia(fresh.part_id, {
+              source: 'Found inventory',
+              detail: `reported by ${r.requested_by_user?.name || 'crew'}`,
+              by: currentUser?.name || null,
+            })
+          }
+        } catch (e) {
+          console.warn('Draft provenance stamp failed:', e)
+        }
+      }
       setSelected(null); setNote('')
       showToast(`Booked ${partLabel(r)} into ${r.target_location?.name || 'warehouse'}`)
       await loadRequests()

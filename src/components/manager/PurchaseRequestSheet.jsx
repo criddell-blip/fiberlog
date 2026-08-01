@@ -1086,7 +1086,10 @@ function ReceiveLineRow({ line, disabled, onReceived, onError }) {
     setCreating(true)
     onError?.(null)
     try {
-      const p = await createPart({ id: newSku.trim(), name: newName.trim(), unit: newUnit.trim() || 'ea', is_active: true })
+      const p = await createPart({
+        id: newSku.trim(), name: newName.trim(), unit: newUnit.trim() || 'ea', is_active: true,
+        created_via: { source: 'Purchase request', by: currentUser?.name || null },
+      })
       setResolvedPart({ id: p?.id || newSku.trim(), name: p?.name || newName.trim() })
     } catch (e) {
       onError?.(e.message || 'Could not create part')
