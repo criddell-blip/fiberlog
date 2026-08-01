@@ -49,10 +49,16 @@ export default function BulkMoveSheet({
 
   // Filter destination top-level options:
   //   - Hide vendors (you don't transfer TO a vendor)
-  //   - Hide the source itself (a bin source is additionally excluded from
-  //     its parent's bin sub-list via LocationWithBinPicker's excludeId)
+  //   - Hide the source itself — EXCEPT a warehouse source, which must stay
+  //     pickable so its bins are reachable (moving unbinned stock into a bin
+  //     is the main binning flow; with one active warehouse, dropping it left
+  //     no warehouse/bin destination at all). Same-warehouse-unbinned is
+  //     caught by the destEqualsSource validation instead.
   const destOptions = useMemo(
-    () => locations.filter(l => l.type !== 'vendor' && l.id !== sourceLocation?.id),
+    () => locations.filter(l =>
+      l.type !== 'vendor' &&
+      (l.id !== sourceLocation?.id || l.type === 'warehouse')
+    ),
     [locations, sourceLocation]
   )
 
@@ -182,7 +188,9 @@ export default function BulkMoveSheet({
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {/* Destination with bin sub-picker — shared two-step picker
               (excludeId keeps the source bin out of its own warehouse's
-              bin list; bins lazy-load via the effect above). */}
+              bin list; bins lazy-load via the effect above). A warehouse
+              source passes no excludeId — it must stay pickable so its
+              bins are reachable, and none of its bins are the source. */}
           <div className="field">
             <label>Destination</label>
             <LocationWithBinPicker
@@ -191,8 +199,13 @@ export default function BulkMoveSheet({
               options={destOptions}
               binsByWarehouse={binsByWarehouse}
               locations={locations}
-              excludeId={sourceLocation?.id}
+              excludeId={sourceLocation?.type === 'warehouse' ? null : sourceLocation?.id}
             />
+            {destEqualsSource && (
+              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--amber)', fontWeight: 700 }}>
+                That's where this stock already is — pick a bin below to bin it, or a different location.
+              </div>
+            )}
           </div>
 
           {/* Per-row qty editor */}
