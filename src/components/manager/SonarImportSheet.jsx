@@ -1237,6 +1237,7 @@ const tdStyle = (extra = {}) => ({
 // override SKU if there's a real internal SKU known, or just accept it
 // and clean up later in Parts admin (same workflow as BoxHero drafts).
 function CreatePartPanel({ sonarModel, onCancel, onCreated }) {
+  const { currentUser } = useApp()
   const [sku, setSku] = useState(sonarModel)
   const [name, setName] = useState(sonarModel)
   const [unit, setUnit] = useState('ea')
@@ -1258,6 +1259,11 @@ function CreatePartPanel({ sonarModel, onCancel, onCreated }) {
         unit: unit.trim() || 'ea',
         department: department.trim() || null,
         is_active: false,
+        created_via: {
+          source: 'Sonar import',
+          detail: `unmapped Sonar model "${sonarModel}"`,
+          by: currentUser?.name || null,
+        },
       })
       if (!newPart) {
         // Insert returned no data — shouldn't normally happen.

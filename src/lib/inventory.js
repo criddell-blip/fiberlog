@@ -1506,7 +1506,12 @@ export async function updatePartsBatch(ids, updates) {
 // since this is a real-world receive (the part exists, you're holding it).
 // `category` is recomputed from department + material_group so it stays
 // consistent with the rest of the catalog.
-export async function createPart({ id, name, unit, department, material_group, barcode, is_active = true }) {
+//
+// `created_via` is the provenance stamp: { source, detail?, by? } stored in
+// attributes.created_via so a draft sitting in the Parts tab months later
+// still says which flow minted it and who was driving. created_at (DB
+// default) covers the when.
+export async function createPart({ id, name, unit, department, material_group, barcode, is_active = true, created_via = null }) {
   if (!id || !String(id).trim()) throw new Error('Part SKU is required')
   if (!name || !String(name).trim()) throw new Error('Part name is required')
   const cleanId = String(id).trim()
@@ -1514,21 +1519,48 @@ export async function createPart({ id, name, unit, department, material_group, b
   const dept = department && String(department).trim() ? String(department).trim() : null
   const matGrp = material_group && String(material_group).trim() ? String(material_group).trim() : null
 
+  const payload = {
+    id: cleanId,
+    name: cleanName,
+    unit: unit && String(unit).trim() ? String(unit).trim() : 'ea',
+    department: dept,
+    material_group: matGrp,
+    category: buildCategory(dept, matGrp),
+    barcode: barcode && String(barcode).trim() ? String(barcode).trim() : null,
+    is_active,
+  }
+  if (created_via) payload.attributes = { created_via }
+
   const { data, error } = await db
     .from('parts_catalog')
-    .insert({
-      id: cleanId,
-      name: cleanName,
-      unit: unit && String(unit).trim() ? String(unit).trim() : 'ea',
-      department: dept,
-      material_group: matGrp,
-      category: buildCategory(dept, matGrp),
-      barcode: barcode && String(barcode).trim() ? String(barcode).trim() : null,
-      is_active,
-    })
+    .insert(payload)
     .select()
   if (error) throw error
   return Array.isArray(data) && data.length > 0 ? data[0] : null
+}
+
+// Stamp provenance onto an already-created part (e.g. the draft that
+// approve_intake_request materializes server-side — the RPC writes the new
+// part_id back onto the request, and the queue stamps it right after).
+// Read-merge-write is fine here: the part is seconds old and nothing else
+// writes attributes concurrently.
+export async function stampPartCreatedVia(partId, created_via) {
+  if (!partId || !created_via) return
+  const { data, error } = await db
+    .from('parts_catalog')
+    .select('attributes')
+    .eq('id', partId)
+    .maybeSingle()
+  if (error) throw error
+  if (!data) return
+  const attrs = { ...(data.attributes || {}) }
+  if (attrs.created_via) return  // never overwrite an existing stamp
+  attrs.created_via = created_via
+  const { error: upErr } = await db
+    .from('parts_catalog')
+    .update({ attributes: attrs })
+    .eq('id', partId)
+  if (upErr) throw upErr
 }
 
 // Bulk-create draft parts during a CSV import. Each draft gets is_active=false
@@ -1540,7 +1572,7 @@ export async function createPart({ id, name, unit, department, material_group, b
 //
 // Returns { created, errors } where errors is an array of { id, message }
 // per failed row.
-export async function createDraftParts(drafts) {
+export async function createDraftParts(drafts, { created_via = null } = {}) {
   console.log('[createDraftParts] called with', drafts.length, 'drafts')
 
   if (!Array.isArray(drafts) || drafts.length === 0) {
@@ -1562,6 +1594,7 @@ export async function createDraftParts(drafts) {
       material_group: d.material_group || null,
       category: buildCategory(d.department, d.material_group),
     }
+    if (created_via) row.attributes = { created_via }
     const { data, error } = await db
       .from('parts_catalog')
       .insert(row)

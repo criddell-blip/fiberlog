@@ -94,6 +94,11 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
             material_group: l.part.material_group,
             barcode: l.part.barcode,
             is_active: true,
+            created_via: {
+              source: 'Receive PO',
+              detail: vendorName.trim() ? `vendor ${vendorName.trim()}` : null,
+              by: currentUser?.name || null,
+            },
           })
         } catch (e) {
           throw new Error(`Couldn't create part "${l.part.id}": ${e.message || e}`)

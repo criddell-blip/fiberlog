@@ -1283,7 +1283,7 @@ function PartPickerSheet({ onPick, onClose }) {
 // the part is immediately usable (not a draft). On success, the new part
 // is added to the active session's count via onCreated → onPick.
 function CreatePartPanel({ initialQuery, onCreated, onCancel, onClose }) {
-  const { showToast } = useApp()
+  const { showToast, currentUser } = useApp()
   const [sku, setSku] = useState(initialQuery.trim())
   const [name, setName] = useState(initialQuery.trim())
   const [unit, setUnit] = useState('ea')
@@ -1303,6 +1303,11 @@ function CreatePartPanel({ initialQuery, onCreated, onCancel, onClose }) {
         unit: unit.trim() || 'ea',
         department: department.trim() || null,
         is_active: true,
+        created_via: {
+          source: 'Cycle count',
+          detail: 'created while counting a bin',
+          by: currentUser?.name || null,
+        },
       })
       if (!newPart) throw new Error('Create returned no row')
       onCreated(newPart)

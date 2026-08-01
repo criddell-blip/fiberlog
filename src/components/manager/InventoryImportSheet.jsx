@@ -270,7 +270,13 @@ export default function InventoryImportSheet({ locations, currentUser, onClose, 
         }
       })
       try {
-        const result = await createDraftParts(drafts)
+        const result = await createDraftParts(drafts, {
+          created_via: {
+            source: 'CSV import',
+            detail: 'auto-created for a SKU not in the catalog',
+            by: currentUser?.name || null,
+          },
+        })
         draftsCreated = result.created.length
         draftErrors = result.errors || []
         setProgress(p => ({

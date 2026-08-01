@@ -431,6 +431,15 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                 <div className="mono" style={{ fontSize: 12, color: 'var(--hint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {p.id} · {p.unit || 'ea'} · {p.category || 'Uncategorized'}
                 </div>
+                {/* Draft provenance: which flow minted this draft, who, when.
+                    attributes.created_via is stamped at every creation path
+                    (imports, Receive PO, found-inventory, cycle count);
+                    drafts that predate the stamp fall back to created_at. */}
+                {!p.is_active && (
+                  <div style={{ fontSize: 11, color: 'var(--amber)', ...(isWide ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } : {}) }}>
+                    {draftOriginLine(p)}
+                  </div>
+                )}
               </>
             )
             const stockBlock = (
@@ -783,6 +792,21 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
 }
 
 // Small per-row action button (outline chip).
+// One-line provenance for a draft row: source flow + detail + who + when.
+// Falls back to the DB created_at for drafts minted before stamping existed.
+function draftOriginLine(p) {
+  const cv = p.attributes?.created_via
+  const when = p.created_at
+    ? new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : null
+  if (!cv) return `Draft · origin unknown${when ? ` · created ${when}` : ''}`
+  const bits = [cv.source]
+  if (cv.detail) bits.push(cv.detail)
+  if (cv.by) bits.push(`by ${cv.by}`)
+  if (when) bits.push(when)
+  return `Draft · ${bits.join(' · ')}`
+}
+
 function quickBtnStyle(variant) {
   const base = {
     display: 'inline-flex', alignItems: 'center', gap: 5,
