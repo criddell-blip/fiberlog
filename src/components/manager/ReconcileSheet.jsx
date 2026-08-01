@@ -418,6 +418,7 @@ export default function ReconcileSheet({ onClose, onApplied }) {
                       booking={effectiveBookingFor(r)}
                       counterOptions={counterOptions}
                       counterLabelById={counterLabelById}
+                      stockByKey={locMeta?.stockByKey}
                       onBookingChange={v => setRowBooking(prev => ({ ...prev, [r.idx]: v }))}
                     />
                   ))}
@@ -457,7 +458,7 @@ export default function ReconcileSheet({ onClose, onApplied }) {
 
 // ─── Sub-components ─────────────────────────────────────────────────────
 
-function ReconcileRow({ row, excluded, onToggle, note, onNoteChange, booking, counterOptions, counterLabelById, onBookingChange }) {
+function ReconcileRow({ row, excluded, onToggle, note, onNoteChange, booking, counterOptions, counterLabelById, stockByKey, onBookingChange }) {
   // Kept local on purpose (#36.4): this maps reconcile ROW states, not
   // submission/intake statuses. Shape note for the queues' future shared
   // STATUS_COLORS (backlog #22): `status → { bg, fg }` keyed by status id —
@@ -524,11 +525,32 @@ function ReconcileRow({ row, excluded, onToggle, note, onNoteChange, booking, co
             style={{ width: '100%', maxWidth: 170, padding: '3px 6px', fontSize: 11, border: '1px solid var(--border2)', borderRadius: 4, background: 'var(--bg)' }}
           >
             <option value="adjust">Adjust</option>
-            <optgroup label={row.willAdjust > 0 ? 'Move from…' : 'Move to…'}>
-              {counterOptions
-                .filter(o => o.id !== row.locationId)
-                .map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-            </optgroup>
+            {/* Part-aware split: locations actually holding THIS part come
+                first (with on-hand qty) — for a counted-more row that's where
+                the extra plausibly came from; for counted-less, where the
+                missing stock most plausibly went back to. Everything else
+                stays reachable under "Other locations". */}
+            {(() => {
+              const candidates = counterOptions.filter(o => o.id !== row.locationId)
+              const qtyOf = o => Number(stockByKey?.get(`${row.partId}|${o.id}`) || 0)
+              const withStock = candidates.filter(o => qtyOf(o) > 0)
+              const others = candidates.filter(o => qtyOf(o) <= 0)
+              const dir = row.willAdjust > 0 ? 'Move from' : 'Move to'
+              return (
+                <>
+                  {withStock.length > 0 && (
+                    <optgroup label={`${dir} — has this part`}>
+                      {withStock
+                        .sort((a, b) => qtyOf(b) - qtyOf(a))
+                        .map(o => <option key={o.id} value={o.id}>{o.label} · {qtyOf(o).toLocaleString()} on hand</option>)}
+                    </optgroup>
+                  )}
+                  <optgroup label={withStock.length > 0 ? `${dir} — other locations` : `${dir}…`}>
+                    {others.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                  </optgroup>
+                </>
+              )
+            })()}
           </select>
         )}
       </td>
