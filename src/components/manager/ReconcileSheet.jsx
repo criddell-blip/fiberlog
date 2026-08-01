@@ -12,7 +12,22 @@ import Icon from '../shared/Icon'
 // walks the warehouse/truck with it, fills in the "Actual Qty" column,
 // uploads it back here. We compute the variance against CURRENT system
 // stock (not the CSV's Expected Qty, which may have drifted since export)
-// and propose one `adjust` movement per row where actual ≠ current.
+// and propose one movement per row where actual ≠ current.
+//
+// Each variance can be booked two ways (batch default + per-row override):
+//   - `adjust` (the original behavior) — conjure/remove stock one-sided.
+//   - `transfer` with a counter-location — the honest booking when you KNOW
+//     where the stock really came from / went (e.g. truck counted +48 that
+//     was grabbed off the warehouse shelf: transfer warehouse → truck zeroes
+//     the truck AND decrements the warehouse, instead of minting 48 from
+//     thin air while the warehouse quietly stays overstated).
+//
+// Sage note (deliberate): transfer-booked variances flow into the Sage
+// export exactly like the contemporaneous movement would have (a normal
+// warehouse→truck load exports in default mode) — that's the point of the
+// honest booking. Adjust-booked variances stay FiberLog-internal
+// (isExportableMovement drops all adjusts; Sage runs its own physical
+// reconciliation).
 //
 // Matching rules (mirror what the Audit export writes):
 //   - Part: lookup by SKU (case-insensitive) against parts_catalog
@@ -31,8 +46,15 @@ export default function ReconcileSheet({ onClose, onApplied }) {
   const [fileName, setFileName] = useState('')
   const [loading, setLoading] = useState(false)
   const [resolved, setResolved] = useState(null)   // null = no file yet, else array
+  const [locMeta, setLocMeta] = useState(null)     // { locations, stockByKey } from the resolver
   const [excluded, setExcluded] = useState(() => new Set())
   const [notes, setNotes] = useState({})           // idx → user-edited note
+  // Booking mode: batch default + per-row override.
+  //   batchMode 'adjust' | 'transfer'; batchCounterId = the shared counter-location.
+  //   rowBooking[idx] = 'adjust' | <locationId> — explicit pick; absent = follow batch.
+  const [batchMode, setBatchMode] = useState('adjust')
+  const [batchCounterId, setBatchCounterId] = useState('')
+  const [rowBooking, setRowBooking] = useState({})
   const [showNoChange, setShowNoChange] = useState(false)
   const [search, setSearch] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -65,10 +87,12 @@ export default function ReconcileSheet({ onClose, onApplied }) {
         setResolved([])
         return
       }
-      const enriched = await resolveAgainstLiveStock(rows)
+      const { rows: enriched, locations, stockByKey } = await resolveAgainstLiveStock(rows)
       setResolved(enriched)
+      setLocMeta({ locations, stockByKey })
       setExcluded(new Set())
       setNotes({})
+      setRowBooking({})
     } catch (e) {
       console.error('Reconcile parse failed:', e)
       setError(e.message || String(e))
@@ -78,11 +102,49 @@ export default function ReconcileSheet({ onClose, onApplied }) {
     }
   }
 
+  // Counter-location candidates for the transfer booking: warehouses, their
+  // bins (labeled "Warehouse / Bin"), groups, trucks. Job-site buckets are
+  // accumulate-only ledgers and vendor/scrap aren't reconcile counterparts.
+  const counterOptions = useMemo(() => {
+    if (!locMeta) return []
+    const byId = new Map(locMeta.locations.map(l => [l.id, l]))
+    const list = []
+    for (const l of locMeta.locations) {
+      if (l.type === 'warehouse')   list.push({ id: l.id, label: `${l.name} (unbinned)`,                                  sort: `0·${l.name}·0` })
+      else if (l.type === 'bin')    list.push({ id: l.id, label: `${byId.get(l.parent_location_id)?.name || '?'} / ${l.name}`, sort: `0·${byId.get(l.parent_location_id)?.name || '?'}·1·${l.name}` })
+      else if (l.type === 'group')  list.push({ id: l.id, label: l.name,                                                  sort: `1·${l.name}` })
+      else if (l.type === 'truck')  list.push({ id: l.id, label: l.assigned_user?.name || l.name,                         sort: `2·${l.assigned_user?.name || l.name}` })
+    }
+    return list.sort((a, b) => a.sort.localeCompare(b.sort, undefined, { numeric: true }))
+  }, [locMeta])
+  const counterLabelById = useMemo(
+    () => new Map(counterOptions.map(o => [o.id, o.label])),
+    [counterOptions]
+  )
+
+  // Resolve how a variance row will actually be booked. A transfer needs a
+  // counter-location different from the row's own location — otherwise the
+  // row silently falls back to adjust (e.g. batch counter = the warehouse
+  // while reconciling the warehouse itself).
+  function effectiveBookingFor(row) {
+    const ov = rowBooking[row.idx]
+    const counter = ov === 'adjust' ? null
+      : ov ? ov
+      : (batchMode === 'transfer' ? batchCounterId : null)
+    if (counter && counter !== row.locationId) return { kind: 'transfer', counterId: counter }
+    return { kind: 'adjust', counterId: null }
+  }
+
   // ── Summary stats over the resolved set ────────────────────────────────
   const stats = useMemo(() => {
     if (!resolved) return null
     let toAdd = 0, toRemove = 0, addCount = 0, removeCount = 0
     let noChange = 0, noActual = 0, noMatch = 0, badActual = 0
+    let adjustCount = 0, transferCount = 0
+    // Transfers PULL from their counter-location — tally the demand per
+    // (part, counter) so we can warn when it exceeds that location's logged
+    // stock (warn-but-allow, same posture as crew over-load).
+    const pullDemand = new Map()
     for (const r of resolved) {
       if (excluded.has(r.idx)) continue
       switch (r.status) {
@@ -94,14 +156,33 @@ export default function ReconcileSheet({ onClose, onApplied }) {
         case 'no-match-part':
         case 'no-match-location': noMatch++; break
       }
+      if (r.status === 'add' || r.status === 'remove') {
+        const b = effectiveBookingFor(r)
+        if (b.kind === 'transfer') {
+          transferCount++
+          if (r.willAdjust > 0) {
+            const k = `${r.partId}|${b.counterId}`
+            pullDemand.set(k, (pullDemand.get(k) || 0) + r.willAdjust)
+          }
+        } else {
+          adjustCount++
+        }
+      }
+    }
+    let overdrawnPulls = 0
+    if (locMeta) {
+      for (const [k, demand] of pullDemand) {
+        if (demand > (locMeta.stockByKey.get(k) || 0)) overdrawnPulls++
+      }
     }
     return {
       total: resolved.length,
       toAdd, toRemove, addCount, removeCount,
       noChange, noActual, badActual, noMatch,
       adjustments: addCount + removeCount,
+      adjustCount, transferCount, overdrawnPulls,
     }
-  }, [resolved, excluded])
+  }, [resolved, excluded, locMeta, rowBooking, batchMode, batchCounterId])
 
   const filteredRows = useMemo(() => {
     if (!resolved) return []
@@ -139,25 +220,47 @@ export default function ReconcileSheet({ onClose, onApplied }) {
         if (excluded.has(r.idx)) continue
         if (r.status !== 'add' && r.status !== 'remove') continue
         const userNote = notes[r.idx] ?? r.csvNote
-        const noteText = `Reconcile ${stamp}${userNote ? ` — ${userNote}` : ''}`
+        // Self-documenting note: "counted N, system had M" turns a bare
+        // "+48" true-up into something readable in the Activity list.
+        const counted = `counted ${r.actualRaw}, system had ${r.currentSystem}`
+        const noteText = `Reconcile ${stamp} — ${counted}${userNote ? ` — ${userNote}` : ''}`
         const qty = Math.abs(r.willAdjust)
-        movements.push({
-          movement_type: 'adjust',
-          part_id: r.partId,
-          quantity: qty,
-          unit: r.unit || null,
-          from_location_id: r.willAdjust < 0 ? r.locationId : null,
-          to_location_id:   r.willAdjust > 0 ? r.locationId : null,
-          notes: noteText,
-          created_by: currentUser?.id,
-        })
+        const booking = effectiveBookingFor(r)
+        if (booking.kind === 'transfer') {
+          movements.push({
+            movement_type: 'transfer',
+            part_id: r.partId,
+            quantity: qty,
+            unit: r.unit || null,
+            // Counted MORE than system → the extra came FROM the counter.
+            // Counted LESS → the missing stock went TO the counter.
+            from_location_id: r.willAdjust > 0 ? booking.counterId : r.locationId,
+            to_location_id:   r.willAdjust > 0 ? r.locationId : booking.counterId,
+            notes: noteText,
+            created_by: currentUser?.id,
+          })
+        } else {
+          movements.push({
+            movement_type: 'adjust',
+            part_id: r.partId,
+            quantity: qty,
+            unit: r.unit || null,
+            from_location_id: r.willAdjust < 0 ? r.locationId : null,
+            to_location_id:   r.willAdjust > 0 ? r.locationId : null,
+            notes: noteText,
+            created_by: currentUser?.id,
+          })
+        }
       }
       if (movements.length === 0) {
         setError('Nothing to apply.')
         return
       }
       await recordMovementsBatch(movements)
-      showToast(`Applied ${movements.length} adjustments`)
+      const nXfer = movements.filter(m => m.movement_type === 'transfer').length
+      showToast(nXfer > 0
+        ? `Applied ${movements.length} movements (${nXfer} transfer${nXfer === 1 ? '' : 's'}, ${movements.length - nXfer} adjustment${movements.length - nXfer === 1 ? '' : 's'})`
+        : `Applied ${movements.length} adjustments`)
       onApplied(movements.length)
     } catch (e) {
       console.error('Apply reconcile failed:', e)
@@ -176,7 +279,7 @@ export default function ReconcileSheet({ onClose, onApplied }) {
           <span style={{ fontWeight: 800, fontSize: 17 }}>Reconcile inventory</span>
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
-          Upload your filled-in Audit CSV. Each row with an Actual Qty becomes one <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>adjust</code> movement to bring the system in line with what you counted.
+          Upload your filled-in Audit CSV. Each row with an Actual Qty becomes one movement to bring the system in line with what you counted — an <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>adjust</code>, or a <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>transfer</code> when you know where the stock really came from or went.
         </div>
 
         {/* File picker */}
@@ -227,6 +330,49 @@ export default function ReconcileSheet({ onClose, onApplied }) {
           </div>
         )}
 
+        {/* Batch booking control: how variances get booked by default.
+            Individual rows can override in the "Book as" column. */}
+        {resolved && resolved.length > 0 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+            marginBottom: 8, padding: '8px 10px',
+            background: 'var(--surface2)', borderRadius: 'var(--r-sm)', fontSize: 12,
+          }}>
+            <span style={{ fontWeight: 700, color: 'var(--muted)' }}>Book variances as:</span>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+              <input type="radio" name="reconcile-batch-mode" checked={batchMode === 'adjust'} onChange={() => setBatchMode('adjust')} />
+              Adjust
+            </label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+              <input type="radio" name="reconcile-batch-mode" checked={batchMode === 'transfer'} onChange={() => setBatchMode('transfer')} />
+              Transfer with counter-location
+            </label>
+            {batchMode === 'transfer' && (
+              <select
+                value={batchCounterId}
+                onChange={e => setBatchCounterId(e.target.value)}
+                style={{ padding: '4px 8px', fontSize: 12, border: `1px solid ${batchCounterId ? 'var(--border2)' : 'var(--amber)'}`, borderRadius: 6, background: 'var(--bg)', maxWidth: 260 }}
+              >
+                <option value="">— Pick counter-location —</option>
+                {counterOptions.map(o => (
+                  <option key={o.id} value={o.id}>{o.label}</option>
+                ))}
+              </select>
+            )}
+            <span style={{ color: 'var(--hint)', fontSize: 11 }}>(rows can override below · transfers reach the Sage export like normal moves; adjusts stay internal)</span>
+            {batchMode === 'transfer' && !batchCounterId && (
+              <span style={{ color: 'var(--amber)', fontWeight: 700, fontSize: 11 }}>
+                No counter-location picked — rows book as Adjust until you pick one
+              </span>
+            )}
+            {stats?.overdrawnPulls > 0 && (
+              <span style={{ color: 'var(--amber)', fontWeight: 700, fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <Icon name="alert" size={13} /> {stats.overdrawnPulls} part/location pull{stats.overdrawnPulls === 1 ? '' : 's'} will overdraw the counter-location (it'll go negative)
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Filters + table */}
         {resolved && resolved.length > 0 && (
           <>
@@ -244,7 +390,7 @@ export default function ReconcileSheet({ onClose, onApplied }) {
               </label>
             </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', background: 'var(--surface)' }}>
+            <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', minHeight: 0, border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', background: 'var(--surface)' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead style={{ background: 'var(--surface2)', position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr>
@@ -256,6 +402,7 @@ export default function ReconcileSheet({ onClose, onApplied }) {
                     <th style={thStyle({ textAlign: 'right' })}>Counted</th>
                     <th style={thStyle({ textAlign: 'right' })}>System now</th>
                     <th style={thStyle({ textAlign: 'right' })}>Δ to apply</th>
+                    <th style={thStyle({ textAlign: 'left' })}>Book as</th>
                     <th style={thStyle({ textAlign: 'left' })}>Note</th>
                   </tr>
                 </thead>
@@ -268,10 +415,14 @@ export default function ReconcileSheet({ onClose, onApplied }) {
                       onToggle={() => toggleExclude(r.idx)}
                       note={notes[r.idx] ?? r.csvNote}
                       onNoteChange={v => setNotes(prev => ({ ...prev, [r.idx]: v }))}
+                      booking={effectiveBookingFor(r)}
+                      counterOptions={counterOptions}
+                      counterLabelById={counterLabelById}
+                      onBookingChange={v => setRowBooking(prev => ({ ...prev, [r.idx]: v }))}
                     />
                   ))}
                   {filteredRows.length === 0 && (
-                    <tr><td colSpan={7} style={{ padding: 20, color: 'var(--hint)', textAlign: 'center' }}>No matching rows.</td></tr>
+                    <tr><td colSpan={8} style={{ padding: 20, color: 'var(--hint)', textAlign: 'center' }}>No matching rows.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -293,7 +444,9 @@ export default function ReconcileSheet({ onClose, onApplied }) {
             {submitting
               ? 'Applying…'
               : stats && stats.adjustments > 0
-                ? `Apply ${stats.adjustments} adjustment${stats.adjustments === 1 ? '' : 's'}`
+                ? (stats.transferCount > 0
+                    ? `Apply ${stats.adjustments} (${stats.transferCount} transfer${stats.transferCount === 1 ? '' : 's'} · ${stats.adjustCount} adjustment${stats.adjustCount === 1 ? '' : 's'})`
+                    : `Apply ${stats.adjustments} adjustment${stats.adjustments === 1 ? '' : 's'}`)
                 : 'No adjustments to apply'}
           </button>
         </div>
@@ -304,7 +457,7 @@ export default function ReconcileSheet({ onClose, onApplied }) {
 
 // ─── Sub-components ─────────────────────────────────────────────────────
 
-function ReconcileRow({ row, excluded, onToggle, note, onNoteChange }) {
+function ReconcileRow({ row, excluded, onToggle, note, onNoteChange, booking, counterOptions, counterLabelById, onBookingChange }) {
   // Kept local on purpose (#36.4): this maps reconcile ROW states, not
   // submission/intake statuses. Shape note for the queues' future shared
   // STATUS_COLORS (backlog #22): `status → { bg, fg }` keyed by status id —
@@ -357,6 +510,27 @@ function ReconcileRow({ row, excluded, onToggle, note, onNoteChange }) {
         {actionable
           ? (row.willAdjust > 0 ? `+${row.willAdjust}` : `${row.willAdjust}`)
           : <span style={{ fontWeight: 400, fontSize: 11 }}>{STATUS_LABELS[row.status] || ''}</span>}
+      </td>
+      <td style={tdStyle()}>
+        {actionable && (
+          <select
+            value={booking.kind === 'transfer' ? booking.counterId : 'adjust'}
+            onChange={e => onBookingChange(e.target.value)}
+            title={booking.kind === 'transfer'
+              ? (row.willAdjust > 0
+                  ? `Transfer FROM ${counterLabelById.get(booking.counterId) || '?'} to here`
+                  : `Transfer from here TO ${counterLabelById.get(booking.counterId) || '?'}`)
+              : 'One-sided adjust movement'}
+            style={{ width: '100%', maxWidth: 170, padding: '3px 6px', fontSize: 11, border: '1px solid var(--border2)', borderRadius: 4, background: 'var(--bg)' }}
+          >
+            <option value="adjust">Adjust</option>
+            <optgroup label={row.willAdjust > 0 ? 'Move from…' : 'Move to…'}>
+              {counterOptions
+                .filter(o => o.id !== row.locationId)
+                .map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </optgroup>
+          </select>
+        )}
       </td>
       <td style={tdStyle()}>
         <input
@@ -454,7 +628,7 @@ async function resolveAgainstLiveStock(csvRows) {
     }
   }
 
-  return csvRows.map((row, idx) => {
+  const mapped = csvRows.map((row, idx) => {
     const sku     = (row['SKU'] || '').trim()
     const locName = (row['Location'] || '').trim()
     const binName = (row['Bin'] || '').trim()
@@ -510,4 +684,9 @@ async function resolveAgainstLiveStock(csvRows) {
       csvNote,
     }
   })
+
+  // Rows + the lookup data the sheet needs for transfer bookings: the
+  // active-location list feeds the counter-location pickers, and the stock
+  // map powers the "this will overdraw the counter-location" warning.
+  return { rows: mapped, locations: locsRes.data || [], stockByKey: stockMap }
 }
