@@ -20,6 +20,7 @@ import { chipStyle, CARD_SHADOW, EmptyState } from './chrome'
 const TYPE_ICONS = {
   warehouse: '🏭',
   truck:     '🚚',
+  group:     '👥',
   job_site:  '📍',
   vendor:    '🏢',
   scrap:     '🗑️',
@@ -261,7 +262,7 @@ export default function InventoryAuditTab({ locations, refreshKey }) {
           })}
 
           {/* Specific top-level locations grouped by type */}
-          {['truck', 'job_site', 'vendor', 'scrap'].map(t => {
+          {['truck', 'group', 'job_site', 'vendor', 'scrap'].map(t => {
             const list = locations.filter(l => l.type === t)
             if (list.length === 0) return null
             return (
