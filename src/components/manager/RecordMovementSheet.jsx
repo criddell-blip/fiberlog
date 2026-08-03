@@ -5,6 +5,7 @@ import {
   getBinsForWarehouse,
   getPartLocations,
   compareNamesNatural,
+  buildLocationQtyMaps,
 } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
@@ -232,6 +233,15 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
         labelById.set(loc.locationId, loc)
       }
     }
+    // Summed on-hand across all picked parts per location — the qty answers
+    // "how much of this order's stuff is here"; the N/M badge carries coverage.
+    const qtySum = new Map()
+    for (const line of lines) {
+      const pl = partLocationsByPart[line.part_id]
+      for (const loc of pl?.locations || []) {
+        qtySum.set(loc.locationId, (qtySum.get(loc.locationId) || 0) + (Number(loc.qty) || 0))
+      }
+    }
     const opts = []
     for (const [locId, count] of counter.entries()) {
       const locInfo = labelById.get(locId)
@@ -244,10 +254,29 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
         displayLabel: locInfo?.displayLabel || locInfo?.name || locId,
         type: locInfo?.type || 'unknown',
         partsHere: count,
+        qty: qtySum.get(locId) || 0,
       })
     }
-    return opts.sort((a, b) => b.partsHere - a.partsHere || compareNamesNatural(a.displayLabel, b.displayLabel))
+    return opts.sort((a, b) => b.partsHere - a.partsHere || b.qty - a.qty || compareNamesNatural(a.displayLabel, b.displayLabel))
   }, [lines, partLocationsByPart, locations, currentUser?.role])
+
+  // Combined qty-by-location maps for the two-step pickers (To + show-all
+  // From) — same data as smartFromOptions but in the { byId, byTop } shape
+  // LocationWithBinPicker's part-aware mode consumes. Summed across parts.
+  const combinedStock = useMemo(() => {
+    const entries = []
+    for (const line of lines) {
+      const pl = partLocationsByPart[line.part_id]
+      for (const loc of pl?.locations || []) {
+        entries.push({ locationId: loc.locationId, parentLocationId: loc.parentLocationId, qty: loc.qty })
+      }
+    }
+    return buildLocationQtyMaps(entries)
+  }, [lines, partLocationsByPart])
+  // "any of" — byTop is a union across lines; a location holding 1 of 5
+  // picked parts still lands in the group (the SmartFromPicker's N/M badge
+  // carries per-location coverage, the optgroup can't).
+  const stockGroupLabel = lines.length > 1 ? 'Has any of these parts' : 'Has this part'
 
   const useSmartFromPicker = showFrom && !showAllFromLocations && lines.length > 0
 
@@ -597,6 +626,8 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                 options={allFromOptions}
                 binsByWarehouse={binsByWarehouse}
                 locations={locations}
+                stock={lines.length > 0 ? combinedStock : undefined}
+                stockGroupLabel={stockGroupLabel}
               />
             )}
           </div>
@@ -612,6 +643,8 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
               options={toOptions}
               binsByWarehouse={binsByWarehouse}
               locations={locations}
+              stock={lines.length > 0 ? combinedStock : undefined}
+              stockGroupLabel={stockGroupLabel}
             />
           </div>
         )}
@@ -713,6 +746,11 @@ function SmartFromPicker({ options, totalLines, value, onChange }) {
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               }}>
                 {opt.displayLabel}
+                {opt.qty > 0 && (
+                  <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--muted)', marginLeft: 6 }}>
+                    · {opt.qty.toLocaleString()} on hand
+                  </span>
+                )}
               </div>
               <div style={{ fontSize: 10, color: 'var(--hint)', textTransform: 'uppercase' }}>
                 {opt.type}

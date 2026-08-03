@@ -766,6 +766,28 @@ export async function getStockRowsForParts(partIds) {
   return out
 }
 
+// Fold per-location stock entries into the two maps the part-aware pickers
+// need. `byId` is exact-location on-hand (bins and top-levels each under
+// their own id). `byTop` rolls bins up into their parent warehouse so a
+// warehouse surfaces in the "has this part" group even when only one of its
+// bins holds stock — the rollup can't come from binsByWarehouse because bins
+// lazy-load only after the warehouse is selected. Entries for the same
+// location sum (multi-part callers pass one entry per part per location).
+// qty ≤ 0 is dropped: getStockRowsForParts returns non-zero rows that can be
+// NEGATIVE, and a negative-stock truck must not land in "has this part".
+export function buildLocationQtyMaps(entries) {
+  const byId = new Map()
+  const byTop = new Map()
+  for (const e of entries || []) {
+    const qty = Number(e.qty) || 0
+    if (qty <= 0) continue
+    byId.set(e.locationId, (byId.get(e.locationId) || 0) + qty)
+    const topId = e.parentLocationId || e.locationId
+    byTop.set(topId, (byTop.get(topId) || 0) + qty)
+  }
+  return { byId, byTop }
+}
+
 // ─── MOVEMENTS ───────────────────────────────────────────────────────────────
 
 // Movement-type rules. Mirrors the DB's movement_endpoints_valid CHECK

@@ -7,9 +7,19 @@
 //
 // Callers own the topLevelId/binId state and should reset binId whenever
 // topLevelId changes (a stale bin from another warehouse must not survive).
+//
+// Optional part-awareness: pass `stock` ({ byId, byTop } from
+// buildLocationQtyMaps) and the top-level list splits into a "Has this part"
+// group (qty desc, "· N on hand") over "Other locations" — the manager sees
+// where the part plausibly is/goes instead of hunting a flat list. byTop is
+// the bin→warehouse rollup so a warehouse whose stock all sits in bins still
+// surfaces before its bins have lazy-loaded; byId keeps warehouse-own
+// ("unbinned") stock separate for the bin sub-select's annotations. Absent
+// `stock` → renders exactly as before (location-only callers unaffected).
 export default function LocationWithBinPicker({
   topLevelId, setTopLevelId, binId, setBinId,
   options, binsByWarehouse, locations, excludeId,
+  stock, stockGroupLabel,
 }) {
   const selectedTop = locations.find(l => l.id === topLevelId)
   const isWarehouse = selectedTop?.type === 'warehouse'
@@ -19,6 +29,18 @@ export default function LocationWithBinPicker({
   const bins = (isWarehouse ? (binsByWarehouse[topLevelId] || []) : [])
     .filter(b => b.id !== excludeId)
 
+  const topQty = id => Number(stock?.byTop?.get(id) || 0)
+  const exactQty = id => Number(stock?.byId?.get(id) || 0)
+  const hasStock = stock ? topOptions.filter(l => topQty(l.id) > 0) : []
+  const others = stock ? topOptions.filter(l => topQty(l.id) <= 0) : topOptions
+  const optionText = loc => `${loc.assigned_user?.name || loc.name} (${loc.type})`
+
+  // Stocked bins first (qty desc); unstocked keep their existing name order.
+  const sortedBins = stock
+    ? [...bins].sort((a, b) => exactQty(b.id) - exactQty(a.id))
+    : bins
+  const unbinnedQty = exactQty(topLevelId)
+
   return (
     <div>
       <select
@@ -27,11 +49,28 @@ export default function LocationWithBinPicker({
         style={{ width: '100%', padding: '10px 12px', borderRadius: 'var(--r-sm)', border: '1.5px solid var(--border2)', fontSize: 14, background: 'var(--bg)' }}
       >
         <option value="">— Pick a location —</option>
-        {topOptions.map(loc => (
-          <option key={loc.id} value={loc.id}>
-            {loc.assigned_user?.name || loc.name} ({loc.type})
-          </option>
-        ))}
+        {hasStock.length > 0 ? (
+          <>
+            <optgroup label={stockGroupLabel || 'Has this part'}>
+              {[...hasStock].sort((a, b) => topQty(b.id) - topQty(a.id)).map(loc => (
+                <option key={loc.id} value={loc.id}>
+                  {optionText(loc)} · {topQty(loc.id).toLocaleString()} on hand
+                </option>
+              ))}
+            </optgroup>
+            {others.length > 0 && (
+              <optgroup label="Other locations">
+                {others.map(loc => (
+                  <option key={loc.id} value={loc.id}>{optionText(loc)}</option>
+                ))}
+              </optgroup>
+            )}
+          </>
+        ) : (
+          others.map(loc => (
+            <option key={loc.id} value={loc.id}>{optionText(loc)}</option>
+          ))
+        )}
       </select>
 
       {isWarehouse && bins.length > 0 && (
@@ -42,9 +81,13 @@ export default function LocationWithBinPicker({
             onChange={e => setBinId(e.target.value)}
             style={{ flex: 1, padding: '7px 10px', borderRadius: 'var(--r-sm)', border: '1.5px solid var(--border2)', fontSize: 13, background: 'var(--bg)' }}
           >
-            <option value="">(unbinned — warehouse level)</option>
-            {bins.map(b => (
-              <option key={b.id} value={b.id}>📥 {b.name}</option>
+            <option value="">
+              (unbinned — warehouse level){unbinnedQty > 0 ? ` · ${unbinnedQty.toLocaleString()} on hand` : ''}
+            </option>
+            {sortedBins.map(b => (
+              <option key={b.id} value={b.id}>
+                📥 {b.name}{exactQty(b.id) > 0 ? ` · ${exactQty(b.id).toLocaleString()} on hand` : ''}
+              </option>
             ))}
           </select>
         </div>
