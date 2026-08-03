@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { approveSubmission, saveSubmissionParts, setTaskClosed, db } from '../../lib/supabase'
 import { useApp } from '../../AppContext'
 import useRealtimeQueue from '../../lib/useRealtimeQueue'
@@ -163,8 +163,20 @@ export default function SubmissionsQueue() {
     }
   }
 
+  // Monotonic ticket for loadPartsForSubmission — only the latest call may
+  // write state (see the guard comment inside).
+  const partsLoadSeqRef = useRef(0)
+
   async function loadPartsForSubmission(sub) {
+    // Stale-response guard: this loader FEEDS A DB WRITE (edit-then-approve
+    // seeds editParts from selectedParts). Without it, opening A on a slow
+    // connection then quickly opening B lets A's parts resolve last and land
+    // under B's detail — and a save would write A's materials onto B.
+    // Bump BEFORE the session_id early-out so even a no-session selection
+    // invalidates a prior in-flight load.
+    const seq = ++partsLoadSeqRef.current
     if (!sub.session_id) return
+    const fresh = () => partsLoadSeqRef.current === seq
     setPartsLoading(true)
     setSelectedParts([])
     setSelTaskClosed(null)
@@ -175,7 +187,7 @@ export default function SubmissionsQueue() {
       const taskId = sub.work_sessions?.task_id
       if (taskId) {
         db.from('tasks').select('is_closed').eq('id', taskId).single()
-          .then(({ data }) => setSelTaskClosed(!!data?.is_closed))
+          .then(({ data }) => { if (fresh()) setSelTaskClosed(!!data?.is_closed) })
           .catch(() => {})
       }
       const { data: entries } = await db
@@ -190,10 +202,12 @@ export default function SubmissionsQueue() {
         ? linked
         : (entries || []).filter(e =>
             !e.submission_id && (taskId ? (!e.task_id || e.task_id === taskId) : true))
+      if (!fresh()) return
       if (!filteredEntries || filteredEntries.length === 0) { setSelectedParts([]); setPartsLoading(false); return }
       const entryIds = filteredEntries.map(e => e.id)
       const { data: parts } = await db
         .from('entry_parts').select('quantity, part_id, parts_catalog ( id, name, unit )').in('entry_id', entryIds)
+      if (!fresh()) return
       const totals = {}
       ;(parts || []).forEach(p => {
         const id = p.parts_catalog?.id || p.part_id || 'unknown'
@@ -203,7 +217,7 @@ export default function SubmissionsQueue() {
       })
       setSelectedParts(Object.values(totals).filter(p => p.qty > 0))
     } catch(e) { console.warn('Parts load failed:', e) }
-    finally { setPartsLoading(false) }
+    finally { if (fresh()) setPartsLoading(false) }
   }
 
   async function handleApprove(sub) {
@@ -426,7 +440,9 @@ export default function SubmissionsQueue() {
               const task = sub.work_sessions?.tasks
               const { locationName } = submissionLocation(sub)
               return (
-                <div key={sub.id} onClick={() => { setSelected(sub); loadPartsForSubmission(sub) }}
+                // setNote(''): a note typed for one submission must not become
+                // another's approval note / flag_reason (matches IntakeRequestsQueue).
+                <div key={sub.id} onClick={() => { setSelected(sub); setNote(''); loadPartsForSubmission(sub) }}
                   style={{
                     background: 'var(--surface)',
                     borderLeft: `4px solid ${colors.text}`,

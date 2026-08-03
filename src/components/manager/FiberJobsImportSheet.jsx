@@ -78,11 +78,16 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     requiredCols: REQUIRED_COLS,
     missingColsMessage: missing => `CSV missing required columns: ${missing.join(', ')}`,
     // Successful load resets the per-import picks (persisted maps survive).
+    // rowSource and rowExtraMaterials are keyed by ROW INDEX — left uncleared,
+    // a pick made for delivery A's row 5 silently re-attaches to whatever job
+    // sits at index 5 of delivery B (phantom materials / wrong source).
     onLoaded: () => {
       setCrewMap({})
       setPendingProjectMap({})
       setExcluded(new Set())
       setRowMaterialOverride({})
+      setRowSource({})
+      setRowExtraMaterials({})
     },
   })
   const { fileName, csvHeaders, csvRows, error, setError, parsing, handleFile } = csv

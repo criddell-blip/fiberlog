@@ -291,6 +291,16 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
 
   const useSmartFromPicker = showFrom && !showAllFromLocations && lines.length > 0
 
+  // Drop a smart-mode From whose location no longer holds any picked part
+  // (lines removed/replaced since the tap). The picker renders selection
+  // only for options in the current list, so a stale id is INVISIBLE — it
+  // would pass validation and submit against a location picked for a part
+  // that's no longer in the batch.
+  useEffect(() => {
+    if (!useSmartFromPicker || !fromLocationId) return
+    if (!smartFromOptions.some(o => o.id === fromLocationId)) setFromLocationId('')
+  }, [useSmartFromPicker, fromLocationId, smartFromOptions])
+
   // Effective from-location id depending on which picker is showing.
   const effectiveFromId = useSmartFromPicker
     ? fromLocationId
