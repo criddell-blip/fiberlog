@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { recordMovementsBatch, getBinsForWarehouse } from '../../lib/inventory'
+import { recordMovementsBatch, getBinsForWarehouse, getStockRowsForParts, buildLocationQtyMaps } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
 import LocationWithBinPicker from './LocationWithBinPicker'
 import Icon from '../shared/Icon'
@@ -27,6 +27,20 @@ export default function BulkMoveSheet({
   const [submitting, setSubmitting] = useState(false)
   const [progress, setProgress] = useState(null)   // { done, total } while a chunked insert runs
   const [error, setError] = useState(null)
+  // Where the selected parts currently reside — feeds the destination
+  // picker's "has this part" grouping. Progressive enhancement: the picker
+  // renders immediately and annotates when this lands; a fetch failure
+  // silently degrades to the plain flat picker.
+  const [destStock, setDestStock] = useState(null)
+  useEffect(() => {
+    getStockRowsForParts(selectedRows.map(r => r.part_id))
+      .then(rows => setDestStock(buildLocationQtyMaps(rows.map(r => ({
+        locationId: r.location_id,
+        parentLocationId: r.location?.parent_location_id || null,
+        qty: r.quantity,
+      })))))
+      .catch(e => console.warn('Dest stock annotate failed:', e))
+  }, [])  // selectedRows is fixed for the sheet's lifetime
 
   // Back closes the sheet (mounted only when open). Confirm if a note was typed
   // (qty/row edits can be re-selected; the free-text note is the losable bit).
@@ -200,6 +214,8 @@ export default function BulkMoveSheet({
               binsByWarehouse={binsByWarehouse}
               locations={locations}
               excludeId={sourceLocation?.type === 'warehouse' ? null : sourceLocation?.id}
+              stock={destStock || undefined}
+              stockGroupLabel={selectedRows.length > 1 ? 'Has any of these parts' : 'Has this part'}
             />
             {destEqualsSource && (
               <div style={{ marginTop: 6, fontSize: 12, color: 'var(--amber)', fontWeight: 700 }}>

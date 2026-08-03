@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import ScanInput from '../shared/ScanInput'
 import Icon from '../shared/Icon'
 import { useBackClose } from '../../lib/backStack'
 import { scanFeedback, unlockAudio } from '../../lib/scanFeedback'
-import { getLocations, recordMovementsBatch, compareNamesNatural } from '../../lib/inventory'
+import { getLocations, recordMovementsBatch, compareNamesNatural, getStockRowsForParts, buildLocationQtyMaps } from '../../lib/inventory'
 import { getPartBySku, getBinById, isBinCode, parseBinCode } from '../../lib/cycleCount'
 
 // Scan-to-move — the RC Willey RF-gun "scan stuff to relocate it" flow.
@@ -41,6 +41,32 @@ export default function MoveStockSheet({ onClose, onDone }) {
       .then(ls => setLocations((ls || []).filter(l => l.is_active !== false)))
       .catch(e => showToast('Could not load locations: ' + e.message))
   }, [])
+
+  // Where the scanned parts currently reside — annotates the destination
+  // list ("· N on hand", stocked-first). Keyed on the part-id set so going
+  // back to scan more parts refetches. Progressive: the list renders
+  // immediately; a fetch failure degrades silently to the plain list.
+  const [destStock, setDestStock] = useState(null)
+  // Array memo'd separately from the joined dep key — a SKU is a free-form
+  // text PK, so round-tripping through split(',') could mangle one that
+  // contains a comma.
+  const partIds = useMemo(() => lines.map(l => l.part.id).sort(), [lines])
+  const partIdsKey = partIds.join(',')
+  useEffect(() => {
+    if (stage !== 'dest' || partIds.length === 0) return
+    let stale = false
+    getStockRowsForParts(partIds)
+      .then(rows => {
+        if (stale) return
+        setDestStock(buildLocationQtyMaps(rows.map(r => ({
+          locationId: r.location_id,
+          parentLocationId: r.location?.parent_location_id || null,
+          qty: r.quantity,
+        }))))
+      })
+      .catch(e => console.warn('Dest stock annotate failed:', e))
+    return () => { stale = true }
+  }, [stage, partIdsKey])
 
   function openCamera() { unlockAudio(); setCameraSignal(n => n + 1) }
 
@@ -104,13 +130,19 @@ export default function MoveStockSheet({ onClose, onDone }) {
   const totalUnits = lines.reduce((a, l) => a + l.qty, 0)
 
   // Location list for the source/dest pickers — searchable, type-labeled.
-  const locList = (onPick, excludeId, extraFilter = null) => {
+  // qtyById (dest stage only): exact-location on-hand for the scanned parts.
+  // Deliberately NOT the bin→warehouse rollup — this flat list shows
+  // warehouses and their bins as separate directly-pickable rows, and
+  // annotating the warehouse row with bin-held stock would mislead (picking
+  // it targets the unbinned level). Stocked rows sort first, qty desc.
+  const locList = (onPick, excludeId, extraFilter = null, qtyById = null) => {
     const query = q.trim().toLowerCase()
+    const qtyOf = l => Number(qtyById?.get(l.id) || 0)
     const filtered = locations
       .filter(l => l.id !== excludeId)
       .filter(l => !extraFilter || extraFilter(l))
       .filter(l => !query || (l.name || '').toLowerCase().includes(query))
-      .sort((a, b) => compareNamesNatural(a.name, b.name))
+      .sort((a, b) => (qtyById ? qtyOf(b) - qtyOf(a) : 0) || compareNamesNatural(a.name, b.name))
     return (
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {filtered.length === 0 && (
@@ -121,6 +153,11 @@ export default function MoveStockSheet({ onClose, onDone }) {
             style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '10px 12px', marginBottom: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', cursor: 'pointer', color: 'var(--text)' }}>
             <span style={{ display: 'inline-flex', color: 'var(--accent-dk)' }}><Icon name={TYPE_ICON[l.type] || 'box'} size={16} /></span>
             <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.name}</span>
+            {qtyOf(l) > 0 && (
+              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                {qtyOf(l).toLocaleString()} on hand
+              </span>
+            )}
             <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)' }}>{TYPE_LABEL[l.type] || l.type}</span>
           </button>
         ))}
@@ -198,7 +235,7 @@ export default function MoveStockSheet({ onClose, onDone }) {
             <input type="text" placeholder="Search locations…" value={q} onChange={e => setQ(e.target.value)} autoFocus autoComplete="off" name="move-dst-search"
               style={{ flexShrink: 0, width: '100%', padding: '10px 12px', border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--surface2)', fontSize: 14, marginBottom: 8, color: 'var(--text)' }} />
             <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', fontWeight: 700, marginBottom: 6, flexShrink: 0 }}>MOVE {totalUnits} UNIT{totalUnits === 1 ? '' : 'S'} TO</div>
-            {locList(l => setDest(l), source?.id)}
+            {locList(l => setDest(l), source?.id, null, destStock?.byId)}
           </>
         )}
 

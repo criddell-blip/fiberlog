@@ -12,7 +12,57 @@ import {
   isExportableMovement,
   buildSageCsv,
   movementEffectiveDate,
+  buildLocationQtyMaps,
 } from './inventory'
+
+// ─── buildLocationQtyMaps ────────────────────────────────────────────────────
+// Feeds the part-aware location pickers ("has this part · N on hand").
+
+describe('buildLocationQtyMaps', () => {
+  it('keys top-level locations under their own id in both maps', () => {
+    const { byId, byTop } = buildLocationQtyMaps([
+      { locationId: 'WH', parentLocationId: null, qty: 10 },
+    ])
+    expect(byId.get('WH')).toBe(10)
+    expect(byTop.get('WH')).toBe(10)
+  })
+
+  it('rolls a bin up to its parent in byTop but keeps its own id in byId', () => {
+    const { byId, byTop } = buildLocationQtyMaps([
+      { locationId: 'BIN1', parentLocationId: 'WH', qty: 24 },
+      { locationId: 'WH', parentLocationId: null, qty: 6 },
+    ])
+    expect(byId.get('BIN1')).toBe(24)
+    expect(byId.get('WH')).toBe(6)          // warehouse-own (unbinned) stays separate
+    expect(byTop.get('WH')).toBe(30)        // own + bin rollup
+    expect(byTop.has('BIN1')).toBe(false)
+  })
+
+  it('sums duplicate locationIds (multi-part callers)', () => {
+    const { byId } = buildLocationQtyMaps([
+      { locationId: 'TRUCK', parentLocationId: null, qty: 3 },
+      { locationId: 'TRUCK', parentLocationId: null, qty: 4 },
+    ])
+    expect(byId.get('TRUCK')).toBe(7)
+  })
+
+  it('drops zero, negative, and non-numeric quantities', () => {
+    const { byId, byTop } = buildLocationQtyMaps([
+      { locationId: 'A', parentLocationId: null, qty: 0 },
+      { locationId: 'B', parentLocationId: null, qty: -48 },  // negative-stock truck
+      { locationId: 'C', parentLocationId: null, qty: 'nope' },
+      { locationId: 'D', parentLocationId: null, qty: 2 },
+    ])
+    expect(byId.size).toBe(1)
+    expect(byTop.size).toBe(1)
+    expect(byId.get('D')).toBe(2)
+  })
+
+  it('tolerates empty and null input', () => {
+    expect(buildLocationQtyMaps([]).byId.size).toBe(0)
+    expect(buildLocationQtyMaps(null).byTop.size).toBe(0)
+  })
+})
 
 // ─── validateMovement ────────────────────────────────────────────────────────
 
