@@ -138,6 +138,9 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       setPartMap({})
       setPendingCityMap({})
       setRowDest({})
+      // Index-keyed like rowDest — a source picked for delivery A's row N
+      // must not silently re-source whatever sits at index N of delivery B.
+      setRowSource({})
     },
   })
   const { fileName, csvRows, error, setError, parsing, handleFile } = csv
@@ -487,17 +490,16 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       let destReason = null  // human-readable explanation
       let status = 'ready'
 
-      // Already imported in a prior delivery — skip by default. Manager
-      // can still re-include via the per-row pick if there's a reason
-      // (e.g., the prior import was for a different reason).
+      // Already imported in a prior delivery — skip.
       if (isAlreadyImported) {
         status = 'already-imported'
       }
-      // Per-row override always wins
-      else if (rowDest[idx]) {
-        destId = rowDest[idx]
-        destReason = 'manual pick'
-      } else if (!fromLocationId) {
+      // Source/part problems are checked BEFORE the per-row destination
+      // override: a manual dest pick must not hold a row at 'ready' after
+      // its source later evaporates (e.g. the source's crew re-picked to a
+      // user with no truck) — that row would count in "Apply N transfers"
+      // but be silently dropped by the apply filter.
+      else if (!fromLocationId) {
         // No source identified — either an unmatched crew name OR an
         // unfamiliar non-crew source string (e.g. "Receiving") that
         // hasn't been mapped to a warehouse yet.
@@ -507,6 +509,11 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         status = 'no-truck'
       } else if (!partId) {
         status = 'no-part'
+      }
+      // Per-row destination override wins over routing/project resolution.
+      else if (rowDest[idx]) {
+        destId = rowDest[idx]
+        destReason = 'manual pick'
       } else if (sonarProject) {
         // Sonar tagged the project → look up phase. Authoritative when
         // mapped. Bucket is derived from the phase's parent project

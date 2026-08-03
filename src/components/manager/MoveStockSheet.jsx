@@ -77,7 +77,7 @@ export default function MoveStockSheet({ onClose, onDone }) {
         if (!bin) { scanFeedback('error'); showToast('Bin not found or inactive'); return }
         if (stage === 'source') { setSource(bin); setStage('items'); setQ(''); scanFeedback('ok'); showToast(`From ${bin.name}`) }
         else if (stage === 'dest') {
-          if (bin.id === source?.id) { scanFeedback('error'); showToast('Destination must differ from source'); return }
+          if (lines.some(l => l.sourceId === bin.id)) { scanFeedback('error'); showToast('Destination must differ from the source of every line'); return }
           setDest(bin); scanFeedback('ok'); showToast(`To ${bin.name}`)
         } else { scanFeedback('error'); showToast('Scan a part here (or a bin in the From/To step)') }
         return
@@ -86,10 +86,19 @@ export default function MoveStockSheet({ onClose, onDone }) {
       if (stage !== 'items') { scanFeedback('error'); showToast('Pick or scan a location first'); return }
       const part = await getPartBySku(code.trim())
       if (!part) { scanFeedback('error'); showToast(`Unknown SKU: ${code}`); return }
+      // Stamp the line with the source it was scanned under. Going Back and
+      // re-picking a source must NOT re-source already-scanned lines (the
+      // last-location-wins bug the Record-movement sheet just fixed) — it
+      // just changes where NEW scans bind, so one move can pull from
+      // several locations. Merge key is (part, source) for the same reason.
+      // A previously-picked dest that equals THIS line's source would commit
+      // a from=to transfer — clear it now so the user re-picks, instead of
+      // hitting a cryptic batch-validation error later.
+      if (dest && dest.id === source.id) setDest(null)
       setLines(prev => {
-        const ex = prev.find(l => l.part.id === part.id)
-        if (ex) return prev.map(l => l.part.id === part.id ? { ...l, qty: l.qty + 1 } : l)
-        return [...prev, { part, qty: 1 }]
+        const ex = prev.find(l => l.part.id === part.id && l.sourceId === source.id)
+        if (ex) return prev.map(l => (l.part.id === part.id && l.sourceId === source.id) ? { ...l, qty: l.qty + 1 } : l)
+        return [...prev, { part, qty: 1, sourceId: source.id, sourceName: source.name }]
       })
       scanFeedback('ok')
     } catch (e) {
@@ -99,14 +108,16 @@ export default function MoveStockSheet({ onClose, onDone }) {
     }
   }
 
-  function setQty(partId, qty) {
+  const lineKey = l => `${l.part.id}|${l.sourceId}`
+
+  function setQty(key, qty) {
     const n = Math.max(0, Number(qty) || 0)
-    if (n === 0) { setLines(prev => prev.filter(l => l.part.id !== partId)); return }
-    setLines(prev => prev.map(l => l.part.id === partId ? { ...l, qty: n } : l))
+    if (n === 0) { setLines(prev => prev.filter(l => lineKey(l) !== key)); return }
+    setLines(prev => prev.map(l => lineKey(l) === key ? { ...l, qty: n } : l))
   }
 
   async function commit() {
-    if (!source || !dest || lines.length === 0) return
+    if (!dest || lines.length === 0) return
     setSaving(true)
     try {
       await recordMovementsBatch(lines.map(l => ({
@@ -114,7 +125,7 @@ export default function MoveStockSheet({ onClose, onDone }) {
         part_id: l.part.id,
         quantity: l.qty,
         unit: l.part.unit || null,
-        from_location_id: source.id,
+        from_location_id: l.sourceId,
         to_location_id: dest.id,
         notes: 'Scan-to-move',
         created_by: currentUser?.id,
@@ -128,6 +139,10 @@ export default function MoveStockSheet({ onClose, onDone }) {
   }
 
   const totalUnits = lines.reduce((a, l) => a + l.qty, 0)
+  // A destination can't be any line's source (transfer from = to is invalid);
+  // with per-line sources that's a set, not just the current source.
+  const lineSourceIds = new Set(lines.map(l => l.sourceId))
+  const multiSource = lineSourceIds.size > 1
 
   // Location list for the source/dest pickers — searchable, type-labeled.
   // qtyById (dest stage only): exact-location on-hand for the scanned parts.
@@ -175,7 +190,7 @@ export default function MoveStockSheet({ onClose, onDone }) {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-xs)', color: 'var(--muted)' }}>
             <span style={{ fontWeight: stage === 'source' ? 800 : 400, color: source ? 'var(--accent-dk)' : 'var(--muted)' }}>
-              {source ? source.name : 'From…'}
+              {multiSource ? `${lineSourceIds.size} sources` : (source ? source.name : 'From…')}
             </span>
             <Icon name="arrow" size={12} />
             <span style={{ fontWeight: stage === 'items' ? 800 : 400 }}>{lines.length || ''} {lines.length ? 'items' : 'items'}</span>
@@ -216,14 +231,19 @@ export default function MoveStockSheet({ onClose, onDone }) {
               </div>
             )}
             {lines.map(l => (
-              <div key={l.part.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '8px 10px', marginBottom: 6 }}>
+              <div key={lineKey(l)} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '8px 10px', marginBottom: 6 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 'var(--fs-base)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.part.name || l.part.id}</div>
-                  <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: 'var(--font-mono)' }}>{l.part.id}</div>
+                  <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--hint)', fontFamily: 'var(--font-mono)' }}>
+                    {l.part.id}
+                    {/* Source shown per line once the batch spans locations —
+                        each line moves from where it was scanned. */}
+                    {multiSource && <span style={{ fontFamily: 'inherit', color: 'var(--muted)' }}> · from {l.sourceName}</span>}
+                  </div>
                 </div>
-                <button onClick={() => setQty(l.part.id, l.qty - 1)} className="btn btn-ghost" style={{ width: 34, height: 34, padding: 0, fontSize: 18, flexShrink: 0 }}>−</button>
+                <button onClick={() => setQty(lineKey(l), l.qty - 1)} className="btn btn-ghost" style={{ width: 34, height: 34, padding: 0, fontSize: 18, flexShrink: 0 }}>−</button>
                 <span className="mono" style={{ minWidth: 34, textAlign: 'center', fontSize: 17, fontWeight: 800 }}>{l.qty}</span>
-                <button onClick={() => setQty(l.part.id, l.qty + 1)} className="btn btn-ghost" style={{ width: 34, height: 34, padding: 0, fontSize: 18, flexShrink: 0 }}>+</button>
+                <button onClick={() => setQty(lineKey(l), l.qty + 1)} className="btn btn-ghost" style={{ width: 34, height: 34, padding: 0, fontSize: 18, flexShrink: 0 }}>+</button>
                 <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', minWidth: 18 }}>{l.part.unit || 'ea'}</span>
               </div>
             ))}
@@ -235,7 +255,7 @@ export default function MoveStockSheet({ onClose, onDone }) {
             <input type="text" placeholder="Search locations…" value={q} onChange={e => setQ(e.target.value)} autoFocus autoComplete="off" name="move-dst-search"
               style={{ flexShrink: 0, width: '100%', padding: '10px 12px', border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--surface2)', fontSize: 14, marginBottom: 8, color: 'var(--text)' }} />
             <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', fontWeight: 700, marginBottom: 6, flexShrink: 0 }}>MOVE {totalUnits} UNIT{totalUnits === 1 ? '' : 'S'} TO</div>
-            {locList(l => setDest(l), source?.id, null, destStock?.byId)}
+            {locList(l => setDest(l), undefined, l => !lineSourceIds.has(l.id), destStock?.byId)}
           </>
         )}
 

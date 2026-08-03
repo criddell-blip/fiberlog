@@ -47,7 +47,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   // IDs ticked in the current search-results dropdown. Reset on every
   // new query so a stale selection from a previous search can't leak in.
   const [selectedSearchIds, setSelectedSearchIds] = useState(() => new Set())
-  const [lines, setLines] = useState([])  // [{ part_id, name, unit, qty: '1' }]
+  const [lines, setLines] = useState([])  // [{ part_id, name, unit, qty: '1', from_override_id: null }]
 
   // Back closes the sheet (mounted only when open). Confirm first if any
   // movement lines have been staged.
@@ -86,13 +86,16 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
 
   const searchTimerRef = useRef(null)
 
-  // Reset endpoints + clear errors when type changes.
+  // Reset endpoints + clear errors when type changes. Per-line From
+  // overrides are endpoints too — sources picked for one operation must not
+  // silently carry into another (same stale-endpoint rule as the pickers).
   useEffect(() => {
     setFromLocationId('')
     setFromTopId(''); setFromBinId('')
     setToTopId(''); setToBinId('')
+    setLines(prev => prev.map(l => (l.from_override_id ? { ...l, from_override_id: null } : l)))
     setError(null)
-  }, [type])
+  }, [type, adjustDir])
 
   // When a top-level location is selected for the To picker (or for
   // show-all From), fetch its bins if it's a warehouse. Cached.
@@ -209,6 +212,14 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     setLines(prev => prev.map(l => l.part_id === partId ? { ...l, qty } : l))
   }
 
+  // Per-line source override ('' = follow the shared From). Added after the
+  // 8/3 Cody's-truck mishap: the smart From list shows every picked part's
+  // home location, which reads like per-part sourcing — but the shared From
+  // applied to ALL lines, so the last tap silently sourced everything.
+  function setLineFrom(partId, locId) {
+    setLines(prev => prev.map(l => l.part_id === partId ? { ...l, from_override_id: locId || null } : l))
+  }
+
   // Show/hide which fields based on movement type + adjust direction.
   const ep = ENDPOINTS[type]
   const showFrom = type === 'adjust' ? adjustDir === 'remove' : !!ep.from
@@ -280,19 +291,32 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
 
   const useSmartFromPicker = showFrom && !showAllFromLocations && lines.length > 0
 
+  // Drop a smart-mode From whose location no longer holds any picked part
+  // (lines removed/replaced since the tap). The picker renders selection
+  // only for options in the current list, so a stale id is INVISIBLE — it
+  // would pass validation and submit against a location picked for a part
+  // that's no longer in the batch.
+  useEffect(() => {
+    if (!useSmartFromPicker || !fromLocationId) return
+    if (!smartFromOptions.some(o => o.id === fromLocationId)) setFromLocationId('')
+  }, [useSmartFromPicker, fromLocationId, smartFromOptions])
+
   // Effective from-location id depending on which picker is showing.
   const effectiveFromId = useSmartFromPicker
     ? fromLocationId
     : (fromBinId || fromTopId)
   const effectiveToId = toBinId || toTopId
 
+  // A line's actual source: its own override, else the shared From.
+  const lineEffectiveFromId = line => line.from_override_id || effectiveFromId
+
   // Per-line "no logged stock at the picked From" warning. Renders only
   // when From is set AND we have the part's location data loaded.
   function lineHasStockAtFrom(line) {
-    if (!showFrom || !effectiveFromId) return true
+    if (!showFrom || !lineEffectiveFromId(line)) return true
     const pl = partLocationsByPart[line.part_id]
     if (!pl || !pl.locations) return true  // unknown yet — don't false-warn
-    return pl.locations.some(l => l.locationId === effectiveFromId)
+    return pl.locations.some(l => l.locationId === lineEffectiveFromId(line))
   }
 
   // To options — same flavor as before: hide scrap from destinations
@@ -314,12 +338,16 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     }
     if (type === 'adjust') {
       if (adjustDir === 'add' && !effectiveToId) return 'Pick a location to add to'
-      if (adjustDir === 'remove' && !effectiveFromId) return 'Pick a location to remove from'
+      if (adjustDir === 'remove' && lines.some(l => !lineEffectiveFromId(l))) return 'Pick a location to remove from'
     } else {
-      if (ep.from && !effectiveFromId) return 'Pick a "from" location'
+      // Per-line sources: every line must resolve a From (its own override
+      // or the shared picker) — a shared From isn't required once every
+      // line carries its own.
+      if (ep.from && lines.some(l => !lineEffectiveFromId(l))) return 'Pick a "from" location (or set one per part)'
       if (ep.to && !effectiveToId) return 'Pick a "to" location'
-      if (ep.from && ep.to && effectiveFromId === effectiveToId) {
-        return '"From" and "to" must be different locations'
+      if (ep.from && ep.to) {
+        const clash = lines.find(l => lineEffectiveFromId(l) === effectiveToId)
+        if (clash) return `${clash.name}: "from" and "to" must be different locations`
       }
     }
     return null
@@ -331,7 +359,8 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     setError(null)
     setSubmitting(true)
     try {
-      // Build one movement payload per line. Shared from/to/type/notes.
+      // Build one movement payload per line. Shared to/type/notes; From is
+      // per-line (line override, else the shared picker).
       const payloads = lines.map(line => {
         const base = {
           movement_type: type,
@@ -343,9 +372,9 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
         }
         if (type === 'adjust') {
           if (adjustDir === 'add') base.to_location_id = effectiveToId
-          else                     base.from_location_id = effectiveFromId
+          else                     base.from_location_id = lineEffectiveFromId(line)
         } else {
-          if (ep.from) base.from_location_id = effectiveFromId
+          if (ep.from) base.from_location_id = lineEffectiveFromId(line)
           if (ep.to)   base.to_location_id = effectiveToId
           if (ep.vendor) {
             base.vendor_invoice = vendorInvoice.trim() || null
@@ -416,54 +445,89 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
             <div style={{ marginBottom: 8, border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
               {lines.map((l, i) => {
                 const warn = !lineHasStockAtFrom(l)
+                // Per-line source options: THIS part's stocked locations
+                // (qty-annotated). Same guards as the smart picker: job_site
+                // is owner-only, and inactive locations (retired trucks with
+                // residual stock) don't get offered.
+                const lineSources = (partLocationsByPart[l.part_id]?.locations || [])
+                  .filter(loc => loc.isActive !== false)
+                  .filter(loc => loc.type !== 'job_site' || currentUser?.role === 'owner')
                 return (
                   <div
                     key={l.part_id}
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
                       padding: '8px 10px',
                       background: warn ? 'var(--amber-lt)' : 'var(--surface)',
                       borderBottom: i < lines.length - 1 ? '1px solid var(--border)' : 'none',
                     }}
                   >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {l.name}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {l.name}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--hint)' }}>{l.part_id}</div>
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--hint)' }}>{l.part_id}</div>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={l.qty}
+                        onChange={e => setLineQty(l.part_id, e.target.value)}
+                        style={{
+                          width: 70, padding: '5px 8px', fontSize: 13,
+                          textAlign: 'right',
+                          border: '1.5px solid var(--border2)', borderRadius: 'var(--r-xs)',
+                          background: 'var(--bg)', color: 'var(--text)',
+                        }}
+                      />
+                      <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 22 }}>{l.unit}</span>
+                      {warn && (
+                        <span title="No logged stock at this line's From location" style={{
+                          color: 'var(--amber)', display: 'inline-flex',
+                        }}>
+                          <Icon name="alert" size={14} />
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeLine(l.part_id)}
+                        title="Remove"
+                        style={{
+                          background: 'transparent', border: 'none', cursor: 'pointer',
+                          color: 'var(--muted)', fontSize: 16, padding: '0 4px',
+                        }}
+                      >
+                        ×
+                      </button>
                     </div>
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={l.qty}
-                      onChange={e => setLineQty(l.part_id, e.target.value)}
-                      style={{
-                        width: 70, padding: '5px 8px', fontSize: 13,
-                        textAlign: 'right',
-                        border: '1.5px solid var(--border2)', borderRadius: 'var(--r-xs)',
-                        background: 'var(--bg)', color: 'var(--text)',
-                      }}
-                    />
-                    <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 22 }}>{l.unit}</span>
-                    {warn && (
-                      <span title="No logged stock at the picked From location" style={{
-                        color: 'var(--amber)', display: 'inline-flex',
-                      }}>
-                        <Icon name="alert" size={14} />
-                      </span>
+                    {/* Per-line source override (see setLineFrom). */}
+                    {showFrom && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
+                        <span style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap' }}>From:</span>
+                        <select
+                          value={l.from_override_id || ''}
+                          onChange={e => setLineFrom(l.part_id, e.target.value)}
+                          style={{
+                            flex: 1, padding: '4px 8px', fontSize: 11,
+                            border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)',
+                            background: 'var(--bg)', color: 'var(--text)',
+                          }}
+                        >
+                          <option value="">
+                            {effectiveFromId
+                              ? `Shared From (${smartFromOptions.find(o => o.id === effectiveFromId)?.displayLabel
+                                  || locations.find(x => x.id === effectiveFromId)?.name || 'picked below'})`
+                              : 'Shared From (pick below)'}
+                          </option>
+                          {lineSources.map(loc => (
+                            <option key={loc.locationId} value={loc.locationId}>
+                              {loc.displayLabel} · {Number(loc.qty).toLocaleString()} on hand
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => removeLine(l.part_id)}
-                      title="Remove"
-                      style={{
-                        background: 'transparent', border: 'none', cursor: 'pointer',
-                        color: 'var(--muted)', fontSize: 16, padding: '0 4px',
-                      }}
-                    >
-                      ×
-                    </button>
                   </div>
                 )
               })}

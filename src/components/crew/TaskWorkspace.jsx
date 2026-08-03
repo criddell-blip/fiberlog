@@ -1078,7 +1078,12 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => { setShowSummary(false); setPartQtyOverrides({}); setExtraParts([]); setShowPartSearch(false) }}>{t('keepLogging', lang)}</button>
+              {/* Close ONLY — never wipe extraParts/overrides here. "Keep
+                  logging" is the designed mid-day loop; wiping silently
+                  deleted hand-added parts (and the flag-restore payload) so
+                  the crew resubmitted without them. Backdrop-tap already
+                  just closes; both dismiss paths now agree. */}
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => { setShowSummary(false); setShowPartSearch(false) }}>{t('keepLogging', lang)}</button>
               <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSubmit} disabled={submitting}>
                 {submitting ? t('submitting', lang) : t('submitDay', lang)}
               </button>
