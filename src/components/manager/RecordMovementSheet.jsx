@@ -11,8 +11,10 @@ import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 import LocationWithBinPicker from './LocationWithBinPicker'
 
+// No `receive` here — vendor deliveries go through the Receive PO sheet
+// (PO ref, unit costs, inline part creation). Keeping receive out of the
+// free-form sheet means every receipt carries proper vendor metadata.
 const TYPES = [
-  { id: 'receive',  label: 'Receive',  iconName: 'download', hint: 'New stock from a vendor' },
   { id: 'transfer', label: 'Transfer', iconName: 'move',     hint: 'Warehouse → truck or vice versa' },
   { id: 'return',   label: 'Return',   iconName: 'rotate',   hint: 'Truck → warehouse' },
   { id: 'issue',    label: 'Issue',    iconName: 'upload',   hint: 'Used in field' },
@@ -21,7 +23,6 @@ const TYPES = [
 ]
 
 const ENDPOINTS = {
-  receive:  { from: false, to: true,  vendor: true  },
   transfer: { from: true,  to: true                  },
   return:   { from: true,  to: true                  },
   issue:    { from: true,  to: false                 },
@@ -39,7 +40,7 @@ const ENDPOINTS = {
 // "show every location" picker for edge cases (adjust movements that
 // genuinely create stock somewhere FiberLog hasn't seen the part at).
 export default function RecordMovementSheet({ locations, currentUser, onClose, onRecorded }) {
-  const [type, setType] = useState('receive')
+  const [type, setType] = useState('transfer')
 
   // Part search + multi-line state. Each line = one movement at submit.
   const [partQuery, setPartQuery] = useState('')
@@ -78,8 +79,6 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   const [binsByWarehouse, setBinsByWarehouse] = useState({})
 
   const [adjustDir, setAdjustDir] = useState('add')
-  const [vendorInvoice, setVendorInvoice] = useState('')
-  const [unitCost, setUnitCost] = useState('')
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -323,7 +322,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   // (scrap movements use the 'scrap' type, not destination=scrap).
   const toOptions = useMemo(() => locations.filter(l => l.type !== 'scrap'), [locations])
   // Show-all From options — hide vendors (you don't transfer FROM a vendor;
-  // that's `receive`). Project (job_site) buckets are accumulate-only and only
+  // that's the Receive PO sheet). Project (job_site) buckets are accumulate-only and only
   // pullable by the owner (mis-routed-consumption correction).
   const allFromOptions = useMemo(
     () => locations.filter(l => l.type !== 'vendor' && (currentUser?.role === 'owner' || l.type !== 'job_site')),
@@ -376,10 +375,6 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
         } else {
           if (ep.from) base.from_location_id = lineEffectiveFromId(line)
           if (ep.to)   base.to_location_id = effectiveToId
-          if (ep.vendor) {
-            base.vendor_invoice = vendorInvoice.trim() || null
-            base.unit_cost = unitCost === '' ? null : Number(unitCost)
-          }
         }
         return base
       })
@@ -711,32 +706,6 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
               stockGroupLabel={stockGroupLabel}
             />
           </div>
-        )}
-
-        {/* Vendor metadata (receive only) */}
-        {ep.vendor && (
-          <>
-            <div className="field">
-              <label>Vendor invoice # (optional)</label>
-              <input
-                type="text"
-                value={vendorInvoice}
-                onChange={e => setVendorInvoice(e.target.value)}
-                placeholder="INV-12345"
-              />
-            </div>
-            <div className="field">
-              <label>Unit cost (optional, applies to all parts)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={unitCost}
-                onChange={e => setUnitCost(e.target.value)}
-                placeholder="0.00"
-              />
-            </div>
-          </>
         )}
 
         {/* Notes */}

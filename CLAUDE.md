@@ -197,7 +197,7 @@ src/
       AdminPanel.jsx      ← admin home — wires Users, Reset-password, BoxHero sync, Crew×Dept permissions
       AdminUsersView.jsx  ← user CRUD + per-user movement permission toggles
       CrewTypePermissionsView.jsx ← crew_type × department matrix (whitelist UI)
-      InventoryView.jsx   ← inventory section (8 sub-tabs: Stock / Locations / Parts / Activity / Purchase Reqs / Found / Audit / Cycle Count; toolbar "Record movement" button + an 8-item Actions strip: Move stock / Receive PO / Reconcile / Sonar / Fiber jobs / Import CSV / Sage export / Footage map — collapses to a bottom sheet on phone). Parts tab has a filter-respecting catalog CSV export (filter in the filename); Activity tab has a date-ranged raw-history CSV export (July 2026) — unlike Sage it keeps adjusts / truck→truck / bin moves, and it's the only way full movement history leaves the app. Both use the shared escapeCsvField + downloadTextAsFile from lib/csvImport.js (the BOM-writing download helper) — do NOT add another private CSV escaper, five legacy copies already exist.
+      InventoryView.jsx   ← inventory section (8 sub-tabs: Stock / Locations / Parts / Activity / Purchase Reqs / Found / Audit / Cycle Count; toolbar "Record movement" button + a 7-item Actions strip: Receive PO / Reconcile / Sonar / Fiber jobs / Import CSV / Sage export / Footage map — collapses to a bottom sheet on phone). Parts tab has a filter-respecting catalog CSV export (filter in the filename); Activity tab has a date-ranged raw-history CSV export (July 2026) — unlike Sage it keeps adjusts / truck→truck / bin moves, and it's the only way full movement history leaves the app. Both use the shared escapeCsvField + downloadTextAsFile from lib/csvImport.js (the BOM-writing download helper) — do NOT add another private CSV escaper, five legacy copies already exist.
       InventoryStockTab.jsx, InventoryLocationsTab.jsx, InventoryPartsTab.jsx,
       InventoryMovementsTab.jsx, InventoryAuditTab.jsx
       PurchaseRequestsTab.jsx, PurchaseRequestSheet.jsx ← FiberLog-originated PRs (compose, cost history, CSV/email export, lifecycle)
@@ -207,8 +207,7 @@ src/
       chrome.jsx          ← shared manager styling tokens: chipStyle / cardSurface / LoadingBlock / EmptyState
       LocationDetailPanel.jsx ← location drill-in (view stock / count / export / labels / edit)
       LocationWithBinPicker.jsx ← shared warehouse→bin destination picker
-      RecordMovementSheet.jsx ← arbitrary single-movement entry
-      MoveStockSheet.jsx  ← scan-driven stock relocation (transfer)
+      RecordMovementSheet.jsx ← free-form multi-line movement entry (transfer default; no receive — Receive PO owns receipts)
       ReceivePOSheet.jsx  ← multi-line vendor delivery (creates new parts inline, edits attrs)
       ReconcileSheet.jsx  ← audit CSV round-trip → adjust movements
       SonarImportSheet.jsx ← field-tech install report → bulk transfer movements
@@ -479,8 +478,7 @@ The inventory side has many entry points that all write to `inventory_movements`
 | Crew Load (`CrewMovementSheet` → `record_crew_movement` RPC) | `transfer` | warehouse → caller's truck | Permission-checked. **Multi-part:** a line cart lets the crew queue several parts (load can pull from different sources in one go) and submit them together — the sheet loops `record_crew_movement` per line (no crew batch RPC), keeping failed lines in the cart for retry on partial failure. A **review-and-confirm step** precedes the commit for multi-part / any return / any non-truck load (single-part → own truck skips it). |
 | Crew Return (same RPC) | `return` | caller's truck → warehouse | Permission-checked. Same multi-part cart (one shared destination warehouse, many truck parts). |
 | Crew Issue/Scrap/Transfer | (same RPC, UI not shipped) | caller's truck → (varies) | RPC ready, sheets deferred |
-| Manager Record movement (`RecordMovementSheet`) | any of 6 | any → any | Free-form, no permission filter |
-| Manager Move stock (`MoveStockSheet`) | `transfer` (× N lines) | any → any | Scan-driven relocation via `recordMovementsBatch` |
+| Manager Record movement (`RecordMovementSheet`) | transfer / return / issue / scrap / adjust (NOT receive — that's Receive PO only, Aug 2026; defaults to transfer) | any → any | Free-form, no permission filter. The former Move-stock pill (`MoveStockSheet`) was removed at the same time — this sheet covers relocation. |
 | Manager Receive PO (`ReceivePOSheet`) | `receive` (× N lines) | NULL → dest | Can create new parts inline |
 | Manager Reconcile (`ReconcileSheet`) | `adjust` OR `transfer` (× N lines) | one-sided / vs counter-location | Audit CSV round-trip. Each variance books as an adjust (default) or a transfer with a counter-location (batch default + per-row override, Aug 2026) — the honest booking when the manager knows where the stock really came from/went (fixes the negative-truck true-up pattern). Warn-but-allow when transfers overdraw the counter-location. Notes are self-documenting: `Reconcile <date> — counted N, system had M`. **Sage:** transfer-booked variances export like any transfer (deliberate — same physical event as a contemporaneous load); adjust-booked stay internal (`isExportableMovement` drops adjusts) |
 | Manager Sonar import (`SonarImportSheet`) | `transfer` (× N lines) | crew truck → routed bucket | Destination via `parts_catalog.sonar_routing` (region / gigwave / Fixed Wireless) + `sonar_city_bucket_map`. Stamps `[sonar:<itemId>]` in notes + `consumed_by_user_id`/`phase_id` when known |

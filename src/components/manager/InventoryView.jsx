@@ -15,7 +15,6 @@ import IntakeRequestsQueue from './IntakeRequestsQueue'
 import CountTab from '../cycleCount/CountTab'
 import PausedBanner from '../shared/PausedBanner'
 import RecordMovementSheet from './RecordMovementSheet'
-import MoveStockSheet from './MoveStockSheet'
 import ReceivePOSheet from './ReceivePOSheet'
 import ReconcileSheet from './ReconcileSheet'
 import SonarImportSheet from './SonarImportSheet'
@@ -53,7 +52,6 @@ export default function InventoryView() {
   const [locations, setLocations] = useState([])
   const [locationsLoading, setLocationsLoading] = useState(true)
   const [showRecordSheet, setShowRecordSheet] = useState(false)
-  const [showMoveSheet, setShowMoveSheet] = useState(false)
   const [showReceiveSheet, setShowReceiveSheet] = useState(false)
   const [showReconcileSheet, setShowReconcileSheet] = useState(false)
   const [showSonarSheet, setShowSonarSheet] = useState(false)
@@ -107,11 +105,6 @@ export default function InventoryView() {
     setRefreshKey(k => k + 1)
     showToast(count === 1 ? 'Movement recorded' : `${count} movements recorded`)
   }
-  function handleMoved(count = 1) {
-    setShowMoveSheet(false)
-    setRefreshKey(k => k + 1)
-    showToast(`Moved ${count} item${count === 1 ? '' : 's'}`)
-  }
   function handlePOReceived(lineCount) {
     setShowReceiveSheet(false)
     setRefreshKey(k => k + 1)
@@ -149,7 +142,6 @@ export default function InventoryView() {
   // Secondary inventory actions (shared by the desktop Actions strip + the
   // phone Actions sheet). These open the various import/receive/export sheets.
   const ACTIONS = [
-    { id: 'move',      label: 'Move stock',  sub: 'Scan to relocate',    icon: 'move',     onClick: () => setShowMoveSheet(true),      disabled: noLocations },
     { id: 'receive',   label: 'Receive PO',  sub: 'Vendor delivery',     icon: 'download', onClick: () => setShowReceiveSheet(true),   disabled: noLocations },
     { id: 'reconcile', label: 'Reconcile',   sub: 'Apply an audit CSV',  icon: 'refresh',  onClick: () => setShowReconcileSheet(true), disabled: noLocations },
     { id: 'sonar',     label: 'Sonar',       sub: 'Serialized installs', icon: 'zap',      onClick: () => setShowSonarSheet(true),     disabled: noLocations },
@@ -350,12 +342,6 @@ export default function InventoryView() {
           currentUser={currentUser}
           onClose={() => setShowRecordSheet(false)}
           onRecorded={handleMovementRecorded}
-        />
-      )}
-      {showMoveSheet && (
-        <MoveStockSheet
-          onClose={() => setShowMoveSheet(false)}
-          onDone={handleMoved}
         />
       )}
       {showReceiveSheet && (

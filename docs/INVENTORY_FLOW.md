@@ -196,7 +196,7 @@ See [Field tech flow](#3-field-tech-sonar-driven--the-new-flow) above. Manager-d
 
 ### Manual record movement
 
-For ad-hoc adjustments: stock moved between bins, scrap, manual issues, etc. RecordMovementSheet covers all 6 movement types. No permission filter (staff-only entry point already).
+For ad-hoc adjustments: stock moved between bins, scrap, manual issues, etc. RecordMovementSheet covers transfer (the default) / return / issue / scrap / adjust — NOT receive, which is Receive PO's job so every receipt carries vendor + cost metadata. No permission filter (staff-only entry point already).
 
 ### Project routing override
 

@@ -100,7 +100,7 @@ The top of the tab has two rows:
 
 | Button | What it does |
 |---|---|
-| ＋ **Record movement** | Manual one-off entry — any of the six movement types. The primary button. |
+| ＋ **Record movement** | Manual one-off entry — transfer (default) / return / issue / scrap / adjust. Receiving is deliberately NOT offered here; vendor deliveries go through **Receive PO** so every receipt carries vendor + cost metadata. The primary button. |
 | ⇪ **Import CSV** | Bulk import from BoxHero (catalog seed or top-up) |
 | 📥 **Receive PO** | Vendor delivery — multi-line, creates `receive` movements |
 | 🔄 **Reconcile** | Upload a filled audit CSV — turns variances into adjust movements |

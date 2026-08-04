@@ -206,10 +206,7 @@ The "Assigned to" dropdown only lists crew members who don't already have a truc
 
 ### The actions strip
 
-A **Record movement** button plus these sheets (on phone, everything except Record movement collapses behind **⋯ More**):
-
-#### Move stock
-- Scan-driven relocation between locations (`transfer` movements, multi-line)
+A **Record movement** button plus these sheets (on phone, everything except Record movement collapses behind **⋯ More**). Record movement defaults to **Transfer** and deliberately has no Receive option — vendor deliveries always go through **Receive PO** so every receipt carries vendor + cost metadata. (The old scan-driven **Move stock** sheet was removed Aug 2026; Record movement's Transfer type covers relocation.)
 
 #### Receive PO
 - Multi-line vendor delivery: vendor + invoice + destination, then SKU + qty + unit cost per line
