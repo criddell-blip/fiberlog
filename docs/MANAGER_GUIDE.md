@@ -201,6 +201,8 @@ The "Assigned to" dropdown only lists crew members who don't already have a truc
 
 #### Cycle Count
 - Live, scanner-driven counting (bin QR + part QR, or manual entry) — faster than the audit-CSV flow for a focused area
+- **"None"** on a still-missing row records a count of 0 (one tap). Wrong tap? Open the part's row in Found (✏️) and **Clear count** to put it back to not-counted
+- **Reopen** a submitted bin from the bin list to fix counts — available until the run is ended; after end-of-run the counts are final
 - End a run → offsetting variances within a warehouse auto-pair as internal transfers; net gains/losses go to a manager-review queue
 - **Bin distribution mode** turns counts into direct warehouse→bin transfers — use it for initial binning and any time a fresh shipment needs sorting into bins
 

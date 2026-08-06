@@ -49,11 +49,27 @@ export async function startOrResumeCountSession({ runId, binId }) {
   return data
 }
 
+// countedQty: null is a deliberate "un-count" — the RPC restores an expected
+// line's counted_qty to NULL (back to "still missing"). Guarded server-side:
+// NULL is rejected for unexpected (expected_qty=0) lines — those are removed
+// via delete_count_line — and when no line exists at all (backlog #39).
 export async function recordCountLine({ sessionId, partId, countedQty }) {
   const { data, error } = await db.rpc('record_count_line', {
     p_session_id: sessionId,
     p_part_id: partId,
     p_counted_qty: countedQty,
+  })
+  if (error) throw error
+  return data
+}
+
+// Unlock a SUBMITTED bin session for corrections (backlog #39). Only valid
+// while the parent run is still in_progress — once the run is ended
+// (reconciling/pending_review/closed) the counts are consumed and the RPC
+// refuses. Idempotent on an already-in_progress session.
+export async function reopenCountSession(sessionId) {
+  const { data, error } = await db.rpc('reopen_count_session', {
+    p_session_id: sessionId,
   })
   if (error) throw error
   return data

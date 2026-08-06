@@ -9,6 +9,7 @@ import {
   startOrResumeCountSession,
   recordCountLine,
   removeCountLine,
+  reopenCountSession,
   submitCountSession,
   endCountRunAndReconcile,
   getRunSessions,
@@ -46,8 +47,8 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false)
   // Pre-submit confirm for a single bin. Opens a modal showing the
   // counted lines + variances so the counter has one last look before
-  // locking the bin. Bin lock is non-trivial to reverse (manager has to
-  // reopen the run), so the extra tap is worth it.
+  // locking the bin. A submitted bin CAN be reopened from the bin list
+  // until the run is ended (#39), but the review is still cheap insurance.
   const [confirmSubmitBin, setConfirmSubmitBin] = useState(false)
   const [endResult, setEndResult] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -142,17 +143,21 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
     }
   }
 
+  // Returns the opened session, or null when the bin lookup soft-fails —
+  // callers that follow up with their own toast/state must distinguish
+  // "opened" from "toasted an error and bailed" (see handleReopenBin).
   async function loadBin(binId) {
     const bin = await getBinById(binId)
     if (!bin) {
       showToast('Bin not found or inactive')
-      return
+      return null
     }
     const session = await startOrResumeCountSession({ runId: run.id, binId })
     setActiveSession({ ...session, location: bin })
     await refreshLines(session.id)
     await refreshSessions()
     showToast(`Counting ${bin.name}`)
+    return session
   }
 
   async function loadPart(sku) {
@@ -230,6 +235,48 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
       await refreshLines(activeSession.id)
     } finally {
       markSaving(line.part_id, false)
+    }
+  }
+
+  // Un-count an expected line (backlog #39): restore counted_qty to NULL so
+  // the row returns to "Still missing". The undo for a mis-tapped "None" or
+  // a wrong count — a real count of 0 stays available via the qty sheet.
+  async function handleClearCount(line) {
+    setQtySheetLine(null)
+    setLines(prev => prev.map(l => l.id === line.id ? { ...l, counted_qty: null } : l))
+    markSaving(line.part_id, true)
+    try {
+      await recordCountLine({ sessionId: activeSession.id, partId: line.part_id, countedQty: null })
+    } catch (e) {
+      console.error('Clear count failed:', e)
+      showToast('Clear failed: ' + e.message)
+      await refreshLines(activeSession.id)
+    } finally {
+      markSaving(line.part_id, false)
+    }
+  }
+
+  // Unlock a submitted bin for corrections while the run is still open
+  // (backlog #39 — the pre-submit copy promised this; now it exists).
+  // Reopen first, then loadBin: start_or_resume only returns sessions that
+  // are in_progress again.
+  async function handleReopenBin(s) {
+    setBusy(true)
+    try {
+      await reopenCountSession(s.id)
+      const session = await loadBin(s.location_id)
+      // loadBin toasts its own error on a soft-fail (bin deactivated since
+      // the count) — only claim success when the resume actually happened.
+      if (session) showToast(`Reopened ${s.location?.name || 'bin'} — fix the counts, then submit it again`)
+    } catch (e) {
+      console.error('Reopen bin failed:', e)
+      showToast(e.message || 'Reopen failed')
+    } finally {
+      // The reopen may have committed even when the resume failed — refetch
+      // so the Submitted/In-progress lists reflect the DB, not the
+      // pre-reopen snapshot (stale lists also mislead the End-run warning).
+      await refreshSessions()
+      setBusy(false)
     }
   }
 
@@ -483,7 +530,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
             </div>
 
             {sessions.length > 0 && (
-              <BinsCountedList sessions={sessions} onResume={(locId) => loadBin(locId)} />
+              <BinsCountedList sessions={sessions} onResume={(locId) => loadBin(locId)} onReopen={handleReopenBin} busy={busy} />
             )}
           </div>
         )}
@@ -551,7 +598,14 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
                       </div>
                       {savingParts.has(line.part_id) && <SavingDot />}
                       <button onClick={() => setQtySheetLine(line)} className="btn btn-primary" style={{ padding: '8px 14px', fontSize: 'var(--fs-sm)', flexShrink: 0 }}>Count</button>
-                      <button onClick={() => handleCountZero(line)} title="Found none" style={{ width: 40, height: 36, flexShrink: 0, border: '1px solid var(--border2)', background: 'var(--surface2)', color: 'var(--muted)', borderRadius: 'var(--r-xs)', fontWeight: 800, cursor: 'pointer' }}>0</button>
+                      {/* Labeled action, NOT a bare "0" — the old 40px "0" box
+                          read as an editable count field and one mis-tap booked
+                          a real zero count (backlog #39). Reversible via the
+                          row's edit sheet → "Clear count". */}
+                      <button onClick={() => handleCountZero(line)} className="btn btn-ghost" title="Records a count of 0 for this part"
+                        style={{ padding: '8px 12px', fontSize: 'var(--fs-sm)', flexShrink: 0, color: 'var(--muted)' }}>
+                        None
+                      </button>
                     </div>
                   )
                 })}
@@ -578,6 +632,13 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
                       {savingParts.has(line.part_id) && <SavingDot />}
                       <div className="mono" style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>{line.counted_qty}</div>
                       <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', minWidth: 18 }}>{part.unit || 'ea'}</span>
+                      {/* Visible edit affordance (#39) — the whole row already
+                          opened the qty sheet, but cursor:pointer was the only
+                          hint and phones have no cursor. */}
+                      <button type="button" onClick={e => { e.stopPropagation(); setQtySheetLine(line) }} title="Edit count"
+                        style={{ width: 28, height: 28, padding: 0, background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 'var(--r-xs)', cursor: 'pointer', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Icon name="edit" size={13} />
+                      </button>
                     </div>
                   )
                 })}
@@ -702,6 +763,7 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
         <QtyOverrideSheet
           line={qtySheetLine}
           onSave={handleQtySave}
+          onClear={handleClearCount}
           onClose={() => setQtySheetLine(null)}
         />
       )}
@@ -779,7 +841,8 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
               Submit bin "{activeSession.location?.name}"?
             </div>
             <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 12 }}>
-              You're locking in these counts. This bin can't be edited after submit unless the run is reopened.
+              You're locking in these counts. If you spot a mistake after submitting, you can
+              reopen this bin from the bin list — but only until the run is ended; after that the counts are final.
               Variances reconcile at end-of-run — no stock changes happen yet.
             </div>
 
@@ -905,12 +968,17 @@ export default function CountRunScreen({ run: initialRun, onExit, initialBinId =
 // Bottom sheet for entering an exact count (a stack you didn't scan one-by-
 // one, or adjusting a found row). Big steppers for one-handed use. Saves on
 // part_id so it works for optimistic/temp rows too.
-function QtyOverrideSheet({ line, onSave, onClose }) {
+function QtyOverrideSheet({ line, onSave, onClear, onClose }) {
   const part = line.part || {}
   const [val, setVal] = useState(line.counted_qty == null ? '' : String(line.counted_qty))
   useBackClose(1, onClose)
   const num = val === '' ? 0 : Number(val)
   const stepper = { width: 52, height: 52, padding: 0, fontSize: 24, fontWeight: 700, flexShrink: 0 }
+  // Un-count is only meaningful for an EXPECTED line that already has a
+  // count — it restores the row to "Still missing" (#39). Unexpected lines
+  // are removed via the ✕ on their row instead; uncounted lines have
+  // nothing to clear.
+  const canClear = !!onClear && line.counted_qty != null && Number(line.expected_qty) !== 0
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="overlay-sheet" style={{ maxWidth: 380 }}>
@@ -930,9 +998,23 @@ function QtyOverrideSheet({ line, onSave, onClose }) {
           />
           <button className="btn btn-ghost" style={stepper} onClick={() => setVal(String(num + 1))}>+</button>
         </div>
-        <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', textAlign: 'center', marginBottom: 18 }}>
+        <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', textAlign: 'center', marginBottom: canClear ? 10 : 18 }}>
           {part.unit || 'ea'} found
         </div>
+        {canClear && (
+          <button
+            type="button"
+            onClick={() => onClear(line)}
+            style={{
+              display: 'block', margin: '0 auto 14px',
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--muted)', fontSize: 'var(--fs-xs)', fontWeight: 600,
+              textDecoration: 'underline', padding: 4,
+            }}
+          >
+            Clear count — mark as not counted yet
+          </button>
+        )}
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
           <button
@@ -971,7 +1053,7 @@ function LastScannedCard({ data }) {
 // (still need attention, resumable) stand apart from Submitted bins
 // (locked / done). Submitted group auto-collapses past 3 entries so the
 // screen stays tight as the run grows.
-function BinsCountedList({ sessions, onResume }) {
+function BinsCountedList({ sessions, onResume, onReopen, busy }) {
   const inProgress = sessions.filter(s => s.status === 'in_progress')
   const submitted = sessions.filter(s => s.status === 'submitted')
   const [showAllSubmitted, setShowAllSubmitted] = useState(false)
@@ -1025,6 +1107,20 @@ function BinsCountedList({ sessions, onResume }) {
               <div style={{ flex: 1, fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
                 {s.location?.name || s.location_id}
               </div>
+              {/* #39 — corrections after a premature/false submit. Only valid
+                  while the run itself is still open (this screen only renders
+                  pre-end, so that's always true here); the RPC re-checks. */}
+              {onReopen && (
+                <button
+                  onClick={() => onReopen(s)}
+                  disabled={busy}
+                  className="btn btn-ghost"
+                  title="Unlock this bin to fix its counts, then submit it again"
+                  style={{ padding: '4px 10px', fontSize: 'var(--fs-xs)' }}
+                >
+                  Reopen
+                </button>
+              )}
             </div>
           ))}
           {hiddenCount > 0 && (
@@ -1109,7 +1205,7 @@ function BinPickerSheet({ bins, statusByBinId = {}, onPick, onClose }) {
     const isInProgress = status === 'in_progress'
     return (
       <button key={b.id} onClick={() => { if (!isSubmitted) onPick(b) }} disabled={isSubmitted}
-        title={isSubmitted ? 'Already submitted in this run' : ''}
+        title={isSubmitted ? 'Already submitted — reopen it from the bin list on the main screen' : ''}
         style={{
           display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
           padding: '10px 12px', marginBottom: 4,
