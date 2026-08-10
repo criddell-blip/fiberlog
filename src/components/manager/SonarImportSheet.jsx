@@ -18,6 +18,7 @@ import {
   Section, MappingRow, StatusTag, StatusBadge, selectStyle,
   SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
 } from './importShared'
+import { applyAccountInheritance, groupRowsByAccount } from '../../lib/accountInheritance'
 import PartSearch from '../crew/workspace/PartSearch'
 import BulkSonarProjectsSheet from './BulkSonarProjectsSheet'
 import { useBackClose } from '../../lib/backStack'
@@ -456,7 +457,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
 
   const resolved = useMemo(() => {
     if (!dedupedRows) return []
-    return dedupedRows.map((entry, idx) => {
+    const rows = dedupedRows.map((entry, idx) => {
       const row = entry.row
       const sonarLoc = row['Previous Inventory Location'] || ''
       const sonarModel = row['Model | Display Name'] || ''
@@ -586,6 +587,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       }
       return {
         idx,
+        accountId,
         date: row['Date Time'] || '',
         customer: row['Current Assignee'] || '',
         city,
@@ -607,7 +609,14 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         status,
       }
     })
+    // Second pass: 'ask' rows (GigaSpire adapters etc.) adopt the
+    // destination their same-account siblings resolved to — see
+    // lib/accountInheritance.js for the rules.
+    return applyAccountInheritance(rows)
   }, [dedupedRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, phases, effectiveCityMap, effectiveProjectMap, effectiveSourceMap, rowDest, rowSource, pendingPartRouting, alreadyImportedItemIds])
+
+  // Preview-table order only — apply/stats keep working off `resolved`.
+  const displayRows = useMemo(() => groupRowsByAccount(resolved), [resolved])
 
   const stats = useMemo(() => {
     if (resolved.length === 0) return null
@@ -1070,16 +1079,23 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {resolved.map(r => {
+                    {displayRows.map((r, di) => {
                       const isExcluded = excluded.has(r.idx)
                       const isReady = r.status === 'ready'
-                      const needsPicker = r.status === 'ask' || r.status === 'city-unmapped' || r.status === 'project-unmapped' || r.status === 'unresolved'
+                      // Inherited rows keep the picker as an escape hatch —
+                      // a rowDest pick outranks inheritance on recompute.
+                      const needsPicker = r.status === 'ask' || r.status === 'city-unmapped' || r.status === 'project-unmapped' || r.status === 'unresolved' || r.inheritedFromAccount
+                      // Divider where the account group changes, so an
+                      // account's items read as one cluster.
+                      const prev = displayRows[di - 1]
+                      const newGroup = di > 0 && (r.accountId || `row-${r.idx}`) !== (prev.accountId || `row-${prev.idx}`)
                       return (
                         <tr key={r.idx} style={{
                           background: isExcluded
                             ? 'var(--gray-lt)'
                             : isReady ? 'transparent' : 'var(--amber-lt)',
                           opacity: isExcluded ? 0.45 : 1,
+                          borderTop: newGroup ? '2px solid var(--border2)' : undefined,
                         }}>
                           <td style={tdStyle({ textAlign: 'center' })}>
                             {isReady && (
@@ -1134,16 +1150,21 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                           </td>
                           <td style={tdStyle()}>
                             {needsPicker ? (
-                              <select
-                                value={rowDest[r.idx] || ''}
-                                onChange={e => setRowDestination(r.idx, e.target.value)}
-                                style={{ ...selectStyle(), minWidth: 140 }}
-                              >
-                                <option value="">— pick bucket —</option>
-                                {buckets.map(b => (
-                                  <option key={b.id} value={b.id}>{b.name}</option>
-                                ))}
-                              </select>
+                              <>
+                                <select
+                                  value={rowDest[r.idx] || (r.inheritedFromAccount ? r.destId : '') || ''}
+                                  onChange={e => setRowDestination(r.idx, e.target.value)}
+                                  style={{ ...selectStyle(), minWidth: 140 }}
+                                >
+                                  <option value="">— pick bucket —</option>
+                                  {buckets.map(b => (
+                                    <option key={b.id} value={b.id}>{b.name}</option>
+                                  ))}
+                                </select>
+                                {r.inheritedFromAccount && !rowDest[r.idx] && (
+                                  <div style={{ fontSize: 10, color: 'var(--hint)', marginTop: 2 }}>{r.destReason}</div>
+                                )}
+                              </>
                             ) : r.destName ? (
                               <div>
                                 <div style={{ fontWeight: 600 }}>{r.destName}</div>
