@@ -489,6 +489,9 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       let destId = null
       let destReason = null  // human-readable explanation
       let status = 'ready'
+      // Set when the wireless part policy trumped a tagged Sonar project —
+      // suppresses the fiber phase tag so Sage cost-centers stay clean.
+      let policyOverrodeProject = false
 
       // Already imported in a prior delivery — skip.
       if (isAlreadyImported) {
@@ -514,6 +517,23 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       else if (rowDest[idx]) {
         destId = rowDest[idx]
         destReason = 'manual pick'
+      }
+      // An explicit wireless part policy (gigwave / fixed-wireless) beats the
+      // Sonar project tag: a CBRS radio or Wave unit is wireless consumption
+      // no matter which project dispatch put on the ticket. Without this,
+      // "West Mountain Fiber"-tagged wireless installs were landing in the
+      // fiber BEAD consumption ledger (reclassed Aug 2026).
+      else if (routing === 'gigwave' || routing === 'none') {
+        const bucketName = routing === 'gigwave' ? 'Gigwave' : 'Fixed Wireless'
+        const b = buckets.find(b => b.name === bucketName)
+        if (b) {
+          destId = b.id
+          destReason = `policy: ${bucketName.toLowerCase()}` +
+            (sonarProject ? ` (overrides Sonar project: ${sonarProject})` : '')
+          if (sonarProject) policyOverrodeProject = true
+        } else {
+          status = routing === 'gigwave' ? 'no-gigwave-bucket' : 'no-fixed-wireless-bucket'
+        }
       } else if (sonarProject) {
         // Sonar tagged the project → look up phase. Authoritative when
         // mapped. Bucket is derived from the phase's parent project
@@ -530,23 +550,13 @@ export default function SonarImportSheet({ onClose, onApplied }) {
           status = 'project-unmapped'
         }
       } else {
+        // gigwave/none are handled above (they outrank the project tag);
+        // only region/ask reach this switch. Legacy token 'none' means
+        // "Fixed Wireless catch-all" — the standalone "None" bucket was
+        // retired and Fixed Wireless took over everything it routed. (Token
+        // kept to avoid a sonar_routing CHECK migration; see
+        // SONAR_ROUTING_OPTIONS in lib/inventory.js.)
         switch (routing) {
-          case 'gigwave': {
-            const b = buckets.find(b => b.name === 'Gigwave')
-            if (b) { destId = b.id; destReason = 'policy: gigwave' }
-            else status = 'no-gigwave-bucket'
-            break
-          }
-          case 'none': {
-            // Legacy token 'none' now means "Fixed Wireless catch-all" — the
-            // standalone "None" bucket was retired and Fixed Wireless took
-            // over everything it routed. (Token kept to avoid a sonar_routing
-            // CHECK migration; see SONAR_ROUTING_OPTIONS in lib/inventory.js.)
-            const b = buckets.find(b => b.name === 'Fixed Wireless')
-            if (b) { destId = b.id; destReason = 'policy: fixed wireless' }
-            else status = 'no-fixed-wireless-bucket'
-            break
-          }
           case 'region': {
             if (!city) status = 'no-city'
             else {
@@ -567,9 +577,11 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       const destBucket = destId ? buckets.find(b => b.id === destId) : null
       // Phase tag follows the resolved phase (when project-routing path
       // was taken); falls back to the phase mapped to the project the
-      // manual override picked, or NULL.
+      // manual override picked, or NULL. Skipped when the wireless part
+      // policy overrode the project tag — a movement into the Gigwave /
+      // Fixed Wireless bucket must not roll up under a fiber phase in Sage.
       let phaseTagId = null
-      if (sonarProject) {
+      if (sonarProject && !policyOverrodeProject) {
         phaseTagId = effectiveProjectMap.get(sonarProject.toUpperCase()) || null
       }
       return {
