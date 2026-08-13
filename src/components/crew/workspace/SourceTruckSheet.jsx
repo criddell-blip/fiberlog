@@ -93,7 +93,9 @@ export default function SourceTruckSheet({ part, current, myTruck, trucks, crewT
   }
 
   return (
-    <div className="overlay open" style={{ zIndex: 120 }} onClick={e => e.target === e.currentTarget && onClose()}>
+    // Shares .overlay's z-index — stacks over the summary sheet by DOM order
+    // (rendered after it in TaskWorkspace).
+    <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="overlay-sheet" style={{ maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 2, flexShrink: 0 }}>
           {t('pulledFromWhich', lang).replace('{part}', part.name)}

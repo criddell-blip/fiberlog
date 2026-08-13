@@ -12,6 +12,7 @@ import { t } from '../../lib/i18n'
 import { useBackClose } from '../../lib/backStack'
 import PartSearch from './workspace/PartSearch'
 import SourceTruckSheet from './workspace/SourceTruckSheet'
+import TruckStockSheet from './workspace/TruckStockSheet'
 import PassdownList, { fmtWhen } from './PassdownList'
 import Icon from '../shared/Icon'
 
@@ -79,6 +80,8 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
   const [partSources, setPartSources] = useState({})
   // { key, part:{id,name,unit}, current } while the picker sheet is open.
   const [sourceSheet, setSourceSheet] = useState(null)
+  // Truck-stock-first add browser (Phase 2b) — the primary add path.
+  const [showAddSheet, setShowAddSheet] = useState(false)
   // Lazy-loaded when the submit sheet first opens: the caller's own pull
   // location + every active assigned truck / group (for the picker list).
   const [truckData, setTruckData] = useState(null)
@@ -1185,27 +1188,17 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
               ))}
             </div>
 
+            {/* Stock-first add (Phase 2b): browse what's actually on a truck.
+                The catalog search survives as the fallback link inside the
+                sheet — the browser only opens once the truck list is loaded
+                (the effect above fires when this summary sheet opens). */}
             <button
-              onClick={() => setShowPartSearch(true)}
+              onClick={() => truckData && setShowAddSheet(true)}
               className="add-dashed"
-              style={{ padding: 10, marginBottom: 14, fontSize: 'var(--fs-base)' }}
+              style={{ padding: 10, marginBottom: 14, fontSize: 'var(--fs-base)', opacity: truckData ? 1 : 0.6 }}
             >
-              {t('addPartNotInList', lang)}
+              {t('addPartsUsed', lang)}
             </button>
-            {showPartSearch && (
-              <PartSearch
-                onSelect={p => {
-                  // Merge only into the untagged ("my truck") line — a line
-                  // tagged to another truck is a different line now.
-                  setExtraParts(prev => prev.some(ep => ep.id === p.id && !ep.sourceLocationId)
-                    ? prev.map(ep => (ep.id === p.id && !ep.sourceLocationId) ? { ...ep, qty: ep.qty + 1 } : ep)
-                    : [...prev, { id: p.id, name: p.name, unit: p.unit || 'ea', qty: 1, sourceLocationId: null }])
-                  setShowPartSearch(false)
-                }}
-                onClose={() => setShowPartSearch(false)}
-              />
-            )}
-
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>{t('hoursWorked', lang)}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1248,9 +1241,31 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
         </div>
       )}
 
-      {/* Per-line source truck picker — nested over the summary sheet the
-          same way PartSearch is. Registered Back-first by the coordinator's
-          activation ordering. */}
+      {/* Truck-stock-first add browser — nested over the summary sheet.
+          onAdd keeps the sheet open (add several parts in one visit); a
+          repeat add of the same (part, truck) bumps that line's qty. */}
+      {showAddSheet && truckData && (
+        <TruckStockSheet
+          myTruck={truckData.myTruck}
+          trucks={truckData.trucks}
+          crewType={currentUser?.crew_type}
+          lang={lang}
+          extraParts={extraParts}
+          onAdd={(p, src) => {
+            setExtraParts(prev => prev.some(ep => ep.id === p.id && (ep.sourceLocationId || null) === src)
+              ? prev.map(ep => (ep.id === p.id && (ep.sourceLocationId || null) === src) ? { ...ep, qty: ep.qty + 1 } : ep)
+              : [...prev, { id: p.id, name: p.name, unit: p.unit, qty: 1, sourceLocationId: src }])
+            showToast(src
+              ? t('sourceTaggedToast', lang).replace('{name}', sourceLabel(src))
+              : t('addedWord', lang))
+          }}
+          onCatalog={() => setShowPartSearch(true)}
+          onClose={() => setShowAddSheet(false)}
+        />
+      )}
+
+      {/* Per-line source truck picker — nested over the summary sheet.
+          Registered Back-first by the coordinator's activation ordering. */}
       {sourceSheet && truckData && (
         <SourceTruckSheet
           part={sourceSheet.part}
@@ -1261,6 +1276,23 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
           lang={lang}
           onPick={pickSource}
           onClose={() => setSourceSheet(null)}
+        />
+      )}
+
+      {/* Catalog-search fallback — rendered LAST so it stacks over the stock
+          browser when opened from its "search the full catalog" link (all
+          overlays share z-index 100; DOM order decides). */}
+      {showPartSearch && (
+        <PartSearch
+          onSelect={p => {
+            // Merge only into the untagged ("my truck") line — a line
+            // tagged to another truck is a different line now.
+            setExtraParts(prev => prev.some(ep => ep.id === p.id && !ep.sourceLocationId)
+              ? prev.map(ep => (ep.id === p.id && !ep.sourceLocationId) ? { ...ep, qty: ep.qty + 1 } : ep)
+              : [...prev, { id: p.id, name: p.name, unit: p.unit || 'ea', qty: 1, sourceLocationId: null }])
+            setShowPartSearch(false)
+          }}
+          onClose={() => setShowPartSearch(false)}
         />
       )}
     </div>
