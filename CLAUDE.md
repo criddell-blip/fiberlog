@@ -37,88 +37,25 @@ We can't integrate directly with Sonar (CRM) or Sage (accounting). The strategy 
 
 ## Infrastructure crew — sites shell
 
-Infrastructure crew gets a **sites-shaped shell** — same overall flow as fiber crews (sidebar tree → task list → workspace → daily passdown), but the middle layer is **sites** instead of phases. A tower / business install / MDU closet is one site; tasks are the work units against it.
+Infra crew (`crew_type = 'infrastructure'`) gets a sites-shaped shell: `App.jsx` routes them to `InfraCrewApp` (project → **site** → task → daily passdown, components under `src/components/crew/infra/`) instead of `CrewApp`; every other crew_type is untouched. Tasks anchor on `tasks.site_id` with `phase_id` NULL (CHECK `tasks_anchor_present` requires one of the two), and `approve_submission` resolves the deduction bucket via override → phase's project → **site's project**, so infra approvals deduct cleanly; phase actuals never increment for infra (no site-actuals concept). Replaces infra dual-logging in Sonar once onboarding finishes (remaining: add infra users, curate `assemblies.crew_type = 'infrastructure'` kits).
 
-**Why a separate shell instead of reusing phases:** Phases work for fiber because each region has a handful of phases that span long stretches of work. Infra has ~150 active sites — modeling each as a phase would bury the actual work in a 150-deep phase list per project. Sites are the natural unit; the schema and UI now reflect that.
-
-**Routing:**
-- `App.jsx` checks `currentUser.crew_type === 'infrastructure'` and renders `InfraCrewApp` instead of `CrewApp`. Every other crew_type (aerial / underground / splice / drop / locator / contractor / install) routes to the existing `CrewApp` unchanged — zero blast radius for fiber crews.
-
-**Schema:**
-- `sites` table — name, type (`wireless` | `fiber`), project_id, address, status. 198 rows imported May 2026.
-- `tasks.site_id` — nullable FK to sites. Infra tasks set it; fiber tasks leave it NULL.
-- `tasks.phase_id` — was NOT NULL, now nullable. Infra tasks have site_id with phase_id NULL.
-- CHECK `tasks_anchor_present` — `phase_id IS NOT NULL OR site_id IS NOT NULL`. Every task must be anchored to one or the other.
-
-**Components (under `src/components/crew/infra/`):**
-- `InfraCrewApp.jsx` — entry point. Mirrors CrewApp's structure (wide + narrow layouts, sign-out, MyStock entry). Loads `getInfraTree()` for the projects-with-sites-with-tasks shape; runs its own realtime subscription on tasks (the global one in AppContext updates the fiber tree only).
-- `SitesList.jsx` — middle layer. Searchable, type-filterable (wireless / fiber pills) list of sites for a project.
-- `SiteTaskList.jsx` — leaf list of tasks under a site + "New task" overlay. Infra-specific job types: maintenance / build / swap / audit / emergency.
-- `TaskWorkspace.jsx` (reused) — the existing fiber workspace is shimmed with `phase={{ id: site.id, name: site.name }}`. It only reads `phase.name` (for display) and `phase.id` (for `setTaskLocal`, a latency-hint that no-ops harmlessly when the fiber tree doesn't contain the task). The tab strip is crew-type-aware: fiber crews see the 4-tab fiber strip (aerial / footage / splice / underground); infra users see a single "Infrastructure" tab backed by `assemblies.crew_type = 'infrastructure'`. Owner authors infra kits in `AssemblyEditor` (manager → Assemblies); they appear immediately in Chad's workspace.
-
-**Materials flow:**
-- Crew loads parts → truck → uses on task → submits passdown → manager approves → materials auto-deduct from truck to project bucket.
-- `approve_submission` RPC resolves the destination bucket via a three-tier project lookup:
-  1. `submission.project_id_override` (manual override from the workspace picker)
-  2. `phases.project_id` (fiber path — derive from the task's phase)
-  3. `sites.project_id` (infra path — derive from the task's site)
-- Phase actuals still increment only when `phase_id IS NOT NULL` (no "site actuals" concept). The crew_type guard is `{fiber_construction, field_service, infrastructure}` (plus legacy `aerial`/`underground`/`splice`/`fiber_tech` still in the IN-list for back-compat).
-- All 7 infra projects (Fixed Wireless, Gigwave, Heber, Ogden Valley, Park City, Wasatch Front, West Mountain) have project buckets. Wasatch Front + West Mountain were backfilled when the auto-deduct path was wired — they pre-dated `trg_ensure_project_job_site` and never got auto-created. The backfill migration is idempotent so it's safe to rerun.
-
-**Per-site attributes the owner cares about:** name / type / category / address / status. Tower height, power source, etc. are intentionally NOT stored.
-
-**Onboarding remaining:**
-1. Add infra users via Users admin with `crew_type = 'infrastructure'` (each auto-gets a personal truck via `trg_ensure_crew_truck`). Chad Sperry done; rest of infra crew to follow.
-2. Fix the 1 unmapped site (Prestige II / "Fiber - Mdu") — currently `project_id IS NULL`.
-3. Sites admin shipped — embedded in ProjectManager's project detail view. Add / edit (rename, change type, address, notes) / decommission (soft delete via status='decommissioned'). Search + type pills render when ≥8 sites. Per-site task count badges. Decommission confirm hints to log physical equipment recovery as a PO with a "Site decommissioned" note. No hard-delete; sites are FK targets for tasks. The "Tasks at site" drilldown also has **"+ Add task"** (July 2026) — until then `addInfraTask`'s only caller was `SiteTaskList` inside the crew shell, so putting work on an infra site's board meant asking a crew member to create it from their phone. Job-type ids must stay in sync with `SiteTaskList.jsx`.
-4. Curate infra assemblies (`assemblies.crew_type = 'infrastructure'`) so the TaskWorkspace tabs are useful instead of showing fiber kits.
-
-**What this replaces:** Infrastructure crew currently dual-logs in FiberLog AND Sonar. Once switched, Sonar entry for infra work stops. Sonar stays only for field tech scheduling.
-
-**Already in place:**
-- `crew_type = 'infrastructure'` is a valid value (CHECK on `public.users.crew_type`).
-- Project bucket auto-creation via `trg_ensure_project_job_site` works for Fixed Wireless + Gigwave + regional projects.
-- Per-user + crew_type × department permissions already cover infrastructure.
-- Receive PO, Reconcile, Sonar import flows all work the same for any crew.
+> Full reference — schema, components, materials flow, sites admin, onboarding checklist: [docs/INFRA_SHELL.md](docs/INFRA_SHELL.md)
 
 ---
 
 ## Working-manager toggle (manager ↔ crew mode)
 
-Some managers are also field workers. They needed to log their own day's work without juggling two accounts. The toggle lets a single staff user (`role = owner | manager`) flip into the crew shell to log work, then flip back.
+Staff (`role = owner | manager`) with a field `crew_type` can flip into the crew shell to log their own day's work — `viewMode` (`'manager' | 'crew'`) in `AppContext`, persisted to `localStorage.fiberlog_view_mode` (reset on logout), routed in `App.jsx` through `canActAsCrew()` from `src/lib/access.js`; `VALID_FIELD_CREW_TYPES` lives in `src/lib/crewTypes.js` only. **Same identity, same truck, same audit trail** — no account sprawl. Caveats: auto-deduct fires only for `crew_type ∈ {fiber_construction, field_service, infrastructure}` (+ legacy values), and crew users (`role = 'crew'`) never see any of this — the toggle is staff-only.
 
-**Where it lives:**
-- `viewMode` (`'manager' | 'crew'`) in `AppContext`, persisted to `localStorage.fiberlog_view_mode`. Reset to `'manager'` on logout so the next user doesn't inherit a stale preference. Exposed as `enterCrewMode()` + `exitCrewMode()` helpers.
-- `App.jsx` router: when `isStaff && viewMode === 'crew' && canActAsCrew(currentUser)`, routes to `CrewApp` (or `InfraCrewApp` if `crew_type === 'infrastructure'`) instead of `ManagerApp`. `VALID_FIELD_CREW_TYPES` (`fiber_construction | field_service | install | infrastructure`) lives in **`src/lib/crewTypes.js` only** — it is no longer duplicated in `App.jsx`/`ManagerApp.jsx`; both go through `canActAsCrew()`.
-- **Owner can also be a field worker (July 2026).** `ACCESS_TYPES.owner` is `needsCrew: true`, so the Users admin shows an *optional* crew-type picker for owners (and working managers) — `accessTypeToFields` does `crewType || null`, so "None" is a valid save. Before this, Owner forced `crew_type = NULL` on every save, so `canActAsCrew()` could never be satisfied for an owner and the crew-mode pill was permanently disabled with **no admin escape hatch** — the exact trap the owner hit. The staff picker deliberately omits `contractor` (a legal `crew_type` that `canActAsCrew` rejects, which silently produced staff who couldn't enter crew mode); it's still offered for the `crew`/`contractor` access types and in the bulk-assign filter.
-- ManagerApp sidebar: `🔧 Crew mode` pill — **one render site** (`ConsoleSidebar`, shared by the desktop rail and the phone drawer; the narrow top bar has only the hamburger). It's a two-part pill: the body enters crew mode using the crew_type on the row, the chevron opens an **"Enter crew mode as…"** sheet that persists a different `crew_type` and enters in one action (`updateUserMetadata` → `await refreshUsers()` → `enterCrewMode()`; the refresh re-points `currentUser`, which is what makes `App.jsx` re-route — no page reload). When `crew_type` is NULL the whole pill opens that sheet instead of sitting disabled. Warehouse/accounting still get the plain disabled pill — `canActAsCrew` rejects them on *scope*, so a picker would only let them write a value they could never use. The sheet renders at `zIndex: 300` because the phone drawer is `200` and `.overlay` is `100`.
-- **Two known gaps, deliberately unfixed:** `crew_activity_today` filters `u.role = 'crew'`, so an owner/manager acting as crew never appears on the Crew Status board (the one-line fix would also surface every working manager + contractor there). And `ensure_crew_truck()` fires `ON INSERT OR UPDATE OF role, is_active` only, so a user who gains a `crew_type` *after* creation gets no auto-truck — pre-existing for working managers.
-- CrewApp + InfraCrewApp sidebar footers + SignOutConfirm overlays: `⚙️ Manager` pill (only rendered when `isStaffActingAsCrew`). User chip subtitle picks up an "· acting as crew" callout in teal so the manager remembers which mode they're in.
-
-**Same identity, same truck.** No account sprawl. All inventory, audit trail, and approval flows use the same `user_id`.
-
-**Auto-deduct caveat:** `approve_submission` still requires `crew_type ∈ {fiber_construction, field_service, infrastructure}` (plus legacy `aerial`/`underground`/`splice`/`fiber_tech`) for the truck → project bucket transfer to fire. A manager with `crew_type = 'install'` or `'contractor'` (or legacy `'drop'`/`'locator'`) can log work in crew mode but their approvals won't auto-deduct. Documented; not enforced in the router because the manager might legitimately want to log non-deducting work.
-
-**What this is NOT:** a unified app shell. Crew users (`role = 'crew'`) never see the manager portal and never interact with `viewMode`. The toggle is staff-only.
+> Full reference — pill/sheet mechanics, owner-as-field-worker, the two known deliberate gaps: [docs/WORKING_MANAGER.md](docs/WORKING_MANAGER.md)
 
 ---
 
 ## Field tech (backlog — blocked)
 
-**Why backlogged:** Field techs install at customer addresses. Sonar tracks customers but does not currently tag each customer with which fiber region (Heber / Park City / etc.) they fall under. Without that, when we import Sonar's daily report, we can't reliably route consumed materials to the right project — and routing to a generic "Wave" or "FW" bucket forces a manual reconciliation step downstream that defeats the purpose.
+Field techs keep logging installs in Sonar until Sonar can tag each customer job with its fiber region (polygon → address mapping, in progress on Sonar's side). When it lands: dispatcher tags the project on the Sonar job → daily CSV → `SonarImportSheet` routes materials per project → manager approves → Sage export covers field tech consumption too. Until then their material consumption isn't tracked in FiberLog (manual Sage entry continues).
 
-**Unblocks when:** Sonar gets polygon-to-customer address mapping (in progress — tied to BEAD/reconnect address requirements). The polygons already exist from the developer side; they haven't propagated to Sonar yet.
-
-**Approach when unblocked (Option 3 — dispatcher tags at job creation):**
-- Dispatcher (or system, once polygons land) adds a `project` field to Sonar jobs at scheduling time
-- Sonar daily CSV export includes that field
-- FiberLog's Sonar import sheet (already shipped — `SonarImportSheet.jsx`) reads the `project` field and ties each imported submission to that project
-- Manager approves the batch → materials auto-deduct truck → project
-- Sage export includes field tech consumption alongside fiber + infrastructure, all keyed by project
-
-**Why Option 3 over an address lookup table:** A FiberLog-maintained address → project lookup is another manual process. The polygon data exists at the developer level and is moving toward Sonar; building our own lookup would compete with the real source of truth.
-
-**Until then:** Field techs continue logging in Sonar. Their material consumption isn't tracked in FiberLog. Manual Sage entry for field tech materials continues (status quo, pending the unblock).
+> Full rationale, the chosen Option 3, and the rejected address-lookup alternative: [docs/FIELD_TECH.md](docs/FIELD_TECH.md)
 
 ---
 
@@ -127,8 +64,7 @@ Some managers are also field workers. They needed to log their own day's work wi
 - **Frontend:** React 18 + Vite + plain JSX (no TypeScript)
 - **Backend:** Supabase (Postgres + Auth + Realtime + Edge Functions)
 - **Styling:** Inline styles + CSS variables (no Tailwind, no CSS modules). Theme tokens + shared classes live in `src/styles/global.css` (imported from `App.jsx`).
-- **Deployment:** `npm run deploy` pushes to `gh-pages` branch
-- **Local dev:** `npm run dev` (Vite default port 5173)
+- Dev/build/test/deploy commands are the standard npm scripts in `package.json` (`npm run deploy` ships to GitHub Pages — see the deploy safety notes before using it).
 
 ### Important IDs / URLs
 
@@ -373,12 +309,7 @@ All `SECURITY DEFINER`, all with `SET search_path = public, pg_temp`. EXECUTE on
 
 `npm test` (one-shot) or `npm run test:watch`. Vitest configured via `package.json` only — no separate config file.
 
-**79 tests across 4 suites** (re-pointed July 2026 — the old `calculations.js` + its 34 tests were DELETED after the audit proved the module unreachable from the app; the suite was guarding dead code). Note `npm test` from the repo root also scans `.claude/worktrees/*`, so a checkout with sibling worktrees reports a multiple of these numbers — the real count is what a clean clone runs:
-- `src/lib/inventory.test.js` — `validateMovement`'s full endpoint matrix (mirrors the DB `movement_endpoints_valid` CHECK), `buildSageCsv` (18-column order, movement-type → Sage mapping, effective dates, CSV escaping), `isExportableMovement` exclusion rules, `movementEffectiveDate`.
-- `src/lib/shared.test.js` — `mergePartsById` (the submit-path dedupe) and `matchesAllTokens` (multi-word search semantics).
-- `src/lib/useCsvImport.test.js` — `extractMarkerKeys` (the double-import guard's marker parser, incl. `sonar` vs `sonar_jobs` prefix isolation).
-- `src/lib/footageLines.test.js` — the multi-type footage breakdown: `linesToParts` (one SKU per picked type, unmapped/zero/assembly-shadowed skips, two-types-one-SKU), the `counts === sum(lines)` invariant across an edit sequence, and `migrateLegacyFootage` (legacy scalar drafts → lines).
-- No component tests yet (no jsdom/testing-library in devDeps). The crew workflow + manager sheets are smoke-tested via QA persona runs (see `qa-harness/README.md`) and manually on the deployed app.
+The suites live in `src/lib/*.test.js` — every tested module sits on a money path (movement validation, Sage CSV, submit-merge, import markers, footage→SKU lines); read the test files themselves for what each covers. Two things the files can't tell you: `npm test` from the repo root also scans `.claude/worktrees/*`, so a checkout with sibling worktrees reports a multiple of the real count (a clean clone is the truth); and there are deliberately no component tests (no jsdom/testing-library in devDeps) — the crew workflow + manager sheets are smoke-tested via QA persona runs (see `qa-harness/README.md`) and manually on the deployed app.
 
 ---
 
@@ -387,7 +318,7 @@ All `SECURITY DEFINER`, all with `SET search_path = public, pg_temp`. EXECUTE on
 ### Code style
 - Functional components with hooks. No class components.
 - Heavy inline styles using CSS variables. No Tailwind, no CSS-in-JS libraries.
-- Theme tokens (post-Console redesign, emerald-primary): surfaces `var(--bg)`, `var(--surface)`, `var(--surface2)`, `var(--sidebar)`, `var(--row-divider)`, `var(--text)`, `var(--muted)`, `var(--hint)`, `var(--border)`, `var(--border2)`; the primary is `var(--accent)` / `--accent-dk` / `--accent-lt` / `--accent-mid` (the legacy `--orange*` / `--teal*` tokens are kept as aliases of `--accent*`, so old code still renders correctly); hue families `--amber*`, `--blue*`, `--red*`, `--gray*`, `--purple*`; semantic roles `--accent-bg/fg/border`, `--success-*`, `--warning-*`, `--danger-*`, `--info-*`. Type scale `--fs-xs…--fs-2xl`, weights `--fw-medium…--fw-black`. Radius tokens: `var(--r)`, `var(--r-sm)`, `var(--r-xs)`, `var(--r-pill)`. All defined in `src/styles/global.css` (light `:root` + dormant `[data-theme="dark"]`).
+- Theme tokens: ALL colors/sizes/radii come from the CSS variables defined in `src/styles/global.css` (light `:root` + dormant `[data-theme="dark"]`) — read that file for the palette. Two non-obvious facts: the legacy `--orange*` / `--teal*` tokens are kept as live **aliases** of `--accent*` (post-Console emerald redesign), so old code still renders correctly and new code may use either; and every new color must be a token, never a hex literal, or the dormant dark theme breaks the day it ships.
 - Comments explain **why**, not what. Dense at decision points, sparse for obvious code.
 - Helper components/functions go at the bottom of the file (e.g., `pillStyle`, `BinFormSheet` at end of `InventoryLocationsTab.jsx`).
 - Section dividers: `// ─── SECTION NAME ────────────────...`
@@ -436,20 +367,6 @@ For any input that's NOT meant to be filled by the browser's saved-credentials l
 - `localStorage.fiberlog_counts_<taskId>` — offline fallback mirror of the crew workspace tally draft (`TaskWorkspace.jsx`; the primary store is `tasks.working_counts` — localStorage is only read when that query fails).
 - `localStorage.fiberlog_lang` — crew's per-device language override (`'en' | 'es'`). Resolve order in AppContext: this override → `users.language` (manager-set default) → `'en'`. **Deliberately NOT cleared on logout** (a Spanish speaker's phone stays Spanish; the login screen has its own toggle for shared devices). Crew can't write their own `users` row (RLS), so this is the only self-service persistence.
 - `localStorage.fiberlog_expanded_project_<userId>` — which project the crew sidebar auto-expands (last one they opened). Keyed per user so shared devices don't leak; first-ever login starts collapsed. Replaced the old auto-expand-first-project default that opened Heber for everyone.
-
----
-
-## Common commands
-
-```bash
-npm run dev                                    # local dev (port 5173)
-npm run build                                  # production build
-npm run test                                   # run vitest once
-npm run test:watch                             # vitest in watch mode
-npm run deploy                                 # deploy to gh-pages
-npx supabase functions deploy <name>           # deploy an edge function
-npx supabase login                             # auth supabase CLI (first time)
-```
 
 ---
 

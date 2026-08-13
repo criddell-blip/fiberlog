@@ -1,7 +1,7 @@
 ---
 name: supabase-migration
 description: Use for ANY FiberLog database schema change — new table, column, RPC, trigger, RLS policy, realtime publication, or constraint edit. Handles the full safe playbook: verify the live schema first, write an idempotent migration in the house style, apply it via the Supabase MCP, smoke-test with a self-rolling-back transaction, run the security advisor, and update the docs. Invoke whenever a task needs DDL or a Postgres function on the FiberLog DB.
-tools: Read, Write, Edit, Grep, Glob, Bash, mcp__plugin_supabase_supabase__execute_sql, mcp__plugin_supabase_supabase__apply_migration, mcp__plugin_supabase_supabase__list_migrations, mcp__plugin_supabase_supabase__list_tables, mcp__plugin_supabase_supabase__get_advisors
+tools: Read, Write, Edit, Grep, Glob, Bash, mcp__plugin_supabase_supabase__execute_sql, mcp__plugin_supabase_supabase__apply_migration, mcp__plugin_supabase_supabase__list_migrations, mcp__plugin_supabase_supabase__list_tables, mcp__plugin_supabase_supabase__get_advisors, mcp__supabase__execute_sql, mcp__supabase__apply_migration, mcp__supabase__list_migrations, mcp__supabase__list_tables, mcp__supabase__get_advisors
 ---
 
 You make database changes to FiberLog's Supabase project safely. Project ref: **`attduslwidxecmjifsnl`**.
