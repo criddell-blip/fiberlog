@@ -556,6 +556,9 @@ export async function saveEntry(sessionId, userId, taskId, entry) {
       part_id: p.id,
       quantity: p.qty,
       is_extra: p.isExtra || false,
+      // Per-line source truck (null = submitter's truck, the default).
+      // save_log_entry validates non-null values are active truck/group.
+      source_location_id: p.sourceLocationId || null,
     }))
 
   const { data, error } = await db.rpc('save_log_entry', {
@@ -690,7 +693,9 @@ export async function getTaskSummary(taskId) {
   if (allEntryIds.length > 0) {
     const { data: parts, error: pErr } = await db
       .from('entry_parts')
-      .select('quantity, part_id, entry_id, parts_catalog ( id, name, unit )')
+      .select(`quantity, part_id, entry_id, source_location_id,
+        parts_catalog ( id, name, unit ),
+        source:inventory_locations ( id, name, assigned_user:users!inventory_locations_assigned_to_fkey ( name ) )`)
       .in('entry_id', allEntryIds)
     if (pErr) throw pErr
     partRows = parts || []
@@ -708,15 +713,25 @@ export async function getTaskSummary(taskId) {
       for (const p of (partsByEntry.get(e.id) || [])) {
         const id = p.parts_catalog?.id || p.part_id
         if (!id) continue
-        if (!totals[id]) {
-          totals[id] = {
+        // Source truck is part of the line identity: the same SKU from two
+        // trucks stays two lines (mirrors mergePartsById + the per-source
+        // deduction in approve_submission). NULL source = submitter's truck.
+        const key = id + '|' + (p.source_location_id || '')
+        if (!totals[key]) {
+          totals[key] = {
             partId: id,
             name: p.parts_catalog?.name || id,
             unit: p.parts_catalog?.unit || 'ea',
             qty: 0,
+            sourceLocationId: p.source_location_id || null,
+            // Trucks display their owner's name everywhere in the app;
+            // groups fall back to the location name.
+            sourceName: p.source_location_id
+              ? (p.source?.assigned_user?.name || p.source?.name || null)
+              : null,
           }
         }
-        totals[id].qty += p.quantity || 0
+        totals[key].qty += p.quantity || 0
       }
     }
     return {

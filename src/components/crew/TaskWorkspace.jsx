@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useApp } from '../../AppContext'
 import { startSession, saveEntry, getTaskSummary, db } from '../../lib/supabase'
-import { getFootageTypePartMap } from '../../lib/inventory'
+import { getFootageTypePartMap, getLocations, getMyTruck, getStockForLocations } from '../../lib/inventory'
 import { FIBER_COUNTS, CONDUIT_SIZES } from '../../lib/footageTypes'
 import { mergePartsById } from '../../lib/shared'
 import {
@@ -11,6 +11,7 @@ import {
 import { t } from '../../lib/i18n'
 import { useBackClose } from '../../lib/backStack'
 import PartSearch from './workspace/PartSearch'
+import SourceTruckSheet from './workspace/SourceTruckSheet'
 import PassdownList, { fmtWhen } from './PassdownList'
 import Icon from '../shared/Icon'
 
@@ -69,6 +70,21 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
   const [partQtyOverrides, setPartQtyOverrides] = useState({})
   const [extraParts, setExtraParts] = useState([])
   const [showPartSearch, setShowPartSearch] = useState(false)
+  // Per-line source truck (Aug 2026). Assembly- and footage-derived rows are
+  // COMPUTED (from tallies / footage lines), so their source overrides live in
+  // this map keyed by row identity: 'asm:<partId>' / 'fp:<srcKey>'. Extra
+  // parts carry `sourceLocationId` inline on each line instead — two adds of
+  // the same SKU from different trucks must stay two lines. Absent/null =
+  // submitter's own truck (nothing stored; approval behavior unchanged).
+  const [partSources, setPartSources] = useState({})
+  // { key, part:{id,name,unit}, current } while the picker sheet is open.
+  const [sourceSheet, setSourceSheet] = useState(null)
+  // Lazy-loaded when the submit sheet first opens: the caller's own pull
+  // location + every active assigned truck / group (for the picker list).
+  const [truckData, setTruckData] = useState(null)
+  // 'loc|part' → qty snapshot across the trucks this draft touches, for the
+  // warn-but-allow over-draw notes. Point-in-time (no realtime on stock).
+  const [stockSnap, setStockSnap] = useState(null)
   // Per-assembly footage TYPE breakdown: { [assemblyId]: [{ type, ft }] } in
   // tap order. Replaces the old scalar fiberCount + one-size-per-slot
   // conduitSizes: a crew pulls 144ct AND 288ct on the same span, and picking
@@ -174,7 +190,9 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     if (draftHasWork) return
     const restored = (flaggedSub.parts || [])
       .filter(p => (p.partId || p.id) && Number(p.qty) > 0)
-      .map(p => ({ id: p.partId || p.id, name: p.name, unit: p.unit || 'ea', qty: Number(p.qty) }))
+      // Carry the source truck through the flag→fix→resubmit loop — dropping
+      // it would silently re-point a crewmate's line at the submitter's truck.
+      .map(p => ({ id: p.partId || p.id, name: p.name, unit: p.unit || 'ea', qty: Number(p.qty), sourceLocationId: p.sourceLocationId || null }))
     if (restored.length > 0) setExtraParts(restored)
     if (typeof flaggedSub.hours_worked === 'number') setHoursWorked(flaggedSub.hours_worked)
     const firstNote = (flaggedSub.notes || []).find(n => String(n || '').trim())
@@ -258,6 +276,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
         if (wc.counts) setCounts(wc.counts)
         if (wc.partQtyOverrides) setPartQtyOverrides(wc.partQtyOverrides)
         if (wc.extraParts) setExtraParts(wc.extraParts)
+        if (wc.partSources) setPartSources(wc.partSources)
         // Draft-shape migration (multi-type footage, July 2026). Drafts written
         // before this shipped carry a scalar `fiberCount` + a one-size-per-slot
         // `conduitSizes`, with the feet living only in `counts`. Crews have open
@@ -324,7 +343,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     saveTimeoutRef.current = setTimeout(async () => {
       const draft = {
-        counts, partQtyOverrides, extraParts, footageLines, note, hoursWorked, projectIdOverride,
+        counts, partQtyOverrides, extraParts, partSources, footageLines, note, hoursWorked, projectIdOverride,
         // Legacy mirror, ONE RELEASE ONLY. Deploys go straight to ~20 live
         // users; a rollback to the previous bundle would read footageLines it
         // doesn't understand and blank every crew's type pick mid-day. Old
@@ -350,7 +369,116 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       }
     }, 800)
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current) }
-  }, [counts, partQtyOverrides, extraParts, footageLines, note, hoursWorked, projectIdOverride, task.id, currentUser?.id, draftLoaded])
+  }, [counts, partQtyOverrides, extraParts, partSources, footageLines, note, hoursWorked, projectIdOverride, task.id, currentUser?.id, draftLoaded])
+
+  // Trucks + own pull location, fetched once when the submit sheet first
+  // opens (the source chips only render there, so nobody pays for this on
+  // plain tally screens). Assigned trucks + groups only — consuming straight
+  // off a warehouse on a passdown would bypass the load→truck flow and its
+  // crew whitelist; the honest record for that is a quick Load first.
+  useEffect(() => {
+    if (!showSummary || truckData) return
+    let cancelled = false
+    Promise.all([getMyTruck(), getLocations()])
+      .then(([mine, locs]) => {
+        if (cancelled) return
+        const trucks = (locs || []).filter(l =>
+          (l.type === 'truck' && l.assigned_to) || l.type === 'group')
+        setTruckData({ myTruck: mine, trucks })
+      })
+      .catch(e => console.warn('Truck list load failed:', e))
+    return () => { cancelled = true }
+  }, [showSummary, truckData])
+
+  // On-hand snapshot across every truck this draft touches, so over-drawn
+  // lines get the amber warn-but-allow note before the crew signs off.
+  useEffect(() => {
+    if (!showSummary || !truckData) return
+    const ids = [...new Set([
+      truckData.myTruck?.id,
+      ...Object.values(partSources),
+      ...extraParts.map(p => p.sourceLocationId),
+    ].filter(Boolean))]
+    if (ids.length === 0) { setStockSnap({}); return }
+    let cancelled = false
+    getStockForLocations(ids)
+      .then(rows => {
+        if (cancelled) return
+        const m = {}
+        for (const r of rows) {
+          const k = r.location_id + '|' + r.part_id
+          m[k] = (m[k] || 0) + Number(r.quantity || 0)
+        }
+        setStockSnap(m)
+      })
+      .catch(e => console.warn('Stock snapshot load failed:', e))
+    return () => { cancelled = true }
+  }, [showSummary, truckData, partSources, extraParts])
+
+  // Display name for a source: trucks show their owner's name (app-wide
+  // convention), groups their location name. '…' while the list loads.
+  function sourceLabel(locId) {
+    if (!locId) return t('myTruckWord', lang)
+    const l = truckData?.trucks?.find(x => x.id === locId)
+    return l ? (l.assigned_user?.name || l.name) : '…'
+  }
+
+  // Amber note text when a line's qty exceeds the on-hand at its source —
+  // warn-but-allow (stock records lag the field; approval is the backstop).
+  function overWarn(partId, unit, sourceId, qty) {
+    if (!stockSnap) return null
+    const locId = sourceId || truckData?.myTruck?.id
+    if (!locId) return null
+    const have = stockSnap[locId + '|' + partId] || 0
+    if (qty <= have) return null
+    return t('overSourceWarn', lang)
+      .replace('{n}', have.toLocaleString())
+      .replace('{unit}', unit || 'ea')
+      .replace('{name}', sourceLabel(sourceId))
+  }
+
+  // The tappable "from" chip on each part row. Neutral/dashed = my truck
+  // (nothing stored); teal = tagged to someone else's truck or a group.
+  function sourceChip(rowKey, part, current) {
+    return (
+      <button
+        onClick={() => truckData && setSourceSheet({ key: rowKey, part, current: current || null })}
+        style={current ? {
+          display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 3,
+          fontSize: 10.5, fontWeight: 700, borderRadius: 'var(--r-pill)',
+          padding: '2px 8px', background: 'var(--teal-lt)',
+          border: '1px solid var(--teal)', color: 'var(--teal-dk)', cursor: 'pointer',
+        } : {
+          display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 3,
+          fontSize: 10.5, fontWeight: 700, borderRadius: 'var(--r-pill)',
+          padding: '2px 8px', background: 'var(--surface2)',
+          border: '1px dashed var(--border2)', color: 'var(--hint)', cursor: 'pointer',
+        }}
+      >
+        <Icon name="truck" size={11} /> {sourceLabel(current)}
+      </button>
+    )
+  }
+
+  function pickSource(locId) {
+    if (!sourceSheet) return
+    const { key } = sourceSheet
+    if (key.startsWith('extra:')) {
+      const idx = Number(key.slice(6))
+      setExtraParts(prev => prev.map((ep, i) => i === idx ? { ...ep, sourceLocationId: locId } : ep))
+    } else {
+      setPartSources(prev => {
+        const next = { ...prev }
+        if (locId) next[key] = locId
+        else delete next[key]
+        return next
+      })
+    }
+    setSourceSheet(null)
+    showToast(locId
+      ? t('sourceTaggedToast', lang).replace('{name}', sourceLabel(locId))
+      : t('sourceMineToast', lang))
+  }
 
   function adjust(id, delta) {
     setCounts(prev => ({ ...prev, [id]: Math.max(0, (prev[id] || 0) + delta) }))
@@ -488,7 +616,14 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       // Merge footage-derived material (cable/conduit) with the assembly +
       // extra parts. Dedup by id summing so a SKU appearing in two sources
       // doesn't write duplicate entry_parts rows.
-      const submitParts = mergePartsById([...allParts, ...footageParts, ...extraParts])
+      // Attach each line's source truck before merging — the merge keys on
+      // (id, source), so the same SKU from two trucks stays two entry_parts
+      // rows and approval books one movement per source truck.
+      const submitParts = mergePartsById([
+        ...allParts.map(p => ({ ...p, sourceLocationId: partSources['asm:' + p.id] || null })),
+        ...footageParts.map(p => ({ ...p, sourceLocationId: partSources['fp:' + p.srcKey] || null })),
+        ...extraParts,
+      ])
       let newEntryId = null
       if (submitParts.length > 0) {
         const newEntry = await saveEntry(sid, currentUser.id, task.id, {
@@ -955,6 +1090,11 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="part-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
                     <div className="part-id">{p.id}</div>
+                    {sourceChip('asm:' + p.id, p, partSources['asm:' + p.id])}
+                    {(() => {
+                      const w = overWarn(p.id, p.unit, partSources['asm:' + p.id], p.qty)
+                      return w ? <div style={{ fontSize: 10.5, color: 'var(--amber)', fontWeight: 600, marginTop: 3 }}>⚠️ {w}</div> : null
+                    })()}
                   </div>
                   <button
                     className="tally-btn tally-sm tally-minus"
@@ -989,14 +1129,23 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                       {p.name} <span className="pill pill-accent pill-sm" style={{ marginLeft: 4 }}>{p.srcType}</span>
                     </div>
                     <div className="part-id">{p.id}</div>
+                    {sourceChip('fp:' + p.srcKey, p, partSources['fp:' + p.srcKey])}
+                    {(() => {
+                      const w = overWarn(p.id, p.unit, partSources['fp:' + p.srcKey], p.qty)
+                      return w ? <div style={{ fontSize: 10.5, color: 'var(--amber)', fontWeight: 600, marginTop: 3 }}>⚠️ {w}</div> : null
+                    })()}
                   </div>
                   <span className="part-qty" style={{ minWidth: 28, textAlign: 'center' }}>{p.qty.toLocaleString()}</span>
                   <span className="part-unit">{p.unit}</span>
                 </div>
               ))}
-              {extraParts.map(p => (
+              {/* Handlers are INDEX-based (not id-based) since the source
+                  became part of a line's identity: the same SKU can appear
+                  twice with different trucks, and id-keyed updates would
+                  step both lines at once. */}
+              {extraParts.map((p, idx) => (
                 <div
-                  key={'extra-'+p.id}
+                  key={'extra-' + p.id + '-' + (p.sourceLocationId || 'mine')}
                   className="parts-row"
                   style={{ gap: 8, background: 'var(--accent-bg)', margin: '0 -12px', padding: '10px 12px' }}
                 >
@@ -1005,25 +1154,30 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                       {p.name} <span className="pill pill-accent pill-sm" style={{ marginLeft: 4 }}>added</span>
                     </div>
                     <div className="part-id">{p.id}</div>
+                    {sourceChip('extra:' + idx, p, p.sourceLocationId)}
+                    {(() => {
+                      const w = overWarn(p.id, p.unit, p.sourceLocationId, p.qty)
+                      return w ? <div style={{ fontSize: 10.5, color: 'var(--amber)', fontWeight: 600, marginTop: 3 }}>⚠️ {w}</div> : null
+                    })()}
                   </div>
                   <button
                     className="tally-btn tally-sm tally-minus"
-                    onClick={() => setExtraParts(prev => prev.map(ep => ep.id === p.id ? { ...ep, qty: Math.max(1, ep.qty - 1) } : ep))}
+                    onClick={() => setExtraParts(prev => prev.map((ep, i) => i === idx ? { ...ep, qty: Math.max(1, ep.qty - 1) } : ep))}
                   >−</button>
                   {/* min 1 mirrors the − button's clamp: an added part is
                       removed with the × on the right, not by typing 0. */}
                   <QtyInput
                     value={p.qty}
                     min={1}
-                    onCommit={n => setExtraParts(prev => prev.map(ep => ep.id === p.id ? { ...ep, qty: n } : ep))}
+                    onCommit={n => setExtraParts(prev => prev.map((ep, i) => i === idx ? { ...ep, qty: n } : ep))}
                   />
                   <button
                     className="tally-btn tally-sm tally-plus"
-                    onClick={() => setExtraParts(prev => prev.map(ep => ep.id === p.id ? { ...ep, qty: ep.qty + 1 } : ep))}
+                    onClick={() => setExtraParts(prev => prev.map((ep, i) => i === idx ? { ...ep, qty: ep.qty + 1 } : ep))}
                   >+</button>
                   <span className="part-unit" style={{ minWidth: 14 }}>{p.unit}</span>
                   <button
-                    onClick={() => setExtraParts(prev => prev.filter(ep => ep.id !== p.id))}
+                    onClick={() => setExtraParts(prev => prev.filter((_, i) => i !== idx))}
                     className="tally-btn tally-sm"
                     style={{ background: 'var(--danger-bg)', color: 'var(--danger-fg)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                   ><Icon name="x" size={14} /></button>
@@ -1041,9 +1195,11 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
             {showPartSearch && (
               <PartSearch
                 onSelect={p => {
-                  setExtraParts(prev => prev.some(ep => ep.id === p.id)
-                    ? prev.map(ep => ep.id === p.id ? { ...ep, qty: ep.qty + 1 } : ep)
-                    : [...prev, { id: p.id, name: p.name, unit: p.unit || 'ea', qty: 1 }])
+                  // Merge only into the untagged ("my truck") line — a line
+                  // tagged to another truck is a different line now.
+                  setExtraParts(prev => prev.some(ep => ep.id === p.id && !ep.sourceLocationId)
+                    ? prev.map(ep => (ep.id === p.id && !ep.sourceLocationId) ? { ...ep, qty: ep.qty + 1 } : ep)
+                    : [...prev, { id: p.id, name: p.name, unit: p.unit || 'ea', qty: 1, sourceLocationId: null }])
                   setShowPartSearch(false)
                 }}
                 onClose={() => setShowPartSearch(false)}
@@ -1090,6 +1246,22 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
             </div>
           </div>
         </div>
+      )}
+
+      {/* Per-line source truck picker — nested over the summary sheet the
+          same way PartSearch is. Registered Back-first by the coordinator's
+          activation ordering. */}
+      {sourceSheet && truckData && (
+        <SourceTruckSheet
+          part={sourceSheet.part}
+          current={sourceSheet.current}
+          myTruck={truckData.myTruck}
+          trucks={truckData.trucks}
+          crewType={currentUser?.crew_type}
+          lang={lang}
+          onPick={pickSource}
+          onClose={() => setSourceSheet(null)}
+        />
       )}
     </div>
   )

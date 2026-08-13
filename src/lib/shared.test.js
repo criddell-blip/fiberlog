@@ -69,6 +69,48 @@ describe('mergePartsById', () => {
     ])
     expect(out.map(p => p.id)).toEqual(['D'])
   })
+
+  // ── per-line source truck (Aug 2026) ──────────────────────────────────────
+  it('keeps the same SKU from two different trucks as two lines', () => {
+    const out = mergePartsById([
+      { id: 'A', qty: 2 },                              // my truck
+      { id: 'A', qty: 3, sourceLocationId: 'truck-f' }, // Francisco's
+    ])
+    expect(out).toHaveLength(2)
+    expect(out.find(p => !p.sourceLocationId).qty).toBe(2)
+    expect(out.find(p => p.sourceLocationId === 'truck-f').qty).toBe(3)
+  })
+
+  it('sums duplicates within the same source', () => {
+    const out = mergePartsById([
+      { id: 'A', qty: 2, sourceLocationId: 'truck-f' },
+      { id: 'A', qty: 3, sourceLocationId: 'truck-f' },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0].qty).toBe(5)
+    expect(out[0].sourceLocationId).toBe('truck-f')
+  })
+
+  it('treats null/undefined/absent source as the same ("my truck") line', () => {
+    const out = mergePartsById([
+      { id: 'A', qty: 1 },
+      { id: 'A', qty: 2, sourceLocationId: null },
+      { id: 'A', qty: 3, sourceLocationId: undefined },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0].qty).toBe(6)
+  })
+
+  it('drops a zero-sum source line without touching the other source', () => {
+    const out = mergePartsById([
+      { id: 'A', qty: 2, sourceLocationId: 'truck-f' },
+      { id: 'A', qty: -2, sourceLocationId: 'truck-f' },
+      { id: 'A', qty: 5 },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0].qty).toBe(5)
+    expect(out[0].sourceLocationId).toBeUndefined()
+  })
 })
 
 describe('matchesAllTokens', () => {

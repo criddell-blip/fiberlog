@@ -50,7 +50,7 @@ export async function getLocations(opts = {}) {
 
   let q = db
     .from('inventory_locations')
-    .select('*, assigned_user:users!inventory_locations_assigned_to_fkey(id, name, initials)')
+    .select('*, assigned_user:users!inventory_locations_assigned_to_fkey(id, name, initials, crew_type)')
   if (!includeInactive) q = q.eq('is_active', true)
   if (!includeBins)     q = q.is('parent_location_id', null)
   const { data, error } = await q
@@ -94,7 +94,7 @@ export async function createLocation({ name, type, assigned_to, notes, parent_lo
   const { data, error } = await db
     .from('inventory_locations')
     .insert(payload)
-    .select('*, assigned_user:users!inventory_locations_assigned_to_fkey(id, name, initials)')
+    .select('*, assigned_user:users!inventory_locations_assigned_to_fkey(id, name, initials, crew_type)')
     .single()
   if (error) throw error
   return data
@@ -105,7 +105,7 @@ export async function updateLocation(id, updates) {
     .from('inventory_locations')
     .update(updates)
     .eq('id', id)
-    .select('*, assigned_user:users!inventory_locations_assigned_to_fkey(id, name, initials)')
+    .select('*, assigned_user:users!inventory_locations_assigned_to_fkey(id, name, initials, crew_type)')
     .single()
   if (error) throw error
   return data
@@ -180,6 +180,25 @@ export async function getStockByLocation(locationId) {
   return data
     .filter(r => Number(r.quantity) !== 0)
     .sort((a, b) => (a.parts_catalog?.name || '').localeCompare(b.parts_catalog?.name || ''))
+}
+
+// Flat stock snapshot for a small set of locations — {location_id, part_id,
+// quantity} rows, optionally narrowed to one part. Backs the per-line source
+// truck picker (on-hand per truck for one part) and the submit sheet's
+// over-draw warnings (all parts across the involved trucks). Point-in-time
+// read, same staleness posture as MyStockView (inventory_stock has no
+// realtime publication).
+export async function getStockForLocations(locationIds, { partId = null } = {}) {
+  const ids = (locationIds || []).filter(Boolean)
+  if (ids.length === 0) return []
+  let q = db
+    .from('inventory_stock')
+    .select('location_id, part_id, quantity')
+    .in('location_id', ids)
+  if (partId) q = q.eq('part_id', partId)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 
 // Returns ALL active stock grouped by part. Used by the crew "Find a

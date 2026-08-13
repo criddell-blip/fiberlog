@@ -2,13 +2,18 @@
 // load money paths (TaskWorkspace submit merge, CrewMovementSheet part search),
 // so they live here where they can be unit-tested directly.
 
-// Dedup a list of {id, name, unit, qty} parts by id, summing quantities.
+// Dedup a list of {id, name, unit, qty, sourceLocationId?} parts by
+// (id, sourceLocationId), summing quantities. The source is part of the
+// identity: the same SKU pulled from two different trucks must stay two
+// lines, because each becomes its own truck→bucket movement at approval.
+// Lines without a source (undefined/null — "my truck") merge as before.
 export function mergePartsById(list) {
   const m = {}
   for (const p of list) {
     if (!p || !p.id) continue
-    if (!m[p.id]) m[p.id] = { ...p }
-    else m[p.id] = { ...m[p.id], qty: (m[p.id].qty || 0) + (p.qty || 0) }
+    const key = p.id + '|' + (p.sourceLocationId || '')
+    if (!m[key]) m[key] = { ...p }
+    else m[key] = { ...m[key], qty: (m[key].qty || 0) + (p.qty || 0) }
   }
   return Object.values(m).filter(p => p.qty > 0)
 }

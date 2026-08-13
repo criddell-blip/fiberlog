@@ -91,6 +91,27 @@ const strings = {
                         es: 'Una vez enviado, este reporte es definitivo — no se puede editar después.' },
   addPartNotInList:   { en: '＋ Add part not in list',    es: '＋ Añadir parte que no está en la lista' },
 
+  // ── Per-line source truck (Aug 2026) ──────────────────────────────────────
+  addPartsUsed:       { en: '＋ Add parts used',          es: '＋ Añadir partes usadas' },
+  pulledFromWhich:    { en: '{part} — pulled from which truck?', es: '{part} — ¿de qué camión salió?' },
+  myTruckWord:        { en: 'My truck',                   es: 'Mi camión' },
+  onHandWord:         { en: 'on hand',                    es: 'disponibles' },
+  showAllTrucks:      { en: 'Show all trucks…',           es: 'Mostrar todos los camiones…' },
+  groupWord:          { en: 'group',                      es: 'grupo' },
+  sourceTaggedToast:  { en: 'Will deduct from {name}',    es: 'Se descontará de {name}' },
+  sourceMineToast:    { en: 'Back to your truck',         es: 'De vuelta a tu camión' },
+  overSourceWarn:     { en: 'Only {n} {unit} on {name} — allowed, but the manager will see it',
+                        es: 'Solo {n} {unit} en {name} — permitido, pero el gerente lo verá' },
+  addFromTruckTitle:  { en: 'Add parts used',             es: 'Añadir partes usadas' },
+  addFromTruckSub:    { en: "Pick from what's actually on a truck — lines are tagged automatically",
+                        es: 'Elige de lo que hay en un camión — las líneas se etiquetan automáticamente' },
+  fromWord:           { en: 'From:',                      es: 'De:' },
+  filterTruckStock:   { en: "Filter this truck's stock…", es: 'Filtrar el inventario de este camión…' },
+  noStockOnTruck:     { en: 'No matching stock on this truck', es: 'No hay inventario que coincida en este camión' },
+  notOnTruckCatalog:  { en: 'Not on a truck? Search the full catalog', es: '¿No está en un camión? Busca en el catálogo completo' },
+  addedWord:          { en: 'Added',                      es: 'Añadido' },
+  doneWord:           { en: 'Done',                       es: 'Listo' },
+
   // ── Toast messages ─────────────────────────────────────────────────────────
   toastSubmitted:     { en: 'Day submitted — pending approval', es: 'Día enviado — pendiente de aprobación' },
   toastTaskAdded:     { en: 'Task added — tap it to start logging', es: 'Tarea añadida — tócala para empezar' },
