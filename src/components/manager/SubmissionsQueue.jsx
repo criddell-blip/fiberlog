@@ -653,11 +653,14 @@ export default function SubmissionsQueue() {
                 rendered when some line is tagged; the everyday single-truck
                 passdown stays visually unchanged. */}
             {selectedParts.some(p => p.source_location_id) && (() => {
+              // Group by LOCATION ID, label for display — two truck owners can
+              // render the same name (the documented name-collision trap in the
+              // reconcile CSV round-trip; don't repeat it here).
               const groups = {}
               selectedParts.forEach(p => {
-                const label = p.sourceName || `${sel.users?.name || 'Submitter'} (own truck)`
-                if (!groups[label]) groups[label] = 0
-                groups[label] += 1
+                const k = p.source_location_id || '__own__'
+                if (!groups[k]) groups[k] = { label: p.sourceName || `${sel.users?.name || 'Submitter'} (own truck)`, n: 0 }
+                groups[k].n += 1
               })
               return (
                 <div style={{
@@ -666,8 +669,8 @@ export default function SubmissionsQueue() {
                   fontSize: 12, fontWeight: 600, lineHeight: 1.5,
                 }}>
                   <Icon name="truck" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 5 }} />
-                  Approval deducts {Object.keys(groups).length} trucks:{' '}
-                  {Object.entries(groups).map(([n, c]) => `${n} (${c} line${c !== 1 ? 's' : ''})`).join(' · ')}
+                  Approval deducts {Object.keys(groups).length} truck{Object.keys(groups).length !== 1 ? 's' : ''}:{' '}
+                  {Object.values(groups).map(g => `${g.label} (${g.n} line${g.n !== 1 ? 's' : ''})`).join(' · ')}
                 </div>
               )
             })()}
@@ -781,9 +784,22 @@ export default function SubmissionsQueue() {
                     <div
                       key={opt.id || 'default'}
                       onClick={() => {
-                        setEditParts(prev => prev.map((x, j) => j === editSourceIdx
-                          ? { ...x, source_location_id: opt.id, sourceName: opt.id ? opt.label : null }
-                          : x))
+                        // Merge on (part, source) collision — two rows with the
+                        // same identity would share a React key and read as a
+                        // confusing double line (the RPC would consolidate them
+                        // at save anyway; do it visibly here).
+                        setEditParts(prev => {
+                          const line = prev[editSourceIdx]
+                          if (!line) return prev
+                          const dup = prev.findIndex((x, j) =>
+                            j !== editSourceIdx && x.part_id === line.part_id && (x.source_location_id || null) === (opt.id || null))
+                          if (dup === -1) return prev.map((x, j) => j === editSourceIdx
+                            ? { ...x, source_location_id: opt.id, sourceName: opt.id ? opt.label : null }
+                            : x)
+                          return prev
+                            .map((x, j) => j === dup ? { ...x, qty: x.qty + line.qty } : x)
+                            .filter((_, j) => j !== editSourceIdx)
+                        })
                         setEditSourceIdx(null)
                       }}
                       style={{

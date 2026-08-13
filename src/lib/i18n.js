@@ -110,7 +110,11 @@ const strings = {
   noStockOnTruck:     { en: 'No matching stock on this truck', es: 'No hay inventario que coincida en este camión' },
   notOnTruckCatalog:  { en: 'Not on a truck? Search the full catalog', es: '¿No está en un camión? Busca en el catálogo completo' },
   addedWord:          { en: 'Added',                      es: 'Añadido' },
+  addWord:            { en: 'Add',                        es: 'Añadir' },
   doneWord:           { en: 'Done',                       es: 'Listo' },
+  pickTruckFirst:     { en: 'Pick a truck to see its stock', es: 'Elige un camión para ver su inventario' },
+  sourceInactiveError:{ en: 'A tagged truck is no longer active — check your tagged lines and re-pick',
+                        es: 'Un camión etiquetado ya no está activo — revisa las líneas etiquetadas y vuelve a elegir' },
 
   // ── Toast messages ─────────────────────────────────────────────────────────
   toastSubmitted:     { en: 'Day submitted — pending approval', es: 'Día enviado — pendiente de aprobación' },

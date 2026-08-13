@@ -116,7 +116,7 @@ export default function SourceTruckSheet({ part, current, myTruck, trucks, crewT
           )}
         </div>
         <button className="btn btn-ghost" style={{ width: '100%', marginTop: 12, flexShrink: 0 }} onClick={onClose}>
-          {lang === 'es' ? 'Cancelar' : 'Cancel'}
+          {t('cancel', lang)}
         </button>
       </div>
     </div>

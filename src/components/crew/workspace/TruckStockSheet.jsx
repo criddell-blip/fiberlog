@@ -25,7 +25,10 @@ export default function TruckStockSheet({ myTruck, trucks, crewType, lang, extra
   // data entry — Back closes without a dirty confirm.
   useBackClose(1, onClose)
   const [fromId, setFromId] = useState(myTruck?.id || null)
-  const [ddOpen, setDdOpen] = useState(false)
+  // No own truck (staff who gained a crew_type after creation never get an
+  // auto-truck — documented gap): start with the dropdown open so the first
+  // action is picking a real source instead of staring at an empty list.
+  const [ddOpen, setDdOpen] = useState(!myTruck?.id)
   const [showAll, setShowAll] = useState(!crewType)
   const [filter, setFilter] = useState('')
   const [stock, setStock] = useState(null) // null = loading
@@ -35,10 +38,12 @@ export default function TruckStockSheet({ myTruck, trucks, crewType, lang, extra
     ? others
     : others.filter(l => l.type === 'group' || l.assigned_user?.crew_type === crewType)
   const hiddenCount = others.length - ddList.length
-  const fromLoc = fromId === myTruck?.id ? myTruck : others.find(l => l.id === fromId)
-  const fromName = fromId === myTruck?.id
-    ? t('myTruckWord', lang)
-    : (fromLoc?.assigned_user?.name || fromLoc?.name || '…')
+  const fromLoc = (fromId && fromId === myTruck?.id) ? myTruck : others.find(l => l.id === fromId)
+  const fromName = !fromId
+    ? '—'
+    : fromId === myTruck?.id
+      ? t('myTruckWord', lang)
+      : (fromLoc?.assigned_user?.name || fromLoc?.name || '…')
 
   useEffect(() => {
     if (!fromId) return
@@ -98,7 +103,7 @@ export default function TruckStockSheet({ myTruck, trucks, crewType, lang, extra
             border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
             marginBottom: 8, overflow: 'hidden', flexShrink: 0, maxHeight: 220, overflowY: 'auto',
           }}>
-            {[{ id: myTruck?.id, _mine: true }, ...ddList].map(l => (
+            {[...(myTruck?.id ? [{ id: myTruck.id, _mine: true }] : []), ...ddList].map(l => (
               <div
                 key={l._mine ? 'mine' : l.id}
                 onClick={() => { setFromId(l.id); setDdOpen(false); setFilter('') }}
@@ -145,7 +150,10 @@ export default function TruckStockSheet({ myTruck, trucks, crewType, lang, extra
         </div>
 
         <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
-          {stock === null && (
+          {!fromId && (
+            <div style={{ textAlign: 'center', padding: 24, color: 'var(--hint)', fontSize: 13 }}>{t('pickTruckFirst', lang)}</div>
+          )}
+          {fromId && stock === null && (
             <div style={{ textAlign: 'center', padding: 24, color: 'var(--muted)', fontSize: 13 }}>…</div>
           )}
           {stock !== null && rows.length === 0 && (
@@ -177,7 +185,7 @@ export default function TruckStockSheet({ myTruck, trucks, crewType, lang, extra
                     border: '1px solid var(--teal)', color: 'var(--teal-dk)',
                   }}
                 >
-                  {added ? `✓ ${t('addedWord', lang)}` : `＋ ${lang === 'es' ? 'Añadir' : 'Add'}`}
+                  {added ? `✓ ${t('addedWord', lang)}` : `＋ ${t('addWord', lang)}`}
                 </button>
               </div>
             )

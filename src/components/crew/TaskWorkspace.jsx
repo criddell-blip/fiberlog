@@ -85,6 +85,10 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
   // Lazy-loaded when the submit sheet first opens: the caller's own pull
   // location + every active assigned truck / group (for the picker list).
   const [truckData, setTruckData] = useState(null)
+  // When that fetch fails, the add button falls back to the catalog search
+  // (untagged lines) instead of going dead — extra-parts add is the ENTIRE
+  // logging flow for infra crews, so it must never silently no-op.
+  const [truckLoadFailed, setTruckLoadFailed] = useState(false)
   // 'loc|part' → qty snapshot across the trucks this draft touches, for the
   // warn-but-allow over-draw notes. Point-in-time (no realtime on stock).
   const [stockSnap, setStockSnap] = useState(null)
@@ -388,20 +392,25 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
         const trucks = (locs || []).filter(l =>
           (l.type === 'truck' && l.assigned_to) || l.type === 'group')
         setTruckData({ myTruck: mine, trucks })
+        setTruckLoadFailed(false)
       })
-      .catch(e => console.warn('Truck list load failed:', e))
+      .catch(e => { console.warn('Truck list load failed:', e); if (!cancelled) setTruckLoadFailed(true) })
     return () => { cancelled = true }
   }, [showSummary, truckData])
 
   // On-hand snapshot across every truck this draft touches, so over-drawn
   // lines get the amber warn-but-allow note before the crew signs off.
+  // Keyed on the SET of involved location ids (not the raw objects) so qty
+  // taps and typed commits don't refire the fetch — only tagging a line to a
+  // truck the snapshot hasn't seen yet does.
+  const snapIdsKey = useMemo(() => [...new Set([
+    truckData?.myTruck?.id,
+    ...Object.values(partSources),
+    ...extraParts.map(p => p.sourceLocationId),
+  ].filter(Boolean))].sort().join(','), [truckData, partSources, extraParts])
   useEffect(() => {
-    if (!showSummary || !truckData) return
-    const ids = [...new Set([
-      truckData.myTruck?.id,
-      ...Object.values(partSources),
-      ...extraParts.map(p => p.sourceLocationId),
-    ].filter(Boolean))]
+    if (!showSummary) return
+    const ids = snapIdsKey ? snapIdsKey.split(',') : []
     if (ids.length === 0) { setStockSnap({}); return }
     let cancelled = false
     getStockForLocations(ids)
@@ -416,7 +425,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       })
       .catch(e => console.warn('Stock snapshot load failed:', e))
     return () => { cancelled = true }
-  }, [showSummary, truckData, partSources, extraParts])
+  }, [showSummary, snapIdsKey])
 
   // Display name for a source: trucks show their owner's name (app-wide
   // convention), groups their location name. '…' while the list loads.
@@ -468,7 +477,19 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     const { key } = sourceSheet
     if (key.startsWith('extra:')) {
       const idx = Number(key.slice(6))
-      setExtraParts(prev => prev.map((ep, i) => i === idx ? { ...ep, sourceLocationId: locId } : ep))
+      // Re-pointing can collide with an existing (id, source) line — merge
+      // the quantities instead of leaving two rows with identical identity
+      // (duplicate React keys + a confusing double line; mirrors mergePartsById).
+      setExtraParts(prev => {
+        const line = prev[idx]
+        if (!line) return prev
+        const dup = prev.findIndex((ep, i) =>
+          i !== idx && ep.id === line.id && (ep.sourceLocationId || null) === (locId || null))
+        if (dup === -1) return prev.map((ep, i) => i === idx ? { ...ep, sourceLocationId: locId } : ep)
+        return prev
+          .map((ep, i) => i === dup ? { ...ep, qty: ep.qty + line.qty } : ep)
+          .filter((_, i) => i !== idx)
+      })
     } else {
       setPartSources(prev => {
         const next = { ...prev }
@@ -734,7 +755,11 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       onSubmitDone()
     } catch(e) {
       console.error('Submit failed:', e)
-      showToast('Submit failed: ' + e.message)
+      // 23514 from save_log_entry = a tagged source truck was deactivated
+      // between tagging and submit. The draft survives, so tell the crew
+      // what to fix instead of showing the raw constraint message.
+      const isSourceErr = e?.code === '23514' || String(e?.message || '').includes('source_location_id')
+      showToast(isSourceErr ? t('sourceInactiveError', lang) : 'Submit failed: ' + e.message)
     } finally {
       setSubmitting(false)
     }
@@ -1193,9 +1218,12 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                 sheet — the browser only opens once the truck list is loaded
                 (the effect above fires when this summary sheet opens). */}
             <button
-              onClick={() => truckData && setShowAddSheet(true)}
+              onClick={() => {
+                if (truckData) setShowAddSheet(true)
+                else if (truckLoadFailed) setShowPartSearch(true) // catalog fallback, untagged lines
+              }}
               className="add-dashed"
-              style={{ padding: 10, marginBottom: 14, fontSize: 'var(--fs-base)', opacity: truckData ? 1 : 0.6 }}
+              style={{ padding: 10, marginBottom: 14, fontSize: 'var(--fs-base)', opacity: (truckData || truckLoadFailed) ? 1 : 0.6 }}
             >
               {t('addPartsUsed', lang)}
             </button>
