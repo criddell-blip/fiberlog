@@ -614,7 +614,9 @@ export async function saveSubmissionParts(id, parts, hours) {
     p_submission_id: id,
     p_parts: (parts || [])
       .filter(p => p.part_id && p.qty > 0)
-      .map(p => ({ part_id: p.part_id, quantity: p.qty })),
+      // source_location_id must round-trip through manager edits — dropping
+      // it would silently re-point a tagged line at the submitter's truck.
+      .map(p => ({ part_id: p.part_id, quantity: p.qty, source_location_id: p.source_location_id || null })),
     p_hours: typeof hours === 'number' ? hours : null,
   })
   if (error) throw error

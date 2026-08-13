@@ -7,6 +7,7 @@
 
 import { useApp } from '../../AppContext'
 import { t } from '../../lib/i18n'
+import Icon from '../shared/Icon'
 
 // labelKey → i18n; render via t(cfg.labelKey, lang).
 export const STATUS_CONFIG = {
@@ -98,13 +99,25 @@ export default function PassdownList({ submissions }) {
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 'var(--r-sm)', overflow: 'hidden', padding: '0 14px',
           }}>
+            {/* (part, source truck) is the line identity — the same SKU from
+                two trucks renders as two lines, matching how it deducts. */}
             {sub.parts.map(p => (
-              <div key={p.partId} className="parts-row">
+              <div key={p.partId + '|' + (p.sourceLocationId || '')} className="parts-row">
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="part-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {p.name}
                   </div>
                   <div className="part-id">{p.partId}</div>
+                  {p.sourceName && (
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 2,
+                      fontSize: 10, fontWeight: 700, borderRadius: 20, padding: '1px 7px',
+                      background: 'var(--teal-lt)', border: '1px solid var(--teal)',
+                      color: 'var(--teal-dk)',
+                    }}>
+                      <Icon name="truck" size={10} /> {p.sourceName}
+                    </span>
+                  )}
                 </div>
                 <div className="part-qty" style={{ flexShrink: 0, marginLeft: 10 }}>
                   {p.qty.toLocaleString()} <span className="part-unit" style={{ fontWeight: 400 }}>{p.unit}</span>

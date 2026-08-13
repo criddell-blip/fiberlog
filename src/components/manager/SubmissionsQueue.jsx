@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { approveSubmission, saveSubmissionParts, setTaskClosed, db } from '../../lib/supabase'
+import { getLocations } from '../../lib/inventory'
 import { useApp } from '../../AppContext'
 import useRealtimeQueue from '../../lib/useRealtimeQueue'
 import { useBackClose } from '../../lib/backStack'
@@ -104,6 +105,11 @@ export default function SubmissionsQueue() {
   const [editTotals, setEditTotals] = useState({})
   const [showPartSearch, setShowPartSearch] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Per-line source truck (Aug 2026): trucks/groups list for the edit-mode
+  // source picker (lazy-loaded on first edit), and which edit row's source
+  // is being picked (null = sheet closed).
+  const [mgrTrucks, setMgrTrucks] = useState(null)
+  const [editSourceIdx, setEditSourceIdx] = useState(null)
 
   useEffect(() => { loadSubmissions() }, [])
 
@@ -125,10 +131,15 @@ export default function SubmissionsQueue() {
     FOOTAGE_FIELDS.some(f => (Number(editTotals[f.key]) || 0) !== (Number(selected[f.key]) || 0)) ||
     editParts.length !== selectedParts.length ||
     editParts.some(ep => {
-      const o = selectedParts.find(s => s.part_id === ep.part_id)
+      // (part, source) is the line identity — a source change alone is dirty.
+      const o = selectedParts.find(s =>
+        s.part_id === ep.part_id && (s.source_location_id || null) === (ep.source_location_id || null))
       return !o || o.qty !== ep.qty
     })
   )
+
+  // Back closes the edit-mode source picker before anything else (display-only).
+  useBackClose(editSourceIdx !== null ? 1 : 0, () => setEditSourceIdx(null))
 
   // Hardware/browser Back guard for edit mode (project convention: data-entry
   // Back confirms when dirty). Registered here at the component top level —
@@ -206,14 +217,31 @@ export default function SubmissionsQueue() {
       if (!filteredEntries || filteredEntries.length === 0) { setSelectedParts([]); setPartsLoading(false); return }
       const entryIds = filteredEntries.map(e => e.id)
       const { data: parts } = await db
-        .from('entry_parts').select('quantity, part_id, parts_catalog ( id, name, unit )').in('entry_id', entryIds)
+        .from('entry_parts').select(`quantity, part_id, source_location_id,
+          parts_catalog ( id, name, unit ),
+          source:inventory_locations ( id, name, assigned_user:users!inventory_locations_assigned_to_fkey ( name ) )`)
+        .in('entry_id', entryIds)
       if (!fresh()) return
       const totals = {}
       ;(parts || []).forEach(p => {
         const id = p.parts_catalog?.id || p.part_id || 'unknown'
-        // part_id is carried so the manager edit path can write it back.
-        if (!totals[id]) totals[id] = { part_id: id, name: p.parts_catalog?.name || p.part_id || id, unit: p.parts_catalog?.unit || 'ea', qty: 0 }
-        totals[id].qty += p.quantity || 0
+        // (part, source truck) is the line identity — the same SKU from two
+        // trucks stays two lines because approval books two movements.
+        const key = id + '|' + (p.source_location_id || '')
+        // part_id + source_location_id are carried so the edit path writes
+        // them back; sourceName is the display label (truck owner, else
+        // the location name — groups).
+        if (!totals[key]) totals[key] = {
+          part_id: id,
+          name: p.parts_catalog?.name || p.part_id || id,
+          unit: p.parts_catalog?.unit || 'ea',
+          qty: 0,
+          source_location_id: p.source_location_id || null,
+          sourceName: p.source_location_id
+            ? (p.source?.assigned_user?.name || p.source?.name || null)
+            : null,
+        }
+        totals[key].qty += p.quantity || 0
       })
       setSelectedParts(Object.values(totals).filter(p => p.qty > 0))
     } catch(e) { console.warn('Parts load failed:', e) }
@@ -288,6 +316,15 @@ export default function SubmissionsQueue() {
     setEditHours(Number(sel.hours_worked) || 0)
     setEditTotals(Object.fromEntries(FOOTAGE_FIELDS.map(f => [f.key, Number(sel[f.key]) || 0])))
     setEditMode(true)
+    // Trucks + groups for the per-line source picker, fetched once per queue
+    // visit. Managers see the full list (no crew_type filter here — they're
+    // correcting records, not browsing).
+    if (!mgrTrucks) {
+      getLocations()
+        .then(locs => setMgrTrucks((locs || []).filter(l =>
+          (l.type === 'truck' && l.assigned_to) || l.type === 'group')))
+        .catch(e => console.warn('Truck list load failed:', e))
+    }
   }
 
   // Save the edited parts + hours via the replace_submission_parts RPC, then
@@ -574,10 +611,15 @@ export default function SubmissionsQueue() {
             {editParts.length > 0 && (
               <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', maxHeight: 220, overflowY: 'auto' }}>
                 {editParts.map((p, i) => (
-                  <div key={p.part_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: i < editParts.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                  <div key={p.part_id + '|' + (p.source_location_id || '')} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: i < editParts.length - 1 ? '1px solid var(--border)' : 'none' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
                       <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'var(--font-mono)' }}>{p.part_id}</div>
+                      {/* Tappable in edit mode: re-point this line at a
+                          different truck before approving. */}
+                      <button onClick={() => setEditSourceIdx(i)} style={{ padding: 0, marginTop: 2, cursor: 'pointer' }}>
+                        <SourcePill name={p.sourceName || `${sel.users?.name || 'Submitter'} (own truck)`} muted={!p.source_location_id} editable />
+                      </button>
                     </div>
                     <button className="tally-btn tally-sm tally-minus" onClick={() => setEditParts(prev => prev.map((x, j) => j === i ? { ...x, qty: Math.max(1, x.qty - 1) } : x))}>−</button>
                     <span className="mono" style={{ minWidth: 30, textAlign: 'center', fontSize: 13, fontWeight: 700 }}>{p.qty.toLocaleString()}</span>
@@ -593,16 +635,43 @@ export default function SubmissionsQueue() {
             </button>
           </div>
         ) : selectedParts.length > 0 ? (
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', marginBottom: 14, maxHeight: 200, overflowY: 'auto' }}>
-            {selectedParts.map((p, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 14px', borderBottom: i < selectedParts.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                <div style={{ fontSize: 12, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--teal-dk)', flexShrink: 0, marginLeft: 8 }}>
-                  {p.qty.toLocaleString()} <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>{p.unit}</span>
+          <>
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', marginBottom: selectedParts.some(p => p.source_location_id) ? 8 : 14, maxHeight: 200, overflowY: 'auto' }}>
+              {selectedParts.map((p, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 14px', borderBottom: i < selectedParts.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                    {p.sourceName && <SourcePill name={p.sourceName} />}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--teal-dk)', flexShrink: 0, marginLeft: 8 }}>
+                    {p.qty.toLocaleString()} <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>{p.unit}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+            {/* Deduction preview — which trucks the approval will hit. Only
+                rendered when some line is tagged; the everyday single-truck
+                passdown stays visually unchanged. */}
+            {selectedParts.some(p => p.source_location_id) && (() => {
+              const groups = {}
+              selectedParts.forEach(p => {
+                const label = p.sourceName || `${sel.users?.name || 'Submitter'} (own truck)`
+                if (!groups[label]) groups[label] = 0
+                groups[label] += 1
+              })
+              return (
+                <div style={{
+                  background: 'var(--amber-lt)', color: 'var(--amber)',
+                  borderRadius: 'var(--r-sm)', padding: '8px 12px', marginBottom: 14,
+                  fontSize: 12, fontWeight: 600, lineHeight: 1.5,
+                }}>
+                  <Icon name="truck" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 5 }} />
+                  Approval deducts {Object.keys(groups).length} trucks:{' '}
+                  {Object.entries(groups).map(([n, c]) => `${n} (${c} line${c !== 1 ? 's' : ''})`).join(' · ')}
+                </div>
+              )
+            })()}
+          </>
         ) : (
           <div style={{ fontSize: 13, color: 'var(--hint)', marginBottom: 14, textAlign: 'center', padding: 12 }}>No parts logged</div>
         )}
@@ -675,15 +744,95 @@ export default function SubmissionsQueue() {
         {showPartSearch && (
           <PartSearch
             onSelect={p => {
-              setEditParts(prev => prev.some(x => x.part_id === p.id)
-                ? prev.map(x => x.part_id === p.id ? { ...x, qty: x.qty + 1 } : x)
-                : [...prev, { part_id: p.id, name: p.name, unit: p.unit || 'ea', qty: 1 }])
+              // Merge only into the untagged (submitter's-truck) line — a
+              // line tagged to another truck is a different line now.
+              setEditParts(prev => prev.some(x => x.part_id === p.id && !x.source_location_id)
+                ? prev.map(x => (x.part_id === p.id && !x.source_location_id) ? { ...x, qty: x.qty + 1 } : x)
+                : [...prev, { part_id: p.id, name: p.name, unit: p.unit || 'ea', qty: 1, source_location_id: null, sourceName: null }])
               setShowPartSearch(false)
             }}
             onClose={() => setShowPartSearch(false)}
           />
         )}
+
+        {/* Edit-mode source picker — re-point a line at a different truck.
+            "Submitter's truck" clears the override (NULL, resolved at
+            approval). Rendered last so it stacks over the detail overlay. */}
+        {editSourceIdx !== null && (
+          <div className="overlay open" onClick={e => e.target === e.currentTarget && setEditSourceIdx(null)}>
+            <div className="overlay-sheet" style={{ maxHeight: '75vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 2, flexShrink: 0 }}>
+                {editParts[editSourceIdx]?.name} — pulled from which truck?
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, flexShrink: 0 }}>
+                Approval deducts this line from the picked truck
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+                {[
+                  { id: null, label: `${sel.users?.name || 'Submitter'}'s truck (default)` },
+                  ...(mgrTrucks || []).map(l => ({
+                    id: l.id,
+                    label: l.assigned_user?.name || l.name,
+                    group: l.type === 'group',
+                  })),
+                ].map(opt => {
+                  const selectedOpt = (editParts[editSourceIdx]?.source_location_id || null) === opt.id
+                  return (
+                    <div
+                      key={opt.id || 'default'}
+                      onClick={() => {
+                        setEditParts(prev => prev.map((x, j) => j === editSourceIdx
+                          ? { ...x, source_location_id: opt.id, sourceName: opt.id ? opt.label : null }
+                          : x))
+                        setEditSourceIdx(null)
+                      }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px',
+                        borderBottom: '1px solid var(--border)', cursor: 'pointer',
+                        fontSize: 13.5, fontWeight: selectedOpt ? 800 : 600,
+                        color: selectedOpt ? 'var(--teal-dk)' : 'var(--text)',
+                        background: selectedOpt ? 'var(--teal-lt)' : 'transparent',
+                      }}
+                    >
+                      {opt.label}
+                      {opt.group && (
+                        <span style={{
+                          fontSize: 9, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase',
+                          color: 'var(--muted)', background: 'var(--surface2)',
+                          border: '1px solid var(--border2)', borderRadius: 4, padding: '1px 5px',
+                        }}>group</span>
+                      )}
+                    </div>
+                  )
+                })}
+                {mgrTrucks === null && (
+                  <div style={{ textAlign: 'center', padding: 16, color: 'var(--muted)', fontSize: 13 }}>Loading trucks…</div>
+                )}
+              </div>
+              <button className="btn btn-ghost" style={{ width: '100%', marginTop: 12, flexShrink: 0 }} onClick={() => setEditSourceIdx(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </>
     )
   }
+}
+
+// ─── SOURCE PILL ─────────────────────────────────────────────────────────────
+// Which truck a part line deducts from. Teal = tagged to a specific truck /
+// group; muted = the submitter's own truck (the default, nothing stored).
+function SourcePill({ name, muted = false, editable = false }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      fontSize: 10, fontWeight: 700, borderRadius: 20, padding: '1px 7px',
+      background: muted ? 'var(--surface2)' : 'var(--teal-lt)',
+      border: muted ? `1px ${editable ? 'dashed' : 'solid'} var(--border2)` : '1px solid var(--teal)',
+      color: muted ? 'var(--hint)' : 'var(--teal-dk)',
+    }}>
+      <Icon name="truck" size={10} /> {name}{editable ? ' ▾' : ''}
+    </span>
+  )
 }
