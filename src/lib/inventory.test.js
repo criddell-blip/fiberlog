@@ -370,6 +370,17 @@ describe('buildSageCsv', () => {
     expect(rows.map(r => r[col('VENDORID')])).toEqual(['', ''])
   })
 
+  // PRICE is dormant-by-DATA, not dead-by-code: unit_cost is type-agnostic and
+  // simply happens to be null on every non-receive today. Guards against
+  // someone "tidying" it to a hardcoded '' alongside VENDORID — it starts
+  // working again for free the day a transfer carries a cost.
+  it('still emits PRICE when a non-receive carries a unit_cost', () => {
+    const rows = csvRows(buildSageCsv([
+      mv({ unit_cost: 3.5, from_location: TRUCK1, to_location: BUCKET }),
+    ]))
+    expect(rows[0][col('PRICE')]).toBe('3.5')
+  })
+
   it('CSV-escapes fields containing commas and quotes', () => {
     const rows = csvRows(buildSageCsv([
       mv({

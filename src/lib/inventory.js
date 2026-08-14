@@ -2098,8 +2098,12 @@ export const FIBER_NON_MATERIAL_COLUMNS = new Set([
 // company in Sage Settings if these names don't match.
 //
 // `receive` and `adjust` are filtered out before this map is ever consulted
-// (isExportableMovement rules 0a/0b). Their entries stay as documentation of
-// the intended mapping should either type ever be exported again.
+// (isExportableMovement rules 0a/0b). Do NOT delete their entries as dead
+// config: the lookup below falls back to `|| 'Inventory Adjustment'`, so a
+// row that ever slips past the filter — a future refactor, a caller passing
+// an unfiltered array — would be silently relabeled, booking a purchase
+// receipt into accounting as an inventory adjustment. A correct-but-unreached
+// mapping is strictly safer than a missing one.
 const SAGE_TRANSACTION_TYPE = {
   receive: 'Inventory Receipt',
   transfer: 'Inventory Transfer',

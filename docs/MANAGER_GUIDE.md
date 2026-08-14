@@ -212,7 +212,7 @@ A **Record movement** button plus these sheets (on phone, everything except Reco
 
 #### Receive PO
 - Multi-line vendor delivery: vendor + invoice + destination, then SKU + qty + unit cost per line
-- Can create new parts inline; posts as `receive` movements. Notes carry the vendor name for Sage later
+- Can create new parts inline; posts as `receive` movements. Notes carry the vendor name for FiberLog's own provenance record (the per-part History panel) — **not** for Sage: receives are no longer exported, because Sage books the purchase from the PO
 
 #### Reconcile
 - Upload the filled-in Audit CSV; preview the variances (positive = more on hand than recorded, negative = less)

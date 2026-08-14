@@ -210,7 +210,7 @@ On the Manager Submissions queue (and in TaskWorkspace pre-submit), you can set 
 
 1. Pick date range (default: last 7 days)
 2. Toggle "Include exported" if re-issuing a corrected batch
-3. Preview shows movements that will export — skips `truck → truck` rows (internal staging, no Sage relevance)
+3. Preview shows movements that will export — skips all `receive` and `adjust` rows plus `truck → truck` and warehouse-internal staging (no Sage relevance)
 4. Stats summarize counts by movement type
 5. Click "Download CSV + mark X exported":
    - Inserts a parent row in `inventory_export_batches` (captures `exported_by` + `movement_count`)
@@ -237,7 +237,8 @@ The next export skips already-exported rows automatically via the partial index 
 - Sage transaction type names are Sage Intacct defaults — config customizable per company
 - Warehouse + project codes use FiberLog names directly (no code mapping table yet)
 - VENDORID kept for column-layout stability but always blank — vendors only attach to receives, which aren't exported (Sage has the vendor from the PO)
-- Trucks are filtered when both endpoints are trucks; truck→bucket consumption + warehouse→truck loadouts kept
+- Receives and adjusts are always filtered; trucks are filtered when both endpoints are trucks; truck→bucket consumption + warehouse→truck loadouts kept
+- Known gap: strict-consumption mode tests only `type='truck'`, so loadouts/handoffs through **group** locations (Contractor - RNS, Crew - Construction …) still export in strict mode — 24 rows today. Pre-existing; fixing it changes what accounting receives, so it needs its own sign-off
 
 ---
 
@@ -251,7 +252,7 @@ Every movement carries a rich set of identifiers:
 | `submission_id` | Auto-deduct | "What movements approved this submission?" |
 | `consumed_by_user_id` | Auto-deduct, Sonar import | "What did this crew member consume?" — works even when source location is a shared trailer |
 | `phase_id` | Auto-deduct, Sonar import | Sage cost-center grouping |
-| `export_batch_id` + `exported_at` | Sage export | "Has this been reported to accounting yet?" |
+| `export_batch_id` + `exported_at` | Sage export | "Has this been reported to accounting yet?" — note that on a `receive`, `exported_at IS NULL` means *never will be*, not *pending* |
 | `vendor_invoice` | Receive PO | "What PO did this part come from?" |
 | `notes` | All entry points | Free-text rationale; Sonar bookkeeps `[sonar:<itemId>]` marker here |
 | `created_by` | All entry points | "Who recorded this movement?" |
