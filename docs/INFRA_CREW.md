@@ -1,6 +1,6 @@
 # Infrastructure crew — sites shell
 
-> Moved out of CLAUDE.md (Aug 2026) to keep always-loaded memory lean. This is the full reference; the summary lives in CLAUDE.md.
+> Moved out of CLAUDE.md (Aug 2026) to keep always-loaded memory lean. This is the full architecture reference for the infra crew shell.
 
 Infrastructure crew gets a **sites-shaped shell** — same overall flow as fiber crews (sidebar tree → task list → workspace → daily passdown), but the middle layer is **sites** instead of phases. A tower / business install / MDU closet is one site; tasks are the work units against it.
 

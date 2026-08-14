@@ -1,6 +1,6 @@
 # Working-manager toggle (manager ↔ crew mode)
 
-> Moved out of CLAUDE.md (Aug 2026) to keep always-loaded memory lean. This is the full reference; the summary lives in CLAUDE.md.
+> Moved out of CLAUDE.md (Aug 2026) to keep always-loaded memory lean. This is the full reference for the staff-only manager ↔ crew mode toggle.
 
 Some managers are also field workers. They needed to log their own day's work without juggling two accounts. The toggle lets a single staff user (`role = owner | manager`) flip into the crew shell to log work, then flip back.
 

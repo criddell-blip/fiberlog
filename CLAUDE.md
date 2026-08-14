@@ -9,6 +9,8 @@ Deployed at https://criddell-blip.github.io/fiberlog/ via GitHub Pages.
 > **Need a deep dive on the Inventory tab specifically?** See [docs/INVENTORY_TAB.md](docs/INVENTORY_TAB.md) — every sub-tab, every action sheet, and how they fit into the daily/weekly/monthly cadence.
 >
 > **The crew-facing how-to (bilingual EN/ES)?** See [docs/CREW_GUIDE.md](docs/CREW_GUIDE.md) — rewritten July 2026 for the is_closed multi-passdown model.
+>
+> **Onboarding someone new?** See [docs/TRAINING.md](docs/TRAINING.md) — role-based training modules (everyone / crew / manager / warehouse) with live-app practice exercises, safety rules, and the trainer's cleanup checklist. A presentable web version (EN/ES toggle on the crew module) is linked at the top of that doc.
 
 ---
 
@@ -41,7 +43,7 @@ We can't integrate directly with Sonar (CRM) or Sage (accounting). The strategy 
 
 Infra crew (`crew_type = 'infrastructure'`) gets a sites-shaped shell: `App.jsx` routes them to `InfraCrewApp` (project → **site** → task → daily passdown, components under `src/components/crew/infra/`) instead of `CrewApp`; every other crew_type is untouched. Tasks anchor on `tasks.site_id` with `phase_id` NULL (CHECK `tasks_anchor_present` requires one of the two), and `approve_submission` resolves the deduction bucket via override → phase's project → **site's project**, so infra approvals deduct cleanly; phase actuals never increment for infra (no site-actuals concept). Replaces infra dual-logging in Sonar once onboarding finishes (remaining: add infra users, curate `assemblies.crew_type = 'infrastructure'` kits).
 
-> Full reference — schema, components, materials flow, sites admin, onboarding checklist: [docs/INFRA_SHELL.md](docs/INFRA_SHELL.md)
+> Full reference — schema, components, materials flow, sites admin, onboarding checklist: [docs/INFRA_CREW.md](docs/INFRA_CREW.md)
 
 ---
 
@@ -55,31 +57,14 @@ Staff (`role = owner | manager`) with a field `crew_type` can flip into the crew
 
 ## Field tech — routing
 
-> **This section previously read "backlog — blocked, waiting on Sonar polygon data." That was stale.** Verified against real data Aug 14 2026: Option 3 (dispatcher tags the project at job creation) is **live in Sonar**, and FiberLog already consumes it. Nobody noticed it had landed. Don't re-plan this epic on the old premise.
+Field techs log ticket-driven installs in Sonar; FiberLog imports the daily report. **Routing is unblocked (verified Aug 14 2026):** Sonar stamps a `Project` on each fiber job, `sonar_project_phase_map` covers 53/53 distinct tags, and blank-Project rows are wireless (routed by the wireless part policy, which deliberately outranks any tag). **Do NOT build an address → project lookup table** — the owner's address export and Sonar's job tags agreed 759/759 where both had a value.
 
-**How field-tech consumption routes today (Option 3, as designed):**
-- Sonar's daily field-tech report ("Field tech asset consumption") carries a **`Project` column**, stamped per job.
-- `SonarImportSheet.jsx` resolves each row's destination bucket; the job's project tag flows through `sonar_project_phase_map` to a phase → project.
-- Manager approves the batch → materials transfer crew truck → project bucket → Sage export picks it up keyed by project, alongside fiber + infrastructure.
-
-**Coverage (measured, not assumed):** `sonar_project_phase_map` holds **53 mappings covering 53/53 distinct Sonar project tags** — 100% of the 8,289 addresses in the owner's Aug 2026 "Fiber project addresses" export. The last gap (`COLDER SPRINGS`, 283 Lehi addresses) was mapped onto the existing Cold Springs phase Aug 14 2026.
-
-**The ~51% of report rows with a BLANK `Project` are not a gap — they're wireless.** Checked by equipment model: tagged rows are fiber gear (GP1100X, GP4200XH, UFiber, Wave-Fiber-ONU); untagged rows are wireless (Wave LR / Nano / Pico, PowerBeam, NanoStation). Wireless installs correctly have no fiber project and route by the **wireless part policy** (`gigwave`/`none` → Gigwave / Fixed Wireless), which deliberately outranks any project tag — see the Sonar routing precedence in the interconnect table. Across all of Q2 only **6 fiber rows** had a blank tag; the per-row destination picker covers those.
-
-**Do NOT build an address → project lookup table.** The original decision to reject one still holds, and is now backed by evidence: cross-checking the owner's address export against the daily report, on the 759 rows where both had a value the address book and Sonar's job tag **agreed 759/759, zero disagreements**. A FiberLog-maintained address table would add maintenance burden and change no routing decision. The serviceable-address list is real, but it lives in Sonar and FiberLog already consumes the useful half of it.
-
-**Two empty placeholders make it *look* like address data was loaded here — it never was.** `sites.address` / `lat` / `lng` are NULL on all 198 rows, and `projects.vetro_project_id` is NULL on all 7 projects. Both are unused. Populating site addresses would help dispatch/navigation but routes nothing — infra material routes on `sites.project_id`.
-
-**`sonar_city_bucket_map` (3 rows) is the weak legacy fallback.** City granularity is wrong for Provo, which spans Osprey / Aspen Summit / Alpine Brook (Wasatch Front) *and* West Mountain Fiber (West Mountain). The per-job project tag outranks it, so the city map only matters when a tag is missing.
-
-**What's actually still open** (workflow, not data): per-line `project_id` on `log_entries` for multi-cost-center allocation (backlog #5) and the field-tech UI surface (backlog #6). Field techs continue to log in Sonar by design — that's the intake split, not a blocker.
+> Full reference — the measured evidence, the legacy city-map fallback, what's still open (backlog #5/#6), and the pre-Aug-2026 history: [docs/FIELD_TECH.md](docs/FIELD_TECH.md)
 
 ---
 
 ## Stack
 
-- **Frontend:** React 18 + Vite + plain JSX (no TypeScript)
-- **Backend:** Supabase (Postgres + Auth + Realtime + Edge Functions)
 - **Styling:** Inline styles + CSS variables (no Tailwind, no CSS modules). Theme tokens + shared classes live in `src/styles/global.css` (imported from `App.jsx`).
 - Dev/build/test/deploy commands are the standard npm scripts in `package.json` (`npm run deploy` ships to GitHub Pages — see the deploy safety notes before using it).
 
@@ -88,7 +73,6 @@ Staff (`role = owner | manager`) with a field `crew_type` can flip into the crew
 - **Supabase project ID:** `attduslwidxecmjifsnl`
 - **Supabase URL:** `https://attduslwidxecmjifsnl.supabase.co`
 - **Supabase anon key:** in `.env` as `VITE_SUPABASE_ANON_KEY`. Hardcoded fallback in `src/lib/supabase.js` for safety. The key is public by design — RLS in the DB is the access boundary (tightened May 2026; see backlog #12 for the remaining intentional exceptions).
-- **Repo path on this machine:** `C:\Users\admin\Desktop\fiberlog-react`
 
 ### Environments
 
@@ -292,36 +276,7 @@ Deploy: `npx supabase functions deploy <name>` (you may need `supabase login` fi
 
 ## Database RPCs (canonical list)
 
-All `SECURITY DEFINER`, all with `SET search_path = public, pg_temp`. EXECUTE on the trigger-only functions is revoked from `anon`/`authenticated`/`PUBLIC`.
-
-| RPC | Called from JS | Purpose |
-|---|---|---|
-| `approve_submission(p_submission_id, p_note)` | `lib/supabase.js` → `approveSubmission` | Atomic + idempotent submission approval. Increments phase actuals when phase is set, mirrors task `status='approved'`, auto-deducts materials (truck → project bucket) for fiber_construction/field_service/infrastructure crews (legacy aerial/underground/splice/fiber_tech still in the guard). Bucket lookup: `submissions.project_id_override` → `phases.project_id` → `sites.project_id`. **Backlog #2:** no longer clears `working_counts`/`last_worked_by`/`last_worked_at` — the task stays open across passdowns until a manager closes it via `tasks.is_closed`. **Auto-deduct is submission-scoped** (migration `20260706232824_log_entries_submission_link.sql`): aggregates `entry_parts` for entries with `log_entries.submission_id = p_submission_id`; falls back to the legacy session-scoped WHERE only when the submission has NO linked entries (pre-fix rows). Two coexisting same-day submissions can never double-deduct each other's parts. |
-| `replace_submission_parts(p_submission_id, p_parts, p_hours)` | `lib/supabase.js` → `saveSubmissionParts` | Manager edit-then-approve (July 2026). Atomically replaces a **pending** submission's parts (consolidated onto ONE linked `log_entry`) and optionally corrects `hours_worked`, so a manager can fix wrong materials in place instead of flagging back to the crew. SECURITY DEFINER, `is_staff()`-guarded, **pending-only** (raises `42501` once `actuals_applied_at` is set — immutable after approval). Submission-scoped: every write keys on this submission's linked entries, so a same-session sibling passdown is never touched; branches cover part-less and legacy-unlinked entries. Only `entry_parts` change — `log_entries`/footage/`total_*` rollups are untouched, so approve stays consistent (it reads the live edited `entry_parts`). |
-| `record_crew_movement(operation, part_id, quantity, other_location_id, ...)` | `lib/inventory.js` → `recordCrewMovement` | Single entry point for crew load/return/issue/scrap/transfer. Checks per-user permission, crew_type×department whitelist, then inserts the movement. |
-| `approve_intake_request(p_request_id, p_note)` | `lib/inventory.js` → `approveIntakeRequest` | Backlog #19. Idempotent (anchors on `booked_at`/`movement_id`). Staff-guarded via `is_staff()`. Validates the target is a warehouse, materializes a draft part (`is_active=false`) when the request has no `part_id`, books a `receive` movement (truck-less, into the warehouse → trigger updates stock), flips the request to `approved`. |
-| `reject_intake_request(p_request_id, p_note)` | `lib/inventory.js` → `rejectIntakeRequest` | Backlog #19. Staff-guarded. Flips a pending intake request to `rejected` with a reason; no stock moves. |
-| `save_log_entry(...)` | `lib/supabase.js` → `saveEntry` | Atomic insert of `log_entries` + `entry_parts`. |
-| `replace_assembly(p_assembly jsonb, p_parts jsonb)` | `lib/supabase.js` → `saveAssembly` | Atomic upsert of assembly + replace of `assembly_parts`. |
-| `start_count_run(p_warehouse_id, p_notes, p_is_first_binning)` | `lib/cycleCount.js` → `startCountRun` | Cycle counting. Opens a count run for a warehouse. All cycle-count RPCs are staff-gated (`is_staff()`, 42501 for crew). |
-| `start_or_resume_count_session(p_run_id, p_bin_id)` / `record_count_line(p_session_id, p_part_id, p_counted_qty)` / `delete_count_line(p_line_id)` / `submit_count_session(p_session_id)` / `reopen_count_session(p_session_id)` | `lib/cycleCount.js` | Per-bin counting session lifecycle: open/resume a session, record a counted line (`p_counted_qty = NULL` is a deliberate **un-count** — restores an expected line to "still missing"; rejected for unexpected lines and missing lines, backlog #39), hard-delete an unexpected (expected_qty=0) line, submit the session, and **reopen a submitted session** for corrections while the run is still `in_progress` (staff-gated, idempotent; refused once the run is ended). |
-| `end_count_run_and_reconcile(p_run_id)` | `lib/cycleCount.js` → `endCountRunAndReconcile` | Closes a run: books offsetting bin↔bin `transfer` movements for paired variances and creates pending `count_resolutions` for net gains/losses. |
-| `approve_count_resolution(p_resolution_id, p_note)` / `discard_count_resolution(p_resolution_id, p_reason)` / `discard_count_run(p_run_id, p_reason)` | `lib/cycleCount.js` | Manager review of net_gain/net_loss resolutions — approve books an `adjust` movement; discard carries a reason. `discard_count_run` abandons a whole run. |
-| `deactivate_location_with_recovery(p_location_id, p_recovery_items, p_destination_location_id)` | `lib/inventory.js` | Retire a location, optionally moving its residual stock to a destination first. Staff-guarded via `is_staff()` (July 2026 — was owner-only, backlog #30). |
-| `decommission_site_with_recovery(p_site_id, p_recovery_items, p_destination_location_id)` | `lib/supabase.js` | Site decommission + optional physical-equipment recovery movements. Staff-guarded via `is_staff()` (July 2026 — was owner-only, backlog #30). |
-| `bulk_assign_pull_location(p_user_ids, p_location_id)` | `lib/inventory.js` → `bulkAssignPullLocation` | Points users' `default_pull_location_id` at a group location, consolidating their personal-truck stock into it (group membership add). |
-| `next_pr_number()` | `lib/inventory.js` | Mints the next purchase-request number (`PR-YYYY-####` from `purchase_requests_seq`). |
-| `is_staff()` | RLS policies | Returns true if `auth.uid()`'s role is owner/manager. STABLE. |
-| `is_owner()` | RLS/RPC guards | Returns true if `auth.uid()`'s role is owner. |
-| `cascade_task_terminal_to_session()` | Trigger only | When task status → pending/approved/done, flips matching `started` work_sessions to `submitted`. |
-| `ensure_crew_truck()` | Trigger only | Auto-creates a personal truck for new crew/contractor users. crew_type IN-list includes the merged `fiber_construction`/`field_service` (July 2026, backlog #28). Trigger fires on INSERT or UPDATE OF role/is_active only — not on crew_type-only updates. |
-| `ensure_project_job_site()` | Trigger only | Auto-creates a job_site bucket for new active projects. |
-| `update_inventory_stock_on_movement()` | Trigger only | Maintains `inventory_stock` from `inventory_movements` inserts. |
-| `validate_inventory_location_parent()` | Trigger only | Enforces bin parent rules (only warehouses can be parents, single-level only). |
-| `validate_count_session_bin()` | Trigger only | Guards count-session bin validity. |
-| `increment_phase_actuals(...)` | (legacy, kept for compatibility — `approve_submission` does the work inline now) | |
-| `crew_op_perms_touch_updated_at()`, `app_settings_touch_updated_at()`, `purchase_requests_touch_updated_at()`, `sites_touch_updated_at()`, `ftpm_touch_updated_at()`, `scbm_touch_updated_at()`, `sonar_project_map_touch_updated_at()` | Trigger only | `updated_at` bump triggers for their respective tables. |
-| `increment_session_counts(...)`, `update_session_timestamp()`, `update_updated_at_column()`, `prevent_movement_modification()`, `prevent_movement_delete()` | Triggers / legacy | |
+The canonical RPC reference (every function, its JS caller, and purpose — all `SECURITY DEFINER` with `SET search_path = public, pg_temp`) lives in **[docs/DB_RPCS.md](docs/DB_RPCS.md)** — moved out of this file to keep always-loaded memory lean. Keep that table updated when adding/changing any Postgres function.
 
 ---
 
