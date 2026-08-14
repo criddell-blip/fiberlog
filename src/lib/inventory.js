@@ -850,7 +850,7 @@ export function validateMovement({ movement_type, from_location_id, to_location_
   }
 }
 
-export async function getRecentMovements({ limit = 100, locationId = null, type = null } = {}) {
+export async function getRecentMovements({ limit = 100, locationId = null, type = null, partId = null } = {}) {
   let q = db
     .from('inventory_movements')
     .select(`
@@ -863,12 +863,32 @@ export async function getRecentMovements({ limit = 100, locationId = null, type 
     .order('created_at', { ascending: false })
     .limit(limit)
   if (type) q = q.eq('movement_type', type)
+  if (partId) q = q.eq('part_id', partId)
   if (locationId) {
     q = q.or(`from_location_id.eq.${locationId},to_location_id.eq.${locationId}`)
   }
   const { data, error } = await q
   if (error) throw error
   return data || []
+}
+
+// Movement history for ONE part, newest first.
+//
+// A thin wrapper rather than its own query: getRecentMovements already owns
+// the FK-disambiguated join spec (the two location joins are ambiguous without
+// the explicit constraint names), and a second copy is how the five-legacy-CSV
+// -escapers problem starts. `part_id` + `created_at DESC` matches the existing
+// idx_inv_movements_part_created, so this is an index scan.
+//
+// Capped rather than paged: the busiest part in the ledger has 284 movements
+// and the median is 7, so a cap plus a "showing the most recent N" note beats
+// paging UI. Receives are far smaller still (max 4 on any part), which is why
+// the panel queries them separately instead of filtering a capped list —
+// a created_at cap would silently drop the oldest receipts off a busy part
+// and under-report the received total.
+export async function getPartMovements(partId, { type = null, limit = 200 } = {}) {
+  if (!partId) return []
+  return getRecentMovements({ partId, type, limit })
 }
 
 export async function recordMovement({
@@ -2134,6 +2154,14 @@ export function pickFiberCustomerColumn(headers = []) {
 
 // Movement type → Sage Intacct transaction type. Defaults; customize per
 // company in Sage Settings if these names don't match.
+//
+// `receive` and `adjust` are filtered out before this map is ever consulted
+// (isExportableMovement rules 0a/0b). Do NOT delete their entries as dead
+// config: the lookup below falls back to `|| 'Inventory Adjustment'`, so a
+// row that ever slips past the filter — a future refactor, a caller passing
+// an unfiltered array — would be silently relabeled, booking a purchase
+// receipt into accounting as an inventory adjustment. A correct-but-unreached
+// mapping is strictly safer than a missing one.
 const SAGE_TRANSACTION_TYPE = {
   receive: 'Inventory Receipt',
   transfer: 'Inventory Transfer',
@@ -2234,6 +2262,7 @@ export async function getMovementsForActivityExport({ since, until, type = null,
       .select(`
         id, movement_type, quantity, unit, unit_cost, notes, created_at, occurred_at,
         submission_id, task_id, vendor_invoice,
+        from_location_id, to_location_id,
         part:parts_catalog(id, name, unit),
         from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type),
         to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type),
@@ -2323,7 +2352,13 @@ export function consumptionSource(m) {
 
 // Decide whether a movement should be included in the export.
 //
+// The export is a CONSUMPTION record, not a full copy of the ledger. Sage is
+// the accounting book; FiberLog is the provenance system ("how it got here and
+// where it went"). Where Sage already owns an event, we don't send it.
+//
 // Always-excluded:
+//   • `adjust` — Sage runs its own physical-inventory reconciliation
+//   • `receive` — Sage books the purchase from the PO/AP side
 //   • truck → truck (internal crew handoffs)
 //   • warehouse/bin ↔ warehouse/bin under the SAME parent warehouse
 //     (internal binning / unbinning / bin rearrangement — these are
@@ -2336,15 +2371,26 @@ export function consumptionSource(m) {
 //     auto-deduct (truck → project bucket) IS consumption and stays.
 //
 // What always stays in the export (default mode AND strict):
-//   receive, transfer to job_site (consumption), issue/scrap, adjust,
-//   inter-warehouse transfers (warehouse → warehouse different parents).
+//   transfer to job_site (consumption), issue/scrap, inter-warehouse
+//   transfers (warehouse → warehouse under different parents).
 export function isExportableMovement(m, { strictConsumption = false } = {}) {
-  // (0) Always exclude `adjust` — count corrections are FiberLog-internal
+  // (0a) Always exclude `adjust` — count corrections are FiberLog-internal
   // bookkeeping (cycle-count reconciliations, audit-CSV variances, manual
   // fixes). They don't represent purchases, consumption, transfers, or
   // scrap, and Sage Intacct runs its own physical-inventory reconciliation
   // — double-correcting in both systems would misstate the books.
   if (m.movement_type === 'adjust') return false
+
+  // (0b) Always exclude `receive`. Purchase orders are received directly
+  // into Sage and only then entered here, so Sage already carries the
+  // purchase from the AP side — exporting it again double-counts it.
+  // FiberLog keeps receives as the provenance record ("how it got here");
+  // they're inventory tracking, not accounting output.
+  //
+  // This also permanently prevents the 660 one-time BoxHero seed rows
+  // (opening stock, Jun 3 2026, ~430k units) from being pushed into Sage
+  // as purchases by anyone exporting a range that covers them.
+  if (m.movement_type === 'receive') return false
 
   const fromType = m.from_location?.type
   const toType = m.to_location?.type
@@ -2433,12 +2479,12 @@ export function buildSageCsv(movements, opts = {}) {
       || (m.to_location?.type === 'job_site' ? (m.to_location.name || '') : '')
     const classId = m.phase?.name || ''
 
-    // Vendor parsed from receive notes "Vendor: X" pattern (best-effort)
-    let vendorId = ''
-    if (m.movement_type === 'receive' && m.notes) {
-      const vm = /Vendor:\s*([^|·\n]+)/i.exec(m.notes)
-      if (vm) vendorId = vm[1].trim()
-    }
+    // VENDORID is intentionally always blank, and this is NOT a bug to fix.
+    // Vendors only ever attach to receives, and receives are excluded from
+    // the export (see isExportableMovement rule 0b) because Sage books the
+    // purchase from the PO. The column is kept so the 18-column layout — and
+    // whatever import mapping Sage has saved against it — stays stable.
+    const vendorId = ''
 
     const row = [
       txnType,

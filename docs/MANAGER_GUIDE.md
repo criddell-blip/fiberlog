@@ -212,7 +212,7 @@ A **Record movement** button plus these sheets (on phone, everything except Reco
 
 #### Receive PO
 - Multi-line vendor delivery: vendor + invoice + destination, then SKU + qty + unit cost per line
-- Can create new parts inline; posts as `receive` movements. Notes carry the vendor name for Sage later
+- Can create new parts inline; posts as `receive` movements. Notes carry the vendor name for FiberLog's own provenance record (the per-part History panel) — **not** for Sage: receives are no longer exported, because Sage books the purchase from the PO
 
 #### Reconcile
 - Upload the filled-in Audit CSV; preview the variances (positive = more on hand than recorded, negative = less)
@@ -283,7 +283,7 @@ Generates a fiber-progress report PDF for the selected project. Only meaningful 
 The Consumption view has an **Export to Sage** button (also reachable as the Inventory → Sage export action) that opens the export sheet with the current date range pre-filled:
 
 1. Pick the date range (default: last 7 days)
-2. Optionally turn on **strict-consumption mode** — the default already excludes internal truck-to-truck and warehouse-internal moves and all `adjust` rows; strict mode *additionally* drops crew loadouts + returns, keeping only true consumption + purchases
+2. Optionally turn on **strict-consumption mode** — the default already excludes receipts (Sage books those from the PO), all `adjust` rows, and internal truck-to-truck / warehouse-internal moves; strict mode *additionally* drops crew loadouts + returns, keeping only true consumption
 3. Preview shows what will export and what's skipped (with reasons)
 4. **Download CSV + mark X exported** — stamps every included movement with `exported_at` + a batch ID; future exports skip them automatically. A toggle re-issues an already-exported batch if Sage rejected one
 

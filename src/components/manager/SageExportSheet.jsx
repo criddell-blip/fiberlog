@@ -143,9 +143,11 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
           <Icon name="receipt" size={20} /> Sage Intacct export <span style={{ fontSize: 12, color: 'var(--orange)', marginLeft: 6 }}>prototype</span>
         </div>
         <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 14 }}>
-          Builds a Sage Inventory Transactions CSV from FiberLog movements in the picked range.
-          Internal staging (truck → truck and warehouse↔bin within the same warehouse) plus count
-          corrections (adjusts) are always filtered. Toggle <em>Strict consumption</em> to also drop
+          Builds a Sage Inventory Transactions CSV of what FiberLog <em>consumed</em> in the picked range.
+          Always filtered: <strong>receipts</strong> (POs are received straight into Sage, so sending them
+          again would double-count the purchase — FiberLog keeps them for tracking), count corrections
+          (adjusts, since Sage runs its own reconciliation), and internal staging (truck → truck and
+          warehouse↔bin within the same warehouse). Toggle <em>Strict consumption</em> to also drop
           crew loadouts + returns. <strong>Preview CSV</strong> downloads the file to inspect with no side
           effects; <strong>Download + mark exported</strong> also stamps the rows so the next batch skips them.
           To re-view an already-exported batch (e.g. Grady's earlier export), turn on <em>Include already exported</em>.
@@ -177,7 +179,7 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
           </label>
           <label
             style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}
-            title="Drop crew loadouts + returns from the export. Keeps only purchases, truck→project consumption, issue, scrap, and adjusts."
+            title="Drop crew loadouts + returns (truck staging) from the export. Keeps truck→project consumption, issue and scrap."
           >
             <input
               type="checkbox"
@@ -224,7 +226,7 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
             <span><strong style={{ color: 'var(--text)' }}>{exportable.length}</strong> ready to export</span>
             {skippedInternal > 0 && (
               <span style={{ color: 'var(--hint)' }}>
-                {skippedInternal} skipped (internal staging + adjusts{strictConsumption ? ' + crew loads/returns' : ''})
+                {skippedInternal} skipped (receipts + adjusts + internal staging{strictConsumption ? ' + crew loads/returns' : ''})
               </span>
             )}
             {Object.entries(typeCounts).map(([type, count]) => (

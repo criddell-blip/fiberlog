@@ -215,8 +215,29 @@ describe('isExportableMovement', () => {
     expect(isExportableMovement(mv({ from_location: BIN_A, to_location: BIN_OTHER }))).toBe(true)
   })
 
-  it('keeps receives, consumption transfers, issues, and scraps', () => {
-    expect(isExportableMovement(mv({ movement_type: 'receive', from_location: null, to_location: WAREHOUSE }))).toBe(true)
+  // POs are received straight into Sage and only then entered here, so Sage
+  // already carries the purchase — exporting it again double-counts it.
+  it('always excludes receives (Sage books purchases from the PO)', () => {
+    const recv = mv({ movement_type: 'receive', from_location: null, to_location: WAREHOUSE })
+    expect(isExportableMovement(recv)).toBe(false)
+    expect(isExportableMovement(recv, { strictConsumption: true })).toBe(false)
+    // Into a bin rather than warehouse level — same answer.
+    expect(isExportableMovement(mv({ movement_type: 'receive', from_location: null, to_location: BIN_A }))).toBe(false)
+  })
+
+  // The 660 BoxHero opening-stock rows are receives. Before the receive guard
+  // they were exportable, so any range covering Jun 3 2026 would have pushed
+  // ~430k units into Sage as purchases. This is the guard against that.
+  it('excludes the one-time BoxHero seed receives', () => {
+    expect(isExportableMovement(mv({
+      movement_type: 'receive',
+      from_location: null,
+      to_location: WAREHOUSE,
+      notes: 'BoxHero seed · Warehouse',
+    }))).toBe(false)
+  })
+
+  it('keeps consumption transfers, issues, and scraps', () => {
     expect(isExportableMovement(mv({ from_location: TRUCK1, to_location: BUCKET }))).toBe(true)
     expect(isExportableMovement(mv({ movement_type: 'issue', from_location: TRUCK1, to_location: null }))).toBe(true)
     expect(isExportableMovement(mv({ movement_type: 'scrap', from_location: TRUCK1, to_location: null }))).toBe(true)
@@ -244,20 +265,31 @@ describe('buildSageCsv', () => {
   })
 
   it('maps movement types to Sage transaction types', () => {
+    // No receive row here — receives are filtered before the type map is
+    // consulted, so 'Inventory Receipt' is unreachable by design.
     const rows = csvRows(buildSageCsv([
-      mv({ movement_type: 'receive', from_location: null, to_location: WAREHOUSE }),
       mv({ movement_type: 'transfer', from_location: TRUCK1, to_location: BUCKET }),
       mv({ movement_type: 'return', from_location: TRUCK1, to_location: WAREHOUSE }),
       mv({ movement_type: 'issue', from_location: TRUCK1, to_location: null }),
       mv({ movement_type: 'scrap', from_location: TRUCK1, to_location: null }),
     ]))
     expect(rows.map(r => r[col('TRANSACTIONTYPE')])).toEqual([
-      'Inventory Receipt',
       'Inventory Transfer',
       'Inventory Transfer', // return also exports as a transfer
       'Inventory Issue',
       'Inventory Adjustment', // scrap
     ])
+  })
+
+  it('emits no row at all for a receive, and does not consume a LINE number', () => {
+    const rows = csvRows(buildSageCsv([
+      mv({ movement_type: 'receive', from_location: null, to_location: WAREHOUSE }),
+      mv({ movement_type: 'transfer', from_location: TRUCK1, to_location: BUCKET }),
+    ]))
+    expect(rows).toHaveLength(1)
+    expect(rows[0][col('TRANSACTIONTYPE')]).toBe('Inventory Transfer')
+    // LINE restarts at 1 — the skipped receive must not leave a gap.
+    expect(rows[0][col('LINE')]).toBe('1')
   })
 
   it('dates by the effective work date: occurred_at wins over created_at, YYYY-MM-DD', () => {
@@ -327,13 +359,28 @@ describe('buildSageCsv', () => {
     expect(rows[2][col('PROJECTID')]).toBe('')
   })
 
-  it('parses VENDORID from receive notes only', () => {
+  // VENDORID is retained only to keep the 18-column layout (and Sage's saved
+  // import mapping) stable. Vendors attach exclusively to receives, and those
+  // no longer export, so it can never be populated. Asserted so nobody
+  // "restores" the parse and starts emitting vendors again.
+  it('leaves VENDORID blank — vendors only exist on receives, which never export', () => {
     const rows = csvRows(buildSageCsv([
-      mv({ movement_type: 'receive', from_location: null, to_location: WAREHOUSE, notes: 'Vendor: Graybar | inv 123' }),
-      mv({ notes: 'Vendor: Graybar' }), // transfer — vendor parse skipped
+      mv({ notes: 'Vendor: Graybar' }),                                   // transfer
+      mv({ movement_type: 'issue', from_location: TRUCK1, to_location: null, notes: 'Vendor: Graybar | inv 123' }),
     ]))
-    expect(rows[0][col('VENDORID')]).toBe('Graybar')
-    expect(rows[1][col('VENDORID')]).toBe('')
+    expect(rows).toHaveLength(2)
+    expect(rows.map(r => r[col('VENDORID')])).toEqual(['', ''])
+  })
+
+  // PRICE is dormant-by-DATA, not dead-by-code: unit_cost is type-agnostic and
+  // simply happens to be null on every non-receive today. Guards against
+  // someone "tidying" it to a hardcoded '' alongside VENDORID — it starts
+  // working again for free the day a transfer carries a cost.
+  it('still emits PRICE when a non-receive carries a unit_cost', () => {
+    const rows = csvRows(buildSageCsv([
+      mv({ unit_cost: 3.5, from_location: TRUCK1, to_location: BUCKET }),
+    ]))
+    expect(rows[0][col('PRICE')]).toBe('3.5')
   })
 
   it('CSV-escapes fields containing commas and quotes', () => {
