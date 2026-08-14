@@ -850,7 +850,7 @@ export function validateMovement({ movement_type, from_location_id, to_location_
   }
 }
 
-export async function getRecentMovements({ limit = 100, locationId = null, type = null } = {}) {
+export async function getRecentMovements({ limit = 100, locationId = null, type = null, partId = null } = {}) {
   let q = db
     .from('inventory_movements')
     .select(`
@@ -863,12 +863,32 @@ export async function getRecentMovements({ limit = 100, locationId = null, type 
     .order('created_at', { ascending: false })
     .limit(limit)
   if (type) q = q.eq('movement_type', type)
+  if (partId) q = q.eq('part_id', partId)
   if (locationId) {
     q = q.or(`from_location_id.eq.${locationId},to_location_id.eq.${locationId}`)
   }
   const { data, error } = await q
   if (error) throw error
   return data || []
+}
+
+// Movement history for ONE part, newest first.
+//
+// A thin wrapper rather than its own query: getRecentMovements already owns
+// the FK-disambiguated join spec (the two location joins are ambiguous without
+// the explicit constraint names), and a second copy is how the five-legacy-CSV
+// -escapers problem starts. `part_id` + `created_at DESC` matches the existing
+// idx_inv_movements_part_created, so this is an index scan.
+//
+// Capped rather than paged: the busiest part in the ledger has 284 movements
+// and the median is 7, so a cap plus a "showing the most recent N" note beats
+// paging UI. Receives are far smaller still (max 4 on any part), which is why
+// the panel queries them separately instead of filtering a capped list —
+// a created_at cap would silently drop the oldest receipts off a busy part
+// and under-report the received total.
+export async function getPartMovements(partId, { type = null, limit = 200 } = {}) {
+  if (!partId) return []
+  return getRecentMovements({ partId, type, limit })
 }
 
 export async function recordMovement({
@@ -2176,6 +2196,7 @@ export async function getMovementsForActivityExport({ since, until, type = null,
       .select(`
         id, movement_type, quantity, unit, unit_cost, notes, created_at, occurred_at,
         submission_id, task_id, vendor_invoice,
+        from_location_id, to_location_id,
         part:parts_catalog(id, name, unit),
         from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type),
         to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type),

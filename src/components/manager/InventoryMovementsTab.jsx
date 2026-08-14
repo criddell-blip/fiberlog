@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { getRecentMovements, getMovementsForActivityExport, movementEffectiveDate } from '../../lib/inventory'
 import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
 import { fmtWhen } from '../../lib/format'
+import { TYPE_COLORS, TYPE_LABELS, movementDisplay, signedQty, resolveReceiveMeta } from '../../lib/movementDisplay'
 import { chipStyle, cardSurface, LoadingBlock, EmptyState } from './chrome'
 import Icon from '../shared/Icon'
 
@@ -13,26 +14,6 @@ function isoLocalDate(d) {
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
-}
-
-// Movement-type accents. Receive/issue are the in/out pair; the rest keep
-// distinct hues so the activity feed is scannable at a glance.
-const TYPE_COLORS = {
-  receive:  { bg: 'var(--teal-lt)',   text: 'var(--accent-dk)', icon: 'download' },
-  transfer: { bg: 'var(--blue-lt)',   text: 'var(--blue)',      icon: 'move' },
-  return:   { bg: 'var(--purple-lt)', text: 'var(--purple)',    icon: 'rotate' },
-  issue:    { bg: 'var(--amber-lt)',  text: 'var(--amber)',     icon: 'upload' },
-  scrap:    { bg: 'var(--red-lt)',    text: 'var(--red)',       icon: 'x' },
-  adjust:   { bg: 'var(--gray-lt)',   text: 'var(--muted)',     icon: 'sliders' },
-}
-
-const TYPE_LABELS = {
-  receive:  'Receive',
-  transfer: 'Transfer',
-  return:   'Return',
-  issue:    'Issue',
-  scrap:    'Scrap',
-  adjust:   'Adjust',
 }
 
 export default function InventoryMovementsTab({ locations, refreshKey }) {
@@ -81,10 +62,15 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
         // Adjusts carry their direction in which endpoint is set (to = up,
         // from = down) — spell it out in Type, and sign the qty so a
         // spreadsheet SUM over adjusts nets out correctly.
-        const isAdjust = m.movement_type === 'adjust'
-        const adjustDown = isAdjust && !m.to_location && !!m.from_location
-        const typeLabel = isAdjust ? (adjustDown ? 'adjust down' : 'adjust up') : m.movement_type
-        const qtySigned = adjustDown ? -Math.abs(Number(m.quantity)) : Number(m.quantity)
+        //
+        // Shared with the feed via movementDisplay, which reads the endpoint
+        // from the scalar FK column OR the joined object. That matters here:
+        // this export's select carries the joins, and until it also selected
+        // the scalars an id-only derivation would have called every adjust
+        // "up" and left its quantity positive.
+        const d = movementDisplay(m)
+        const typeLabel = d.label.toLowerCase()
+        const qtySigned = signedQty(m)
         lines.push([
           eff ? String(eff).slice(0, 10) : '',
           m.created_at ? String(m.created_at).slice(0, 10) : '',
@@ -93,8 +79,8 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
           m.part?.name || '',
           qtySigned,
           m.unit || m.part?.unit || 'ea',
-          m.from_location?.name || (m.movement_type === 'receive' ? 'Vendor' : ''),
-          m.to_location?.name || (m.movement_type === 'issue' || m.movement_type === 'scrap' ? 'Consumed' : ''),
+          d.fromName || '',
+          d.toName || '',
           m.created_by_user?.name || '',
           m.vendor_invoice || '',
           m.notes || '',
@@ -185,22 +171,10 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {movements.map(m => {
-            const baseColors = TYPE_COLORS[m.movement_type] || TYPE_COLORS.adjust
-            // Adjust has two directions: positive (to only, adds stock) and
-            // negative (from only, removes stock). Surface that visually.
-            const isAdjust     = m.movement_type === 'adjust'
-            const isAdjustUp   = isAdjust && !m.from_location_id && !!m.to_location_id
-            const isAdjustDown = isAdjust && !!m.from_location_id && !m.to_location_id
-            const colors = isAdjustUp
-              ? { bg: 'var(--teal-lt)', text: 'var(--accent-dk)', icon: 'plus' }
-              : isAdjustDown
-              ? { bg: 'var(--red-lt)',  text: 'var(--red)',       icon: 'x' }
-              : baseColors
-            const label = isAdjustUp ? 'Adjust up' : isAdjustDown ? 'Adjust down' : TYPE_LABELS[m.movement_type]
-            const qtyColor = isAdjustUp ? 'var(--accent-dk)' : isAdjustDown ? 'var(--red)' : 'var(--text)'
-            const qtyPrefix = isAdjustUp ? '+' : isAdjustDown ? '−' : ''
-            const fromName = m.from_location?.name || (m.movement_type === 'receive' ? 'Vendor' : null)
-            const toName   = m.to_location?.name   || (m.movement_type === 'issue' || m.movement_type === 'scrap' ? 'Consumed' : null)
+            // Type accent, adjust direction and endpoint fallbacks all come
+            // from lib/movementDisplay so this feed, its CSV export and the
+            // part-history panel can't drift apart.
+            const { colors, label, qtyColor, qtyPrefix, fromName, toName } = movementDisplay(m)
             return (
               <div key={m.id} style={{
                 ...cardSurface,
@@ -230,10 +204,23 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
                   </span>
                 </div>
                 {(m.vendor_invoice || m.notes) && (
-                  <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
-                    {m.vendor_invoice && <span>Invoice: {m.vendor_invoice}</span>}
-                    {m.vendor_invoice && m.notes && ' · '}
-                    {m.notes && <span>{m.notes}</span>}
+                  <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4, wordBreak: 'break-word' }}>
+                    {/* NOT "Invoice: {vendor_invoice}" — that column holds the
+                        PO ref for ReceivePOSheet rows but the VENDOR NAME for
+                        PR-received ones, and hand-entered prose on a few. The
+                        resolver labels whatever it actually is. */}
+                    {(() => {
+                      const meta = resolveReceiveMeta(m)
+                      const bits = []
+                      if (meta.vendor) bits.push(`Vendor: ${meta.vendor}`)
+                      if (meta.reference) bits.push(`Ref: ${meta.reference}`)
+                      // Non-receives never resolve, so fall back to the raw column.
+                      if (!bits.length && m.vendor_invoice) bits.push(m.vendor_invoice)
+                      // Skip notes the resolver already turned into the
+                      // Vendor/Ref bits above — else the vendor prints twice.
+                      if (m.notes && !meta.notesConsumed) bits.push(m.notes)
+                      return bits.join(' · ')
+                    })()}
                   </div>
                 )}
               </div>

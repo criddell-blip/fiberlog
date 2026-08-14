@@ -5,6 +5,7 @@ import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
 import SkuLabelSheet from './SkuLabelSheet'
 import BulkMoveSheet from './BulkMoveSheet'
 import PurchaseRequestSheet from './PurchaseRequestSheet'
+import PartHistoryPanel from './PartHistoryPanel'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
 import { useBackClose } from '../../lib/backStack'
 import { useIsWide } from '../../lib/useIsWide'
@@ -35,9 +36,13 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   const [showPrSheet, setShowPrSheet] = useState(false)
   // The part whose location-breakdown overlay is open. NULL = closed.
   const [viewingLocationsFor, setViewingLocationsFor] = useState(null)
+  // The part whose movement-history overlay is open. NULL = closed.
+  const [viewingHistoryFor, setViewingHistoryFor] = useState(null)
 
   // Back closes the edit-part form or the location-breakdown overlay. The label
-  // / bulk-move / PR sheets self-register, so they're not listed here.
+  // / bulk-move / PR sheets self-register, so they're not listed here — and
+  // neither is PartHistoryPanel, for the same reason (registering it here too
+  // would take two Back presses to close it).
   useBackClose(editing ? 1 : 0, () => setEditing(null))
   useBackClose(viewingLocationsFor ? 1 : 0, () => setViewingLocationsFor(null))
 
@@ -488,6 +493,16 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                 ) : (
                   <button onClick={() => handleQuickDeactivate(p)} style={quickBtnStyle('amber')}>Retire</button>
                 ))}
+                {/* Read-only info, so deliberately outside the !readOnly guard
+                    like Locations — accounting scope is arguably the primary
+                    audience for "what did we pay, to whom, when". */}
+                <button
+                  onClick={() => setViewingHistoryFor(p)}
+                  style={{ ...quickBtnStyle('default'), display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                  title="Receive and movement history for this part"
+                >
+                  <Icon name="activity" size={13} /> History
+                </button>
                 <button
                   onClick={() => setViewingLocationsFor(p)}
                   style={{ ...quickBtnStyle('default'), display: 'inline-flex', alignItems: 'center', gap: 5 }}
@@ -599,6 +614,15 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           onClose={() => setViewingLocationsFor(null)}
           onJumpToLocation={(id) => { setViewingLocationsFor(null); onJumpToLocation?.(id) }}
           onMoved={() => { setViewingLocationsFor(null); onChanged?.() }}
+        />
+      )}
+
+      {/* Read-only, and unmounted on close so reopening always refetches —
+          hence no refreshKey thread and no onChanged callback. */}
+      {viewingHistoryFor && (
+        <PartHistoryPanel
+          part={viewingHistoryFor}
+          onClose={() => setViewingHistoryFor(null)}
         />
       )}
 
