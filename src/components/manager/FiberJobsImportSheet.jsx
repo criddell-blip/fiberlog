@@ -6,7 +6,7 @@ import {
   recordMovementsBatch,
   getSonarProjectMap, setSonarProjectPhase, getPhasesWithBuckets,
   getSonarSourceLocationMap, setSonarSourceLocation, getLocations,
-  getFiberValueMap, setFiberValueMap, FIBER_QTY_MODE_OPTIONS,
+  getFiberValueMap, setFiberValueMap, clearFiberValueMap, FIBER_QTY_MODE_OPTIONS,
   parseFiberRow, isFiberValueIgnored, FIBER_NON_MATERIAL_COLUMNS,
   isFiberCustomerColumn, pickFiberCustomerColumn,
   confirmNegativeStock,
@@ -264,10 +264,21 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   }
 
   // Unique (column, value) combos that need a map entry
-  const valueMappingsNeeded = useMemo(() => {
-    if (!csvRows) return []
+  // Every unique (column, value) combo in this CSV, split by whether it
+  // already has a persisted mapping. The SAVED half stays on screen so a
+  // mis-picked SKU or qty mode can be corrected without leaving the sheet:
+  // before this, a row vanished the instant it was saved and there was no
+  // editor for sonar_fiber_value_map anywhere in the app, so a wrong pick was
+  // unreachable (a wrongly-mapped line resolves to 'ready', which doesn't get
+  // the per-row override either).
+  //
+  // Scoped to the loaded CSV on purpose — this is "fix what you just did",
+  // not a catalog-wide admin screen.
+  const { valueMappingsNeeded, valueMappingsSaved } = useMemo(() => {
+    if (!csvRows) return { valueMappingsNeeded: [], valueMappingsSaved: [] }
     const seen = new Set()
-    const out = []
+    const needed = []
+    const saved = []
     for (const row of csvRows) {
       for (const col of materialColumns) {
         const raw = (row[col] || '').trim()
@@ -276,10 +287,11 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         if (seen.has(key)) continue
         seen.add(key)
         const existing = valueMap.get(key)
-        if (!existing) out.push({ columnName: col, valueText: raw })
+        if (existing) saved.push({ columnName: col, valueText: raw, existing })
+        else needed.push({ columnName: col, valueText: raw })
       }
     }
-    return out
+    return { valueMappingsNeeded: needed, valueMappingsSaved: saved }
   }, [csvRows, materialColumns, valueMap])
 
   // Already-imported [sonar_jobs:<acct>_YYYY-MM-DD_<type>] markers from past
@@ -403,6 +415,19 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       setValueMap(newMap)
     } catch (e) {
       setError(`Save mapping failed: ${e.message || e}`)
+    }
+  }
+
+  // Drop a saved mapping entirely. The combo falls back into "needed" on the
+  // next recompute, so this is the escape hatch when the right answer is
+  // "start over" rather than "change the mode".
+  async function handleValueMapRemove(columnName, valueText) {
+    try {
+      await clearFiberValueMap({ columnName, valueText })
+      const key = `${columnName}::${valueText.toLowerCase()}`
+      setValueMap(prev => { const next = new Map(prev); next.delete(key); return next })
+    } catch (e) {
+      setError(`Remove mapping failed: ${e.message || e}`)
     }
   }
 
@@ -631,6 +656,29 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             </Section>
           )}
 
+          {/* Saved mappings for values in THIS file — editable in place.
+              Keyed on the persisted values so a successful change remounts the
+              row with fresh state; otherwise ValueMapRow's useState would keep
+              serving the pre-edit SKU/mode it was initialised with. */}
+          {valueMappingsSaved.length > 0 && (
+            <Section title={`Value mappings already set (${valueMappingsSaved.length})`} accent="var(--gray)"
+              subtitle="Every mapped value in this file. Change the SKU or qty mode to correct a wrong pick, or remove it to start over — changes apply to future imports, not to movements already applied.">
+              {valueMappingsSaved.map(({ columnName, valueText, existing }) => (
+                <ValueMapRow
+                  key={`${columnName}::${valueText}::${existing.sku}::${existing.qty_mode}::${existing.pair_column}`}
+                  columnName={columnName}
+                  valueText={valueText}
+                  parts={parts}
+                  materialColumns={materialColumns}
+                  rowCount={resolved.filter(r => r.lines.some(l => l.columnName === columnName && l.valueText === valueText)).length}
+                  existing={existing}
+                  onSave={fields => handleValueMapChange(columnName, valueText, fields)}
+                  onRemove={() => handleValueMapRemove(columnName, valueText)}
+                />
+              ))}
+            </Section>
+          )}
+
           {/* Crew mappings */}
           {uniqueUsernames.length > 0 && (
             <Section title="Crew (User | Username → FiberLog user)" accent="var(--teal)"
@@ -784,13 +832,24 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
 }
 
 // ─── Value-map picker row ──────────────────────────────────────────────
-function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, onSave }) {
-  const [sku, setSku] = useState('')
-  const [qtyMode, setQtyMode] = useState('fixed_unit')
-  const [pairColumn, setPairColumn] = useState('')
+// Doubles as the "needs a mapping" row and the "already mapped, fix it" row.
+// When `existing` is passed the fields start from the persisted mapping and
+// the button only enables once something actually differs, so an accidental
+// re-save can't churn the row. The parent keys this component on the persisted
+// values, so a successful change remounts it rather than leaving these useState
+// values stale.
+function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, existing = null, onSave, onRemove }) {
+  const [sku, setSku] = useState(existing?.sku || '')
+  const [qtyMode, setQtyMode] = useState(existing?.qty_mode || 'fixed_unit')
+  const [pairColumn, setPairColumn] = useState(existing?.pair_column || '')
   const [saved, setSaved] = useState(false)
   const [picking, setPicking] = useState(false)
   const pickedPart = sku ? parts.find(p => p.id === sku) : null
+
+  const unchanged = !!existing &&
+    (sku || '') === (existing.sku || '') &&
+    qtyMode === existing.qty_mode &&
+    (pairColumn || '') === (existing.pair_column || '')
 
   async function save() {
     if (qtyMode !== 'ignore' && !sku) return
@@ -810,7 +869,7 @@ function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, 
     )}
     <div style={{
       display: 'grid',
-      gridTemplateColumns: '2fr 2fr 1.6fr 1.6fr auto',
+      gridTemplateColumns: '2fr 2fr 1.6fr 1.6fr auto auto',
       gap: 6, alignItems: 'center',
       padding: '6px 8px', marginBottom: 4,
       background: saved ? 'var(--success-bg)' : 'var(--surface2)',
@@ -845,12 +904,24 @@ function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, 
       ) : <div />}
       <button
         onClick={save}
-        disabled={(qtyMode !== 'ignore' && !sku) || (qtyMode === 'pair_with_column' && !pairColumn) || saved}
+        disabled={(qtyMode !== 'ignore' && !sku) || (qtyMode === 'pair_with_column' && !pairColumn) || saved || unchanged}
         className="btn btn-primary"
         style={{ padding: '4px 10px', fontSize: 11 }}
       >
-        {saved ? 'Saved' : 'Save'}
+        {saved ? 'Saved' : existing ? 'Update' : 'Save'}
       </button>
+      {existing && onRemove ? (
+        <button
+          type="button"
+          title="Remove this mapping — the value goes back to needing one"
+          onClick={() => {
+            if (window.confirm(`Remove the mapping for "${valueText}"?\n\nIt will show up under "Value mappings needed" again. Movements already applied are unaffected.`)) onRemove()
+          }}
+          style={{ padding: '4px 8px', fontSize: 11, fontWeight: 600, background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 'var(--r-xs)', cursor: 'pointer' }}
+        >
+          Remove
+        </button>
+      ) : <div />}
     </div>
     </>
   )
