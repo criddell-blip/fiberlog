@@ -21,6 +21,8 @@ We can't integrate directly with Sonar (CRM) or Sage (accounting). The strategy 
 - **Use FiberLog as the consumption ledger** — what was used, by whom, on which project
 - **Export cleanly** — Sage gets a CSV per period; future Sonar export will go back the other way once we have the data we need
 
+**Who owns what, FiberLog vs Sage (Aug 2026).** Purchase orders are received **directly into Sage**, then entered into FiberLog. So Sage is the accounting book (it already holds the purchase from the AP side; only a few people have access), and FiberLog is the **inventory-provenance** system — how stock got here and where it went. Consequence: the Sage export is consumption-only and deliberately **excludes `receive` movements** (exporting them would double-count the purchase), alongside `adjust` (Sage runs its own physical-inventory reconciliation). Receives stay in FiberLog as the provenance record and are what the Parts tab's per-part History panel reads. See `isExportableMovement` in `lib/inventory.js`.
+
 ---
 
 ## The three crew workflows

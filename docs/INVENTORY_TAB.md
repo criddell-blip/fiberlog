@@ -271,7 +271,7 @@ For one-off correction movements between locations you don't normally connect, y
 1. Click **🧾 Sage export**
 2. Pick the date range (defaults to the last 7 days)
 3. Decide whether to use **strict-consumption mode**:
-   - **Off (default)**: includes everything Sage cares about — receives, sells, project consumption, scrap, returns. Excludes internal truck-to-truck transfers (those aren't Sage-relevant).
+   - **Off (default)**: includes everything Sage cares about — project consumption, scrap, returns, inter-warehouse transfers. Excludes **receipts** (POs are received directly into Sage, so exporting them again would double-count the purchase; FiberLog keeps them as the provenance record), count corrections (adjusts), and internal truck-to-truck / warehouse-internal transfers.
    - **On**: also excludes crew loads and returns (warehouse ↔ truck staging). Use this if Sage doesn't want to see staging activity, only true consumption.
 4. Review the preview — it tells you how many movements will export and how many are being skipped, with the reason
 5. Click **Download CSV + mark X exported**

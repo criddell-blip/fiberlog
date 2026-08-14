@@ -226,7 +226,7 @@ PROJECTID, CLASSID, DEPARTMENTID, VENDORID, MEMO,
 FIBERLOG_MOVEMENT_ID
 ```
 
-- `TRANSACTIONTYPE` = Sage's standard transaction type per movement_type (Inventory Receipt / Transfer / Issue / Adjustment)
+- `TRANSACTIONTYPE` = Sage's standard transaction type per movement_type (Inventory Transfer / Issue / Adjustment). Inventory Receipt never appears — receipts are booked in Sage from the PO, so FiberLog doesn't export them
 - `PROJECTID` = phase's parent project (Heber, Park City, etc.)
 - `CLASSID` = phase name (Center Creek, Snyderville, etc.) — Sage's cost-center sub-grouping
 - `FIBERLOG_MOVEMENT_ID` = `inventory_movements.id`, useful for back-referencing in Sage
@@ -236,7 +236,7 @@ The next export skips already-exported rows automatically via the partial index 
 **Prototype defaults** (easy to swap if Sage rejects):
 - Sage transaction type names are Sage Intacct defaults — config customizable per company
 - Warehouse + project codes use FiberLog names directly (no code mapping table yet)
-- VENDORID parsed from receive notes via "Vendor: X" regex
+- VENDORID kept for column-layout stability but always blank — vendors only attach to receives, which aren't exported (Sage has the vendor from the PO)
 - Trucks are filtered when both endpoints are trucks; truck→bucket consumption + warehouse→truck loadouts kept
 
 ---
