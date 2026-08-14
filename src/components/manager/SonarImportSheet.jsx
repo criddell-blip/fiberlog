@@ -1125,7 +1125,14 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                                 </span>
                               )}
                             </div>
-                            <div style={{ fontSize: 10, color: 'var(--hint)' }}>{r.city}</div>
+                            {/* Account number was already parsed (it keys the
+                                dedup and the group divider) but never shown —
+                                it's the handle for looking the job up in Sonar
+                                when a row needs a judgement call. */}
+                            <div style={{ fontSize: 10, color: 'var(--hint)' }}>
+                              {r.city}
+                              {r.accountId && <> · acct {r.accountId}</>}
+                            </div>
                           </td>
                           <td style={tdStyle()}>
                             <div style={{ fontWeight: 600 }}>{r.partName || <em style={{ color: 'var(--amber)' }}>{r.sonarModel}</em>}</div>
