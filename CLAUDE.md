@@ -29,9 +29,9 @@ We can't integrate directly with Sonar (CRM) or Sage (accounting). The strategy 
 |---|---|---|---|
 | **Fiber construction** (aerial / underground / splice / drop / locator) | Project → Phase → Task → Daily passdown | FiberLog only | ✅ Shipped |
 | **Infrastructure** (towers, sites, business installs) | Project → **Site** → Task → Daily passdown (sites-shaped shell) | FiberLog only | 🚧 Shell shipped — onboarding next |
-| **Field tech** (Calix/UBNT installs, Wave/wireless) | Customer install ticket (Sonar-scheduled) | Sonar for scheduling + logging; FiberLog imports daily | 📋 Backlog (blocked on Sonar polygon data) |
+| **Field tech** (Calix/UBNT installs, Wave/wireless) | Customer install ticket (Sonar-scheduled) | Sonar for scheduling + logging; FiberLog imports daily | ✅ Routing unblocked Aug 2026 — Sonar tags jobs with a project |
 
-**Why this split:** Fiber and infrastructure crews work plan-driven jobs against geographic projects — they know which project they're on. Field techs work ticket-driven jobs against customer addresses and don't reliably know which fiber region a customer falls into. Until Sonar provides polygon/address → region mapping, field tech intake stays in Sonar; we'll import nightly when the data is good enough to route automatically.
+**Why this split:** Fiber and infrastructure crews work plan-driven jobs against geographic projects — they know which project they're on. Field techs work ticket-driven jobs against customer addresses and don't reliably know which fiber region a customer falls into. That used to make their consumption unroutable; it no longer does — Sonar now stamps a `Project` on each fiber job and FiberLog maps every one of those tags to a phase (see "Field tech — routing" below). Field tech intake still lives in Sonar; FiberLog imports the daily report.
 
 ---
 
@@ -103,22 +103,26 @@ Some managers are also field workers. They needed to log their own day's work wi
 
 ---
 
-## Field tech (backlog — blocked)
+## Field tech — routing
 
-**Why backlogged:** Field techs install at customer addresses. Sonar tracks customers but does not currently tag each customer with which fiber region (Heber / Park City / etc.) they fall under. Without that, when we import Sonar's daily report, we can't reliably route consumed materials to the right project — and routing to a generic "Wave" or "FW" bucket forces a manual reconciliation step downstream that defeats the purpose.
+> **This section previously read "backlog — blocked, waiting on Sonar polygon data." That was stale.** Verified against real data Aug 14 2026: Option 3 (dispatcher tags the project at job creation) is **live in Sonar**, and FiberLog already consumes it. Nobody noticed it had landed. Don't re-plan this epic on the old premise.
 
-**Unblocks when:** Sonar gets polygon-to-customer address mapping (in progress — tied to BEAD/reconnect address requirements). The polygons already exist from the developer side; they haven't propagated to Sonar yet.
+**How field-tech consumption routes today (Option 3, as designed):**
+- Sonar's daily field-tech report ("Field tech asset consumption") carries a **`Project` column**, stamped per job.
+- `SonarImportSheet.jsx` resolves each row's destination bucket; the job's project tag flows through `sonar_project_phase_map` to a phase → project.
+- Manager approves the batch → materials transfer crew truck → project bucket → Sage export picks it up keyed by project, alongside fiber + infrastructure.
 
-**Approach when unblocked (Option 3 — dispatcher tags at job creation):**
-- Dispatcher (or system, once polygons land) adds a `project` field to Sonar jobs at scheduling time
-- Sonar daily CSV export includes that field
-- FiberLog's Sonar import sheet (already shipped — `SonarImportSheet.jsx`) reads the `project` field and ties each imported submission to that project
-- Manager approves the batch → materials auto-deduct truck → project
-- Sage export includes field tech consumption alongside fiber + infrastructure, all keyed by project
+**Coverage (measured, not assumed):** `sonar_project_phase_map` holds **53 mappings covering 53/53 distinct Sonar project tags** — 100% of the 8,289 addresses in the owner's Aug 2026 "Fiber project addresses" export. The last gap (`COLDER SPRINGS`, 283 Lehi addresses) was mapped onto the existing Cold Springs phase Aug 14 2026.
 
-**Why Option 3 over an address lookup table:** A FiberLog-maintained address → project lookup is another manual process. The polygon data exists at the developer level and is moving toward Sonar; building our own lookup would compete with the real source of truth.
+**The ~51% of report rows with a BLANK `Project` are not a gap — they're wireless.** Checked by equipment model: tagged rows are fiber gear (GP1100X, GP4200XH, UFiber, Wave-Fiber-ONU); untagged rows are wireless (Wave LR / Nano / Pico, PowerBeam, NanoStation). Wireless installs correctly have no fiber project and route by the **wireless part policy** (`gigwave`/`none` → Gigwave / Fixed Wireless), which deliberately outranks any project tag — see the Sonar routing precedence in the interconnect table. Across all of Q2 only **6 fiber rows** had a blank tag; the per-row destination picker covers those.
 
-**Until then:** Field techs continue logging in Sonar. Their material consumption isn't tracked in FiberLog. Manual Sage entry for field tech materials continues (status quo, pending the unblock).
+**Do NOT build an address → project lookup table.** The original decision to reject one still holds, and is now backed by evidence: cross-checking the owner's address export against the daily report, on the 759 rows where both had a value the address book and Sonar's job tag **agreed 759/759, zero disagreements**. A FiberLog-maintained address table would add maintenance burden and change no routing decision. The serviceable-address list is real, but it lives in Sonar and FiberLog already consumes the useful half of it.
+
+**Two empty placeholders make it *look* like address data was loaded here — it never was.** `sites.address` / `lat` / `lng` are NULL on all 198 rows, and `projects.vetro_project_id` is NULL on all 7 projects. Both are unused. Populating site addresses would help dispatch/navigation but routes nothing — infra material routes on `sites.project_id`.
+
+**`sonar_city_bucket_map` (3 rows) is the weak legacy fallback.** City granularity is wrong for Provo, which spans Osprey / Aspen Summit / Alpine Brook (Wasatch Front) *and* West Mountain Fiber (West Mountain). The per-job project tag outranks it, so the city map only matters when a tag is missing.
+
+**What's actually still open** (workflow, not data): per-line `project_id` on `log_entries` for multi-cost-center allocation (backlog #5) and the field-tech UI surface (backlog #6). Field techs continue to log in Sonar by design — that's the intake split, not a blocker.
 
 ---
 
@@ -285,7 +289,7 @@ supabase/
 ### Sonar import routing (current state)
 - `parts_catalog.sonar_routing text NOT NULL DEFAULT 'ask'` — CHECK in `('region','gigwave','none','ask')`. Determines where a Sonar import row's transfer lands.
 - `sonar_city_bucket_map(city PK, location_id, updated_at, updated_by)` — persisted city → bucket mapping for `region`-routed parts. Updated by the SonarImportSheet's city picker. RLS: auth read, staff write. Bump trigger on `updated_at`.
-- **Future:** when Sonar provides per-job project tagging (polygon data), this routing simplifies — every job comes in pre-tagged with a project, no city lookup needed.
+- **Sonar per-job project tagging is LIVE** (confirmed Aug 2026) — fiber jobs arrive pre-tagged, resolved via `sonar_project_phase_map` (53/53 tags mapped). The city lookup below is now only a fallback for the rare untagged fiber row; wireless rows never need it (part policy routes them). See "Field tech — routing" above.
 
 ### Submission routing override
 - `submissions.project_id_override` — nullable FK to projects. If set, `approve_submission` routes auto-deduct to this project's bucket instead of the task's natural project. Phase actuals stay on the natural phase. Persisted by `TaskWorkspace`'s in-task picker.
