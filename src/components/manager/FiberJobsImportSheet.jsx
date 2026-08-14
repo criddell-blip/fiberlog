@@ -8,13 +8,14 @@ import {
   getSonarSourceLocationMap, setSonarSourceLocation, getLocations,
   getFiberValueMap, setFiberValueMap, FIBER_QTY_MODE_OPTIONS,
   parseFiberRow, isFiberValueIgnored, FIBER_NON_MATERIAL_COLUMNS,
+  isFiberCustomerColumn, pickFiberCustomerColumn,
   confirmNegativeStock,
 } from '../../lib/inventory'
 import {
   useCsvFile, useSonarPendingQueue, useEffectiveMap, useAlreadyImportedMarkers,
 } from '../../lib/useCsvImport'
 import {
-  Section, MappingRow, StatusBadge, selectStyle,
+  Section, MappingRow, StatusBadge, StatusTag, selectStyle,
   SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
 } from './importShared'
 import { useBackClose } from '../../lib/backStack'
@@ -72,6 +73,13 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   const [rowMaterialOverride, setRowMaterialOverride] = useState({})
   const [rowSource, setRowSource] = useState({})        // row idx → source location id (per-row override)
   const [rowExtraMaterials, setRowExtraMaterials] = useState({})  // job idx → [{sku, qty}] materials added by hand (Sonar job had none/missing)
+  // Per-row destination override for jobs Sonar left unroutable (blank Project
+  // column — happens when the job's address isn't tied to a project record) or
+  // tagged with a value not worth a permanent mapping. Holds a PHASE id: the
+  // phase supplies BOTH the destination bucket (phase.bucket_id) and the
+  // phase_id cost-center tag, so an overridden row is identical downstream to
+  // a naturally-resolved one. Manual only — nothing is inferred, nothing persists.
+  const [rowPhase, setRowPhase] = useState({})          // row idx → phase id
   const [submitting, setSubmitting] = useState(false)
 
   // CSV state + webhook queue (shared plumbing)
@@ -79,9 +87,12 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     requiredCols: REQUIRED_COLS,
     missingColsMessage: missing => `CSV missing required columns: ${missing.join(', ')}`,
     // Successful load resets the per-import picks (persisted maps survive).
-    // rowSource and rowExtraMaterials are keyed by ROW INDEX — left uncleared,
-    // a pick made for delivery A's row 5 silently re-attaches to whatever job
-    // sits at index 5 of delivery B (phantom materials / wrong source).
+    // rowSource, rowExtraMaterials and rowPhase are keyed by ROW INDEX — left
+    // uncleared, a pick made for delivery A's row 5 silently re-attaches to
+    // whatever job sits at index 5 of delivery B (phantom materials / wrong
+    // source). rowPhase is the worst of the three: a stale pick doesn't just
+    // mis-source the stock, it bills the wrong project — straight through
+    // phase_id into the Sage cost-center rollup.
     onLoaded: () => {
       setCrewMap({})
       setPendingProjectMap({})
@@ -89,6 +100,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       setRowMaterialOverride({})
       setRowSource({})
       setRowExtraMaterials({})
+      setRowPhase({})
     },
   })
   const { fileName, csvHeaders, csvRows, error, setError, parsing, handleFile } = csv
@@ -103,6 +115,12 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
 
   // Back closes the importer (mounted only when open). Confirm once a CSV is
   // loaded so mapping work isn't lost to a stray Back.
+  //
+  // The coarse "any loaded CSV" test is deliberate, not lazy. The crew /
+  // project / source pickers live-save to the DB the moment they're touched,
+  // so losing the sheet loses nothing there — but rowPhase (and the other
+  // index-keyed row state) exists only in component state and dies with it.
+  // This confirm is its only protection; don't narrow it.
   useBackClose(1, onClose, {
     confirm: () => csvRows == null || window.confirm('Close the fiber-jobs import? Unsaved mapping will be lost.'),
   })
@@ -163,9 +181,19 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     return () => { cancelled = true }
   }, [])
 
-  // Material columns = headers minus required + non-material columns
+  // The optional customer-name header, if this export has one. Absent from
+  // every delivery received before Aug 2026 — the sheet must work either way,
+  // which is why it is NOT in REQUIRED_COLS (useCsvFile hard-rejects a CSV
+  // missing a required column, which would break the pending queue).
+  const customerColumn = useMemo(() => pickFiberCustomerColumn(csvHeaders), [csvHeaders])
+
+  // Material columns = headers minus required + non-material columns, minus
+  // any customer-name column. ALLOW-BY-DEFAULT: anything not excluded here is
+  // a presumed material and will demand a SKU mapping. Filter on the predicate
+  // rather than `h !== customerColumn` — if Sonar emits two name-ish columns,
+  // only one is displayed but NEITHER may leak into materials.
   const materialColumns = useMemo(() => {
-    return csvHeaders.filter(h => !FIBER_NON_MATERIAL_COLUMNS.has(h))
+    return csvHeaders.filter(h => !FIBER_NON_MATERIAL_COLUMNS.has(h) && !isFiberCustomerColumn(h))
   }, [csvHeaders])
 
   // Unique usernames
@@ -229,6 +257,12 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     setRowSource(prev => ({ ...prev, [idx]: locationId || null }))
   }
 
+  // Per-row destination override (one-off; not persisted). Picking the blank
+  // option clears it and the row falls back to the Project-column mapping.
+  function setRowPhaseOverride(idx, phaseId) {
+    setRowPhase(prev => ({ ...prev, [idx]: phaseId || null }))
+  }
+
   // Unique (column, value) combos that need a map entry
   const valueMappingsNeeded = useMemo(() => {
     if (!csvRows) return []
@@ -265,9 +299,17 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       const sourceIsMapped = !!(rowSource[idx] || effectiveSourceMap.get(username.toUpperCase()))
       const sourceLocId = rowSource[idx] || effectiveSourceMap.get(username.toUpperCase()) || homeLocFor(userId)
       const sonarProject = (row['Project'] || '').trim()
-      const projPhaseId = sonarProject ? effectiveProjectMap.get(sonarProject.toUpperCase()) : null
-      const phase = projPhaseId ? phases.find(p => p.id === projPhaseId) : null
+      // Destination resolves to a PHASE. A manual per-row pick outranks the
+      // Project-column mapping; either way the phase supplies both the bucket
+      // and the phase_id tag, so there is deliberately no separate "override
+      // bucket" path for anything downstream to diverge on.
+      const overridePhase = rowPhase[idx] ? phases.find(p => p.id === rowPhase[idx]) : null
+      const mappedPhaseId = sonarProject ? effectiveProjectMap.get(sonarProject.toUpperCase()) : null
+      const mappedPhase = mappedPhaseId ? phases.find(p => p.id === mappedPhaseId) : null
+      const phase = overridePhase || mappedPhase
+      const phaseOverridden = !!overridePhase
       const destBucketId = phase?.bucket_id || null
+      const customer = customerColumn ? (row[customerColumn] || '').trim() : ''
       const account = (row['Account | ID'] || '').trim()
       const dateStr = (row['Job | Completion Date time'] || '').slice(0, 10)
       const jobType = (row['Job Type | Name'] || '').trim().toLowerCase().replace(/\s+/g, '_')
@@ -301,13 +343,20 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       })
       const finalLines = [...overridden, ...extras]
 
-      // Top-level row status
+      // Top-level row status. The order is deliberate: the already-imported
+      // guard and the SOURCE blockers are evaluated before the destination, so
+      // a manual phase pick can never hold a row at 'ready' whose source has
+      // evaporated — such a row would be counted in "Apply N movements" and
+      // then silently dropped by handleApply's `rowStatus !== 'ready'` filter.
       let rowStatus = 'ready'
       if (isAlreadyImported) rowStatus = 'already-imported'
       else if (!userId && !sourceIsMapped) rowStatus = 'no-crew'
       else if (!sourceLocId) rowStatus = 'no-truck'
-      else if (!sonarProject) rowStatus = 'no-project'
-      else if (!projPhaseId) rowStatus = 'project-unmapped'
+      // Destination unresolved. Distinguish "Sonar never tagged a project"
+      // (fix it here, per row) from "tagged, but that project isn't mapped"
+      // (fix it once in the Project mappings section — the per-row picker is
+      // still offered as the one-off escape for values not worth mapping).
+      else if (!phase) rowStatus = sonarProject ? 'project-unmapped' : 'no-project'
       else if (!destBucketId) rowStatus = 'no-project-bucket'
       else if (finalLines.filter(l => l.status === 'ready').length === 0) rowStatus = 'no-materials'
 
@@ -318,8 +367,10 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         username, userId, userName,
         sourceLocId, sourceIsMapped,
         sonarProject,
-        phaseId: projPhaseId, phaseName: phase?.name || '', phaseProjectName: phase?.project_name || '',
+        phaseId: phase?.id || null, phaseName: phase?.name || '', phaseProjectName: phase?.project_name || '',
+        phaseOverridden,
         destBucketId,
+        customer,
         account, jobType, jobTypeRaw: row['Job Type | Name'] || '',
         notes: row['Job | Completion Notes'] || '',
         dedupKey,
@@ -328,7 +379,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         rowStatus,
       }
     })
-  }, [csvRows, crewMap, trucksByUser, pullByUser, activeLocIds, effectiveSourceMap, rowSource, crewUsers, materialColumns, valueMap, effectiveProjectMap, phases, rowMaterialOverride, rowExtraMaterials, alreadyImportedKeys])
+  }, [csvRows, crewMap, trucksByUser, pullByUser, activeLocIds, effectiveSourceMap, rowSource, crewUsers, materialColumns, customerColumn, valueMap, effectiveProjectMap, phases, rowPhase, rowMaterialOverride, rowExtraMaterials, alreadyImportedKeys])
 
   // Handlers for value-map picker
   async function handleValueMapChange(columnName, valueText, fields) {
@@ -430,6 +481,10 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             `Sonar fiber-jobs: ${r.jobTypeRaw}`,
             r.address,
             line.columnName + ': ' + line.valueText,
+            // Once applied, a human-chosen destination is indistinguishable
+            // from a mapped one — it's just stock sitting in a bucket. This is
+            // the only durable record that someone picked it by hand.
+            r.phaseOverridden && `dest: manual → ${r.phaseProjectName} / ${r.phaseName}`,
             `[sonar_jobs:${r.dedupKey}]`,
           ].filter(Boolean)
           // Real job date (completion) so reports/Sage date by when the work
@@ -477,6 +532,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       setPendingProjectMap({})
       setExcluded(new Set())
       setRowMaterialOverride({})
+      setRowPhase({})
       if (onApplied) onApplied(movements.length)
     } catch (e) {
       console.error('Apply failed:', e)
@@ -528,6 +584,19 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             </div>
           )}
         </div>
+
+        {/* Which header the customer name is being read from. Printed because
+            the material-column filter is allow-by-default: if detection ever
+            grabbed a real material column, its materials would silently never
+            become movements. Seeing "Customer column: box used" here makes
+            that failure obvious before anything is applied. */}
+        {csvRows && (
+          <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: -6, marginBottom: 10 }}>
+            {customerColumn
+              ? <>Customer column: <strong>{customerColumn}</strong> — shown per job, never treated as a material.</>
+              : <>No customer-name column in this export — jobs show address only.</>}
+          </div>
+        )}
 
         {/* Pending deliveries (fiber_jobs only) */}
         <PendingImportsPanel queue={queue} disabled={parsing || submitting} />
@@ -669,6 +738,18 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
                     sourceLocations={sourceLocations}
                     rowSourceId={rowSource[r.idx] || ''}
                     onSetSource={locId => setRowSourceLocation(r.idx, locId)}
+                    phases={phases}
+                    rowPhaseId={rowPhase[r.idx] || ''}
+                    onSetPhase={pid => setRowPhaseOverride(r.idx, pid)}
+                    // Gate on the CONDITION, not the status string. The
+                    // `|| rowPhase[...]` clause keeps the select mounted after
+                    // a successful pick so it stays editable and clearable —
+                    // gating purely on status makes a pick permanent until
+                    // reload. Being independent of the source blockers also
+                    // means a row blocked on BOTH crew and destination shows
+                    // both pickers at once, instead of revealing the second
+                    // only after the first is fixed.
+                    showPhasePicker={!r.destBucketId || !!rowPhase[r.idx]}
                     onAddMaterial={() => addRowMaterial(r.idx)}
                     onSetMaterial={(i, patch) => setRowMaterial(r.idx, i, patch)}
                     onRemoveMaterial={i => removeRowMaterial(r.idx, i)}
@@ -776,7 +857,7 @@ function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, 
 }
 
 // ─── Job preview row ────────────────────────────────────────────────────
-function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, sourceLocations = [], rowSourceId = '', onSetSource, onAddMaterial, onSetMaterial, onRemoveMaterial }) {
+function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, sourceLocations = [], rowSourceId = '', onSetSource, phases = [], rowPhaseId = '', onSetPhase, showPhasePicker = false, onAddMaterial, onSetMaterial, onRemoveMaterial }) {
   const isReady = job.rowStatus === 'ready'
   const isAlreadyImported = job.rowStatus === 'already-imported'
   // Which line's SKU is being picked via the search overlay:
@@ -813,9 +894,41 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
           <div style={{ fontWeight: 700, fontSize: 12 }}>
             {job.jobTypeRaw} <span style={{ color: 'var(--hint)', fontWeight: 400 }}>· {job.address}</span>
           </div>
+          {/* Destination fragment is conditional — a blank-project row used to
+              render a bare "→  / ", an arrow pointing at nothing. */}
           <div style={{ fontSize: 10, color: 'var(--hint)' }}>
-            {job.date} · {job.userName || job.username} · {job.sonarProject} → {job.phaseProjectName} / {job.phaseName}
+            {job.date} · {job.userName || job.username}
+            {job.account && <> · acct {job.account}</>}
+            {' · '}
+            {job.phaseOverridden
+              ? <span style={{ color: 'var(--purple)' }}>→ {job.phaseProjectName} / {job.phaseName} (manual)</span>
+              : job.phaseName
+                ? <>{job.sonarProject} → {job.phaseProjectName} / {job.phaseName}</>
+                : job.sonarProject
+                  ? <>{job.sonarProject} <em>— unmapped</em></>
+                  : <em>no project tag</em>}
           </div>
+          {/* Customer name — only present when the Sonar export carries the
+              column (see pickFiberCustomerColumn). Full text colour so it
+              reads as identity, not metadata. */}
+          {job.customer && (
+            <div style={{ fontSize: 11, color: 'var(--text)', fontWeight: 600, marginTop: 1 }}>
+              {job.customer}
+            </div>
+          )}
+          {/* The crew's own description of the job. Decision support for rows
+              that need a pick, so it's skipped on rows already resolved —
+              prose on every row would double the list height for no benefit.
+              Clamped to 2 lines; full text on hover. */}
+          {!isReady && !isAlreadyImported && job.notes && (
+            <div title={job.notes} style={{
+              fontSize: 10, color: 'var(--muted)', marginTop: 2,
+              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}>
+              {job.notes}
+            </div>
+          )}
           {/* Per-row source override — set where the stock came off when the
               completer isn't the carrier; resolves no-crew / no-truck rows. */}
           {!isAlreadyImported && (
@@ -832,7 +945,41 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
               />
             </div>
           )}
+          {/* Per-row destination override — pick the phase when Sonar left the
+              Project column blank, or tagged something not worth a permanent
+              mapping. The phase sets BOTH the bucket and the phase_id tag.
+              Manual only; nothing is inferred and nothing persists.
+              Option rendering is deliberately identical to the Project-mappings
+              select above (including the "(no bucket)" suffix) so the two lists
+              can't drift. Not filtered by p.status for the same reason.
+              Note Gigwave / Fixed Wireless are absent because they have zero
+              phases — a data property, not a rule enforced here. */}
+          {!isAlreadyImported && showPhasePicker && (
+            <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 10, color: 'var(--hint)' }}>
+                phase{job.sonarProject ? ' (one-off)' : ''}:
+              </span>
+              <select
+                value={rowPhaseId}
+                onChange={e => onSetPhase(e.target.value)}
+                style={{ ...selectStyle(), fontSize: 11, minWidth: 220, width: 'auto', color: 'var(--muted)' }}
+              >
+                <option value="">— pick phase —</option>
+                {phases.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.project_name} / {p.name}{!p.bucket_id ? ' (no bucket)' : ''}
+                  </option>
+                ))}
+              </select>
+              {job.sonarProject && (
+                <span style={{ fontSize: 10, color: 'var(--hint)' }}>
+                  or map “{job.sonarProject}” above — that one persists
+                </span>
+              )}
+            </div>
+          )}
         </div>
+        {job.phaseOverridden && <StatusTag tag="manual dest" color="var(--purple)" />}
         <StatusBadge status={job.rowStatus} map={JOB_STATUS_MAP} />
       </div>
       {/* Material lines — always shown for a non-imported job so a job that
@@ -939,7 +1086,13 @@ const JOB_STATUS_MAP = {
   ready:             { label: 'ready',           color: 'var(--teal-dk)',  bg: 'var(--teal-lt)' },
   'no-crew':         { label: 'no crew',         color: 'var(--amber)',    bg: 'var(--amber-lt)' },
   'no-truck':        { label: 'no truck',        color: 'var(--red)',      bg: 'var(--red-lt)' },
-  'no-project':      { label: 'no project',      color: 'var(--amber)',    bg: 'var(--amber-lt)' },
+  // Label states the ACTION — the meta line already carries the diagnosis
+  // ("no project tag"). Keep it short: the badge is flexShrink:0 and eats
+  // width from the address. Do NOT add a separate "ready-override" status:
+  // handleApply and stats both test `=== 'ready'` by string, so a ready-ish
+  // sibling would silently drop every overridden row. Overriddenness is a
+  // flag (phaseOverridden), never a status.
+  'no-project':      { label: 'pick phase',      color: 'var(--amber)',    bg: 'var(--amber-lt)' },
   'project-unmapped':{ label: 'project unmapped',color: 'var(--amber)',    bg: 'var(--amber-lt)' },
   'no-project-bucket':{label: 'no bucket',       color: 'var(--red)',      bg: 'var(--red-lt)' },
   'no-materials':    { label: 'no materials',    color: 'var(--hint)',     bg: 'var(--gray-lt)' },

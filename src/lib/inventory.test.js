@@ -14,6 +14,8 @@ import {
   movementEffectiveDate,
   buildLocationQtyMaps,
   aggregateDeductions,
+  isFiberCustomerColumn,
+  pickFiberCustomerColumn,
 } from './inventory'
 
 // ─── buildLocationQtyMaps ────────────────────────────────────────────────────
@@ -417,5 +419,67 @@ describe('aggregateDeductions (negative-stock pre-flight)', () => {
     expect(aggregateDeductions([])).toEqual({})
     expect(aggregateDeductions(undefined)).toEqual({})
     expect(aggregateDeductions([null, undefined])).toEqual({})
+  })
+})
+
+// ─── fiber-jobs customer column ─────────────────────────────────────────────
+// Guards the material-column filter, which is ALLOW-BY-DEFAULT. A false
+// positive here silently drops a real material column out of the consumption
+// ledger, so the "must NOT match" cases matter more than the matches.
+
+// The fiber-jobs report as it ships today — no customer column.
+const FIBER_HEADERS_TODAY = [
+  'Job | Address on Completion', 'Job Type | Name', 'Job | Completion Notes',
+  'box used', 'Drop type/length', 'length of flat used', 'other equip used',
+  'Account | ID', 'User | Username', 'Job | Completion Date time',
+  'Pushable fiber', 'Project',
+]
+
+describe('pickFiberCustomerColumn', () => {
+  it('returns null for the report as it ships today', () => {
+    expect(pickFiberCustomerColumn(FIBER_HEADERS_TODAY)).toBe(null)
+  })
+
+  it('finds Current Assignee once Sonar adds it', () => {
+    expect(pickFiberCustomerColumn([...FIBER_HEADERS_TODAY, 'Current Assignee']))
+      .toBe('Current Assignee')
+  })
+
+  it('prefers Current Assignee over Customer when both are present', () => {
+    expect(pickFiberCustomerColumn(['Customer', 'Current Assignee']))
+      .toBe('Current Assignee')
+  })
+
+  it('matches case-insensitively and preserves the original header casing', () => {
+    expect(pickFiberCustomerColumn([...FIBER_HEADERS_TODAY, 'CURRENT ASSIGNEE']))
+      .toBe('CURRENT ASSIGNEE')
+  })
+
+  it('handles empty / missing input', () => {
+    expect(pickFiberCustomerColumn([])).toBe(null)
+    expect(pickFiberCustomerColumn()).toBe(null)
+  })
+})
+
+describe('isFiberCustomerColumn', () => {
+  it('matches the expected customer headers', () => {
+    for (const h of ['Current Assignee', 'Assignee', 'Customer', 'Customer Name', 'Account | Name']) {
+      expect(isFiberCustomerColumn(h), h).toBe(true)
+    }
+  })
+
+  // The whole point of anchoring the regex: these are real or plausible
+  // material columns in this report's naming style. Matching one would make
+  // its materials silently vanish from the ledger.
+  it('does NOT match material columns that merely contain a customer-ish word', () => {
+    for (const h of ['customer equipment used', 'customer drop installed', 'box used', 'other equip used', 'Pushable fiber']) {
+      expect(isFiberCustomerColumn(h), h).toBe(false)
+    }
+  })
+
+  it('does NOT match known identity columns or empty input', () => {
+    for (const h of ['Account | ID', 'Project', 'User | Username', '', '   ', null, undefined]) {
+      expect(isFiberCustomerColumn(h), String(h)).toBe(false)
+    }
   })
 })

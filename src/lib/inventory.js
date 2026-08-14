@@ -2060,6 +2060,64 @@ export const FIBER_NON_MATERIAL_COLUMNS = new Set([
   'length of flat used',  // referenced by Drop type/length pair_with_column
 ])
 
+// ─── FIBER-JOBS CUSTOMER COLUMN (optional) ───────────────────────────────
+//
+// The fiber-jobs report carries no customer name today — one is being added
+// on the Sonar side and we don't control its final header. Two jobs here:
+//   (a) keep it OUT of materialColumns. That filter is allow-by-DEFAULT, so
+//       an unrecognised header becomes a presumed material and every distinct
+//       customer name would land in "Value mappings needed" demanding a SKU.
+//   (b) tell the sheet which header to read the name from.
+//
+// The two failure directions are wildly asymmetric, so the matching is tuned
+// to fail in the loud direction:
+//   • MISS a real customer column → it shows up demanding a SKU on the first
+//     import. Obvious, self-diagnosing, no data damage.
+//   • MATCH a real material column → its materials silently never become
+//     movements. That is the exact bug class this whole feature exists to
+//     close.
+// Hence: exact names first, and a fallback regex anchored on the WHOLE header
+// so "Customer" matches but "customer equipment used" does not — the latter is
+// the naming convention this report already uses ("other equip used",
+// "box used"). The sheet also prints which column it picked, so a bad match is
+// visible before anything is applied.
+export const FIBER_CUSTOMER_COLUMN_CANDIDATES = [
+  'Current Assignee',       // the asset report's equivalent column
+  'Account | Name',
+  'Account | Full Name',
+  'Customer Name',
+  'Customer',
+  'Assignee',
+]
+
+const FIBER_CUSTOMER_COLUMN_RE =
+  /^(?:current\s+)?assignee$|^customer(?:\s*\|?\s*(?:full\s+)?name)?$|^account\s*\|?\s*(?:full\s+)?name$/i
+
+// True for ANY header that looks like a customer-name column. Every match is
+// excluded from materials, even though only the first is read for display —
+// if Sonar ever emits both `Account | Name` and `Current Assignee`, neither
+// may leak into the material columns.
+//
+// Fiber-report specific by design: do NOT reuse this in SonarImportSheet,
+// where `Current Assignee` is a hard-REQUIRED column.
+export function isFiberCustomerColumn(header) {
+  const h = (header || '').trim()
+  if (!h || FIBER_NON_MATERIAL_COLUMNS.has(h)) return false
+  if (FIBER_CUSTOMER_COLUMN_CANDIDATES.some(c => c.toLowerCase() === h.toLowerCase())) return true
+  return FIBER_CUSTOMER_COLUMN_RE.test(h)
+}
+
+// The one header the name is read from: candidate-list priority first, then
+// the first anchored-regex match in header order. null when the report has no
+// customer column at all (every delivery received before Aug 2026).
+export function pickFiberCustomerColumn(headers = []) {
+  for (const cand of FIBER_CUSTOMER_COLUMN_CANDIDATES) {
+    const hit = headers.find(h => (h || '').trim().toLowerCase() === cand.toLowerCase())
+    if (hit) return hit
+  }
+  return headers.find(isFiberCustomerColumn) || null
+}
+
 // ─── SAGE INTACCT EXPORT ─────────────────────────────────────────────────
 //
 // Build a CSV of movements in Sage Intacct's Inventory Transactions
