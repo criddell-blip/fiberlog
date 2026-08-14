@@ -82,6 +82,26 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
+  // Flipped on a blocked submit so every row lacking a source turns red.
+  // The flagged set is DERIVED from it (not a stored id list) so a row
+  // un-flags the instant its From is picked, without another submit.
+  const [showMissingFrom, setShowMissingFrom] = useState(false)
+
+  // Every bin under every warehouse, loaded once. The per-line From
+  // dropdown needs one complete flat list — the shared picker reaches bins
+  // through its warehouse→bin cascade, but a row's <select> has no cascade.
+  const [allBins, setAllBins] = useState([])
+  useEffect(() => {
+    let cancelled = false
+    const warehouses = locations.filter(l => l.type === 'warehouse')
+    Promise.all(warehouses.map(w =>
+      getBinsForWarehouse(w.id).catch(e => {
+        console.warn(`Failed to load bins for ${w.name}:`, e)
+        return []
+      })
+    )).then(res => { if (!cancelled) setAllBins(res.flat()) })
+    return () => { cancelled = true }
+  }, [locations])
 
   const searchTimerRef = useRef(null)
 
@@ -94,6 +114,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     setToTopId(''); setToBinId('')
     setLines(prev => prev.map(l => (l.from_override_id ? { ...l, from_override_id: null } : l)))
     setError(null)
+    setShowMissingFrom(false)
   }, [type, adjustDir])
 
   // When a top-level location is selected for the To picker (or for
@@ -329,6 +350,49 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     [locations, currentUser?.role]
   )
 
+  // The complete source list for a row's override select — everything the
+  // shared "Show all locations" picker offers, bins included, flattened.
+  //
+  // Why: the row select used to list ONLY locations where that part has
+  // logged stock. A part sitting at zero everywhere (143 of 606 active SKUs
+  // as of Aug 2026) got an EMPTY dropdown, so it could not be sourced on its
+  // own row at all — and nothing on the row said so. Set sources per part on
+  // a mixed batch and the zero-stock ones stayed silently unsourced, which
+  // read as "I set every location" but failed the shared-From check.
+  const lineFallbackOptions = useMemo(() => {
+    const binsByParent = new Map()
+    for (const b of allBins) {
+      const arr = binsByParent.get(b.parent_location_id)
+      if (arr) arr.push(b)
+      else binsByParent.set(b.parent_location_id, [b])
+    }
+    const out = []
+    for (const loc of allFromOptions) {
+      out.push({
+        locationId: loc.id,
+        displayLabel: loc.assigned_user?.name || loc.name,
+        type: loc.type,
+      })
+      for (const b of binsByParent.get(loc.id) || []) {
+        out.push({ locationId: b.id, displayLabel: `${loc.name} › ${b.name}`, type: 'bin' })
+      }
+    }
+    return out
+  }, [allFromOptions, allBins])
+
+  // Lines with no resolvable source (own override or the shared From).
+  const linesMissingFrom = useMemo(
+    () => (showFrom ? lines.filter(l => !lineEffectiveFromId(l)) : []),
+    [showFrom, lines, effectiveFromId]
+  )
+
+  // "SC/APC pigtail, 1" coupler +3 more" — the error names the offending
+  // parts so a 12-line batch doesn't send the manager hunting row by row.
+  function namesOf(ls) {
+    const shown = ls.slice(0, 3).map(l => l.name).join(', ')
+    return ls.length > 3 ? `${shown} +${ls.length - 3} more` : shown
+  }
+
   function validate() {
     if (lines.length === 0) return 'Add at least one part'
     for (const l of lines) {
@@ -337,12 +401,16 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     }
     if (type === 'adjust') {
       if (adjustDir === 'add' && !effectiveToId) return 'Pick a location to add to'
-      if (adjustDir === 'remove' && lines.some(l => !lineEffectiveFromId(l))) return 'Pick a location to remove from'
+      if (adjustDir === 'remove' && linesMissingFrom.length) {
+        return `No location to remove ${namesOf(linesMissingFrom)} from — pick one below, or set it on each flagged row.`
+      }
     } else {
       // Per-line sources: every line must resolve a From (its own override
       // or the shared picker) — a shared From isn't required once every
       // line carries its own.
-      if (ep.from && lines.some(l => !lineEffectiveFromId(l))) return 'Pick a "from" location (or set one per part)'
+      if (ep.from && linesMissingFrom.length) {
+        return `No "from" location for ${namesOf(linesMissingFrom)} — pick a From below, or set a source on each flagged row.`
+      }
       if (ep.to && !effectiveToId) return 'Pick a "to" location'
       if (ep.from && ep.to) {
         const clash = lines.find(l => lineEffectiveFromId(l) === effectiveToId)
@@ -354,8 +422,9 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
 
   async function handleSubmit() {
     const v = validate()
-    if (v) { setError(v); return }
+    if (v) { setError(v); setShowMissingFrom(true); return }
     setError(null)
+    setShowMissingFrom(false)
     setSubmitting(true)
     try {
       // Build one movement payload per line. Shared to/type/notes; From is
@@ -447,12 +516,17 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                 const lineSources = (partLocationsByPart[l.part_id]?.locations || [])
                   .filter(loc => loc.isActive !== false)
                   .filter(loc => loc.type !== 'job_site' || currentUser?.role === 'owner')
+                // Everything else, so a part with no logged stock is still
+                // sourceable on its own row. Stocked ids are already above.
+                const stockedIds = new Set(lineSources.map(s => s.locationId))
+                const otherSources = lineFallbackOptions.filter(o => !stockedIds.has(o.locationId))
+                const flagged = showMissingFrom && showFrom && !lineEffectiveFromId(l)
                 return (
                   <div
                     key={l.part_id}
                     style={{
                       padding: '8px 10px',
-                      background: warn ? 'var(--amber-lt)' : 'var(--surface)',
+                      background: flagged ? 'var(--red-lt)' : warn ? 'var(--amber-lt)' : 'var(--surface)',
                       borderBottom: i < lines.length - 1 ? '1px solid var(--border)' : 'none',
                     }}
                   >
@@ -499,13 +573,18 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                     {/* Per-line source override (see setLineFrom). */}
                     {showFrom && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
-                        <span style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap' }}>From:</span>
+                        <span style={{
+                          fontSize: 10, whiteSpace: 'nowrap',
+                          color: flagged ? 'var(--red)' : 'var(--muted)',
+                          fontWeight: flagged ? 700 : 400,
+                        }}>From:</span>
                         <select
                           value={l.from_override_id || ''}
                           onChange={e => setLineFrom(l.part_id, e.target.value)}
                           style={{
                             flex: 1, padding: '4px 8px', fontSize: 11,
-                            border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)',
+                            border: `1px solid ${flagged ? 'var(--red)' : 'var(--border2)'}`,
+                            borderRadius: 'var(--r-xs)',
                             background: 'var(--bg)', color: 'var(--text)',
                           }}
                         >
@@ -513,13 +592,26 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                             {effectiveFromId
                               ? `Shared From (${smartFromOptions.find(o => o.id === effectiveFromId)?.displayLabel
                                   || locations.find(x => x.id === effectiveFromId)?.name || 'picked below'})`
-                              : 'Shared From (pick below)'}
+                              : 'Shared From (not set — pick one here or below)'}
                           </option>
-                          {lineSources.map(loc => (
-                            <option key={loc.locationId} value={loc.locationId}>
-                              {loc.displayLabel} · {Number(loc.qty).toLocaleString()} on hand
-                            </option>
-                          ))}
+                          {lineSources.length > 0 && (
+                            <optgroup label="Has this part">
+                              {lineSources.map(loc => (
+                                <option key={loc.locationId} value={loc.locationId}>
+                                  {loc.displayLabel} · {Number(loc.qty).toLocaleString()} on hand
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {otherSources.length > 0 && (
+                            <optgroup label={lineSources.length > 0 ? 'Other locations' : 'No logged stock — pick any location'}>
+                              {otherSources.map(loc => (
+                                <option key={loc.locationId} value={loc.locationId}>
+                                  {loc.displayLabel}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
                         </select>
                       </div>
                     )}
@@ -672,12 +764,23 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
               )}
             </div>
             {useSmartFromPicker ? (
-              <SmartFromPicker
-                options={smartFromOptions}
-                totalLines={lines.length}
-                value={fromLocationId}
-                onChange={setFromLocationId}
-              />
+              <>
+                {/* The row list highlights on tap and carries an N/M badge,
+                    which reads as multi-select — it isn't. One shared source
+                    for every line that hasn't set its own. Say so. */}
+                {lines.length > 1 && (
+                  <div style={{ fontSize: 11, color: 'var(--hint)', marginBottom: 5 }}>
+                    Pick <strong>one</strong> shared source. Parts that came from somewhere else
+                    get their own “From” on their row above.
+                  </div>
+                )}
+                <SmartFromPicker
+                  options={smartFromOptions}
+                  totalLines={lines.length}
+                  value={fromLocationId}
+                  onChange={setFromLocationId}
+                />
+              </>
             ) : (
               <LocationWithBinPicker
                 topLevelId={fromTopId} setTopLevelId={setFromTopId}
