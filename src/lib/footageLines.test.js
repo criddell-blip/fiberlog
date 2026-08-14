@@ -2,16 +2,19 @@ import { describe, it, expect } from 'vitest'
 import {
   sumLines, toggleLine, setLineFt, removalLosesWork,
   linesToParts, typeLabel, hasFootageLines, migrateLegacyFootage,
+  footageKind, autoPickType,
 } from './footageLines'
+import { FOOTAGE_TYPE_VALUES, STRAND_SIZES } from './footageTypes'
 
-// The assemblies the app actually flags (verified against the live DB): only
-// fiber-ft is isFiber, bore-ft/plow-ft are isConduit, strand-ft is footage with
-// no type concept at all.
+// The assemblies the app actually flags (verified against the live DB):
+// fiber-ft is isFiber, bore-ft/plow-ft are isConduit, strand-ft is isStrand.
+// misc-ft has no kind flag and exists to prove untyped footage stays out.
 const ASSEMBLIES = [
-  { id: 'strand-ft', label: 'Strand', isFootage: true },
-  { id: 'fiber-ft', label: 'Fiber', isFootage: true, isFiber: true },
-  { id: 'bore-ft', label: 'Bore', isFootage: true, isConduit: true },
-  { id: 'plow-ft', label: 'Plow', isFootage: true, isConduit: true },
+  { id: 'strand-ft', label: 'Strand', isFootage: true, isStrand: true, parts: [] },
+  { id: 'fiber-ft', label: 'Fiber', isFootage: true, isFiber: true, parts: [] },
+  { id: 'bore-ft', label: 'Bore', isFootage: true, isConduit: true, parts: [] },
+  { id: 'plow-ft', label: 'Plow', isFootage: true, isConduit: true, parts: [] },
+  { id: 'misc-ft', label: 'Misc', isFootage: true, parts: [] },
 ]
 
 const MAP = {
@@ -24,12 +27,13 @@ const MAP = {
     '2"': { partId: 'SKU-C2', name: 'Conduit 2"', unit: 'ea' },
     '3/4"': { partId: 'SKU-C34', name: 'Conduit 3/4"', unit: 'ft' },
   },
+  strand: {
+    '1/4"': { partId: 'STRAND-EHS', name: 'Strand, EHS, 1/4"', unit: 'ea' },
+  },
 }
 
-const parts = (footageLines, opts = {}) => linesToParts({
-  assemblies: ASSEMBLIES, footageLines, footageMap: MAP,
-  assemblyPartIds: opts.skip || new Set(),
-})
+const parts = (footageLines, assemblies = ASSEMBLIES) =>
+  linesToParts({ assemblies, footageLines, footageMap: MAP })
 
 describe('sumLines', () => {
   it('sums feet and tolerates junk', () => {
@@ -141,16 +145,38 @@ describe('linesToParts', () => {
     expect(out.map(p => p.id)).toEqual(['SKU-144'])
   })
 
-  it('skips a SKU the assemblies already derive, so it cannot double-count', () => {
-    const out = parts(
-      { 'fiber-ft': [{ type: '144ct', ft: 500 }, { type: '288ct', ft: 100 }] },
-      { skip: new Set(['SKU-144']) },
-    )
+  it('skips a SKU the SAME assembly already derives, so it cannot double-count', () => {
+    // fiber-ft itself carries SKU-144 as an assembly part.
+    const asms = ASSEMBLIES.map(a =>
+      a.id === 'fiber-ft' ? { ...a, parts: [{ id: 'SKU-144' }] } : a)
+    const out = parts({ 'fiber-ft': [{ type: '144ct', ft: 500 }, { type: '288ct', ft: 100 }] }, asms)
     expect(out.map(p => p.id)).toEqual(['SKU-288'])
   })
 
-  it('ignores assemblies with no type concept (strand)', () => {
-    expect(parts({ 'strand-ft': [{ type: '144ct', ft: 999 }] })).toEqual([])
+  it('does NOT let a DIFFERENT assembly consuming the same SKU suppress the line', () => {
+    // The regression this guard exists for: down-guy burns 20 ft of the strand
+    // SKU per guy. Under an app-wide skip set, hanging one down guy silently
+    // deleted the entire day's strand footage. Different assemblies consuming
+    // one SKU is additive consumption, not a double-count.
+    const asms = [...ASSEMBLIES, { id: 'down-guy', parts: [{ id: 'STRAND-EHS' }] }]
+    const out = parts({ 'strand-ft': [{ type: '1/4"', ft: 1200 }] }, asms)
+    expect(out.map(p => [p.id, p.qty])).toEqual([['STRAND-EHS', 1200]])
+  })
+
+  it('resolves a strand line to its mapped SKU', () => {
+    const out = parts({ 'strand-ft': [{ type: '1/4"', ft: 850 }] })
+    expect(out.map(p => [p.id, p.qty, p.srcType])).toEqual([['STRAND-EHS', 850, '1/4"']])
+  })
+
+  it('emits nothing for strand while strand-ft still carries the per_ft part', () => {
+    // The cutover window: both paths live, same SKU, assembly row wins.
+    const asms = ASSEMBLIES.map(a =>
+      a.id === 'strand-ft' ? { ...a, parts: [{ id: 'STRAND-EHS' }] } : a)
+    expect(parts({ 'strand-ft': [{ type: '1/4"', ft: 850 }] }, asms)).toEqual([])
+  })
+
+  it('ignores a footage assembly with no kind flag', () => {
+    expect(parts({ 'misc-ft': [{ type: '144ct', ft: 999 }] })).toEqual([])
   })
 
   it('emits two rows when two types map to ONE sku, for mergePartsById to sum', () => {
@@ -158,7 +184,7 @@ describe('linesToParts', () => {
     // row; mergePartsById then sums them onto one entry_parts line.
     const dupMap = { fiber: { '144ct': { partId: 'SKU-X', name: 'X', unit: 'ft' }, '288ct': { partId: 'SKU-X', name: 'X', unit: 'ft' } }, conduit: {} }
     const out = linesToParts({
-      assemblies: ASSEMBLIES, footageMap: dupMap, assemblyPartIds: new Set(),
+      assemblies: ASSEMBLIES, footageMap: dupMap,
       footageLines: { 'fiber-ft': [{ type: '144ct', ft: 500 }, { type: '288ct', ft: 300 }] },
     })
     expect(out).toHaveLength(2)
@@ -231,5 +257,61 @@ describe('migrateLegacyFootage', () => {
     const wc = { fiberCount: '144ct', counts: { 'fiber-ft': 2500 } }
     const lines = migrateLegacyFootage(wc)
     expect(sumLines(lines['fiber-ft'])).toBe(wc.counts['fiber-ft'])
+  })
+})
+
+describe('footageKind', () => {
+  it('maps each flag to its kind', () => {
+    expect(footageKind({ isFiber: true })).toBe('fiber')
+    expect(footageKind({ isConduit: true })).toBe('conduit')
+    expect(footageKind({ isStrand: true })).toBe('strand')
+  })
+
+  it('returns null for untyped footage and for nothing at all', () => {
+    // The null is load-bearing: it's what keeps untyped footage (and every
+    // non-footage assembly) out of the consumption path entirely.
+    expect(footageKind({ isFootage: true })).toBe(null)
+    expect(footageKind({})).toBe(null)
+    expect(footageKind(null)).toBe(null)
+    expect(footageKind(undefined)).toBe(null)
+  })
+
+  it('has a documented precedence when two flags are somehow set', () => {
+    expect(footageKind({ isFiber: true, isConduit: true, isStrand: true })).toBe('fiber')
+  })
+})
+
+describe('autoPickType', () => {
+  it('picks the only value when a kind has exactly one chip', () => {
+    expect(autoPickType([], ['1/4"'])).toBe('1/4"')
+  })
+
+  it('never picks for a multi-chip kind — that is a real choice', () => {
+    expect(autoPickType([], ['12ct', '144ct', '288ct'])).toBe(null)
+  })
+
+  it('never overrides an existing pick, whatever the list length', () => {
+    expect(autoPickType([{ type: '1/4"', ft: 10 }], ['1/4"'])).toBe(null)
+  })
+
+  it('survives empty/missing input', () => {
+    expect(autoPickType([], [])).toBe(null)
+    expect(autoPickType(undefined, undefined)).toBe(null)
+  })
+})
+
+describe('footage kind registry', () => {
+  // Tripwire. STRAND_SIZES having exactly one entry is what makes autoPickType
+  // fire for strand — adding a size silently turns the auto-pick off and
+  // reintroduces "typed feet, forgot the chip, consumed nothing". If you're
+  // here because this failed: that's the decision to confront, not the test.
+  it('keeps strand at a single size so the auto-pick stays deterministic', () => {
+    expect(STRAND_SIZES).toHaveLength(1)
+  })
+
+  it('covers every kind footageKind can return', () => {
+    const kinds = ['fiber', 'conduit', 'strand']
+    expect(Object.keys(FOOTAGE_TYPE_VALUES).sort()).toEqual([...kinds].sort())
+    for (const k of kinds) expect(FOOTAGE_TYPE_VALUES[k].length).toBeGreaterThan(0)
   })
 })

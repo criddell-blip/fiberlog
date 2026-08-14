@@ -68,6 +68,7 @@ const strings = {
   // / {size} are .replace()d at the call site — t() has no interpolation.
   tapFiberTypes:      { en: 'Tap each fiber type you pulled', es: 'Toca cada tipo de fibra que jalaste' },
   tapConduitSizes:    { en: 'Tap each conduit size you used', es: 'Toca cada tamaño de tubería que usaste' },
+  tapStrandSizes:     { en: 'Strand size',                 es: 'Tamaño del mensajero' },
   totalWord:          { en: 'Total',                      es: 'Total' },
   noSkuMapped:        { en: 'No material mapped — footage only', es: 'Sin material asignado — solo metraje' },
   dropTypeConfirm:    { en: 'Remove {type}? Its {ft} ft come off the total.', es: '¿Quitar {type}? Sus {ft} pies se restan del total.' },

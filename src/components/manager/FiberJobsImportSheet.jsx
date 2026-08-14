@@ -8,6 +8,7 @@ import {
   getSonarSourceLocationMap, setSonarSourceLocation, getLocations,
   getFiberValueMap, setFiberValueMap, FIBER_QTY_MODE_OPTIONS,
   parseFiberRow, isFiberValueIgnored, FIBER_NON_MATERIAL_COLUMNS,
+  confirmNegativeStock,
 } from '../../lib/inventory'
 import {
   useCsvFile, useSonarPendingQueue, useEffectiveMap, useAlreadyImportedMarkers,
@@ -462,6 +463,10 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       // in-session marker set also never refreshes mid-CSV, so partial +
       // re-apply could equally double-book. All-or-nothing sidesteps both:
       // failure writes nothing, re-apply is always safe.
+      //
+      // Warn first: these deduct from crew trucks, and a truck that never got
+      // its load recorded goes straight negative on import.
+      if (!(await confirmNegativeStock(movements))) return
       await recordMovementsBatch(movements)
       await queue.markApplied(movements.length)
       // Clear local state so the apply button can't re-fire against the

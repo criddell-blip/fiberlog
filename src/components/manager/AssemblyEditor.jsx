@@ -35,7 +35,7 @@ const CREW_TYPES = [
 const FIBER_CREW_TYPES = ['aerial', 'footage', 'splice', 'underground']
 const FLAG_KEYS = [
   'is_footage', 'is_fiber', 'is_mst',
-  'is_splice_case', 'is_handhole', 'is_vault', 'is_conduit',
+  'is_splice_case', 'is_handhole', 'is_vault', 'is_conduit', 'is_strand',
 ]
 
 const FLAGS = [
@@ -46,6 +46,7 @@ const FLAGS = [
   { key: 'is_handhole',   label: 'Counts as handhole' },
   { key: 'is_vault',      label: 'Counts as vault' },
   { key: 'is_conduit',    label: 'Show conduit size picker' },
+  { key: 'is_strand',     label: 'Show strand size picker' },
 ]
 
 // Should the flags section be shown for a given crew type?
@@ -93,7 +94,7 @@ export default function AssemblyEditor() {
       // viewing — saves a click when filling out empty install/infra tabs.
       id: '', label: '', sub_label: '', crew_type: selTab,
       is_footage: false, is_fiber: false, is_mst: false,
-      is_splice_case: false, is_handhole: false, is_vault: false, is_conduit: false,
+      is_splice_case: false, is_handhole: false, is_vault: false, is_conduit: false, is_strand: false,
       is_active: true, sort_order: 0,
       assembly_parts: []
     })
@@ -123,6 +124,7 @@ export default function AssemblyEditor() {
       is_handhole: !!asm.is_handhole,
       is_vault: !!asm.is_vault,
       is_conduit: !!asm.is_conduit,
+      is_strand: !!asm.is_strand,
       is_active: asm.is_active !== false,
       sort_order: (asm.sort_order || 0) + 1,
       // Deep copy parts so edits don't leak back to the source
@@ -204,6 +206,7 @@ export default function AssemblyEditor() {
         isHandhole: editing.is_handhole,
         isVault: editing.is_vault,
         isConduit: editing.is_conduit,
+        isStrand: editing.is_strand,
         is_active: editing.is_active !== false,
         sort_order: editing.sort_order || 0,
         parts: editing.assembly_parts.map((p, i) => ({

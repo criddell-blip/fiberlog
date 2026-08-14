@@ -2,17 +2,18 @@ import { useState, useEffect, useCallback } from 'react'
 import { useApp } from '../../AppContext'
 import { useBackClose } from '../../lib/backStack'
 import { getFootageTypePartMap, setFootageTypePart, clearFootageTypePart } from '../../lib/inventory'
-import { FIBER_COUNTS, CONDUIT_SIZES } from '../../lib/footageTypes'
+import { FOOTAGE_TYPE_VALUES, FOOTAGE_KIND_LABELS } from '../../lib/footageTypes'
 import PartSearch from '../crew/workspace/PartSearch'
 import Icon from '../shared/Icon'
 
-// Manager editor for the footage type → part map. Each fiber strand count and
-// conduit size maps to one canonical SKU; when a crew logs that footage + type,
+// Manager editor for the footage type → part map. Each fiber strand count,
+// conduit size and strand size maps to one canonical SKU; when a crew logs
+// that footage + type,
 // the workspace consumes the mapped part by the foot. Unmapped = footage-only
 // (no material), exactly as before mapping.
 export default function FootageMapSheet({ onClose }) {
   const { showToast } = useApp()
-  const [map, setMap] = useState({ fiber: {}, conduit: {} })
+  const [map, setMap] = useState({})
   const [loading, setLoading] = useState(true)
   const [picking, setPicking] = useState(null)   // { kind, value } while choosing a SKU
 
@@ -101,8 +102,11 @@ export default function FootageMapSheet({ onClose }) {
             <div style={{ padding: 30, textAlign: 'center', color: 'var(--muted)' }}>Loading…</div>
           ) : (
             <>
-              <Section title="Fiber — strand count" kind="fiber" values={FIBER_COUNTS} />
-              <Section title="Conduit — size" kind="conduit" values={CONDUIT_SIZES} />
+              {/* One section per footage kind, straight from the registry, so
+                  adding a kind needs no edit here. */}
+              {Object.entries(FOOTAGE_TYPE_VALUES).map(([kind, values]) => (
+                <Section key={kind} title={FOOTAGE_KIND_LABELS[kind]} kind={kind} values={values} />
+              ))}
             </>
           )}
         </div>

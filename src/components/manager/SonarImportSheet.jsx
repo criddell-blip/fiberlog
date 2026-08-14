@@ -10,6 +10,7 @@ import {
   getLocations,
   setPartSonarRouting, SONAR_ROUTING_OPTIONS,
   createPart,
+  confirmNegativeStock,
 } from '../../lib/inventory'
 import {
   useCsvFile, useSonarPendingQueue, useEffectiveMap, useAlreadyImportedMarkers,
@@ -736,6 +737,10 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       // re-apply would double-book transfers. All-or-nothing means a
       // failure writes nothing and re-apply is always safe. Daily
       // deliveries are far below any payload limit.
+      //
+      // Warn first: these deduct from crew trucks, and a truck that never got
+      // its load recorded goes straight negative on import.
+      if (!(await confirmNegativeStock(movements))) return
       await recordMovementsBatch(movements)
       // If this CSV came from a webhook delivery, mark it imported so it
       // drops out of the pending queue. Non-fatal if it fails (movements

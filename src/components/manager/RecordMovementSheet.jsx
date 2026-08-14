@@ -6,6 +6,7 @@ import {
   getPartLocations,
   compareNamesNatural,
   buildLocationQtyMaps,
+  confirmNegativeStock,
 } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
@@ -447,6 +448,10 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
         }
         return base
       })
+      // Free-form entry — any type, any direction, so it can take a location
+      // negative in a single click. Warn, don't block: a real correction
+      // sometimes has to pass through zero.
+      if (!(await confirmNegativeStock(payloads))) { setSubmitting(false); return }
       await recordMovementsBatch(payloads)
       onRecorded(payloads.length)
     } catch (e) {

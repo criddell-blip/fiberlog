@@ -13,6 +13,7 @@ import {
   buildSageCsv,
   movementEffectiveDate,
   buildLocationQtyMaps,
+  aggregateDeductions,
 } from './inventory'
 
 // ─── buildLocationQtyMaps ────────────────────────────────────────────────────
@@ -364,5 +365,57 @@ describe('movementEffectiveDate', () => {
     expect(movementEffectiveDate({ occurred_at: null, created_at: 'B' })).toBe('B')
     expect(movementEffectiveDate({})).toBe(null)
     expect(movementEffectiveDate(null)).toBe(null)
+  })
+})
+
+describe('aggregateDeductions (negative-stock pre-flight)', () => {
+  const mv = (part_id, from_location_id, quantity, extra = {}) =>
+    ({ part_id, from_location_id, quantity, ...extra })
+
+  it('sums several lines that hit the SAME part+location', () => {
+    // The case that matters: each line alone may be affordable while the
+    // batch as a whole overdraws the location.
+    const out = aggregateDeductions([
+      mv('P1', 'L1', 5),
+      mv('P1', 'L1', 7),
+      mv('P1', 'L2', 3),
+    ])
+    expect(out).toEqual({ 'P1|L1': 12, 'P1|L2': 3 })
+  })
+
+  it('ignores rows with no source — receives and positive adjusts', () => {
+    expect(aggregateDeductions([
+      { part_id: 'P1', to_location_id: 'L1', quantity: 50 },            // receive
+      { part_id: 'P1', from_location_id: null, quantity: 10 },          // positive adjust
+    ])).toEqual({})
+  })
+
+  it('ignores non-positive and unparseable quantities', () => {
+    expect(aggregateDeductions([
+      mv('P1', 'L1', 0),
+      mv('P1', 'L1', -5),
+      mv('P1', 'L1', null),
+      mv('P1', 'L1', 'abc'),
+    ])).toEqual({})
+  })
+
+  it('coerces numeric strings, as the sheets hand them over', () => {
+    expect(aggregateDeductions([mv('P1', 'L1', '90'), mv('P1', 'L1', '9')]))
+      .toEqual({ 'P1|L1': 99 })
+  })
+
+  it('skips rows missing a part id', () => {
+    expect(aggregateDeductions([{ from_location_id: 'L1', quantity: 5 }])).toEqual({})
+  })
+
+  it('keeps different parts at one location apart', () => {
+    expect(aggregateDeductions([mv('P1', 'L1', 2), mv('P2', 'L1', 3)]))
+      .toEqual({ 'P1|L1': 2, 'P2|L1': 3 })
+  })
+
+  it('survives empty/missing input', () => {
+    expect(aggregateDeductions([])).toEqual({})
+    expect(aggregateDeductions(undefined)).toEqual({})
+    expect(aggregateDeductions([null, undefined])).toEqual({})
   })
 })

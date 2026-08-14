@@ -3,6 +3,7 @@
 // from the rest of supabase.js so we can extract it later if needed.
 
 import { db, searchPartsCatalog } from './supabase'
+import { FOOTAGE_TYPE_VALUES } from './footageTypes'
 
 // Natural / "logical" name compare. Beats plain localeCompare on alnum bin
 // labels: "A2" < "A10" instead of "A10" < "A2". Used everywhere bins or
@@ -903,6 +904,116 @@ export async function recordMovement({
     .single()
   if (error) throw error
   return data
+}
+
+// ─── Negative-stock pre-flight ───────────────────────────────────────────────
+// Nothing in the stack stops a movement that takes more than a location holds:
+// validateMovement only checks endpoint SHAPE (a transfer has both ends, an
+// adjust is one-sided), and the DB trigger just applies the delta. So moving
+// 90 units out of a location holding 9 is a legal operation that silently
+// leaves -81 behind.
+//
+// That is not hypothetical — the July 2026 first-time-binning pass drove 92
+// warehouse rows negative that way (e.g. Aerial Clamp Kit: bin +90, warehouse
+// -81, net 9). Almost none of it was real loss; it was stock misallocated
+// between a warehouse and its own bins, which is exactly what makes a
+// bin-level CSV disagree with a rolled-up screen.
+//
+// This is a WARNING, not a block: a genuine correction sometimes has to pass
+// through zero, and the crew load path already uses warn-but-allow. Callers
+// confirm, then proceed.
+
+// Total deducted per (part, location), keyed `partId|locationId`.
+//
+// Pure + exported so the summing is tested: a batch routinely hits the same
+// pair on several lines (one scan-to-move list, one CSV import), and checking
+// each line against on-hand independently would wave through a batch that only
+// goes negative in aggregate.
+//
+// Only the deducting side counts. `receive` has no source, and an `adjust`
+// with only a destination is a positive — neither can drive a location down.
+export function aggregateDeductions(movements) {
+  const out = {}
+  for (const m of Array.isArray(movements) ? movements : []) {
+    const loc = m?.from_location_id
+    const qty = Number(m?.quantity) || 0
+    if (!loc || !m?.part_id || qty <= 0) continue
+    const key = `${m.part_id}|${loc}`
+    out[key] = (out[key] || 0) + qty
+  }
+  return out
+}
+
+// Which (part, location) pairs would a batch drive below zero?
+// Returns [{ partId, locationId, partName, locationName, current, delta, after }].
+export async function checkNegativeStock(movements) {
+  const deductions = new Map(Object.entries(aggregateDeductions(movements)))
+  if (deductions.size === 0) return []
+
+  const partIds = [...new Set([...deductions.keys()].map(k => k.split('|')[0]))]
+  const locIds = [...new Set([...deductions.keys()].map(k => k.split('|')[1]))]
+
+  const { data, error } = await db
+    .from('inventory_stock')
+    .select('part_id, location_id, quantity, parts_catalog(name), inventory_locations(name)')
+    .in('part_id', partIds)
+    .in('location_id', locIds)
+  if (error) throw error
+
+  const onHand = new Map()
+  const names = new Map()
+  for (const r of data || []) {
+    const key = `${r.part_id}|${r.location_id}`
+    onHand.set(key, Number(r.quantity) || 0)
+    names.set(key, {
+      partName: r.parts_catalog?.name || r.part_id,
+      locationName: r.inventory_locations?.name || 'location',
+    })
+  }
+
+  const out = []
+  for (const [key, delta] of deductions) {
+    // A pair with no stock row at all reads as 0 on hand — still negative.
+    const current = onHand.get(key) || 0
+    const after = current - delta
+    if (after >= 0) continue
+    const [partId, locationId] = key.split('|')
+    const n = names.get(key) || {}
+    out.push({
+      partId, locationId, delta, current, after,
+      partName: n.partName || partId,
+      locationName: n.locationName || 'location',
+    })
+  }
+  return out
+}
+
+// Pre-flight + window.confirm. Returns true to proceed, false to abort.
+// Lives here rather than in each sheet so the eight call sites that commit
+// movements share one message instead of hand-rolling their own.
+export async function confirmNegativeStock(movements) {
+  let bad = []
+  try {
+    bad = await checkNegativeStock(movements)
+  } catch (e) {
+    // A failed pre-flight must never block a legitimate movement — the check
+    // is advisory, so fall through and let the commit proceed.
+    console.warn('Negative-stock pre-flight failed:', e)
+    return true
+  }
+  if (bad.length === 0) return true
+
+  const MAX = 8
+  const lines = bad.slice(0, MAX).map(b =>
+    `• ${b.partName} at ${b.locationName}: ${b.current} on hand − ${b.delta} = ${b.after}`)
+  if (bad.length > MAX) lines.push(`…and ${bad.length - MAX} more`)
+
+  return window.confirm(
+    `This takes more than ${bad.length === 1 ? 'that location holds' : 'those locations hold'}:\n\n` +
+    lines.join('\n') +
+    `\n\nStock will go negative, which usually means the count is wrong or the ` +
+    `material is in a different bin. Continue anyway?`
+  )
 }
 
 // Batch insert of inventory movements.
@@ -2905,7 +3016,9 @@ export async function getFootageTypePartMap() {
     .from('footage_type_part_map')
     .select('kind, type_value, part_id, part:parts_catalog!footage_type_part_map_part_id_fkey(id, name, unit)')
   if (error) throw error
-  const out = { fiber: {}, conduit: {} }
+  // Seed every known kind so "no mappings curated yet" reads as {} rather than
+  // undefined — the picker and FootageMapSheet both index into these directly.
+  const out = Object.fromEntries(Object.keys(FOOTAGE_TYPE_VALUES).map(k => [k, {}]))
   for (const r of data || []) {
     if (!out[r.kind]) out[r.kind] = {}
     out[r.kind][r.type_value] = {
@@ -2917,7 +3030,7 @@ export async function getFootageTypePartMap() {
   return out
 }
 
-// Upsert one mapping (kind = 'fiber' | 'conduit'). Staff-only via RLS.
+// Upsert one mapping (kind = 'fiber' | 'conduit' | 'strand'). Staff-only via RLS.
 export async function setFootageTypePart(kind, typeValue, partId) {
   const { data: { user } } = await db.auth.getUser()
   const { error } = await db

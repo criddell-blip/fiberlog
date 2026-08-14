@@ -17,6 +17,34 @@ export function sumLines(lines) {
   return (lines || []).reduce((a, l) => a + (Number(l.ft) || 0), 0)
 }
 
+// THE derivation of a footage assembly's type kind. Flag-driven, never
+// id-driven, so the crew picker, the consumption path and the manager's flag
+// checkbox cannot disagree about which cards are typed. Returning null rather
+// than falling through to a default is deliberate: it's what keeps untyped
+// footage (and every non-footage assembly) out of the consumption path.
+export function footageKind(asm) {
+  if (!asm) return null
+  if (asm.isFiber) return 'fiber'
+  if (asm.isConduit) return 'conduit'
+  if (asm.isStrand) return 'strand'
+  return null
+}
+
+// A kind whose chip list holds exactly ONE value isn't really a choice — the
+// crew would tap the same chip every time, and forgetting to would mean the
+// footage consumes nothing. So create the line for them.
+//
+// Keyed on the CHIP LIST, not on how many types the manager has mapped. A
+// map-derived rule would race the async footage-map fetch (a crew on a slow
+// connection types feet before it lands, gets no auto-pick, and silently logs
+// zero material), and it would switch itself on for fiber the day someone
+// cleared four of the five fiber mappings. The chip list is a code constant:
+// deterministic, and it matches what the crew actually sees on screen.
+export function autoPickType(lines, values) {
+  if ((lines || []).length > 0) return null
+  return (values || []).length === 1 ? values[0] : null
+}
+
 // Toggle a type on/off for one assembly. Returns the next lines array, or the
 // SAME array reference when nothing should change (caller can skip the write).
 //
@@ -47,23 +75,28 @@ export function removalLosesWork(lines, type) {
 
 // Resolve every picked type into its mapped SKU. One part row per line.
 //
-// assemblies: the ALL_ASSEMBLIES list (needs .id/.isFiber/.isConduit)
+// assemblies: the ALL_ASSEMBLIES list (needs .id, a kind flag, and .parts)
 // footageLines: { [assemblyId]: [{ type, ft }] }
-// footageMap: { fiber: { '144ct': {partId,name,unit} }, conduit: {...} }
-// assemblyPartIds: Set of part ids the assemblies already derive — a footage
-//   SKU that collides with one is skipped so it can't double-count.
-export function linesToParts({ assemblies, footageLines, footageMap, assemblyPartIds }) {
+// footageMap: { fiber: { '144ct': {partId,name,unit} }, conduit: {...}, strand: {...} }
+export function linesToParts({ assemblies, footageLines, footageMap }) {
   const out = []
-  const skip = assemblyPartIds || new Set()
   for (const asm of assemblies || []) {
-    // Driven by the assembly's own flags rather than hardcoded ids, so the
-    // picker and the consumption can't disagree about which cards are typed.
-    const kind = asm.isFiber ? 'fiber' : asm.isConduit ? 'conduit' : null
+    const kind = footageKind(asm)
     if (!kind) continue
+    // Collision guard, scoped to THIS assembly's own parts. When the assembly
+    // already derives the SKU a picked type maps to, the assembly row wins and
+    // the footage row is dropped — otherwise the same feet land twice.
+    //
+    // It MUST be per-assembly, not app-wide. `down-guy` consumes 20 ft of the
+    // SAME strand SKU per guy, so an app-wide skip set would let a single down
+    // guy silently delete a whole day of strand footage. Two different
+    // assemblies consuming one SKU is legitimate additive consumption, not a
+    // double-count — only the assembly that owns the line can shadow it.
+    const own = new Set((asm.parts || []).map(p => p.id))
     for (const line of footageLines?.[asm.id] || []) {
       const ft = Number(line.ft) || 0
       const hit = line.type && footageMap?.[kind]?.[line.type]
-      if (ft <= 0 || !hit || skip.has(hit.partId)) continue
+      if (ft <= 0 || !hit || own.has(hit.partId)) continue
       // srcKey, not partId, is the React key at the call site: two types CAN
       // map to one SKU via a mis-curated footage map, and duplicate keys make
       // React silently drop a row from the review sheet.

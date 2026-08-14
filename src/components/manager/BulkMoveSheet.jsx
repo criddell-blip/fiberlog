@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { recordMovementsBatch, getBinsForWarehouse, getStockRowsForParts, buildLocationQtyMaps } from '../../lib/inventory'
+import { recordMovementsBatch, getBinsForWarehouse, getStockRowsForParts, buildLocationQtyMaps, confirmNegativeStock } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
 import LocationWithBinPicker from './LocationWithBinPicker'
 import Icon from '../shared/Icon'
@@ -123,7 +123,6 @@ export default function BulkMoveSheet({
     const v = validate()
     if (v) { setError(v); return }
     setError(null)
-    setSubmitting(true)
 
     const movements = validMovements.map(r => ({
       movement_type: 'transfer',
@@ -135,6 +134,11 @@ export default function BulkMoveSheet({
       notes: notes.trim() || null,
       created_by: currentUser?.id,
     }))
+
+    // Warn before the spinner goes up — a bulk move is the easiest way to
+    // take more than a source holds across many parts at once.
+    if (!(await confirmNegativeStock(movements))) return
+    setSubmitting(true)
 
     try {
       // chunk:true = the chunked-insert-with-single-row-fallback loop that
