@@ -202,21 +202,41 @@ export default function ReportsView() {
       // Get all log entries for these submissions
       const sessionIds = [...new Set(filteredSubs.map(s => s.session_id).filter(Boolean))]
 
-      // Build a map of session_id -> submission
-      const sessionToSub = {}
-      filteredSubs.forEach(s => { if (s.session_id) sessionToSub[s.session_id] = s })
-
       // Get log entries
       const { data: entries } = await db
         .from('log_entries')
-        .select('id, session_id, task_id, footage_amt, entry_type')
-        .in('session_id', filteredSubs.map(s => s.session_id).filter(Boolean))
+        .select('id, session_id, task_id, submission_id, footage_amt, entry_type')
+        .in('session_id', sessionIds)
 
       if (!entries || entries.length === 0) { setRows([]); setLoading(false); return }
 
-      const entryIds = entries.map(e => e.id)
+      // Attribute each entry to an APPROVED submission by submission_id
+      // (backlog #43). Under the is_closed multi-passdown model one session
+      // can hold approved + pending + flagged submissions at once — the old
+      // session-scoped attribution counted a pending/flagged passdown's parts
+      // into this approved-only report. Direct link wins; legacy unlinked
+      // rows (pre-July-2026, submission_id NULL) fall back to their session's
+      // SINGLE approved submission — skipped if the session has several
+      // ("better absent than double-counted", same rule as getTaskSummary /
+      // SubmissionsQueue.loadPartsForSubmission).
+      const subById = new Map(filteredSubs.map(s => [s.id, s]))
+      const subsBySession = new Map()
+      filteredSubs.forEach(s => {
+        if (!s.session_id) return
+        if (!subsBySession.has(s.session_id)) subsBySession.set(s.session_id, [])
+        subsBySession.get(s.session_id).push(s)
+      })
+      const subForEntry = e => {
+        if (e.submission_id) return subById.get(e.submission_id) || null
+        const owners = subsBySession.get(e.session_id) || []
+        return owners.length === 1 ? owners[0] : null
+      }
+
+      const attributed = entries.filter(e => subForEntry(e))
+      if (attributed.length === 0) { setRows([]); setLoading(false); return }
+      const entryIds = attributed.map(e => e.id)
       const entryMap = {}
-      entries.forEach(e => { entryMap[e.id] = e })
+      attributed.forEach(e => { entryMap[e.id] = e })
 
       // Get parts
       const { data: parts } = await db
@@ -231,7 +251,7 @@ export default function ReportsView() {
       ;(parts || []).forEach(p => {
         const entry = entryMap[p.entry_id]
         if (!entry) return
-        const sub = sessionToSub[entry.session_id]
+        const sub = subForEntry(entry)
         if (!sub) return
 
         const task = sub._session?.tasks
@@ -457,13 +477,29 @@ export default function ReportsView() {
     if (sessionIds.length > 0) {
       const { data: sessionEntries } = await db
         .from('log_entries')
-        .select('id, session_id')
+        .select('id, session_id, submission_id')
         .in('session_id', sessionIds)
 
-      const entrySession = {}
-      ;(sessionEntries || []).forEach(e => { entrySession[e.id] = e.session_id })
+      // Same submission-id attribution as load() (backlog #43): only count
+      // entries linked to an APPROVED submission in scope — or legacy
+      // unlinked rows whose session has exactly one approved submission —
+      // so a pending/flagged passdown's parts can't inflate the PDF's
+      // materials breakdown.
+      const projSubIds = new Set(projSubs.map(s => s.id))
+      const projSubsBySession = new Map()
+      projSubs.forEach(s => {
+        if (!s.session_id) return
+        projSubsBySession.set(s.session_id, (projSubsBySession.get(s.session_id) || 0) + 1)
+      })
+      const countable = (sessionEntries || []).filter(e =>
+        e.submission_id
+          ? projSubIds.has(e.submission_id)
+          : projSubsBySession.get(e.session_id) === 1)
 
-      const eIds = (sessionEntries || []).map(e => e.id)
+      const entrySession = {}
+      countable.forEach(e => { entrySession[e.id] = e.session_id })
+
+      const eIds = countable.map(e => e.id)
       if (eIds.length > 0) {
         const { data: eParts } = await db
           .from('entry_parts')
