@@ -15,6 +15,13 @@ export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 export const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
+// supabase-js does NOT throw on failure — it returns { error }. Any write a
+// toast or state change depends on must check it, or a blocked delete/update
+// (FK violation, RLS) silently "succeeds": local state updates, the toast
+// lies, and the row is back after a reload. Wrap the awaited result:
+//   const rows = must(await db.from('tasks').delete().in('id', ids))
+export const must = res => { if (res.error) throw res.error; return res.data || [] }
+
 // Search parts_catalog by name OR id, returning up to `limit` deduped rows.
 // Implemented as two parallel `.ilike()` queries instead of one `.or()`
 // filter because PostgREST's filter grammar treats `,()`:.` as reserved,
@@ -482,9 +489,8 @@ export async function saveAssembly(asm) {
 }
 
 export async function deleteAssembly(id) {
-  await db.from('assembly_parts').delete().eq('assembly_id', id)
-  const { error } = await db.from('assemblies').delete().eq('id', id)
-  if (error) throw error
+  must(await db.from('assembly_parts').delete().eq('assembly_id', id))
+  must(await db.from('assemblies').delete().eq('id', id))
 }
 
 export async function searchParts(query, { activeOnly = false } = {}) {

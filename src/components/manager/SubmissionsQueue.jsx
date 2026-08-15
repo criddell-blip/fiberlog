@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { approveSubmission, saveSubmissionParts, setTaskClosed, db } from '../../lib/supabase'
+import { approveSubmission, saveSubmissionParts, setTaskClosed, db, must } from '../../lib/supabase'
 import { getLocations } from '../../lib/inventory'
 import { useApp } from '../../AppContext'
 import useRealtimeQueue from '../../lib/useRealtimeQueue'
@@ -284,12 +284,15 @@ export default function SubmissionsQueue() {
   async function handleFlag(sub) {
     setActing(true)
     try {
-      await db.from('submissions').update({
+      // must(): an RLS/network failure here has to reach the catch — an
+      // unchecked update still toasted "Flagged" and closed the detail view
+      // while the passdown silently stayed pending (backlog #42).
+      must(await db.from('submissions').update({
         status: 'flagged',
         flag_reason: note || 'Flagged by manager',
         reviewed_by: currentUser?.id || null,
         reviewed_at: new Date().toISOString(),
-      }).eq('id', sub.id)
+      }).eq('id', sub.id))
 
       // Mirror the task's status back to 'open' (backlog #2: the task is
       // still visible to the crew via is_closed regardless — this re-arms
@@ -387,10 +390,10 @@ export default function SubmissionsQueue() {
 
   async function handleArchive(sub) {
     try {
-      await db.from('submissions').update({
+      must(await db.from('submissions').update({
         archived: true,
         archived_at: new Date().toISOString(),
-      }).eq('id', sub.id)
+      }).eq('id', sub.id))
       setSelected(null)
       showToast('Archived')
       await loadSubmissions()

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
-import { db } from '../../lib/supabase'
+import { db, must } from '../../lib/supabase'
 import AdminUsersView from './AdminUsersView'
 import CrewTypePermissionsView from './CrewTypePermissionsView'
 import { useBackClose } from '../../lib/backStack'
@@ -36,7 +36,7 @@ export default function AdminPanel() {
     if (!editVal.trim()) return
     setSaving(true)
     try {
-      await db.from('projects').update({ name: editVal.trim() }).eq('id', project.id)
+      must(await db.from('projects').update({ name: editVal.trim() }).eq('id', project.id))
       setProjects(prev => prev.map(p => p.id === project.id ? { ...p, name: editVal.trim() } : p))
       if (selProject?.id === project.id) setSelProject(prev => ({ ...prev, name: editVal.trim() }))
       setEditingName(null)
@@ -49,7 +49,7 @@ export default function AdminPanel() {
     if (!editVal.trim()) return
     setSaving(true)
     try {
-      await db.from('phases').update({ name: editVal.trim() }).eq('id', phase.id)
+      must(await db.from('phases').update({ name: editVal.trim() }).eq('id', phase.id))
       setSelProject(prev => ({
         ...prev,
         phases: prev.phases.map(ph => ph.id === phase.id ? { ...ph, name: editVal.trim() } : ph)
@@ -60,15 +60,10 @@ export default function AdminPanel() {
     finally { setSaving(false) }
   }
 
-  // Supabase doesn't THROW on failure — it returns { error }. Every step
-  // of these destructive chains must check it, or a blocked delete (FK
-  // violation, RLS) silently "succeeds": local state updates, the toast
-  // lies, and the row is back after a reload. That's exactly the
-  // "I deleted the phase but it still shows up" report — phases with
-  // inventory_movements stamped against them are FK-blocked today
-  // (inventory_movements.phase_id is ON DELETE NO ACTION), and the error
-  // was being swallowed.
-  const must = res => { if (res.error) throw res.error; return res.data || [] }
+  // `must` (lib/supabase.js) guards every step of these destructive chains —
+  // a blocked delete (FK violation, RLS) must throw, not silently "succeed".
+  // Phases with inventory_movements stamped against them are FK-blocked today
+  // (inventory_movements.phase_id is ON DELETE NO ACTION).
 
   async function deletePhase(phase) {
     setLoading(true)

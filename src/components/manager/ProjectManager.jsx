@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import {
-  db, addTask, addInfraTask, setTaskClosed,
+  db, must, addTask, addInfraTask, setTaskClosed,
   getSitesByProject, addSite, updateSite,
   decommissionSiteWithRecovery,
   getTaskCountsBySite, getTasksBySite, getMaterialsAtSite,
@@ -456,18 +456,22 @@ export default function ProjectManager() {
 
   async function handleDeleteTask(task) {
     try {
-      // Delete related sessions, entries, submissions first
-      const { data: sessions } = await db.from('work_sessions').select('id').eq('task_id', task.id)
-      const sessionIds = (sessions || []).map(s => s.id)
+      // Delete related sessions, entries, submissions first. Every step goes
+      // through must() (lib/supabase.js) — supabase-js returns { error }
+      // instead of throwing, and an approved task's submissions are FK-blocked
+      // by inventory_movements.submission_id, so an unchecked chain would
+      // half-complete and still toast "Task deleted" (backlog #42).
+      const sessions = must(await db.from('work_sessions').select('id').eq('task_id', task.id))
+      const sessionIds = sessions.map(s => s.id)
       if (sessionIds.length > 0) {
-        const { data: entries } = await db.from('log_entries').select('id').in('session_id', sessionIds)
-        const entryIds = (entries || []).map(e => e.id)
-        if (entryIds.length > 0) await db.from('entry_parts').delete().in('entry_id', entryIds)
-        await db.from('log_entries').delete().in('session_id', sessionIds)
-        await db.from('submissions').delete().in('session_id', sessionIds)
-        await db.from('work_sessions').delete().in('id', sessionIds)
+        const entries = must(await db.from('log_entries').select('id').in('session_id', sessionIds))
+        const entryIds = entries.map(e => e.id)
+        if (entryIds.length > 0) must(await db.from('entry_parts').delete().in('entry_id', entryIds))
+        must(await db.from('log_entries').delete().in('session_id', sessionIds))
+        must(await db.from('submissions').delete().in('session_id', sessionIds))
+        must(await db.from('work_sessions').delete().in('id', sessionIds))
       }
-      await db.from('tasks').delete().eq('id', task.id)
+      must(await db.from('tasks').delete().eq('id', task.id))
 
       // Fiber path: patch the open phase's task list in place.
       if (selPhase) {
@@ -655,7 +659,7 @@ export default function ProjectManager() {
     setPermitSaving(true)
     try {
       const url = editPermitVal.trim() || null
-      await db.from('phases').update({ permit_url: url }).eq('id', selPhase.id)
+      must(await db.from('phases').update({ permit_url: url }).eq('id', selPhase.id))
 
       const updatedPhase = { ...selPhase, permit_url: url }
       setSelPhase(updatedPhase)
@@ -680,7 +684,7 @@ export default function ProjectManager() {
     setEditSaving(true)
     try {
       const val = parseInt(editVal) || 0
-      await db.from('phases').update({ [field.col]: val }).eq('id', phase.id)
+      must(await db.from('phases').update({ [field.col]: val }).eq('id', phase.id))
 
       // Update local state
       setProjects(prev => prev.map(p => {
@@ -707,7 +711,7 @@ export default function ProjectManager() {
     setEditProjSaving(true)
     try {
       const val = parseInt(editProjVal) || 0
-      await db.from('projects').update({ [field.key]: val }).eq('id', selProject.id)
+      must(await db.from('projects').update({ [field.key]: val }).eq('id', selProject.id))
       const updated = { ...selProject, [field.key]: val }
       setSelProject(updated)
       setProjects(prev => prev.map(p => p.id === selProject.id ? { ...p, [field.key]: val } : p))
