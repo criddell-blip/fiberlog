@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { isoLocalDate } from './format'
 
 // Read from Vite env vars (.env / .env.local). Hardcoded fallbacks are kept
 // so a build still works if .env goes missing — the anon key is public
@@ -531,7 +532,11 @@ export async function getUsers() {
 // have handleSubmit's session-scoped cleanup delete the first task's
 // pending submission. Per-task sessions keep each task's passdown isolated.
 export async function startSession(userId, taskId) {
-  const today = new Date().toISOString().split('T')[0]
+  // LOCAL date (backlog #45) — the UTC date rolls to tomorrow at ~6pm Utah,
+  // which split evening work onto tomorrow's session. crew_activity_today's
+  // CURRENT_DATE filter was moved to America/Denver in the same change so
+  // the view and this stamp agree on what "today" means.
+  const today = isoLocalDate()
   const { data, error } = await db
     .from('work_sessions')
     .upsert({ user_id: userId, task_id: taskId, session_date: today, status: 'started' },

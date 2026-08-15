@@ -7,6 +7,7 @@ import {
   markMovementsExported,
 } from '../../lib/inventory'
 import { downloadTextAsFile } from '../../lib/csvImport'
+import { isoLocalDate } from '../../lib/format'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 
@@ -326,15 +327,6 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
       </div>
     </div>
   )
-}
-
-// Format a Date as YYYY-MM-DD in local time (not UTC) so the input[type=date]
-// shows what the user expects.
-function isoLocalDate(d) {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
 }
 
 const thStyle = {

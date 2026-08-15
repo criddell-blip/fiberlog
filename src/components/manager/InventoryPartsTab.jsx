@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../AppContext'
 import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, getPartLocations, deleteDraftPart, SONAR_ROUTING_OPTIONS } from '../../lib/inventory'
 import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
+import { isoLocalDate } from '../../lib/format'
 import SkuLabelSheet from './SkuLabelSheet'
 import BulkMoveSheet from './BulkMoveSheet'
 import PurchaseRequestSheet from './PurchaseRequestSheet'
@@ -233,7 +234,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
         Number(stockTotals.get(p.id) || 0),
       ].map(escapeCsvField).join(','))
     }
-    const stamp = new Date().toISOString().slice(0, 10)
+    const stamp = isoLocalDate()
     // Filter in the filename: a "-draft-" file and an "-active-" file must
     // never be mistaken for one another once they're both on a clipboard.
     const scope = search.trim() ? `${filter}-search` : filter

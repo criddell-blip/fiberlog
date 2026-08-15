@@ -13,6 +13,19 @@ export function fmtWhen(iso, lang = 'en') {
   return d.toLocaleString(lang === 'es' ? 'es' : 'en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
+// "2026-08-15" in LOCAL time — never .toISOString().slice(0,10), which is
+// the UTC date: after ~5pm MST / 6pm MDT that's TOMORROW in Utah (backlog
+// #45 — evening work sessions, PR dates, and reconcile notes were all
+// stamping the next day). Use this for any "today" written to the DB or
+// shown to a user; the server-side counterpart is
+// (now() AT TIME ZONE 'America/Denver')::date (see crew_activity_today).
+export function isoLocalDate(d = new Date()) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 // "Aug 13, 2026" — date only, year always shown.
 //
 // fmtWhen deliberately omits the year, which is right for a live feed of

@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { db, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabase'
 import { getConsumptionLedger, movementEffectiveDate, consumptionSource } from '../../lib/inventory'
 import { useIsWide } from '../../lib/useIsWide'
+import { isoLocalDate } from '../../lib/format'
 import Icon from '../shared/Icon'
 import SageExportSheet from './SageExportSheet'
 
@@ -83,9 +84,9 @@ export default function ReportsView() {
   const [preset, setPreset] = useState('this_week')
   const [dateFrom, setDateFrom] = useState(() => {
     const r = getDateRange('this_week')
-    return r.from.toISOString().split('T')[0]
+    return isoLocalDate(r.from)  // local, not UTC (#45) — evening rollover shifted presets a day
   })
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0])
+  const [dateTo, setDateTo] = useState(() => isoLocalDate())
   const [selProject, setSelProject] = useState('all')
   const [selUser, setSelUser] = useState('all')
   const [users, setUsers] = useState([])
@@ -365,8 +366,8 @@ export default function ReportsView() {
     setPreset(p)
     const r = getDateRange(p)
     if (r) {
-      setDateFrom(r.from.toISOString().split('T')[0])
-      setDateTo(r.to.toISOString().split('T')[0])
+      setDateFrom(isoLocalDate(r.from))
+      setDateTo(isoLocalDate(r.to))
     }
   }
 

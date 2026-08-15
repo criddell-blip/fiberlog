@@ -3,6 +3,7 @@
 // from the rest of supabase.js so we can extract it later if needed.
 
 import { db, searchPartsCatalog } from './supabase'
+import { isoLocalDate } from './format'
 import { FOOTAGE_TYPE_VALUES } from './footageTypes'
 
 // Natural / "logical" name compare. Beats plain localeCompare on alnum bin
@@ -1376,7 +1377,7 @@ export async function exportLocationStockCSV(location) {
 
   const csv = lines.join('\n')
   const safeName = (location.name || 'location').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()
-  const stamp = new Date().toISOString().slice(0, 10)
+  const stamp = isoLocalDate()
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -2625,7 +2626,7 @@ export async function createPurchaseRequest({
     .from('purchase_requests')
     .insert({
       pr_number: prNumData,
-      date_requested: dateRequested || new Date().toISOString().slice(0, 10),
+      date_requested: dateRequested || isoLocalDate(),  // local, not UTC (#45)
       target_location_id: targetLocationId || null,
       notes: notes || null,
       created_by: createdBy,

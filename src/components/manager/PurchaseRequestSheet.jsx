@@ -10,6 +10,7 @@ import {
 } from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
 import { downloadTextAsFile } from '../../lib/csvImport'
+import { isoLocalDate } from '../../lib/format'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 
@@ -40,7 +41,7 @@ export default function PurchaseRequestSheet({
   // ── Header state ────────────────────────────────────────────────────
   const [pr, setPr] = useState(null)  // detail mode: loaded PR object
   const [loading, setLoading] = useState(mode === 'detail')
-  const [dateRequested, setDateRequested] = useState(() => new Date().toISOString().slice(0, 10))
+  const [dateRequested, setDateRequested] = useState(() => isoLocalDate())
   const [targetLocationId, setTargetLocationId] = useState('')
   const [notes, setNotes] = useState('')
 
@@ -111,7 +112,7 @@ export default function PurchaseRequestSheet({
       .then(loaded => {
         if (cancelled || !loaded) return
         setPr(loaded)
-        setDateRequested(loaded.date_requested || new Date().toISOString().slice(0, 10))
+        setDateRequested(loaded.date_requested || isoLocalDate())
         setTargetLocationId(loaded.target_location_id || '')
         setNotes(loaded.notes || '')
         setPoNumber(loaded.po_number || '')

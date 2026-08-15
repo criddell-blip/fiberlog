@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { db } from '../../lib/supabase'
 import { recordMovementsBatch, fetchAllRows, confirmNegativeStock } from '../../lib/inventory'
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
+import { isoLocalDate } from '../../lib/format'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 
@@ -215,7 +216,9 @@ export default function ReconcileSheet({ onClose, onApplied }) {
     setError(''); setSubmitting(true)
     try {
       const movements = []
-      const stamp = new Date().toISOString().slice(0, 10)
+      // Local date (#45) — this stamp lands in permanent movement notes; the
+      // UTC date is tomorrow after ~6pm Utah.
+      const stamp = isoLocalDate()
       for (const r of resolved) {
         if (excluded.has(r.idx)) continue
         if (r.status !== 'add' && r.status !== 'remove') continue

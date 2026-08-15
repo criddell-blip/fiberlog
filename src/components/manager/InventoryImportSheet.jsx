@@ -19,6 +19,7 @@ import {
   updatePartsBatch,
 } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
+import { isoLocalDate } from '../../lib/format'
 import Icon from '../shared/Icon'
 
 const STAGES = {
@@ -421,7 +422,7 @@ export default function InventoryImportSheet({ locations, currentUser, onClose, 
     )) return
 
     setSweeping(true)
-    const stamp = new Date().toISOString().slice(0, 10)
+    const stamp = isoLocalDate()  // local, not UTC (#45) — lands in adjust-movement notes
 
     // Balancing adjusts are built from the review-time stock snapshot
     // (getStockRowsForParts), not re-read at commit. If warehouse stock changes
