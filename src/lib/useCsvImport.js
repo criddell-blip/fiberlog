@@ -4,6 +4,7 @@ import { parseCsv, readFileAsText } from './csvImport'
 import {
   getPendingSonarImports, getProcessedSonarImports, getPendingSonarImport,
   markSonarPendingImportApplied, discardSonarPendingImport,
+  fetchAllRows,
 } from './inventory'
 
 // Shared plumbing hooks for the CSV importer sheets. Extracted July 2026
@@ -242,14 +243,20 @@ export function useAlreadyImportedMarkers(prefix, rows) {
     ;(async () => {
       try {
         const cutoff = new Date(Date.now() - 90 * 86400 * 1000).toISOString()
-        const { data, error } = await db
+        // Paged (backlog #41): this guard FAILS OPEN — a marker row lost to
+        // PostgREST's silent 1,000-row cap reads as "not yet imported" and a
+        // re-delivered report double-books its transfers. The [sonar:] family
+        // alone crossed 778 rows in the 90-day window (Aug 2026), so the cap
+        // was weeks away. Stable (created_at, id) order per fetchAllRows'
+        // contract — batch-inserted import rows share one created_at.
+        const data = await fetchAllRows(() => db
           .from('inventory_movements')
           .select('notes')
           .like('notes', `%[${prefix}:%`)
           .gte('created_at', cutoff)
-        if (error) throw error
+          .order('created_at').order('id'))
         if (cancelled) return
-        setKeys(extractMarkerKeys(data || [], prefix))
+        setKeys(extractMarkerKeys(data, prefix))
       } catch (e) {
         console.warn(`Already-imported lookup failed (${prefix}):`, e)
       }
