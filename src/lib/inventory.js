@@ -2618,6 +2618,26 @@ export async function createPurchaseRequest({
   if (!createdBy) throw new Error('createdBy required')
   if (lines.length === 0) throw new Error('At least one line is required')
 
+  // Build + validate the lines payload BEFORE touching the DB (backlog #47a).
+  // The checks are pure — validating after the header insert used to orphan a
+  // numbered, line-less PR in the list (and burn a pr_number) whenever a line
+  // was missing its description or quantity.
+  const linesPayload = lines.map((l, i) => ({
+    ordered_position: i,
+    vendor: (l.vendor || null) && String(l.vendor).trim() || null,
+    quantity: Number(l.quantity || 0),
+    part_id: l.part_id || null,
+    item_number: (l.item_number || null) && String(l.item_number).trim() || null,
+    description: (l.description || '').trim(),
+    project_reason: (l.project_reason || null) && String(l.project_reason).trim() || null,
+    unit_cost: l.unit_cost == null || l.unit_cost === '' ? null : Number(l.unit_cost),
+    notes: (l.notes || null) && String(l.notes).trim() || null,
+  }))
+  for (const lp of linesPayload) {
+    if (!lp.description) throw new Error('Each line needs a description')
+    if (!lp.quantity || lp.quantity <= 0) throw new Error('Each line needs a quantity > 0')
+  }
+
   // Allocate the PR number via the helper function.
   const { data: prNumData, error: prNumErr } = await db.rpc('next_pr_number')
   if (prNumErr) throw prNumErr
@@ -2635,26 +2655,9 @@ export async function createPurchaseRequest({
     .single()
   if (prErr) throw prErr
 
-  // Insert lines. Use a stable ordered_position so re-renders don't shuffle.
-  const linesPayload = lines.map((l, i) => ({
-    request_id: prRow.id,
-    ordered_position: i,
-    vendor: (l.vendor || null) && String(l.vendor).trim() || null,
-    quantity: Number(l.quantity || 0),
-    part_id: l.part_id || null,
-    item_number: (l.item_number || null) && String(l.item_number).trim() || null,
-    description: (l.description || '').trim(),
-    project_reason: (l.project_reason || null) && String(l.project_reason).trim() || null,
-    unit_cost: l.unit_cost == null || l.unit_cost === '' ? null : Number(l.unit_cost),
-    notes: (l.notes || null) && String(l.notes).trim() || null,
-  }))
-  for (const lp of linesPayload) {
-    if (!lp.description) throw new Error('Each line needs a description')
-    if (!lp.quantity || lp.quantity <= 0) throw new Error('Each line needs a quantity > 0')
-  }
   const { data: insertedLines, error: linesErr } = await db
     .from('purchase_request_lines')
-    .insert(linesPayload)
+    .insert(linesPayload.map(lp => ({ ...lp, request_id: prRow.id })))
     .select()
   if (linesErr) throw linesErr
 
@@ -2776,6 +2779,19 @@ export async function replacePurchaseRequestLines(prId, lines = []) {
 
 export async function deletePurchaseRequest(prId) {
   if (!prId) throw new Error('prId required')
+  // Block delete once any stock has been received against it (backlog #47c) —
+  // the receive movements' "Received from PR-x" notes reference this PR, and
+  // deleting it would orphan that trail. Cancel keeps the record instead.
+  const { data: recv, error: rErr } = await db
+    .from('purchase_request_lines')
+    .select('id')
+    .eq('request_id', prId)
+    .gt('received_qty', 0)
+    .limit(1)
+  if (rErr) throw rErr
+  if (recv && recv.length > 0) {
+    throw new Error('This PR has received stock — its receipts reference it, so it can\'t be deleted. Set it to Cancelled instead.')
+  }
   const { error } = await db.from('purchase_requests').delete().eq('id', prId)
   if (error) throw error
 }
@@ -2790,94 +2806,30 @@ export async function deletePurchaseRequest(prId) {
 // (via createPart). The resolved id is persisted onto the line so it stops
 // being freeform.
 //
-// After the line updates, the PR status is recomputed from the full line
-// set: all lines fully received → 'received'; some received → 'partial'.
+// Backed by the receive_pr_line RPC (backlog #47b): the movement insert,
+// received_qty advance, and header-status recompute happen in ONE
+// transaction with the line row-locked. The old JS sequence booked the
+// movement before advancing the counter — a failure between the two left
+// stock received with the line still "outstanding" (re-receiving
+// double-booked), and two managers receiving the same line concurrently
+// both passed the remaining check. created_by comes from auth.uid()
+// server-side; `createdBy` is kept in the signature for call-site
+// compatibility but unused.
 //
 // Returns the reloaded PR (header + lines) so the caller can re-render.
-export async function receivePurchaseRequestLine({ lineId, partId = null, quantity, createdBy } = {}) {
+export async function receivePurchaseRequestLine({ lineId, partId = null, quantity, createdBy } = {}) {  // eslint-disable-line no-unused-vars
   if (!lineId) throw new Error('lineId required')
-  if (!createdBy) throw new Error('createdBy required')
   const qty = Number(quantity)
   if (!qty || qty <= 0) throw new Error('quantity must be > 0')
 
-  // Load the line (+ catalog part for the unit).
-  const { data: line, error: lineErr } = await db
-    .from('purchase_request_lines')
-    .select('*, part:parts_catalog(id, name, unit)')
-    .eq('id', lineId)
-    .maybeSingle()
-  if (lineErr) throw lineErr
-  if (!line) throw new Error('PR line not found')
-
-  // Header gives us the target location + pr_number for the movement note.
-  const { data: header, error: hErr } = await db
-    .from('purchase_requests')
-    .select('id, pr_number, status, target_location_id, received_at')
-    .eq('id', line.request_id)
-    .maybeSingle()
-  if (hErr) throw hErr
-  if (!header) throw new Error('PR not found')
-  if (header.status === 'cancelled') throw new Error('PR is cancelled')
-  if (!header.target_location_id) {
-    throw new Error('PR has no "Deliver to" location set — open the PR and pick one before receiving')
-  }
-
-  // A movement needs a real catalog part. Freeform lines must bring one in.
-  const effectivePartId = line.part_id || partId
-  if (!effectivePartId) {
-    throw new Error('This freeform line has no catalog part — link or create one before receiving')
-  }
-
-  const already = Number(line.received_qty || 0)
-  const remaining = Number(line.quantity || 0) - already
-  if (remaining <= 0) throw new Error('This line is already fully received')
-  if (qty - remaining > 1e-9) throw new Error(`Can only receive up to ${remaining} more on this line`)
-
-  // Persist the resolved part_id so a freeform line is no longer freeform.
-  if (!line.part_id && partId) {
-    const { error: pErr } = await db
-      .from('purchase_request_lines')
-      .update({ part_id: partId })
-      .eq('id', lineId)
-    if (pErr) throw pErr
-  }
-
-  // Book the receive movement (trigger increments inventory_stock).
-  await recordMovement({
-    movement_type: 'receive',
-    part_id: effectivePartId,
-    quantity: qty,
-    unit: line.part?.unit || null,
-    from_location_id: null,
-    to_location_id: header.target_location_id,
-    vendor_invoice: line.vendor || null,
-    unit_cost: line.unit_cost != null ? Number(line.unit_cost) : null,
-    notes: `Received from ${header.pr_number}` + (line.project_reason ? ` · ${line.project_reason}` : ''),
-    created_by: createdBy,
+  const { data: pr, error } = await db.rpc('receive_pr_line', {
+    p_line_id: lineId,
+    p_quantity: qty,
+    p_part_id: partId || null,
   })
-
-  // Advance the line's running received counter.
-  const { error: uErr } = await db
-    .from('purchase_request_lines')
-    .update({ received_qty: already + qty, received_at: new Date().toISOString() })
-    .eq('id', lineId)
-  if (uErr) throw uErr
-
-  // Recompute PR status from the (now-updated) full line set.
-  const fresh = await getPurchaseRequest(header.id)
-  const allLines = fresh.lines || []
-  const allReceived = allLines.length > 0 &&
-    allLines.every(l => Number(l.received_qty || 0) >= Number(l.quantity || 0))
-  const anyReceived = allLines.some(l => Number(l.received_qty || 0) > 0)
-  const nextStatus = allReceived ? 'received' : (anyReceived ? 'partial' : fresh.status)
-  if (nextStatus !== fresh.status || (allReceived && !fresh.received_at)) {
-    const patch = { status: nextStatus }
-    if (allReceived && !fresh.received_at) patch.received_at = new Date().toISOString()
-    await updatePurchaseRequest(header.id, patch)
-    fresh.status = nextStatus
-    if (patch.received_at) fresh.received_at = patch.received_at
-  }
-  return fresh
+  if (error) throw error
+  // RPC returns the header row; reload with lines joined for the sheet.
+  return getPurchaseRequest(pr.id)
 }
 
 // Receive all *remaining* catalog lines on a PR in one shot (the bulk
