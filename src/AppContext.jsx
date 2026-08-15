@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useContext, useState, useEffect, useRef } from 'react'
 import { db, getFullTree, getAssemblies, getUsers, subscribeToAllTaskChanges, nextChannelSuffix } from './lib/supabase'
 
 const AppContext = createContext(null)
@@ -340,9 +340,13 @@ export function AppProvider({ children }) {
     }
   }
 
+  // One shared timer (#51): without it, an earlier toast's timeout clears a
+  // later toast early — two quick actions and the second message vanished.
+  const toastTimerRef = useRef(null)
   function showToast(msg, duration = 3000) {
     setToast(msg)
-    setTimeout(() => setToast(null), duration)
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    toastTimerRef.current = setTimeout(() => setToast(null), duration)
   }
 
   // Imperatively patch a task in the in-memory project tree. LOCAL-ONLY —

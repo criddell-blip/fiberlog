@@ -3,7 +3,7 @@ import { useApp } from '../../AppContext'
 import { db } from '../../lib/supabase'
 import { crewTypeLabel } from '../../lib/crewTypes'
 import {
-  recordMovementsBatch,
+  recordMovementsBatch, fetchAllRows,
   getSonarCityMap, setSonarCityBucket,
   getSonarProjectMap, setSonarProjectPhase, getPhasesWithBuckets,
   getSonarSourceLocationMap, setSonarSourceLocation,
@@ -178,10 +178,12 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             .eq('type', 'truck')
             .eq('is_active', true)
             .not('assigned_to', 'is', null),
-          db.from('parts_catalog')
+          // Paged (#44): the model→SKU auto-match walks this whole list — a
+          // truncated tail would silently stop matching those parts.
+          fetchAllRows(() => db.from('parts_catalog')
             .select('id, name, unit, sonar_routing')
             .eq('is_active', true)
-            .order('name'),
+            .order('name').order('id')),
           db.from('inventory_locations')
             .select('id, name, project_id')
             .eq('type', 'job_site')
@@ -196,13 +198,12 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         if (cancelled) return
         if (usersRes.error)   throw usersRes.error
         if (trucksRes.error)  throw trucksRes.error
-        if (partsRes.error)   throw partsRes.error
         if (bucketsRes.error) throw bucketsRes.error
         setCrewUsers(usersRes.data || [])
         const tbu = {}
         for (const t of trucksRes.data || []) tbu[t.assigned_to] = t.id
         setTrucksByUser(tbu)
-        setParts(partsRes.data || [])
+        setParts(partsRes || [])  // fetchAllRows returns rows directly (throws on error)
         setBuckets(bucketsRes.data || [])
         setPersistedCityMap(cityMap)
         setPersistedProjectMap(projectMap)

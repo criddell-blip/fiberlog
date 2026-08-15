@@ -23,6 +23,32 @@ export const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 //   const rows = must(await db.from('tasks').delete().in('id', ids))
 export const must = res => { if (res.error) throw res.error; return res.data || [] }
 
+// Supabase/PostgREST silently caps ANY un-paginated select at 1,000 rows
+// (server-side db-max-rows; a client .limit() above that is clamped, not
+// honored) — and which rows survive follows physical heap order, so the most
+// recently touched rows are the ones that vanish (backlog #29 / #44). Every
+// read that can return >1,000 rows must page through here. buildQuery must
+// return a FRESH builder on each call (builders are single-use) and include a
+// stable .order() with a unique tiebreaker (e.g. id) so pages don't shear if
+// a concurrent write moves rows between requests.
+//
+// Lives here (not lib/inventory.js) so supabase.js's own readers — the
+// getFullTree/getInfraTree task pulls — can page without an import cycle;
+// inventory.js re-exports it, so existing `from './inventory'` imports work.
+const FETCH_PAGE = 1000
+export async function fetchAllRows(buildQuery, { maxRows = Infinity } = {}) {
+  const all = []
+  for (let from = 0; all.length < maxRows; from += FETCH_PAGE) {
+    const { data, error } = await buildQuery().range(from, from + FETCH_PAGE - 1)
+    if (error) throw error
+    all.push(...(data || []))
+    if (!data || data.length < FETCH_PAGE) break
+  }
+  // The loop can overshoot maxRows by up to a page — clamp so callers'
+  // ceilings (e.g. the audit export's 20k) are exact.
+  return all.length > maxRows ? all.slice(0, maxRows) : all
+}
+
 // Search parts_catalog by name OR id, returning up to `limit` deduped rows.
 // Implemented as two parallel `.ilike()` queries instead of one `.or()`
 // filter because PostgREST's filter grammar treats `,()`:.` as reserved,
@@ -102,15 +128,21 @@ export async function searchPartsCatalog(query, { cols = 'id, name, nickname, un
 
 // ─── PROJECTS ────────────────────────────────────────────────────────────────
 export async function getFullTree() {
-  const [{ data: projects, error: pErr }, { data: phases, error: phErr }, { data: tasks, error: tErr }] =
+  const [{ data: projects, error: pErr }, { data: phases, error: phErr }, tasks] =
     await Promise.all([
       db.from('projects').select('*').eq('status', 'active').order('name'),
       db.from('phases').select('*').order('sequence_order'),
-      db.from('tasks').select('*, creator:users!tasks_created_by_fkey(id, name, initials)').order('name'),
+      // Paged (#44): this selects EVERY task ever (closed included — crew
+      // "Past tasks" needs them) and nothing archives them out, so it will
+      // cross PostgREST's silent 1,000-row cap eventually and truncate the
+      // project tree. (Server-filtering old closed tasks is the bigger fix
+      // when volume warrants; paging keeps it correct meanwhile.)
+      fetchAllRows(() => db.from('tasks')
+        .select('*, creator:users!tasks_created_by_fkey(id, name, initials)')
+        .order('name').order('id')),
     ])
   if (pErr) throw pErr
   if (phErr) throw phErr
-  if (tErr) throw tErr
 
   return projects.map(p => ({
     ...p,
@@ -173,19 +205,19 @@ export async function setTaskClosed(taskId, closed, userId) {
 // on what infra crew can act on. Fiber-only regional projects (no sites) and
 // projects in non-active status are hidden.
 export async function getInfraTree() {
-  const [{ data: projects, error: pErr }, { data: sites, error: sErr }, { data: tasks, error: tErr }] =
+  const [{ data: projects, error: pErr }, { data: sites, error: sErr }, tasks] =
     await Promise.all([
       db.from('projects').select('*').eq('status', 'active').order('name'),
       db.from('sites').select('*').eq('status', 'active').order('name'),
-      // Pull every site-anchored task — same join as getFullTree for creator chip.
-      db.from('tasks')
+      // Pull every site-anchored task — same join as getFullTree for creator
+      // chip. Paged (#44), same unbounded-growth reasoning as getFullTree.
+      fetchAllRows(() => db.from('tasks')
         .select('*, creator:users!tasks_created_by_fkey(id, name, initials)')
         .not('site_id', 'is', null)
-        .order('name'),
+        .order('name').order('id')),
     ])
   if (pErr) throw pErr
   if (sErr) throw sErr
-  if (tErr) throw tErr
 
   // Surface any unmapped sites (project_id IS NULL) so they can't silently
   // vanish from the tree. Right now we only warn — the Sites admin (TBD)
@@ -769,6 +801,11 @@ export async function getTaskSummary(taskId) {
 // error bubbles up to React, blanking the page. The counter guarantees a
 // unique suffix per call regardless of clock resolution.
 let _realtimeChannelCounter = 0
+// Realtime debug logging (#51): the per-event INSERT/UPDATE/DELETE + channel
+// status chatter was shipping to every production console. Flip on locally
+// when debugging subscription issues.
+const RT_DEBUG = false
+const rtlog = (...args) => { if (RT_DEBUG) console.log(...args) }
 // Exported so realtime subscribers in components (SubmissionsQueue, CrewStatus,
 // etc.) can build unique channel names without each reinventing the wheel.
 // Don't reuse a channel name across simultaneous .channel() calls — supabase
@@ -812,7 +849,7 @@ export function subscribeToAllTaskChanges({ onInsert, onUpdate, onDelete } = {})
       ch = ch.on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'tasks' },
         payload => {
-          console.log(tag, 'INSERT', payload.new?.id)
+          rtlog(tag, 'INSERT', payload.new?.id)
           onInsert(payload.new)
         })
     }
@@ -820,7 +857,7 @@ export function subscribeToAllTaskChanges({ onInsert, onUpdate, onDelete } = {})
       ch = ch.on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'tasks' },
         payload => {
-          console.log(tag, 'UPDATE', payload.new?.id, 'status:', payload.new?.status)
+          rtlog(tag, 'UPDATE', payload.new?.id, 'status:', payload.new?.status)
           onUpdate(payload.new, payload.old)
         })
     }
@@ -828,13 +865,13 @@ export function subscribeToAllTaskChanges({ onInsert, onUpdate, onDelete } = {})
       ch = ch.on('postgres_changes',
         { event: 'DELETE', schema: 'public', table: 'tasks' },
         payload => {
-          console.log(tag, 'DELETE', payload.old?.id)
+          rtlog(tag, 'DELETE', payload.old?.id)
           onDelete(payload.old)
         })
     }
 
     ch.subscribe(status => {
-      console.log(tag, 'channel status:', status)
+      rtlog(tag, 'channel status:', status)
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         if (reconnectTimer) clearTimeout(reconnectTimer)
         reconnectTimer = setTimeout(setup, 2000)
@@ -876,7 +913,7 @@ export function subscribeToTasks(phaseId, handlers) {
       ch = ch.on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'tasks', filter: `phase_id=eq.${phaseId}` },
         payload => {
-          console.log(tag, 'INSERT', payload.new?.id, payload.new?.name)
+          rtlog(tag, 'INSERT', payload.new?.id, payload.new?.name)
           onInsert(payload.new)
         }
       )
@@ -886,14 +923,14 @@ export function subscribeToTasks(phaseId, handlers) {
       ch = ch.on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'tasks', filter: `phase_id=eq.${phaseId}` },
         payload => {
-          console.log(tag, 'UPDATE', payload.new?.id, 'status:', payload.new?.status)
+          rtlog(tag, 'UPDATE', payload.new?.id, 'status:', payload.new?.status)
           onUpdate(payload.new, payload.old)
         }
       )
     }
 
     ch.subscribe(status => {
-      console.log(tag, 'channel status:', status)
+      rtlog(tag, 'channel status:', status)
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         if (reconnectTimer) clearTimeout(reconnectTimer)
         reconnectTimer = setTimeout(setup, 2000)

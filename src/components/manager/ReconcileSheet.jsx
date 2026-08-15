@@ -155,7 +155,8 @@ export default function ReconcileSheet({ onClose, onApplied }) {
         case 'no-actual': noActual++; break
         case 'bad-actual':badActual++; break
         case 'no-match-part':
-        case 'no-match-location': noMatch++; break
+        case 'no-match-location':
+        case 'duplicate': noMatch++; break
       }
       if (r.status === 'add' || r.status === 'remove') {
         const b = effectiveBookingFor(r)
@@ -199,7 +200,7 @@ export default function ReconcileSheet({ onClose, onApplied }) {
       )
     }
     // Sort: actionable rows first (add/remove), then warnings, then no-change
-    const rank = { 'remove': 0, 'add': 1, 'bad-actual': 2, 'no-match-part': 3, 'no-match-location': 3, 'no-actual': 4, 'no-change': 5 }
+    const rank = { 'remove': 0, 'add': 1, 'bad-actual': 2, 'no-match-part': 3, 'no-match-location': 3, 'duplicate': 3, 'no-actual': 4, 'no-change': 5 }
     return [...list].sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9))
   }, [resolved, excluded, showNoChange, search])
 
@@ -477,6 +478,7 @@ function ReconcileRow({ row, excluded, onToggle, note, onNoteChange, booking, co
     'bad-actual':      { bg: 'var(--amber-lt)',  fg: 'var(--amber)' },
     'no-match-part':   { bg: 'var(--amber-lt)',  fg: 'var(--amber)' },
     'no-match-location': { bg: 'var(--amber-lt)', fg: 'var(--amber)' },
+    'duplicate':       { bg: 'var(--amber-lt)',  fg: 'var(--amber)' },
   }
   const STATUS_LABELS = {
     'no-change':         'no change',
@@ -484,6 +486,7 @@ function ReconcileRow({ row, excluded, onToggle, note, onNoteChange, booking, co
     'bad-actual':        'invalid actual qty',
     'no-match-part':     'SKU not in catalog',
     'no-match-location': 'location not found',
+    'duplicate':         'duplicate row (first occurrence wins)',
   }
   const c = STATUS_COLORS[row.status] || {}
   const actionable = row.status === 'add' || row.status === 'remove'
@@ -655,6 +658,7 @@ async function resolveAgainstLiveStock(csvRows) {
     }
   }
 
+  const seenPairs = new Set()  // (partId|locationId) already handled — dupes flagged
   const mapped = csvRows.map((row, idx) => {
     const sku     = (row['SKU'] || '').trim()
     const locName = (row['Location'] || '').trim()
@@ -679,7 +683,13 @@ async function resolveAgainstLiveStock(csvRows) {
       status = 'no-match-part'
     } else if (!location) {
       status = 'no-match-location'
+    } else if (seenPairs.has(`${part.id}|${location.id}`)) {
+      // Duplicate (SKU, location) row — a hand-edited CSV can repeat a pair,
+      // and both rows would compute the SAME variance against the same live
+      // qty and book it twice (#51). First row wins; the rest are flagged.
+      status = 'duplicate'
     } else {
+      seenPairs.add(`${part.id}|${location.id}`)
       currentSystem = stockMap.get(`${part.id}|${location.id}`) || 0
       if (actualRaw === '') {
         status = 'no-actual'

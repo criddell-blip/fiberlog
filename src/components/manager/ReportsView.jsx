@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { db, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabase'
-import { getConsumptionLedger, movementEffectiveDate, consumptionSource } from '../../lib/inventory'
+import { getConsumptionLedger, movementEffectiveDate, consumptionSource, fetchAllRows } from '../../lib/inventory'
 import { useIsWide } from '../../lib/useIsWide'
 import { isoLocalDate } from '../../lib/format'
 import Icon from '../shared/Icon'
@@ -155,7 +155,10 @@ export default function ReportsView() {
       // their project context too — otherwise the project filter below would
       // silently exclude every infra row and the Sage CSV would be missing
       // infra material consumption entirely.
-      let subQuery = db
+      // Paged (#44): an all-time report over the approved history will cross
+      // PostgREST's 1,000-row cap eventually; unpaged, the newest-first order
+      // would silently drop the OLDEST rows from long look-backs.
+      const subs = await fetchAllRows(() => db
         .from('submissions')
         .select(`
           id, session_id, created_at, hours_worked, user_id,
@@ -174,9 +177,7 @@ export default function ReportsView() {
         .gte('created_at', dayStart(dateFrom))
         .lte('created_at', dayEnd(dateTo))
         .order('created_at', { ascending: false })
-
-      const { data: subs, error: subErr } = await subQuery
-      if (subErr) throw subErr
+        .order('id', { ascending: false }))
 
       // Filter by project
       let filteredSubs = subs || []

@@ -2,8 +2,12 @@
 // inventory_stock, and parts_catalog. Keeps the inventory module decoupled
 // from the rest of supabase.js so we can extract it later if needed.
 
-import { db, searchPartsCatalog } from './supabase'
+import { db, searchPartsCatalog, fetchAllRows } from './supabase'
 import { isoLocalDate } from './format'
+
+// Re-export so the many existing `import { fetchAllRows } from './inventory'`
+// call sites keep working — the implementation moved to supabase.js (#44).
+export { fetchAllRows }
 import { FOOTAGE_TYPE_VALUES } from './footageTypes'
 
 // Natural / "logical" name compare. Beats plain localeCompare on alnum bin
@@ -143,32 +147,10 @@ export async function deactivateLocationWithRecovery(locationId, recoveryItems, 
 
 // ─── STOCK ───────────────────────────────────────────────────────────────────
 
-// Supabase/PostgREST silently caps ANY un-paginated select at 1,000 rows
-// (server-side db-max-rows; a client .limit() above that is clamped, not
-// honored). inventory_stock crossed that (~1,400 rows July 2026), and which
-// rows survive the cap follows physical heap order — so the most recently
-// touched rows are the ones that vanish. That's how the Stock tab reported
-// 80 units for a part that had 480 (July 2026 audit, backlog #29). Every
-// read that can return >1,000 inventory_stock rows must page through here.
-// buildQuery must return a FRESH builder on each call (builders are
-// single-use) and include a stable .order() so pages don't shear if a
-// concurrent write moves rows between requests.
-const FETCH_PAGE = 1000
-// Exported: any full-table read that feeds MOVEMENT WRITES (ReconcileSheet's
-// live-stock resolve, orphan sweeps) must page too — a truncated row reading
-// as "0 on hand" turns into a wrong adjust movement.
-export async function fetchAllRows(buildQuery, { maxRows = Infinity } = {}) {
-  const all = []
-  for (let from = 0; all.length < maxRows; from += FETCH_PAGE) {
-    const { data, error } = await buildQuery().range(from, from + FETCH_PAGE - 1)
-    if (error) throw error
-    all.push(...(data || []))
-    if (!data || data.length < FETCH_PAGE) break
-  }
-  // The loop can overshoot maxRows by up to a page — clamp so callers'
-  // ceilings (e.g. the audit export's 20k) are exact.
-  return all.length > maxRows ? all.slice(0, maxRows) : all
-}
+// fetchAllRows (the >1,000-row pager) moved to lib/supabase.js — see the #44
+// note there. Re-exported above; any full-table read that feeds MOVEMENT
+// WRITES (ReconcileSheet's live-stock resolve, orphan sweeps) must page —
+// a truncated row reading as "0 on hand" turns into a wrong adjust movement.
 
 export async function getStockByLocation(locationId) {
   // department rides along for the crew sheet's whitelist badges (a part
@@ -212,28 +194,31 @@ export async function getStockForLocations(locationIds, { partId = null } = {}) 
 // drops the caller's truck (or whatever pull location they're loading
 // INTO) so they don't see it as a possible source.
 export async function getAllStockGrouped({ excludeLocationId = null, excludeTypes = [] } = {}) {
-  const [stockRows, partsRes, locsRes] = await Promise.all([
-    // Full-table stock read — must page (see fetchAllRows). Parts and
-    // locations are safely under the 1,000-row cap (~700 / ~250 rows).
+  const [stockRows, partRows, locRows] = await Promise.all([
+    // All three legs page (#44): stock crossed the 1,000-row cap long ago,
+    // and the catalog (608 active, Aug 2026) + locations are growing toward
+    // it — a silently truncated parts leg would drop SKUs from crew search.
     fetchAllRows(() => db
       .from('inventory_stock')
       .select('part_id, location_id, quantity')
       .order('part_id').order('location_id')),
-    db.from('parts_catalog')
+    fetchAllRows(() => db
+      .from('parts_catalog')
       .select('id, name, nickname, attributes, unit, category, material_group, department')
-      .eq('is_active', true),
-    db.from('inventory_locations')
+      .eq('is_active', true)
+      .order('id')),
+    fetchAllRows(() => db
+      .from('inventory_locations')
       .select('id, name, type, parent_location_id, assigned_to')
-      .eq('is_active', true),
+      .eq('is_active', true)
+      .order('id')),
   ])
-  if (partsRes.error) throw partsRes.error
-  if (locsRes.error) throw locsRes.error
 
   // Index part + location lookups
-  const partById = new Map((partsRes.data || []).map(p => [p.id, p]))
-  const locById = new Map((locsRes.data || []).map(l => [l.id, l]))
+  const partById = new Map(partRows.map(p => [p.id, p]))
+  const locById = new Map(locRows.map(l => [l.id, l]))
   const parentNameById = new Map(
-    (locsRes.data || []).filter(l => l.type === 'warehouse').map(l => [l.id, l.name])
+    locRows.filter(l => l.type === 'warehouse').map(l => [l.id, l.name])
   )
 
   const byPart = new Map()
@@ -1552,10 +1537,12 @@ export async function setCrewLoadDestinations(userId, locationIds, { grantedBy =
 // ─── PARTS CATALOG ──────────────────────────────────────────────────────────
 
 export async function getPartsCatalogIndex() {
-  const { data, error } = await db
+  // Paged (#44): this index feeds the CSV importer's SKU matching — a
+  // silently truncated read would mint duplicate drafts for existing SKUs.
+  const data = await fetchAllRows(() => db
     .from('parts_catalog')
     .select('id, name, unit, category, material_group, is_active')
-  if (error) throw error
+    .order('id'))
   const byId = new Map()
   const byName = new Map()
   for (const p of data || []) {
@@ -1909,10 +1896,11 @@ export async function getStockForAudit({
 // Distinct department + material_group values from the catalog. Used by
 // the audit tab to populate filter dropdowns.
 export async function getPartsCatalogTaxonomy() {
-  const { data, error } = await db
+  // Paged (#44) — full-catalog read, 709 rows and growing.
+  const data = await fetchAllRows(() => db
     .from('parts_catalog')
     .select('department, material_group')
-  if (error) throw error
+    .order('id'))
   const depts = new Set()
   const matGroups = new Set()
   for (const p of data || []) {
@@ -2541,6 +2529,7 @@ export async function markMovementsExported(movementIds, { userId = null, notes 
   // URL; a few hundred UUIDs blow past the gateway's URL limit → HTTP 400 (the
   // "bad request" bug when the unexported backlog grew). 100 ids/URL is safe.
   const CHUNK = 100
+  let stamped = 0
   for (let i = 0; i < movementIds.length; i += CHUNK) {
     const slice = movementIds.slice(i, i + CHUNK)
     const { error: uErr } = await db
@@ -2550,7 +2539,22 @@ export async function markMovementsExported(movementIds, { userId = null, notes 
         export_batch_id: batch.id,
       })
       .in('id', slice)
-    if (uErr) throw uErr
+    if (uErr) {
+      // Partial stamp (backlog #48a): the batch row exists and `stamped`
+      // movements carry it, but the rest don't — those unstamped rows would
+      // re-export into the NEXT batch, delivering duplicate lines to Sage
+      // across two files. Say exactly that, with the recovery path, instead
+      // of a bare network error.
+      throw new Error(
+        `Export batch ${batch.id} was only partially recorded (${stamped} of ` +
+        `${movementIds.length} movements stamped): ${uErr.message}. The CSV you ` +
+        `downloaded is still complete. To finish the bookkeeping, re-run the same ` +
+        `date range with "Include already exported" OFF — that batch will contain ` +
+        `exactly the unstamped remainder; deliver it to Sage ONLY if the first ` +
+        `file wasn't imported there.`
+      )
+    }
+    stamped += slice.length
   }
 
   return batch

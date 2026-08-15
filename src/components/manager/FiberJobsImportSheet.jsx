@@ -3,7 +3,7 @@ import { useApp } from '../../AppContext'
 import { db } from '../../lib/supabase'
 import { crewTypeLabel } from '../../lib/crewTypes'
 import {
-  recordMovementsBatch,
+  recordMovementsBatch, fetchAllRows,
   getSonarProjectMap, setSonarProjectPhase, getPhasesWithBuckets,
   getSonarSourceLocationMap, setSonarSourceLocation, getLocations,
   getFiberValueMap, setFiberValueMap, clearFiberValueMap, FIBER_QTY_MODE_OPTIONS,
@@ -140,10 +140,12 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             .eq('type', 'truck')
             .eq('is_active', true)
             .not('assigned_to', 'is', null),
-          db.from('parts_catalog')
+          // Paged (#44): the value-map SKU pickers walk this whole list — a
+          // truncated tail would silently hide those parts from mapping.
+          fetchAllRows(() => db.from('parts_catalog')
             .select('id, name, unit, department, material_group')
             .eq('is_active', true)
-            .order('name'),
+            .order('name').order('id')),
           getPhasesWithBuckets(),
           getSonarProjectMap(),
           getFiberValueMap(),
@@ -155,7 +157,6 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         // doesn't silently kill the whole load.
         if (usersRes.error) throw new Error('users query: ' + usersRes.error.message)
         if (trucksRes.error) throw new Error('trucks query: ' + trucksRes.error.message)
-        if (partsRes.error) throw new Error('parts query: ' + partsRes.error.message)
         setCrewUsers(usersRes.data || [])
         const tbu = {}
         for (const t of trucksRes.data || []) tbu[t.assigned_to] = t.id
@@ -164,7 +165,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         const pbu = {}
         for (const u of usersRes.data || []) if (u.default_pull_location_id) pbu[u.id] = u.default_pull_location_id
         setPullByUser(pbu)
-        setParts(partsRes.data || [])
+        setParts(partsRes || [])  // fetchAllRows returns rows directly (throws on error)
         setPhases(phasesData || [])
         setPersistedProjectMap(projectMap)
         setValueMap(valMap)

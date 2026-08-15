@@ -22,7 +22,7 @@ export const ALL_MANAGER_TABS = ['submissions', 'crew', 'projects', 'reports', '
 
 // Resolve a user's staff scope. Returns null for non-staff (crew/contractor).
 export function staffScope(user) {
-  if (!user) return 'full'
+  if (!user) return null  // fail closed (#51) — no user is not full-scope staff
   if (user.role === 'owner') return 'full'
   if (user.role !== 'manager') return null
   return user.staff_scope || (user.restricted_to_inventory ? 'warehouse' : 'full')

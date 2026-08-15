@@ -5,6 +5,7 @@ import {
   isExportableMovement,
   buildSageCsv,
   markMovementsExported,
+  movementEffectiveDate,
 } from '../../lib/inventory'
 import { downloadTextAsFile } from '../../lib/csvImport'
 import { isoLocalDate } from '../../lib/format'
@@ -263,7 +264,11 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
               <tbody>
                 {exportable.slice(0, 200).map(m => (
                   <tr key={m.id} style={{ background: m.exported_at ? 'var(--gray-lt)' : 'transparent', opacity: m.exported_at ? 0.6 : 1 }}>
-                    <td style={tdStyle}>{(m.created_at || '').slice(0, 10)}</td>
+                    {/* Effective work date (occurred_at ?? created_at) — the
+                        SAME date the CSV's DATE column writes (#48b). Showing
+                        created_at here made the screen disagree with the
+                        delivered file for imported/backfilled rows. */}
+                    <td style={tdStyle}>{String(movementEffectiveDate(m) || '').slice(0, 10)}</td>
                     <td style={tdStyle}>{m.movement_type}</td>
                     <td style={tdStyle}>
                       <div style={{ fontWeight: 600 }}>{m.part?.name || m.part?.id || '—'}</div>

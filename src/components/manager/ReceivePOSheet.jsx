@@ -101,7 +101,13 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
             },
           })
         } catch (e) {
-          throw new Error(`Couldn't create part "${l.part.id}": ${e.message || e}`)
+          // Duplicate SKU on a NEW line = this part was already created —
+          // either by a prior failed submit's retry (backlog #49a: the old
+          // hard-abort left the manager stuck re-picking every NEW part) or
+          // by the manager typing an existing SKU. Either way the part
+          // exists, which is all the movement insert needs — continue.
+          const isDup = e?.code === '23505' || /duplicate key|already exists/i.test(e?.message || '')
+          if (!isDup) throw new Error(`Couldn't create part "${l.part.id}": ${e.message || e}`)
         }
       }
 
@@ -124,7 +130,9 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
         movement_type: 'receive',
         part_id: l.part.id,
         quantity: Number(l.quantity),
-        unit: l.part.unit || null,
+        // An attrs-edit changes the catalog unit above — the movement row
+        // must record the same unit, not the pre-edit one (#49b).
+        unit: l.pendingAttrs?.unit || l.part.unit || null,
         from_location_id: null,
         to_location_id: dest,
         vendor_invoice: poRef.trim(),
@@ -243,8 +251,12 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
               style={{ width: '100%', padding: '8px 10px', fontSize: 14, border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--bg)' }}
             >
               <option value="">— select location —</option>
+              {/* Receivable destinations only (#51): job_site buckets are the
+                  consumption ledger and scrap is terminal — receiving new
+                  stock into either is almost certainly a mis-tap. Bins are
+                  reached via the bin dropdown after picking a warehouse. */}
               {locations
-                .filter(l => l.type !== 'vendor' && l.is_active !== false)
+                .filter(l => ['warehouse', 'truck', 'group'].includes(l.type) && l.is_active !== false)
                 .map(l => (
                   <option key={l.id} value={l.id}>
                     {TYPE_ICON[l.type] || ''} {l.name}
