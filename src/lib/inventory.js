@@ -2411,6 +2411,18 @@ export function isExportableMovement(m, { strictConsumption = false } = {}) {
   return true
 }
 
+// The PROJECTID a movement exports with: the phase's parent project, else the
+// destination bucket's name — but ONLY for job_site buckets. A truck or
+// warehouse destination is NOT a project and must export blank. Exported so
+// the SageExportSheet preview renders the SAME value the CSV will write —
+// the preview used to fall back to any destination name, showing loadout
+// rows as project-attributed while the file wrote blank (Aug 2026 smoke
+// audit's must-fix).
+export function sageProjectId(m) {
+  return m?.phase?.project?.name
+    || (m?.to_location?.type === 'job_site' ? (m.to_location.name || '') : '')
+}
+
 // Build CSV text in Sage Intacct Inventory Transactions format.
 // One row per movement. Quote anything with commas/newlines.
 export function buildSageCsv(movements, opts = {}) {
@@ -2464,8 +2476,7 @@ export function buildSageCsv(movements, opts = {}) {
     // PROJECTID + CLASSID — phase tag drives both when present.
     // Phase's parent project becomes PROJECTID; phase name → CLASSID.
     // Fallback: destination bucket's project_id resolves to project name.
-    const projectId = m.phase?.project?.name
-      || (m.to_location?.type === 'job_site' ? (m.to_location.name || '') : '')
+    const projectId = sageProjectId(m)
     const classId = m.phase?.name || ''
 
     // VENDORID is intentionally always blank, and this is NOT a bug to fix.

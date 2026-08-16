@@ -989,7 +989,15 @@ export default function ReportsView() {
         {!loading && rows.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--hint)' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10, color: 'var(--gray-mid)' }}><Icon name="chart" size={32} /></div>
-            <div>{mode === 'consumption' ? 'No material consumed in this range' : 'No approved submissions in this range'}</div>
+            {/* Name the actual range — presets can collapse to a single day
+                ("This week" on a Sunday = today only, Aug 2026 smoke audit),
+                and a bare "in this range" hides that that's what happened. */}
+            <div>
+              {mode === 'consumption' ? 'No material consumed' : 'No approved submissions'}
+              {' '}between {new Date(dateFrom + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              {' '}and {new Date(dateTo + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              {dateFrom === dateTo ? ' (a single day — widen the range or pick another preset)' : ''}
+            </div>
           </div>
         )}
 

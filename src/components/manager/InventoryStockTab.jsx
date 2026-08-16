@@ -225,7 +225,10 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
   }, [rows, search])
 
   const totalLines = rows.length
-  const totalUnits = rows.reduce((a, r) => a + (Number(r.total) || 0), 0)
+  // Units for the summary line sum the FILTERED set — next to "26 of 504
+  // parts", an unfiltered grand total read as "656,015 units across 26
+  // parts" (Aug 2026 smoke audit). Unfiltered, filtered === rows anyway.
+  const totalUnits = filtered.reduce((a, r) => a + (Number(r.total) || 0), 0)
 
   const scopedLoc = scope !== 'all' ? locations.find(l => l.id === scope) : null
   const isWarehouseScope = scopedLoc?.type === 'warehouse'

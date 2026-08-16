@@ -6,6 +6,7 @@ import {
   buildSageCsv,
   markMovementsExported,
   movementEffectiveDate,
+  sageProjectId,
 } from '../../lib/inventory'
 import { downloadTextAsFile } from '../../lib/csvImport'
 import { isoLocalDate } from '../../lib/format'
@@ -278,7 +279,10 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
                     <td style={tdStyle}>{m.from_location?.name || <span style={{ color: 'var(--hint)' }}>—</span>}</td>
                     <td style={tdStyle}>{m.to_location?.name || <span style={{ color: 'var(--hint)' }}>—</span>}</td>
                     <td style={tdStyle}>
-                      <div>{m.phase?.project?.name || m.to_location?.name || ''}</div>
+                      {/* Same value the CSV's PROJECTID writes (sageProjectId) —
+                          the old any-destination fallback showed loadout rows as
+                          project-attributed while the file wrote blank. */}
+                      <div>{sageProjectId(m) || <span style={{ color: 'var(--hint)' }}>—</span>}</div>
                       {m.phase?.name && <div style={{ fontSize: 10, color: 'var(--hint)' }}>{m.phase.name}</div>}
                     </td>
                     <td style={tdStyle}>
