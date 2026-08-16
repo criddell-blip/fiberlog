@@ -72,7 +72,15 @@ export async function fetchAllRows(buildQuery, { maxRows = Infinity } = {}) {
 // Single OR-query would be 1 round trip vs 8, but parallel queries avoid
 // the PostgREST escaping hazard when the user's query contains commas
 // (real-world example: "Bolt, Thimble Eye 5/8").
-export async function searchPartsCatalog(query, { cols = 'id, name, nickname, unit', limit = 20, activeOnly = false } = {}) {
+//
+// `activeOnly` defaults to TRUE (Aug 2026): every part picker in the app
+// searches the *usable* catalog only. `is_active=false` covers both drafts
+// (auto-minted by CSV imports) and retired parts — 101 of 709 rows — and
+// surfacing them here buried the real SKUs in noise. The deliberate escape
+// hatches: Inventory → Parts (its own Drafts/All filter chips, fed by
+// getAllParts, not this search) for admin work, and a literal SKU/barcode
+// scan (cycleCount.getPartBySku) for stock that physically exists.
+export async function searchPartsCatalog(query, { cols = 'id, name, nickname, unit', limit = 20, activeOnly = true } = {}) {
   const q = String(query ?? '').trim()
   if (!q) return []
   // Tokenize on whitespace and AND the tokens within each column — chained
@@ -99,9 +107,11 @@ export async function searchPartsCatalog(query, { cols = 'id, name, nickname, un
   const results = await Promise.all(
     searchedCols.map(col => {
       let qb = db.from('parts_catalog').select(cols)
-      // activeOnly hides draft parts (is_active=false) — the import mapping
-      // pickers want real catalog SKUs only, matching their is_active=true
-      // dropdowns. Crew search leaves it off (drafts can be legit finds).
+      // Pass activeOnly:false only for an admin surface that is explicitly
+      // meant to show drafts/retired parts — a picker that hides them must
+      // never be the same UI that offers "create a new SKU", or the manager
+      // gets a duplicate-SKU error instead of a match. createPart() guards
+      // that collision with a pointed message.
       if (activeOnly) qb = qb.eq('is_active', true)
       for (const tok of tokens) qb = qb.ilike(col, `%${tok}%`)
       return qb.order('name').limit(limit)
@@ -526,7 +536,7 @@ export async function deleteAssembly(id) {
   must(await db.from('assemblies').delete().eq('id', id))
 }
 
-export async function searchParts(query, { activeOnly = false } = {}) {
+export async function searchParts(query, { activeOnly = true } = {}) {
   return searchPartsCatalog(query, {
     cols: 'id, name, nickname, unit, category, department, material_group',
     limit: 20,

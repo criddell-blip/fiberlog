@@ -1691,10 +1691,33 @@ export async function createPart({ id, name, unit, department, material_group, b
   }
   if (created_via) payload.attributes = { created_via }
 
+  // Collision guard. Part search hides is_active=false rows (drafts +
+  // retired), so a SKU that already exists can look "missing" and push the
+  // user straight into this create path — where a bare PK violation reads
+  // as a mystery. Name the real situation and the one action that fixes it.
+  const { data: existing, error: exErr } = await db
+    .from('parts_catalog')
+    .select('id, name, is_active')
+    .eq('id', cleanId)
+    .maybeSingle()
+  if (exErr) throw exErr
+  if (existing) {
+    throw new Error(
+      existing.is_active
+        ? `SKU ${cleanId} already exists ("${existing.name}") — search for it instead of creating it.`
+        : `SKU ${cleanId} already exists but is retired/draft ("${existing.name}"). Reactivate it in Inventory → Parts (Drafts filter → Activate), then it will show up in search.`
+    )
+  }
+
   const { data, error } = await db
     .from('parts_catalog')
     .insert(payload)
     .select()
+  // Lost the race between the check above and this insert (or the check was
+  // bypassed) — 23505 is the same story, told by the DB.
+  if (error?.code === '23505') {
+    throw new Error(`SKU ${cleanId} already exists in the catalog — it may be retired/draft. Check Inventory → Parts.`)
+  }
   if (error) throw error
   return Array.isArray(data) && data.length > 0 ? data[0] : null
 }

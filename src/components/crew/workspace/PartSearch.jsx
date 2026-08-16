@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { searchParts } from '../../../lib/supabase'
 import { useBackClose } from '../../../lib/backStack'
 
-export default function PartSearch({ onSelect, onClose, filter, activeOnly = false }) {
+export default function PartSearch({ onSelect, onClose, filter, activeOnly = true }) {
   // Mounted only while open, so depth is always 1. Display-only (picking a part
   // is the action) — Back closes it with no confirm.
   useBackClose(1, onClose)
