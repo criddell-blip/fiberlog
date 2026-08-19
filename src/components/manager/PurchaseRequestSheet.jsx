@@ -13,6 +13,7 @@ import { downloadTextAsFile } from '../../lib/csvImport'
 import { isoLocalDate } from '../../lib/format'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
+import SkuLabelSheet from './SkuLabelSheet'
 
 // Purchase Request composition + detail/edit sheet.
 //
@@ -412,14 +413,28 @@ export default function PurchaseRequestSheet({
     }
   }
 
+  // Parts received in THIS sheet session, for the label-print offer (same
+  // idea as ReceivePOSheet's post-save prompt). Deduped by SKU; when the
+  // last line lands (status flips to received) the label sheet auto-opens —
+  // it has its own Cancel, so it doubles as the prompt.
+  const [sessionReceived, setSessionReceived] = useState([])
+  const [showLabelSheet, setShowLabelSheet] = useState(false)
+
   // ReceivePanel hands back the reloaded PR after a line (or all lines) is
   // received. Update local state but DON'T call onSaved — that closes the
   // sheet, and partial receiving needs the sheet to stay open across lines.
   // onChanged refreshes the parent list in the background instead.
-  function handleReceived(fresh) {
+  function handleReceived(fresh, receivedParts = []) {
     if (!fresh) return
     setPr(fresh)
     onChanged?.(fresh)
+    if (receivedParts.length > 0) {
+      setSessionReceived(prev => {
+        const seen = new Set(prev.map(p => p.id))
+        return [...prev, ...receivedParts.filter(p => p?.id && !seen.has(p.id))]
+      })
+      if (fresh.status === 'received') setShowLabelSheet(true)
+    }
   }
 
   async function handleDelete() {
@@ -820,6 +835,8 @@ export default function PurchaseRequestSheet({
                 <ReceivePanel
                   pr={pr}
                   blocked={linesEditable && linesTouched}
+                  labelCount={sessionReceived.length}
+                  onPrintLabels={() => setShowLabelSheet(true)}
                   onReceived={handleReceived}
                   onError={setError}
                 />
@@ -950,6 +967,14 @@ export default function PurchaseRequestSheet({
           via createPortal so it's a direct child of body. window.print()
           fires from printPdf(); afterprint clears the state. Pattern
           matches BinLabelSheet. */}
+      {showLabelSheet && sessionReceived.length > 0 && (
+        <SkuLabelSheet
+          parts={sessionReceived}
+          title={`Print labels for ${sessionReceived.length} received item${sessionReceived.length === 1 ? '' : 's'}`}
+          onClose={() => setShowLabelSheet(false)}
+        />
+      )}
+
       {printablePr && (
         <>
           <style>{`
@@ -1115,7 +1140,19 @@ function PrintablePR({ pr }) {
 // full or in part; freeform lines (no catalog SKU) first resolve a part by
 // linking an existing one or creating a new one. "Receive all remaining"
 // books every outstanding catalog line at once (freeform skipped).
-function ReceivePanel({ pr, blocked = false, onReceived, onError }) {
+// Build the {id, name, unit} shape SkuLabelSheet wants from a PR line
+// (falls back to the line's description for parts created moments ago).
+function lineLabelPart(line, resolvedPart = null) {
+  const id = line.part_id || resolvedPart?.id
+  if (!id) return null
+  return {
+    id,
+    name: line.part?.name || resolvedPart?.name || line.description || id,
+    unit: line.part?.unit || 'ea',
+  }
+}
+
+function ReceivePanel({ pr, blocked = false, labelCount = 0, onPrintLabels, onReceived, onError }) {
   const { currentUser, showToast } = useApp()
   const [busy, setBusy] = useState(false)
   const lines = pr?.lines || []
@@ -1153,7 +1190,7 @@ function ReceivePanel({ pr, blocked = false, onReceived, onError }) {
     try {
       const { linesReceived, skippedFreeform } = await markPurchaseRequestReceived(pr.id, { createdBy: currentUser?.id, toLocationId: binId || null })
       const fresh = await getPurchaseRequest(pr.id)
-      onReceived?.(fresh)
+      onReceived?.(fresh, catalogRemaining.map(l => lineLabelPart(l)).filter(Boolean))
       showToast(skippedFreeform.length > 0
         ? `Received ${linesReceived} line${linesReceived === 1 ? '' : 's'} · ${skippedFreeform.length} freeform skipped`
         : `Received ${linesReceived} line${linesReceived === 1 ? '' : 's'} into ${fresh?.target_location?.name || 'stock'}`)
@@ -1168,6 +1205,17 @@ function ReceivePanel({ pr, blocked = false, onReceived, onError }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>Receive items</div>
+        {labelCount > 0 && (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 11px', fontSize: 12 }}
+            onClick={onPrintLabels}
+            disabled={busy}
+          >
+            <Icon name="tag" size={13} /> Print labels ({labelCount})
+          </button>
+        )}
         {isWarehouseTarget && bins.length > 0 && !allDone && (
           <select
             value={binId}
@@ -1287,7 +1335,7 @@ function ReceiveLineRow({ line, disabled, toLocationId = null, onReceived, onErr
     onError?.(null)
     try {
       const fresh = await receivePurchaseRequestLine({ lineId: line.id, partId, quantity: q, createdBy: currentUser?.id, toLocationId })
-      onReceived?.(fresh)
+      onReceived?.(fresh, [lineLabelPart(line, resolvedPart)].filter(Boolean))
       showToast(`Received ${q}${line.part?.unit ? ' ' + line.part.unit : ''} · ${line.description || partId}`)
       setOpen(false)
     } catch (e) {
