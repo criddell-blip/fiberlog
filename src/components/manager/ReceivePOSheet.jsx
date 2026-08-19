@@ -26,7 +26,7 @@ const TYPE_ICON = {
 let nextLineId = 1
 const newLine = () => ({ tempId: nextLineId++, part: null, quantity: '', unit_cost: '' })
 
-export default function ReceivePOSheet({ locations, currentUser, onClose, onRecorded, onOpenPr }) {
+export default function ReceivePOSheet({ locations, currentUser, onClose, onRecorded, onOpenPr, onCreatePo }) {
   const [poRef, setPoRef]         = useState('')
   const [vendorName, setVendorName] = useState('')
   const [toTopId, setToTopId]     = useState('')
@@ -234,15 +234,40 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
 
           {/* Open POs — receiving against one reuses its typed-in lines via
-              the PR sheet's receive panel instead of re-keying them here. */}
-          {openPos.length > 0 && (
+              the PR sheet's receive panel instead of re-keying them here.
+              This section is the PO front door: it also carries the
+              "Create a PO" affordance so a delivery you're EXPECTING gets
+              typed in ahead of time instead of re-keyed at the dock. */}
+          {(openPos.length > 0 || onCreatePo) && (
             <div style={{ marginBottom: 14 }}>
               <div style={{
-                fontSize: 12, fontWeight: 700, color: 'var(--muted)',
-                textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                gap: 8, marginBottom: 6,
               }}>
-                Receiving against a PO?
+                <span style={{
+                  fontSize: 12, fontWeight: 700, color: 'var(--muted)',
+                  textTransform: 'uppercase', letterSpacing: '.04em',
+                }}>
+                  Receiving against a PO?
+                </span>
+                {onCreatePo && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={onCreatePo}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', fontSize: 12 }}
+                  >
+                    <Icon name="plus" size={13} /> Create a PO
+                  </button>
+                )}
               </div>
+              {openPos.length === 0 && (
+                <div style={{ fontSize: 12, color: 'var(--hint)', marginBottom: 4 }}>
+                  No open POs. If this delivery was ordered in Sage, create the PO first so
+                  its lines are typed in once and received against — now or when it arrives.
+                </div>
+              )}
+              {openPos.length > 0 && (
               <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
                 {openPos.slice(0, 5).map((pr, i) => (
                   <div
@@ -277,6 +302,7 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
                   </div>
                 ))}
               </div>
+              )}
               {openPos.length > 5 && (
                 <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
                   …and {openPos.length - 5} more — see the Purchase Reqs tab.

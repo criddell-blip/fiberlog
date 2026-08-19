@@ -157,7 +157,7 @@ The PR lands in the **📋 PRs** sub-tab with status **pending**. When purchasin
 
 ### Create a PO (already ordered in Sage)
 
-If the purchase already exists in Sage (accounting placed it), skip the request step: click **＋ New PO** in the PRs sub-tab. Same composition sheet, but the row is born **ordered** with Sage's **PO #** (required — FiberLog never mints PO numbers), an ETA, a required **Deliver to** location, and an optional header **Vendor** that fills any blank line vendors. When the truck shows up, the warehouse receives against it — per line, partial quantities supported, optionally straight into a **bin** under the target warehouse. An ordered PO's lines and PO #/ETA stay editable until the first receipt; after that it locks (cancel + re-create to fix).
+If the purchase already exists in Sage (accounting placed it), skip the request step: click **＋ New PO** in the PRs sub-tab, or **＋ Create a PO** at the top of the **📥 Receive PO** sheet (same sheet — the Receive PO pill is the PO front door). Same composition sheet, but the row is born **ordered** with Sage's **PO #** (required — FiberLog never mints PO numbers), an ETA, a required **Deliver to** location, and an optional header **Vendor** that fills any blank line vendors. When the truck shows up, the warehouse receives against it — per line, partial quantities supported, optionally straight into a **bin** under the target warehouse. An ordered PO's lines and PO #/ETA stay editable until the first receipt; after that it locks (cancel + re-create to fix).
 
 The PRs sub-tab has filter pills: **All / Active / Pending / Ordered / Received / Cancelled**. Default is **Active** (pending + ordered) so you see what's in motion.
 

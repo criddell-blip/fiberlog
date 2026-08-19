@@ -57,6 +57,9 @@ export default function InventoryView() {
   // Set when the Receive PO sheet hands off to an open PO — opens the PR
   // detail sheet (with its receive panel) in place of the manual form.
   const [receivePrId, setReceivePrId] = useState(null)
+  // The Receive PO sheet is also the PO front door: its "Create a PO"
+  // button opens the PO-variant compose sheet (same one as the PRs tab).
+  const [showPoSheet, setShowPoSheet] = useState(false)
   const [showReconcileSheet, setShowReconcileSheet] = useState(false)
   const [showSonarSheet, setShowSonarSheet] = useState(false)
   const [showFiberJobsSheet, setShowFiberJobsSheet] = useState(false)
@@ -355,6 +358,20 @@ export default function InventoryView() {
           onClose={() => setShowReceiveSheet(false)}
           onRecorded={handlePOReceived}
           onOpenPr={id => { setShowReceiveSheet(false); setReceivePrId(id) }}
+          onCreatePo={() => { setShowReceiveSheet(false); setShowPoSheet(true) }}
+        />
+      )}
+      {showPoSheet && (
+        <PurchaseRequestSheet
+          mode="new"
+          variant="po"
+          locations={locations}
+          onClose={() => setShowPoSheet(false)}
+          onSaved={saved => {
+            setShowPoSheet(false)
+            setRefreshKey(k => k + 1)
+            if (saved?.pr_number) showToast(`${saved.po_number ? 'PO ' + saved.po_number : saved.pr_number} saved — receive against it when it arrives`)
+          }}
         />
       )}
       {receivePrId && (
