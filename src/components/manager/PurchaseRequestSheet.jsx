@@ -2,10 +2,10 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp } from '../../AppContext'
 import {
-  createPurchaseRequest, getPurchaseRequest,
+  createPurchaseRequest, getPurchaseRequest, getPurchaseRequests,
   updatePurchaseRequest, replacePurchaseRequestLines, deletePurchaseRequest,
   markPurchaseRequestReceived, receivePurchaseRequestLine, createPart,
-  getLastUnitCost, getRecentVendors,
+  getLastUnitCost, getRecentVendors, getBinsForWarehouse,
   buildPurchaseRequestCsv, buildPurchaseRequestEmail,
 } from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
@@ -20,7 +20,16 @@ import Icon from '../shared/Icon'
 //  • 'new'      — fresh PR. Pre-populated parts come from props.initialParts
 //                 (e.g. bulk-select from Stock/Parts tabs).
 //  • 'detail'   — loads an existing PR by id and lets the manager edit
-//                 lines (only while pending) and transition status.
+//                 lines (while pending, or ordered before any receipt) and
+//                 transition status.
+//
+// Variants (mode='new' only):
+//  • 'pr' (default) — the request-to-purchasing flow; row born pending.
+//  • 'po'           — "Create PO": the purchase already exists in Sage, so
+//                     the row is born ordered with Sage's PO # (required,
+//                     typed — never minted here), ETA, and a header vendor
+//                     that defaults onto blank-vendor lines. Deliver-to is
+//                     required (the receive RPC refuses a null target).
 //
 // Per-line vendor matches the Utah Broadband PR spreadsheet column order
 // (Vendor · Qty · Item # · Description · Project/Reason · Unit Price ·
@@ -28,6 +37,7 @@ import Icon from '../shared/Icon'
 // movement history and the active projects list respectively.
 export default function PurchaseRequestSheet({
   mode = 'new',
+  variant = 'pr',
   prId = null,
   initialParts = [],
   locations = [],
@@ -37,6 +47,7 @@ export default function PurchaseRequestSheet({
 }) {
   const { currentUser, showToast, projects } = useApp()
   const isOwner = currentUser?.role === 'owner'
+  const isPO = mode === 'new' && variant === 'po'
 
   // ── Header state ────────────────────────────────────────────────────
   const [pr, setPr] = useState(null)  // detail mode: loaded PR object
@@ -45,22 +56,34 @@ export default function PurchaseRequestSheet({
   const [targetLocationId, setTargetLocationId] = useState('')
   const [notes, setNotes] = useState('')
 
-  // ── Status action fields (detail mode) ──────────────────────────────
+  // ── Status action fields (detail mode + PO variant) ─────────────────
   const [poNumber, setPoNumber] = useState('')
   const [expectedAt, setExpectedAt] = useState('')
+  // PO variant only: header vendor that defaults onto blank-vendor lines.
+  const [headerVendor, setHeaderVendor] = useState('')
 
   // ── Lines ───────────────────────────────────────────────────────────
   // Each line: { tempId, part_id, item_number, description, vendor, qty,
   //              project_reason, unit_cost }
   const [lines, setLines] = useState([])
+  // Detail mode: true once the local lines diverge from the loaded PR.
+  // Receiving reads the DB lines, not these — so while edits are unsaved
+  // the receive panel is blocked (a receipt would also flip the lock and
+  // freeze the dirty edits in disabled inputs).
+  const [linesTouched, setLinesTouched] = useState(false)
 
   // Back closes the sheet (mounted only when open). Confirm if composing a new
   // PR with content, or if a note was typed (detail mode loads an existing PR,
   // so don't nag on a plain view-and-close).
   useBackClose(1, onClose, {
     confirm: () => {
-      const dirty = notes.trim() !== '' || (mode === 'new' && lines.length > 0)
-      return !dirty || window.confirm('Discard this purchase request?')
+      // Detail mode loads existing notes — compare against them, not '', so a
+      // plain view-and-close of a noted PR doesn't nag.
+      const notesDirty = notes.trim() !== (mode === 'detail' ? (pr?.notes || '').trim() : '')
+      const dirty = notesDirty
+        || (mode === 'detail' && linesTouched)
+        || (mode === 'new' && (lines.length > 0 || poNumber.trim() !== '' || expectedAt !== '' || headerVendor.trim() !== ''))
+      return !dirty || window.confirm(isPO ? 'Discard this purchase order?' : 'Discard this purchase request?')
     },
   })
 
@@ -127,6 +150,7 @@ export default function PurchaseRequestSheet({
           project_reason: l.project_reason || '',
           unit_cost: l.unit_cost != null ? String(l.unit_cost) : '',
         })))
+        setLinesTouched(false)
       })
       .catch(e => { if (!cancelled) setError(e.message || 'Failed to load PR') })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -177,6 +201,7 @@ export default function PurchaseRequestSheet({
 
   // ── Line ops ────────────────────────────────────────────────────────
   function addCatalogPart(p) {
+    setLinesTouched(true)
     setPartQuery('')
     setPartResults([])
     // Avoid duplicates: if the part is already in lines, just bump its qty.
@@ -211,6 +236,7 @@ export default function PurchaseRequestSheet({
   }
 
   function addFreeformRow() {
+    setLinesTouched(true)
     setLines(prev => [...prev, {
       tempId: `t-${Date.now()}`,
       part_id: null,
@@ -224,10 +250,12 @@ export default function PurchaseRequestSheet({
   }
 
   function removeLine(tempId) {
+    setLinesTouched(true)
     setLines(prev => prev.filter(l => l.tempId !== tempId))
   }
 
   function updateLine(tempId, patch) {
+    setLinesTouched(true)
     setLines(prev => prev.map(l => l.tempId === tempId ? { ...l, ...patch } : l))
   }
 
@@ -244,11 +272,21 @@ export default function PurchaseRequestSheet({
 
   // ── Status semantics ────────────────────────────────────────────────
   const isPending = mode === 'new' || (pr?.status || 'pending') === 'pending'
-  const isLocked = mode === 'detail' && !isPending
   const status = pr?.status || 'pending'
+  // An ordered PO stays fully editable until the first receipt — after that
+  // the line replace would clobber received_qty, so everything locks and
+  // corrections go through cancel + re-create (same posture as delete).
+  const anyReceived = (pr?.lines || []).some(l => Number(l.received_qty || 0) > 0)
+  const linesEditable = isPending || (mode === 'detail' && status === 'ordered' && !anyReceived)
+  const isLocked = mode === 'detail' && !linesEditable
 
   // ── Validation ──────────────────────────────────────────────────────
   function validate() {
+    if (isPO && !poNumber.trim()) return 'A PO needs its Sage PO number'
+    // Ordered rows must keep a Deliver-to — receiving refuses without one.
+    if ((isPO || (mode === 'detail' && status === 'ordered')) && !targetLocationId) {
+      return 'Pick a "Deliver to" location — receiving needs one'
+    }
     if (lines.length === 0) return 'Add at least one line'
     for (const l of lines) {
       if (!l.description || !l.description.trim()) {
@@ -269,22 +307,47 @@ export default function PurchaseRequestSheet({
     try {
       let saved
       if (mode === 'new') {
+        if (isPO) {
+          // Soft duplicate guard — Sage occasionally reuses/amends PO
+          // numbers, so this is a confirm, not a constraint.
+          const dupe = await getPurchaseRequests({ statuses: ['pending', 'ordered', 'partial', 'received'], limit: 200 })
+            .then(rows => rows.find(r => (r.po_number || '').trim().toLowerCase() === poNumber.trim().toLowerCase()))
+            .catch(() => null)
+          if (dupe && !window.confirm(`${dupe.pr_number} already carries PO # ${dupe.po_number}. Create another with the same number?`)) {
+            setSubmitting(false)
+            return
+          }
+        }
         saved = await createPurchaseRequest({
           dateRequested,
           targetLocationId: targetLocationId || null,
           notes: notes || null,
           lines,
           createdBy: currentUser?.id,
+          ...(isPO ? {
+            status: 'ordered',
+            poNumber: poNumber.trim(),
+            expectedAt: expectedAt || null,
+            approvedBy: currentUser?.id,
+            vendor: headerVendor.trim() || null,
+          } : {}),
         })
       } else {
-        // Detail-edit: persist line changes (only while pending) + header.
-        if (isPending) {
+        // Detail-edit: persist line changes (pending, or ordered pre-receipt) + header.
+        if (linesEditable) {
           await replacePurchaseRequestLines(prId, lines)
+          setLinesTouched(false)
         }
         await updatePurchaseRequest(prId, {
           date_requested: dateRequested,
           target_location_id: targetLocationId || null,
           notes: notes || null,
+          // Ordered-unreceived: the PO#/ETA inputs are on screen too — a
+          // footer Save must not silently drop edits typed into them.
+          ...(status === 'ordered' && !anyReceived ? {
+            po_number: poNumber.trim() || null,
+            expected_at: expectedAt || null,
+          } : {}),
         })
         saved = await getPurchaseRequest(prId)
       }
@@ -333,7 +396,7 @@ export default function PurchaseRequestSheet({
     try {
       const patch = { status: nextStatus }
       if (nextStatus === 'ordered') {
-        if (poNumber) patch.po_number = poNumber
+        if (poNumber.trim()) patch.po_number = poNumber.trim()
         if (expectedAt) patch.expected_at = expectedAt
         patch.approved_by = currentUser?.id || null
       }
@@ -395,7 +458,7 @@ export default function PurchaseRequestSheet({
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 4 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 18 }}>
-            <Icon name="clipboard" size={18} /> Purchase Request
+            <Icon name="clipboard" size={18} /> {isPO ? 'New Purchase Order' : 'Purchase Request'}
             {pr?.pr_number && <span style={{ marginLeft: 8, color: 'var(--orange)' }}>{pr.pr_number}</span>}
           </div>
           {mode === 'detail' && (
@@ -404,9 +467,42 @@ export default function PurchaseRequestSheet({
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
           {mode === 'new'
-            ? `New request · ${currentUser?.name}`
+            ? (isPO ? `Entered from Sage · ${currentUser?.name}` : `New request · ${currentUser?.name}`)
             : `Created by ${pr?.created_by_user?.name || 'Unknown'} · ${pr?.created_at ? new Date(pr.created_at).toLocaleDateString() : ''}`}
         </div>
+
+        {/* PO variant: Sage PO # + ETA + header vendor */}
+        {isPO && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 1fr', gap: 8, marginBottom: 12 }}>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Sage PO # *</label>
+              <input
+                value={poNumber}
+                onChange={e => setPoNumber(e.target.value)}
+                placeholder="e.g. 12345-A"
+                disabled={submitting}
+                autoComplete="off"
+                name="po-number"
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Expected arrival</label>
+              <input type="date" value={expectedAt} onChange={e => setExpectedAt(e.target.value)} disabled={submitting} />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Vendor (all lines)</label>
+              <input
+                list="pr-vendor-list"
+                value={headerVendor}
+                onChange={e => setHeaderVendor(e.target.value)}
+                placeholder="fills blank line vendors"
+                disabled={submitting}
+                autoComplete="off"
+                name="po-header-vendor"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Top fields: Date + Deliver to + Notes */}
         <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 8, marginBottom: 12 }}>
@@ -420,7 +516,7 @@ export default function PurchaseRequestSheet({
             />
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label>Deliver to</label>
+            <label>Deliver to{isPO ? ' *' : ''}</label>
             <select
               value={targetLocationId}
               onChange={e => setTargetLocationId(e.target.value)}
@@ -665,12 +761,65 @@ export default function PurchaseRequestSheet({
             )}
             {(status === 'ordered' || status === 'partial') && (
               <>
-                <div style={{ fontSize: 12, marginBottom: 10 }}>
-                  <span style={{ marginRight: 16 }}><strong>PO #:</strong> {pr?.po_number || '—'}</span>
-                  <span><strong>ETA:</strong> {pr?.expected_at || '—'}</span>
-                </div>
+                {status === 'ordered' && !anyReceived ? (
+                  // Nothing received yet — a mistyped Sage number / ETA is
+                  // fixable in place without a status dance.
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px auto', gap: 8, alignItems: 'end', marginBottom: 10 }}>
+                    <div className="field" style={{ marginBottom: 0 }}>
+                      <label>Sage PO #</label>
+                      <input value={poNumber} onChange={e => setPoNumber(e.target.value)} placeholder="e.g. 12345-A" disabled={submitting} autoComplete="off" name="po-number-edit" />
+                    </div>
+                    <div className="field" style={{ marginBottom: 0 }}>
+                      <label>ETA</label>
+                      <input type="date" value={expectedAt} onChange={e => setExpectedAt(e.target.value)} disabled={submitting} />
+                    </div>
+                    {(poNumber !== (pr?.po_number || '') || expectedAt !== (pr?.expected_at || '')) && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ padding: '8px 14px', fontSize: 12 }}
+                        disabled={submitting}
+                        onClick={async () => {
+                          setSubmitting(true)
+                          setError(null)
+                          try {
+                            await updatePurchaseRequest(prId, {
+                              po_number: poNumber.trim() || null,
+                              expected_at: expectedAt || null,
+                            })
+                            const reloaded = await getPurchaseRequest(prId)
+                            setPr(reloaded)
+                            onChanged?.(reloaded)
+                            showToast('PO # / ETA updated')
+                          } catch (e) {
+                            setError(e.message || 'Update failed')
+                          } finally {
+                            setSubmitting(false)
+                          }
+                        }}
+                      >
+                        Save
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, marginBottom: 10 }}>
+                    <span style={{ marginRight: 16 }}><strong>PO #:</strong> {pr?.po_number || '—'}</span>
+                    <span><strong>ETA:</strong> {pr?.expected_at || '—'}</span>
+                  </div>
+                )}
+                {linesEditable && linesTouched && (
+                  <div style={{
+                    padding: '6px 10px', marginBottom: 8, fontSize: 12,
+                    background: 'var(--amber-lt)', color: 'var(--amber)',
+                    borderRadius: 'var(--r-sm)',
+                  }}>
+                    Unsaved line edits — save (or reopen) before receiving, since receiving reads the saved lines.
+                  </div>
+                )}
                 <ReceivePanel
                   pr={pr}
+                  blocked={linesEditable && linesTouched}
                   onReceived={handleReceived}
                   onError={setError}
                 />
@@ -721,14 +870,14 @@ export default function PurchaseRequestSheet({
           {!isLocked && (
             <>
               <button
-                className="btn btn-ghost"
+                className={isPO ? 'btn btn-primary' : 'btn btn-ghost'}
                 style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, flex: '1 1 110px' }}
                 onClick={() => saveAndDo()}
                 disabled={submitting || lines.length === 0}
               >
                 {submitting
                   ? 'Saving…'
-                  : <><Icon name="download" size={14} /> {mode === 'new' ? 'Save draft' : 'Save changes'}</>}
+                  : <><Icon name="download" size={14} /> {isPO ? 'Save PO' : mode === 'new' ? 'Save draft' : 'Save changes'}</>}
               </button>
               <button
                 className="btn btn-ghost"
@@ -747,7 +896,7 @@ export default function PurchaseRequestSheet({
                 <Icon name="clipboard" size={14} /> Save & PDF
               </button>
               <button
-                className="btn btn-primary"
+                className={isPO ? 'btn btn-ghost' : 'btn btn-primary'}
                 style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, flex: '1 1 150px' }}
                 onClick={() => saveAndDo(copyEmail)}
                 disabled={submitting || lines.length === 0}
@@ -966,10 +1115,25 @@ function PrintablePR({ pr }) {
 // full or in part; freeform lines (no catalog SKU) first resolve a part by
 // linking an existing one or creating a new one. "Receive all remaining"
 // books every outstanding catalog line at once (freeform skipped).
-function ReceivePanel({ pr, onReceived, onError }) {
+function ReceivePanel({ pr, blocked = false, onReceived, onError }) {
   const { currentUser, showToast } = useApp()
   const [busy, setBusy] = useState(false)
   const lines = pr?.lines || []
+
+  // Optional bin destination inside the target warehouse (bin-first UX).
+  // Empty = warehouse-level ("unbinned"), same as before the override.
+  const [bins, setBins] = useState([])
+  const [binId, setBinId] = useState('')
+  const isWarehouseTarget = pr?.target_location?.type === 'warehouse'
+  useEffect(() => {
+    if (!isWarehouseTarget || !pr?.target_location_id) { setBins([]); setBinId(''); return }
+    let cancelled = false
+    getBinsForWarehouse(pr.target_location_id)
+      .then(b => { if (!cancelled) setBins(b || []) })
+      .catch(() => { if (!cancelled) setBins([]) })
+    return () => { cancelled = true }
+  }, [isWarehouseTarget, pr?.target_location_id])
+  const binName = binId ? bins.find(b => b.id === binId)?.name : null
 
   const remainingOf = l => Number(l.quantity || 0) - Number(l.received_qty || 0)
   const catalogRemaining = lines.filter(l => l.part_id && remainingOf(l) > 0)
@@ -978,7 +1142,8 @@ function ReceivePanel({ pr, onReceived, onError }) {
 
   async function receiveAll() {
     if (catalogRemaining.length === 0) return
-    const msg = `Receive all ${catalogRemaining.length} remaining catalog line${catalogRemaining.length === 1 ? '' : 's'} into ${pr?.target_location?.name || 'the target location'}?`
+    const destLabel = (pr?.target_location?.name || 'the target location') + (binName ? ` · bin ${binName}` : '')
+    const msg = `Receive all ${catalogRemaining.length} remaining catalog line${catalogRemaining.length === 1 ? '' : 's'} into ${destLabel}?`
       + (freeformRemaining.length > 0
         ? `\n\n${freeformRemaining.length} freeform line${freeformRemaining.length === 1 ? '' : 's'} will be skipped — link or create a part to receive ${freeformRemaining.length === 1 ? 'it' : 'them'}.`
         : '')
@@ -986,7 +1151,7 @@ function ReceivePanel({ pr, onReceived, onError }) {
     setBusy(true)
     onError?.(null)
     try {
-      const { linesReceived, skippedFreeform } = await markPurchaseRequestReceived(pr.id, { createdBy: currentUser?.id })
+      const { linesReceived, skippedFreeform } = await markPurchaseRequestReceived(pr.id, { createdBy: currentUser?.id, toLocationId: binId || null })
       const fresh = await getPurchaseRequest(pr.id)
       onReceived?.(fresh)
       showToast(skippedFreeform.length > 0
@@ -1003,13 +1168,25 @@ function ReceivePanel({ pr, onReceived, onError }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>Receive items</div>
+        {isWarehouseTarget && bins.length > 0 && !allDone && (
+          <select
+            value={binId}
+            onChange={e => setBinId(e.target.value)}
+            disabled={busy}
+            style={{ fontSize: 12, padding: '4px 8px' }}
+            title="Receive into a bin instead of warehouse-level stock"
+          >
+            <option value="">— warehouse-level (no bin) —</option>
+            {bins.map(b => <option key={b.id} value={b.id}>📥 {b.name}</option>)}
+          </select>
+        )}
         {catalogRemaining.length > 0 && (
           <button
             type="button"
             className="btn btn-primary"
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: 12 }}
             onClick={receiveAll}
-            disabled={busy}
+            disabled={busy || blocked}
           >
             <Icon name="box" size={13} /> Receive all remaining
           </button>
@@ -1024,7 +1201,8 @@ function ReceivePanel({ pr, onReceived, onError }) {
             key={l.id}
             line={l}
             pr={pr}
-            disabled={busy}
+            disabled={busy || blocked}
+            toLocationId={binId || null}
             onReceived={onReceived}
             onError={onError}
           />
@@ -1043,7 +1221,7 @@ function ReceivePanel({ pr, onReceived, onError }) {
 // a qty field (defaults to the remaining amount, capped at it) and, for
 // freeform lines, a resolve-part step (link existing via catalog search, or
 // create a new part inline) before the qty field appears.
-function ReceiveLineRow({ line, disabled, onReceived, onError }) {
+function ReceiveLineRow({ line, disabled, toLocationId = null, onReceived, onError }) {
   const { currentUser, showToast } = useApp()
   const received = Number(line.received_qty || 0)
   const total = Number(line.quantity || 0)
@@ -1108,7 +1286,7 @@ function ReceiveLineRow({ line, disabled, onReceived, onError }) {
     setBusy(true)
     onError?.(null)
     try {
-      const fresh = await receivePurchaseRequestLine({ lineId: line.id, partId, quantity: q, createdBy: currentUser?.id })
+      const fresh = await receivePurchaseRequestLine({ lineId: line.id, partId, quantity: q, createdBy: currentUser?.id, toLocationId })
       onReceived?.(fresh)
       showToast(`Received ${q}${line.part?.unit ? ' ' + line.part.unit : ''} · ${line.description || partId}`)
       setOpen(false)

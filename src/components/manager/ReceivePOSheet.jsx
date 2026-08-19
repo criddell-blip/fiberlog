@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   recordMovementsBatch, getBinsForWarehouse,
-  createPart, updatePart,
+  createPart, updatePart, getPurchaseRequests,
 } from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
 import SkuLabelSheet from './SkuLabelSheet'
@@ -26,7 +26,7 @@ const TYPE_ICON = {
 let nextLineId = 1
 const newLine = () => ({ tempId: nextLineId++, part: null, quantity: '', unit_cost: '' })
 
-export default function ReceivePOSheet({ locations, currentUser, onClose, onRecorded }) {
+export default function ReceivePOSheet({ locations, currentUser, onClose, onRecorded, onOpenPr }) {
   const [poRef, setPoRef]         = useState('')
   const [vendorName, setVendorName] = useState('')
   const [toTopId, setToTopId]     = useState('')
@@ -39,6 +39,20 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
   // "print labels for these items" prompt can use them.
   const [justReceived, setJustReceived] = useState(null)  // null | array of parts
   const [showLabelSheet, setShowLabelSheet] = useState(false)
+  // Open POs (ordered/partial PRs) the delivery might belong to. Tapping one
+  // hands off to the PR detail sheet's receive panel via onOpenPr — its lines
+  // are already typed in, so nothing gets re-keyed at the dock. Fail-soft:
+  // load errors just hide the section and leave the manual flow.
+  const [openPos, setOpenPos] = useState([])
+
+  useEffect(() => {
+    if (!onOpenPr) return
+    let cancelled = false
+    getPurchaseRequests({ statuses: ['ordered', 'partial'], limit: 50 })
+      .then(rows => { if (!cancelled) setOpenPos(rows || []) })
+      .catch(() => { if (!cancelled) setOpenPos([]) })
+    return () => { cancelled = true }
+  }, [onOpenPr])
 
   // Back closes the sheet (mounted only when open). Confirm first if the user
   // has started a delivery (ref, vendor, or any line). The nested SkuLabelSheet
@@ -218,6 +232,61 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+
+          {/* Open POs — receiving against one reuses its typed-in lines via
+              the PR sheet's receive panel instead of re-keying them here. */}
+          {openPos.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{
+                fontSize: 12, fontWeight: 700, color: 'var(--muted)',
+                textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6,
+              }}>
+                Receiving against a PO?
+              </div>
+              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
+                {openPos.slice(0, 5).map((pr, i) => (
+                  <div
+                    key={pr.id}
+                    onClick={() => onOpenPr(pr.id)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '8px 12px', cursor: 'pointer', fontSize: 13,
+                      borderBottom: i < Math.min(openPos.length, 5) - 1 ? '1px solid var(--row-divider)' : 'none',
+                      background: 'var(--surface)',
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span className="mono" style={{ fontWeight: 700, color: 'var(--accent-dk)' }}>
+                        {pr.po_number ? `PO ${pr.po_number}` : pr.pr_number}
+                      </span>
+                      {pr.vendors.length > 0 && (
+                        <span style={{ marginLeft: 8, color: 'var(--muted)' }}>{pr.vendors.slice(0, 2).join(' · ')}</span>
+                      )}
+                      <div style={{ fontSize: 11, color: 'var(--hint)' }}>
+                        {pr.outstandingLines} line{pr.outstandingLines === 1 ? '' : 's'} outstanding · ETA {pr.expected_at || '—'}
+                      </div>
+                    </div>
+                    <span style={{
+                      padding: '2px 9px', borderRadius: 999, fontSize: 10, fontWeight: 700,
+                      textTransform: 'uppercase', whiteSpace: 'nowrap',
+                      color: pr.status === 'partial' ? 'var(--blue)' : 'var(--accent-dk)',
+                      background: pr.status === 'partial' ? 'var(--blue-lt)' : 'var(--accent-lt)',
+                      border: `1px solid ${pr.status === 'partial' ? 'var(--blue)' : 'var(--accent)'}`,
+                    }}>{pr.status}</span>
+                    <Icon name="chevron-right" size={15} />
+                  </div>
+                ))}
+              </div>
+              {openPos.length > 5 && (
+                <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
+                  …and {openPos.length - 5} more — see the Purchase Reqs tab.
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 8, textTransform: 'uppercase', fontWeight: 700, letterSpacing: '.04em' }}>
+                — or record a manual delivery (no PO in FiberLog) —
+              </div>
+            </div>
+          )}
 
           {/* PO ref + Vendor (optional free text) */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>

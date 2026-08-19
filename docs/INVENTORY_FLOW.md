@@ -165,6 +165,8 @@ Manager opens **Inventory → 📥 Receive PO**:
 
 Stock immediately updates in `inventory_stock` via the trigger. Lands in the warehouse-level stock (or a specific bin if picked).
 
+**Receiving against a PO (Aug 2026):** the sheet now lists open POs (ordered/partial purchase_requests) at the top — tapping one opens that PR's detail sheet and its per-line receive panel (partial quantities, optional bin destination, atomic `receive_pr_line` RPC) instead of re-typing lines. The manual flow above remains for PO-less deliveries. POs are created either as a PR marked ordered, or directly via **＋ New PO** in the PRs sub-tab (born `ordered` with Sage's typed PO number — accounting enters it when the purchase is placed, warehouse receives at the dock).
+
 ### Reconcile (audit CSV round-trip)
 
 For correcting drift between system stock and physical reality:

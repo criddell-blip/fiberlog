@@ -2623,15 +2623,35 @@ export async function getRecentVendors({ limit = 25 } = {}) {
 
 // Insert a PR + its lines. Allocates pr_number via next_pr_number RPC.
 // Returns the inserted PR row joined with its lines.
+//
+// status='ordered' is the "Create PO" path: the purchase already exists in
+// Sage, so the request step is skipped and the row is born ordered with
+// Sage's PO number (required — FiberLog never mints PO numbers), ETA, and
+// approved_by/at stamped. `vendor` is a header-level convenience: it
+// defaults into any line whose own vendor is blank (per-line vendor stays
+// the storage — a PR can still span suppliers).
 export async function createPurchaseRequest({
   dateRequested = null,
   targetLocationId = null,
   notes = null,
   lines = [],
   createdBy = null,
+  status = 'pending',
+  poNumber = null,
+  expectedAt = null,
+  approvedBy = null,
+  vendor = null,
 } = {}) {
   if (!createdBy) throw new Error('createdBy required')
   if (lines.length === 0) throw new Error('At least one line is required')
+  if (status !== 'pending' && status !== 'ordered') {
+    throw new Error('New PRs can only be created as pending or ordered')
+  }
+  const poNum = (poNumber || '').trim() || null
+  if (status === 'ordered' && !poNum) {
+    throw new Error('A PO needs its Sage PO number')
+  }
+  const headerVendor = (vendor || '').trim() || null
 
   // Build + validate the lines payload BEFORE touching the DB (backlog #47a).
   // The checks are pure — validating after the header insert used to orphan a
@@ -2639,7 +2659,7 @@ export async function createPurchaseRequest({
   // was missing its description or quantity.
   const linesPayload = lines.map((l, i) => ({
     ordered_position: i,
-    vendor: (l.vendor || null) && String(l.vendor).trim() || null,
+    vendor: ((l.vendor || null) && String(l.vendor).trim()) || headerVendor || null,
     quantity: Number(l.quantity || 0),
     part_id: l.part_id || null,
     item_number: (l.item_number || null) && String(l.item_number).trim() || null,
@@ -2657,15 +2677,24 @@ export async function createPurchaseRequest({
   const { data: prNumData, error: prNumErr } = await db.rpc('next_pr_number')
   if (prNumErr) throw prNumErr
 
+  const header = {
+    pr_number: prNumData,
+    date_requested: dateRequested || isoLocalDate(),  // local, not UTC (#45)
+    target_location_id: targetLocationId || null,
+    notes: notes || null,
+    created_by: createdBy,
+  }
+  if (status === 'ordered') {
+    header.status = 'ordered'
+    header.po_number = poNum
+    header.expected_at = expectedAt || null
+    header.approved_by = approvedBy || createdBy
+    header.approved_at = new Date().toISOString()
+  }
+
   const { data: prRow, error: prErr } = await db
     .from('purchase_requests')
-    .insert({
-      pr_number: prNumData,
-      date_requested: dateRequested || isoLocalDate(),  // local, not UTC (#45)
-      target_location_id: targetLocationId || null,
-      notes: notes || null,
-      created_by: createdBy,
-    })
+    .insert(header)
     .select()
     .single()
   if (prErr) throw prErr
@@ -2674,7 +2703,12 @@ export async function createPurchaseRequest({
     .from('purchase_request_lines')
     .insert(linesPayload.map(lp => ({ ...lp, request_id: prRow.id })))
     .select()
-  if (linesErr) throw linesErr
+  if (linesErr) {
+    // Don't leave a numbered, line-less header behind — an ordered one would
+    // even surface in the Receive-PO "open POs" list. Best-effort rollback.
+    await db.from('purchase_requests').delete().eq('id', prRow.id).then(() => {}, () => {})
+    throw linesErr
+  }
 
   return { ...prRow, lines: insertedLines || [] }
 }
@@ -2688,7 +2722,7 @@ export async function getPurchaseRequests({ statuses = ['pending', 'ordered', 'p
       *,
       created_by_user:users!purchase_requests_created_by_fkey(id, name),
       target_location:inventory_locations!purchase_requests_target_location_id_fkey(id, name, type),
-      lines:purchase_request_lines(id, quantity, unit_cost, vendor)
+      lines:purchase_request_lines(id, quantity, unit_cost, vendor, received_qty)
     `)
     .order('created_at', { ascending: false })
     .limit(limit)
@@ -2699,17 +2733,20 @@ export async function getPurchaseRequests({ statuses = ['pending', 'ordered', 'p
   return (data || []).map(pr => {
     const lineCount = pr.lines?.length || 0
     let estTotal = 0
+    let outstandingLines = 0
     const vendors = new Set()
     for (const l of pr.lines || []) {
       const qty = Number(l.quantity || 0)
       const uc = l.unit_cost == null ? null : Number(l.unit_cost)
       if (uc != null) estTotal += qty * uc
       if (l.vendor) vendors.add(l.vendor)
+      if (qty - Number(l.received_qty || 0) > 0) outstandingLines++
     }
     return {
       ...pr,
       lineCount,
       estTotal,
+      outstandingLines,
       vendors: Array.from(vendors),
     }
   })
@@ -2757,14 +2794,27 @@ export async function updatePurchaseRequest(prId, fields = {}) {
   return data
 }
 
-// Replace a PR's lines (delete all + insert new). Used by the edit
-// flow while PR is still pending. Throws if PR isn't pending.
+// Replace a PR's lines (delete all + insert new). Used by the edit flow.
+// Allowed while pending, or while ordered as long as NOTHING has been
+// received — the delete+reinsert would clobber received_qty, so that guard
+// is load-bearing, not cosmetic. (A wrongly-typed PO is fixable until the
+// first receipt; after that, cancel + re-create.)
 export async function replacePurchaseRequestLines(prId, lines = []) {
   if (!prId) throw new Error('prId required')
   if (lines.length === 0) throw new Error('At least one line is required')
-  const { data: pr } = await db.from('purchase_requests').select('status').eq('id', prId).maybeSingle()
-  if (pr && pr.status !== 'pending') {
-    throw new Error('Lines can only be edited while PR is pending')
+  // Fail CLOSED: if this read errors, we must not fall through to the
+  // delete+reinsert — that's the received_qty clobber the gate exists for.
+  const { data: pr, error: prErr } = await db
+    .from('purchase_requests')
+    .select('status, lines:purchase_request_lines(received_qty)')
+    .eq('id', prId)
+    .maybeSingle()
+  if (prErr) throw prErr
+  if (!pr) throw new Error('PR not found')
+  const anyReceived = (pr.lines || []).some(l => Number(l.received_qty || 0) > 0)
+  const editable = pr.status === 'pending' || (pr.status === 'ordered' && !anyReceived)
+  if (!editable) {
+    throw new Error('Lines can only be edited while pending, or on an ordered PO before anything is received')
   }
   const { error: delErr } = await db.from('purchase_request_lines').delete().eq('request_id', prId)
   if (delErr) throw delErr
@@ -2831,8 +2881,13 @@ export async function deletePurchaseRequest(prId) {
 // server-side; `createdBy` is kept in the signature for call-site
 // compatibility but unused.
 //
+// `toLocationId` optionally lands the stock at a bin inside the PR's target
+// warehouse instead of warehouse-level ("unbinned") — the RPC validates it's
+// the target itself or a bin whose parent is the target, and rejects
+// anything else.
+//
 // Returns the reloaded PR (header + lines) so the caller can re-render.
-export async function receivePurchaseRequestLine({ lineId, partId = null, quantity, createdBy } = {}) {  // eslint-disable-line no-unused-vars
+export async function receivePurchaseRequestLine({ lineId, partId = null, quantity, createdBy, toLocationId = null } = {}) {  // eslint-disable-line no-unused-vars
   if (!lineId) throw new Error('lineId required')
   const qty = Number(quantity)
   if (!qty || qty <= 0) throw new Error('quantity must be > 0')
@@ -2841,6 +2896,7 @@ export async function receivePurchaseRequestLine({ lineId, partId = null, quanti
     p_line_id: lineId,
     p_quantity: qty,
     p_part_id: partId || null,
+    p_to_location_id: toLocationId || null,
   })
   if (error) throw error
   // RPC returns the header row; reload with lines joined for the sheet.
@@ -2854,7 +2910,7 @@ export async function receivePurchaseRequestLine({ lineId, partId = null, quanti
 // can prompt the manager to link/create a part and receive them one-by-one.
 //
 // Returns: { linesReceived: int, skippedFreeform: array }
-export async function markPurchaseRequestReceived(prId, { createdBy } = {}) {
+export async function markPurchaseRequestReceived(prId, { createdBy, toLocationId = null } = {}) {
   if (!prId) throw new Error('prId required')
   if (!createdBy) throw new Error('createdBy required')
 
@@ -2873,7 +2929,7 @@ export async function markPurchaseRequestReceived(prId, { createdBy } = {}) {
     if (!l.part_id) { skippedFreeform.push(l); continue } // freeform → manual resolve
     // Each call re-reads the line, so looping stays consistent. Status is
     // recomputed inside, so by the last line the PR settles to received.
-    await receivePurchaseRequestLine({ lineId: l.id, quantity: remaining, createdBy })
+    await receivePurchaseRequestLine({ lineId: l.id, quantity: remaining, createdBy, toLocationId })
     linesReceived++
   }
 

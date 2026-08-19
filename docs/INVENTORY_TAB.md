@@ -155,13 +155,17 @@ Then in the composition sheet:
 
 The PR lands in the **📋 PRs** sub-tab with status **pending**. When purchasing places the order, change it to **ordered**. When the delivery arrives, open the PR and click **Mark received** — this writes the receive movements for you (no need to re-enter the parts via Receive PO). The PR moves to **received**.
 
+### Create a PO (already ordered in Sage)
+
+If the purchase already exists in Sage (accounting placed it), skip the request step: click **＋ New PO** in the PRs sub-tab. Same composition sheet, but the row is born **ordered** with Sage's **PO #** (required — FiberLog never mints PO numbers), an ETA, a required **Deliver to** location, and an optional header **Vendor** that fills any blank line vendors. When the truck shows up, the warehouse receives against it — per line, partial quantities supported, optionally straight into a **bin** under the target warehouse. An ordered PO's lines and PO #/ETA stay editable until the first receipt; after that it locks (cancel + re-create to fix).
+
 The PRs sub-tab has filter pills: **All / Active / Pending / Ordered / Received / Cancelled**. Default is **Active** (pending + ordered) so you see what's in motion.
 
 ### Receive a vendor delivery
 
 This is one of your most common tasks. Two flows depending on whether the delivery has a PR backing it:
 
-- **Has a PR**: open the PR in the **📋 PRs** tab → click **Mark received**. Done — receive movements are written automatically.
+- **Has a PR/PO**: open it in the **📋 PRs** tab → receive per line (partial OK) or **Receive all remaining**. Done — receive movements are written automatically. The **📥 Receive PO** sheet also lists open POs at the top ("Receiving against a PO?") and tapping one jumps straight to this panel.
 - **No PR (vendor just showed up)**: use the **📥 Receive PO** sheet manually, walked through below.
 
 **Manual Receive PO walkthrough:**

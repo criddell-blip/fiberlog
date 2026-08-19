@@ -11,6 +11,7 @@ import InventoryPartsTab from './InventoryPartsTab'
 import InventoryMovementsTab from './InventoryMovementsTab'
 import InventoryAuditTab from './InventoryAuditTab'
 import PurchaseRequestsTab from './PurchaseRequestsTab'
+import PurchaseRequestSheet from './PurchaseRequestSheet'
 import IntakeRequestsQueue from './IntakeRequestsQueue'
 import CountTab from '../cycleCount/CountTab'
 import PausedBanner from '../shared/PausedBanner'
@@ -53,6 +54,9 @@ export default function InventoryView() {
   const [locationsLoading, setLocationsLoading] = useState(true)
   const [showRecordSheet, setShowRecordSheet] = useState(false)
   const [showReceiveSheet, setShowReceiveSheet] = useState(false)
+  // Set when the Receive PO sheet hands off to an open PO — opens the PR
+  // detail sheet (with its receive panel) in place of the manual form.
+  const [receivePrId, setReceivePrId] = useState(null)
   const [showReconcileSheet, setShowReconcileSheet] = useState(false)
   const [showSonarSheet, setShowSonarSheet] = useState(false)
   const [showFiberJobsSheet, setShowFiberJobsSheet] = useState(false)
@@ -350,6 +354,17 @@ export default function InventoryView() {
           currentUser={currentUser}
           onClose={() => setShowReceiveSheet(false)}
           onRecorded={handlePOReceived}
+          onOpenPr={id => { setShowReceiveSheet(false); setReceivePrId(id) }}
+        />
+      )}
+      {receivePrId && (
+        <PurchaseRequestSheet
+          mode="detail"
+          prId={receivePrId}
+          locations={locations}
+          onClose={() => setReceivePrId(null)}
+          onSaved={() => { setReceivePrId(null); setRefreshKey(k => k + 1) }}
+          onChanged={() => setRefreshKey(k => k + 1)}
         />
       )}
       {showReconcileSheet && (

@@ -76,13 +76,24 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
         ))}
         <div style={{ flex: 1 }} />
         {canCreate && (
-          <button
-            onClick={() => setShowSheet({ mode: 'new' })}
-            className="btn btn-primary"
-            style={{ height: 32, padding: '0 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 7 }}
-          >
-            <Icon name="plus" size={15} /> New PR
-          </button>
+          <>
+            {/* PR = request to purchasing (born pending). PO = the purchase
+                already exists in Sage — born ordered, ready to receive. */}
+            <button
+              onClick={() => setShowSheet({ mode: 'new' })}
+              className="btn btn-ghost"
+              style={{ height: 32, padding: '0 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 7 }}
+            >
+              <Icon name="plus" size={15} /> New PR
+            </button>
+            <button
+              onClick={() => setShowSheet({ mode: 'new', variant: 'po' })}
+              className="btn btn-primary"
+              style={{ height: 32, padding: '0 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 7 }}
+            >
+              <Icon name="plus" size={15} /> New PO
+            </button>
+          </>
         )}
       </div>
 
@@ -99,7 +110,8 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
           <div>No purchase requests in this view.</div>
           {canCreate && (
             <div style={{ marginTop: 12, fontSize: 12 }}>
-              Click <strong>New PR</strong> or use bulk-select on the Stock / Parts tabs to create one.
+              Click <strong>New PR</strong> (request to purchasing) or <strong>New PO</strong> (already
+              ordered in Sage) — or use bulk-select on the Stock / Parts tabs.
             </div>
           )}
         </EmptyState>
@@ -134,7 +146,12 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
               onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface2)' }}
               onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface)' }}
             >
-              <div className="mono" style={{ fontWeight: 600, color: 'var(--accent-dk)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pr.pr_number}</div>
+              <div style={{ minWidth: 0 }}>
+                <div className="mono" style={{ fontWeight: 600, color: 'var(--accent-dk)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pr.pr_number}</div>
+                {pr.po_number && (
+                  <div className="mono" style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>PO {pr.po_number}</div>
+                )}
+              </div>
               <div><span style={statusPill(pr.status)}>{pr.status}</span></div>
               <div style={{ color: pr.vendors.length === 0 ? 'var(--hint)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {vendorSummary(pr)}
@@ -170,7 +187,12 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <span className="mono" style={{ fontWeight: 700, color: 'var(--accent-dk)' }}>{pr.pr_number}</span>
+                <span style={{ minWidth: 0 }}>
+                  <span className="mono" style={{ fontWeight: 700, color: 'var(--accent-dk)' }}>{pr.pr_number}</span>
+                  {pr.po_number && (
+                    <span className="mono" style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted)' }}>PO {pr.po_number}</span>
+                  )}
+                </span>
                 <span style={statusPill(pr.status)}>{pr.status}</span>
               </div>
               <div style={{ fontSize: 13, marginBottom: 6, color: pr.vendors.length === 0 ? 'var(--hint)' : 'var(--text)' }}>
@@ -192,6 +214,7 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
       {showSheet && (
         <PurchaseRequestSheet
           mode={showSheet.mode}
+          variant={showSheet.variant || 'pr'}
           prId={showSheet.prId}
           locations={locations || []}
           onClose={() => setShowSheet(null)}
