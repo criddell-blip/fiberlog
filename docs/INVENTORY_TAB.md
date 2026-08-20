@@ -251,7 +251,7 @@ There's also a **"Bin distribution mode"** for the case where stock currently si
 
 Two ways:
 
-- **During a Receive PO** — type the SKU, click the "+ create" affordance. Fastest if you're already receiving it.
+- **During a Receive PO** — type the name, tap **＋ Create new part** at the bottom of the search dropdown (SKU, name, unit, department, Sage ID). Fastest if you're already receiving it — see [SOP_RECEIVING.md](SOP_RECEIVING.md) §4.
 - **Directly in the catalog** — **🔧 Parts** sub-tab → **+ Add part**. Fill SKU, name, unit, department, material group. Use this when you need the part to exist for some other reason (e.g. setting up an assembly).
 
 When parts auto-appear from CSV imports or webhook deliveries, they're created as **drafts** (`is_active=false`) with minimal metadata. You'll want to periodically open the Parts tab, filter by "Drafts", and clean them up: set unit (`ft` for cable, `ea` for things you count), set department, then bulk-activate.
