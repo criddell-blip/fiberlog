@@ -187,7 +187,7 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
           </label>
           <label
             style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}
-            title="Drop crew loadouts + returns (truck staging) from the export. Keeps truck→project consumption, issue and scrap."
+            title="Drop crew loadouts + returns (truck staging, incl. shared group trucks like Crew - Construction) from the export. Keeps truck→project consumption, issue and scrap."
           >
             <input
               type="checkbox"

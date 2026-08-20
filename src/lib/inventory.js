@@ -2392,16 +2392,20 @@ export function consumptionSource(m) {
 // Always-excluded:
 //   • `adjust` — Sage runs its own physical-inventory reconciliation
 //   • `receive` — Sage books the purchase from the PO/AP side
-//   • truck → truck (internal crew handoffs)
+//   • truck-like → truck-like (internal crew handoffs — "truck-like" is a
+//     personal truck OR a `group` shared truck; groups ARE crew trucks
+//     with several drivers, so group↔truck member-consolidation moves
+//     count as handoffs too)
 //   • warehouse/bin ↔ warehouse/bin under the SAME parent warehouse
 //     (internal binning / unbinning / bin rearrangement — these are
 //      noise in an accounting export and were the user's flag for the
 //      "transfers within the warehouse" bug).
 //
 // Opt-in via {strictConsumption: true}:
-//   • Additionally exclude warehouse/bin ↔ truck (crew loadouts +
-//     returns) — these are staging, not consumption. The follow-up
-//     auto-deduct (truck → project bucket) IS consumption and stays.
+//   • Additionally exclude warehouse/bin ↔ truck-like (crew loadouts +
+//     returns, personal trucks and shared `group` trucks alike) — these
+//     are staging, not consumption. The follow-up auto-deduct
+//     (truck/group → project bucket) IS consumption and stays.
 //
 // What always stays in the export (default mode AND strict):
 //   transfer to job_site (consumption), issue/scrap, inter-warehouse
@@ -2437,8 +2441,16 @@ export function isExportableMovement(m, { strictConsumption = false, includeFiel
   const fromType = m.from_location?.type
   const toType = m.to_location?.type
 
-  // (1) Always exclude truck → truck.
-  if (fromType === 'truck' && toType === 'truck') return false
+  // "Truck-like" = a personal truck OR a `group` shared truck (Crew -
+  // Construction Underground/Aerial, Contractor - RNS, …). Groups are crew
+  // trucks with several drivers — the rest of the app (source pickers,
+  // getMyTruck) already treats them as truck-equivalents, and so must the
+  // export: a Yard → Crew - Construction load is staging, not consumption.
+  const isTruckLike = t => t === 'truck' || t === 'group'
+
+  // (1) Always exclude truck-like → truck-like (crew handoffs + group
+  //     member-consolidation moves).
+  if (isTruckLike(fromType) && isTruckLike(toType)) return false
 
   // (2) Always exclude warehouse-internal movements. For a warehouse,
   //     its "hierarchy id" is itself; for a bin it's its parent. When
@@ -2455,10 +2467,12 @@ export function isExportableMovement(m, { strictConsumption = false, includeFiel
     if (fromWh && toWh && fromWh === toWh) return false
   }
 
-  // (3) Strict consumption: also exclude truck staging.
+  // (3) Strict consumption: also exclude truck staging (loadouts +
+  //     returns), for personal trucks and group trucks alike. The
+  //     truck-like → job_site auto-deduct stays — that IS consumption.
   if (strictConsumption) {
-    if (fromType === 'truck' && toType !== 'job_site') return false
-    if (toType === 'truck' && fromType !== 'job_site') return false
+    if (isTruckLike(fromType) && toType !== 'job_site') return false
+    if (isTruckLike(toType) && fromType !== 'job_site') return false
   }
 
   return true

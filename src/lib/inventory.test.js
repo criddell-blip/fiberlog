@@ -137,6 +137,9 @@ const BIN_B = { id: 'binB', name: 'B-02', type: 'bin', parent_location_id: 'wh1'
 const BIN_OTHER = { id: 'binC', name: 'C-01', type: 'bin', parent_location_id: 'wh2' }
 const TRUCK1 = { id: 'tr1', name: 'Francisco Molina', type: 'truck', parent_location_id: null }
 const TRUCK2 = { id: 'tr2', name: 'Edgar Molina', type: 'truck', parent_location_id: null }
+// Shared multi-member crew truck (Crew - Construction, Contractor - RNS…) —
+// truck-equivalent everywhere, including the export's staging rules.
+const GROUP = { id: 'grp1', name: 'Crew - Construction Underground', type: 'group', parent_location_id: null }
 const BUCKET = { id: 'js1', name: 'Heber', type: 'job_site', parent_location_id: null, project_id: 'p1' }
 
 const PART = { id: 'SKU-1', name: 'Lag Bolt', unit: 'ea', department: 'Hardware' }
@@ -205,6 +208,13 @@ describe('isExportableMovement', () => {
     expect(isExportableMovement(mv({ from_location: TRUCK1, to_location: TRUCK2 }))).toBe(false)
   })
 
+  // Groups are shared crew trucks — group↔truck moves are member
+  // consolidations (GroupMembersSheet add/remove), i.e. internal handoffs.
+  it('always excludes group ↔ truck consolidation moves (group = shared truck)', () => {
+    expect(isExportableMovement(mv({ from_location: TRUCK1, to_location: GROUP }))).toBe(false)
+    expect(isExportableMovement(mv({ from_location: GROUP, to_location: TRUCK1 }))).toBe(false)
+  })
+
   it('excludes movements that never leave a warehouse (bin↔bin, bin↔parent)', () => {
     expect(isExportableMovement(mv({ from_location: BIN_A, to_location: BIN_B }))).toBe(false)
     expect(isExportableMovement(mv({ from_location: WAREHOUSE, to_location: BIN_A }))).toBe(false)
@@ -271,6 +281,21 @@ describe('isExportableMovement', () => {
     expect(isExportableMovement(ret)).toBe(true)
     expect(isExportableMovement(ret, { strictConsumption: true })).toBe(false)
     expect(isExportableMovement(autoDeduct, { strictConsumption: true })).toBe(true)
+  })
+
+  // The user-reported leak: "Yard → Crew - Construction" survived strict mode
+  // because the rule only knew type='truck'; group locations ARE crew trucks.
+  it('strictConsumption drops warehouse ↔ group loadouts/returns, keeps group auto-deduct', () => {
+    const groupLoadout = mv({ from_location: WAREHOUSE, to_location: GROUP })
+    const groupReturn = mv({ movement_type: 'return', from_location: GROUP, to_location: WAREHOUSE })
+    const groupDeduct = mv({ from_location: GROUP, to_location: BUCKET })
+    // Default mode unchanged: loadouts/returns still export.
+    expect(isExportableMovement(groupLoadout)).toBe(true)
+    expect(isExportableMovement(groupReturn)).toBe(true)
+    // Strict: staging drops, consumption stays.
+    expect(isExportableMovement(groupLoadout, { strictConsumption: true })).toBe(false)
+    expect(isExportableMovement(groupReturn, { strictConsumption: true })).toBe(false)
+    expect(isExportableMovement(groupDeduct, { strictConsumption: true })).toBe(true)
   })
 })
 
