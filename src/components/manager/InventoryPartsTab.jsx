@@ -16,7 +16,7 @@ import Icon from '../shared/Icon'
 const COMMON_UNITS = ['ea', 'ft', 'm', 'in', 'lb', 'kg', 'box', 'roll', 'spool', 'pair', 'pack', 'kit']
 
 export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, onJumpToLocation, locations, currentUser, readOnly = false }) {
-  const { showToast, isQtyPaused } = useApp()
+  const { showToast, isQtyPaused, purchasingEnabled } = useApp()
   // Desktop = single horizontal row; phone = stacked card so the part name/SKU
   // get their own full-width line instead of being crushed to 0 by the action
   // buttons (mirrors InventoryStockTab's responsive split).
@@ -611,7 +611,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           </div>
           {!readOnly && <button onClick={() => setBulkEditing(true)} style={bulkActionBtn('orange')}><Icon name="edit" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Bulk edit</button>}
           <button onClick={() => setShowLabelSheet(true)} style={bulkActionBtn('purple')}><Icon name="tag" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Labels</button>
-          {!readOnly && <button onClick={() => setShowPrSheet(true)} style={bulkActionBtn('orange')}><Icon name="clipboard" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Create PR</button>}
+          {!readOnly && purchasingEnabled && <button onClick={() => setShowPrSheet(true)} style={bulkActionBtn('orange')}><Icon name="clipboard" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Create PR</button>}
           {!readOnly && <button onClick={handleBulkActivate} style={bulkActionBtn('teal')}><Icon name="check" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} />Activate</button>}
           {!readOnly && <button onClick={handleBulkDeactivate} style={bulkActionBtn('amber')}>⊘ Deactivate</button>}
           <button onClick={clearSelection} style={bulkActionBtn('ghost')}>Cancel</button>

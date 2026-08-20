@@ -72,6 +72,14 @@ export function AppProvider({ children }) {
   const [qtyDisplayMode, setQtyDisplayMode] = useState('tracking')
   const [qtyDisplayUpdatedAt, setQtyDisplayUpdatedAt] = useState(null)
   const [qtyDisplayUpdatedBy, setQtyDisplayUpdatedBy] = useState(null)
+  // Org-wide "purchasing lives in FiberLog" switch (app_settings key
+  // purchasing_ui_enabled, 'on' | 'off'). OFF (owner decision Aug 2026) hides
+  // the Purchase Reqs sub-tab, New PR / New PO, and receiving against a PO;
+  // manual Receive PO + field returns are unaffected. Defaults to OFF and a
+  // failed read stays OFF — fail-closed, because "hidden" is the ask.
+  const [purchasingEnabled, setPurchasingEnabledState] = useState(false)
+  const [purchasingUpdatedAt, setPurchasingUpdatedAt] = useState(null)
+  const [purchasingUpdatedBy, setPurchasingUpdatedBy] = useState(null)
 
   // Theme is global state so the toggle works the same way no matter which
   // sub-app the user is in (crew or manager), and it persists across reloads.
@@ -259,6 +267,55 @@ export function AppProvider({ children }) {
     }
   }, [currentUser?.id])
 
+  // Purchasing flag — same shape as the display-mode block above, on its own
+  // channel (one channel per key; never share a subscribe across keys).
+  useEffect(() => {
+    if (!currentUser?.id) return
+    let cancelled = false
+    const apply = row => {
+      setPurchasingEnabledState(row?.value === 'on')
+      setPurchasingUpdatedAt(row?.updated_at || null)
+      setPurchasingUpdatedBy(row?.updated_by || null)
+    }
+
+    async function loadFlag() {
+      try {
+        const { data } = await db
+          .from('app_settings')
+          .select('value, updated_at, updated_by')
+          .eq('key', 'purchasing_ui_enabled')
+          .maybeSingle()
+        if (cancelled || !data) return
+        apply(data)
+      } catch (e) {
+        console.warn('Load purchasing flag failed:', e)
+      }
+    }
+    loadFlag()
+
+    let channel = null
+    try {
+      channel = db
+        .channel('app_settings_purchasing_' + nextChannelSuffix())
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'app_settings', filter: 'key=eq.purchasing_ui_enabled' },
+          payload => {
+            const row = payload.new || payload.old
+            if (row) apply(row)
+          }
+        )
+        .subscribe()
+    } catch (e) {
+      console.warn('app_settings purchasing realtime subscribe failed:', e)
+    }
+
+    return () => {
+      cancelled = true
+      try { if (channel) db.removeChannel(channel) } catch (e) { /* noop */ }
+    }
+  }, [currentUser?.id])
+
   async function loadAll() {
     try {
       setLoading(true)
@@ -421,6 +478,17 @@ export function AppProvider({ children }) {
     setQtyDisplayMode(nextMode)
   }
 
+  // Staff: flip the org-wide purchasing switch (RLS: is_staff() on the key).
+  async function setPurchasingEnabled(enabled) {
+    const value = enabled ? 'on' : 'off'
+    const { error: err } = await db
+      .from('app_settings')
+      .update({ value, updated_by: currentUser?.id || null })
+      .eq('key', 'purchasing_ui_enabled')
+    if (err) throw err
+    setPurchasingEnabledState(!!enabled)
+  }
+
   return (
     <AppContext.Provider value={{
       projects, setProjects,
@@ -448,6 +516,11 @@ export function AppProvider({ children }) {
       qtyDisplayUpdatedAt,
       qtyDisplayUpdatedBy,
       setInventoryQtyDisplayMode,
+      // Purchasing (PRs / POs) UI switch — OFF hides the whole feature family
+      purchasingEnabled,
+      purchasingUpdatedAt,
+      purchasingUpdatedBy,
+      setPurchasingEnabled,
     }}>
       {children}
       {toast && <div className="toast">{toast}</div>}

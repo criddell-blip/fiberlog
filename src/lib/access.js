@@ -45,8 +45,9 @@ export function canActAsCrew(user) {
   return VALID_FIELD_CREW_TYPES.includes(user?.crew_type)
 }
 
-// Accounting gets a reduced Inventory tab: Receive PO + Purchase Requests +
-// read-only stock. Everyone else with Inventory access gets full ops.
+// Accounting gets a reduced Inventory tab: Receive PO + read-only stock/parts
+// (+ Purchase Requests while the Admin → Purchasing switch is on). Everyone
+// else with Inventory access gets full ops.
 export function inventoryIsLimited(user) {
   return staffScope(user) === 'accounting'
 }
@@ -73,7 +74,7 @@ export const ACCESS_TYPES = [
   { id: 'warehouse',       label: 'Warehouse manager', role: 'manager',    scope: 'warehouse',  needsCrew: false,
     desc: 'Inventory (move/count/adjust/receive/locate) + Reports + Admin.' },
   { id: 'accounting',      label: 'Accounting',        role: 'manager',    scope: 'accounting', needsCrew: false,
-    desc: 'Reports + receive POs / purchase requests + view stock. No cycle count or adjust.' },
+    desc: 'Reports + receive deliveries (+ purchase requests when Purchasing is on) + view stock. No cycle count or adjust.' },
   { id: 'crew',            label: 'Crew',              role: 'crew',       scope: null,         needsCrew: true,
     desc: 'Field worker. Logs work in the crew app.' },
   { id: 'contractor',      label: 'Contractor',        role: 'contractor', scope: null,         needsCrew: false,

@@ -183,6 +183,7 @@ The "Assigned to" dropdown only lists crew members who don't already have a truc
 - See who created the movement and when. Movements are **immutable** — to fix one, record a counter-movement (the wrong one stays in the trail, by design)
 
 #### Purchase Reqs
+> **Purchasing is currently OFF** (Admin → Purchasing (PRs & POs), `app_settings.purchasing_ui_enabled`, since Aug 20 2026). The PR/PO parts of this section are hidden until it is turned on; manual Receive PO and field returns are unaffected.
 - FiberLog-originated purchase requests — the queue between "we need this" and "it arrived," replacing the spreadsheet-emailed-to-purchasing workflow
 - Start one from **+ New PR**, or bulk-select rows in Stock / Parts → **Create PR** to pre-fill
 - Vendor is **per line** (one PR can span suppliers); save as draft, or Save & CSV / PDF / copy-email

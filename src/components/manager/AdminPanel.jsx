@@ -11,8 +11,10 @@ export default function AdminPanel() {
     projects, setProjects, showToast, reload,
     qtyDisplayMode, qtyDisplayUpdatedAt, qtyDisplayUpdatedBy,
     setInventoryQtyDisplayMode, users,
+    purchasingEnabled, purchasingUpdatedAt, purchasingUpdatedBy, setPurchasingEnabled,
   } = useApp()
   const [qtyToggling, setQtyToggling] = useState(false)
+  const [purchasingToggling, setPurchasingToggling] = useState(false)
   const [selProject, setSelProject] = useState(null)
   const [loading, setLoading] = useState(false)
   const [confirm, setConfirm] = useState(null)
@@ -342,6 +344,67 @@ export default function AdminPanel() {
                 : qtyDisplayMode === 'paused'
                   ? '⏸ Paused · Resume'
                   : '▶ Tracking · Pause'}
+            </button>
+          </div>
+        </div>
+
+        {/* Purchasing (PRs / POs) switch. OFF since Aug 2026 by owner decision —
+            the feature family stays in the code but out of the UI until
+            purchasing is meant to live in FiberLog. Manual Receive PO and
+            field returns are NOT behind this switch. */}
+        <div style={{
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 8,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 7 }}><Icon name="clipboard" size={15} /> Purchasing (PRs &amp; POs)</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, lineHeight: 1.4 }}>
+                {purchasingEnabled
+                  ? <>On — the Purchase Reqs tab, New PR / New PO, and receiving against a PO are available.</>
+                  : <>Off — the Purchase Reqs tab, New PR / New PO, and receiving against a PO are hidden.
+                      Manual <strong>Receive PO</strong> and <strong>Returned from field</strong> still work.
+                      Existing PRs/POs are kept and reappear when turned on.</>}
+              </div>
+              {purchasingUpdatedAt && (
+                <div style={{ fontSize: 10, color: 'var(--hint)', marginTop: 4 }}>
+                  Last toggled {new Date(purchasingUpdatedAt).toLocaleString()}
+                  {purchasingUpdatedBy && users && (() => {
+                    const u = users.find(x => x.id === purchasingUpdatedBy)
+                    return u ? ` by ${u.name}` : ''
+                  })()}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              disabled={purchasingToggling}
+              onClick={async () => {
+                setPurchasingToggling(true)
+                try {
+                  const next = !purchasingEnabled
+                  await setPurchasingEnabled(next)
+                  showToast(next
+                    ? 'Purchasing turned on — Purchase Reqs tab and PO receiving are back'
+                    : 'Purchasing turned off — PR/PO features hidden (manual Receive PO unaffected)')
+                } catch (e) {
+                  showToast(e.message || 'Failed to update purchasing switch')
+                } finally {
+                  setPurchasingToggling(false)
+                }
+              }}
+              style={{
+                padding: '6px 12px', borderRadius: 999,
+                background: purchasingEnabled ? 'var(--teal-lt)' : 'var(--gray-lt)',
+                color: purchasingEnabled ? 'var(--teal-dk)' : 'var(--muted)',
+                border: `1.5px solid ${purchasingEnabled ? 'var(--teal)' : 'var(--border2)'}`,
+                fontWeight: 700, fontSize: 12,
+                cursor: purchasingToggling ? 'not-allowed' : 'pointer',
+                opacity: purchasingToggling ? 0.5 : 1,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {purchasingToggling ? '…' : purchasingEnabled ? 'On · Turn off' : 'Off · Turn on'}
             </button>
           </div>
         </div>

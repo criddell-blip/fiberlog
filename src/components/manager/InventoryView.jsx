@@ -38,7 +38,7 @@ const SUBTABS = [
 ]
 
 export default function InventoryView() {
-  const { showToast, currentUser } = useApp()
+  const { showToast, currentUser, purchasingEnabled } = useApp()
   const isWide = useIsWide()
   // Phone: the secondary inventory actions collapse into a bottom "Actions"
   // sheet opened from the toolbar ⋯ button. Desktop shows them inline as the
@@ -164,8 +164,17 @@ export default function InventoryView() {
   // Parts is included so accounting can confirm a SKU exists even when it has
   // no logged stock (the Stock tab lists only stocked parts).
   const limited = inventoryIsLimited(currentUser)
-  const subtabs = limited ? SUBTABS.filter(s => s.id === 'stock' || s.id === 'parts' || s.id === 'prs') : SUBTABS
+  // Purchasing (PRs / POs) is behind the Admin → Purchasing switch
+  // (app_settings.purchasing_ui_enabled, OFF since Aug 2026). When off the
+  // sub-tab disappears and the Receive PO sheet drops its PO hand-offs; the
+  // manual delivery + field-return flows are untouched.
+  const baseSubtabs = purchasingEnabled ? SUBTABS : SUBTABS.filter(s => s.id !== 'prs')
+  const subtabs = limited ? baseSubtabs.filter(s => s.id === 'stock' || s.id === 'parts' || s.id === 'prs') : baseSubtabs
   const actions = limited ? ACTIONS.filter(a => a.id === 'receive') : ACTIONS
+  // Flag flipped off while someone was sitting on the PRs tab (realtime).
+  useEffect(() => {
+    if (!purchasingEnabled && tab === 'prs') setTab('stock')
+  }, [purchasingEnabled, tab])
 
   // Count sub-tab takes over the full panel — its body is a scanner-driven
   // counter UI that needs every vertical pixel on mobile. Navigation back is
@@ -351,17 +360,20 @@ export default function InventoryView() {
           onRecorded={handleMovementRecorded}
         />
       )}
+      {/* Both PO hand-offs are withheld while purchasing is off — the sheet
+          then renders only the manual delivery / field-return form (its
+          open-POs query is gated on onOpenPr, so nothing is even fetched). */}
       {showReceiveSheet && (
         <ReceivePOSheet
           locations={locations}
           currentUser={currentUser}
           onClose={() => setShowReceiveSheet(false)}
           onRecorded={handlePOReceived}
-          onOpenPr={id => { setShowReceiveSheet(false); setReceivePrId(id) }}
-          onCreatePo={() => { setShowReceiveSheet(false); setShowPoSheet(true) }}
+          onOpenPr={purchasingEnabled ? id => { setShowReceiveSheet(false); setReceivePrId(id) } : undefined}
+          onCreatePo={purchasingEnabled ? () => { setShowReceiveSheet(false); setShowPoSheet(true) } : undefined}
         />
       )}
-      {showPoSheet && (
+      {purchasingEnabled && showPoSheet && (
         <PurchaseRequestSheet
           mode="new"
           variant="po"
@@ -374,7 +386,7 @@ export default function InventoryView() {
           }}
         />
       )}
-      {receivePrId && (
+      {purchasingEnabled && receivePrId && (
         <PurchaseRequestSheet
           mode="detail"
           prId={receivePrId}

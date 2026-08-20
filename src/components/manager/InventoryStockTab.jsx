@@ -48,7 +48,7 @@ const SUBMODE_ROLLUP = 'rollup'
 const SUBMODE_UNBINNED = 'unbinned'
 
 export default function InventoryStockTab({ locations, locationsLoading, refreshKey, jumpToScope, onJumpToPart, onJumpToLocation, readOnly = false }) {
-  const { showToast, currentUser, isQtyPaused } = useApp()
+  const { showToast, currentUser, isQtyPaused, purchasingEnabled } = useApp()
   // Initialize scope from jumpToScope so the very first load fires with
   // the right scope — avoids the race where the parent flipped tabs +
   // signaled a jump, but useState ran first with 'all', kicking off a
@@ -648,16 +648,18 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
               }}
             ><Icon name="move" size={15} /> Bulk move</button>
           )}
-          <button
-            onClick={() => setShowPrSheet(true)}
-            title="Create a purchase request seeded with the selected parts"
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 7,
-              padding: '8px 14px', borderRadius: 8,
-              border: '1px solid rgba(255,255,255,0.3)', background: 'transparent', color: '#fff',
-              fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
-            }}
-          ><Icon name="clipboard" size={15} /> Create PR</button>
+          {!readOnly && purchasingEnabled && (
+            <button
+              onClick={() => setShowPrSheet(true)}
+              title="Create a purchase request seeded with the selected parts"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7,
+                padding: '8px 14px', borderRadius: 8,
+                border: '1px solid rgba(255,255,255,0.3)', background: 'transparent', color: '#fff',
+                fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+              }}
+            ><Icon name="clipboard" size={15} /> Create PR</button>
+          )}
           <button onClick={clearSelection} style={{
             padding: '8px 12px', borderRadius: 8, border: 'none', background: 'transparent',
             color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: 600, cursor: 'pointer',

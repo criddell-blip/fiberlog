@@ -279,7 +279,7 @@ Sub-tabs are for *looking things up*; the action buttons are for *changing somet
 | 🏭 Locations | "What warehouses, bins, trucks, groups, buckets exist?" Truck assignment lives here. |
 | 🔧 Parts | "What's in the catalog? Any drafts to clean up?" |
 | 📜 Activity | "What just happened?" Every movement ever — first stop when something looks off. |
-| 📋 Purchase Reqs | The queue between "we need this" and "it arrived." |
+| 📋 Purchase Reqs | The queue between "we need this" and "it arrived." | *(Hidden while Admin → Purchasing is Off — the default since Aug 20 2026.)*
 | 🔍 Found | Crew-reported found inventory awaiting approve/reject. |
 | 🔍 Audit | Generates the physical-count CSV. |
 | 🔢 Cycle Count | Live scanner-driven counting, bin by bin. |

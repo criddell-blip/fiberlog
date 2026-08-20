@@ -135,6 +135,8 @@ If the truck shows stock that doesn't match what the crew member says they have,
 
 ### Originate a Purchase Request
 
+> **Purchasing is switched OFF (Aug 20 2026, owner decision).** The Purchase Reqs sub-tab, **＋ New PR / ＋ New PO**, the "Receiving against a PO?" block, and the Create-PR bulk buttons are hidden until an owner/manager flips **Admin → Purchasing (PRs & POs)** to On (`app_settings.purchasing_ui_enabled`; live, no deploy). Everything in this section and "Create a PO" below applies only when it's on. The manual **Receive PO** sheet and **Returned from field** are NOT behind the switch. Existing PR/PO rows are kept and reappear when it's turned on.
+
 PRs are how a need ("we're out of bullet connectors", "Edgar wants another splice kit") becomes an order. The PR feature replaces the spreadsheet-emailed-to-purchasing workflow.
 
 There are three ways to start one:
@@ -165,7 +167,7 @@ The PRs sub-tab has filter pills: **All / Active / Pending / Ordered / Received 
 
 ### Receive a vendor delivery
 
-This is one of your most common tasks. Two flows depending on whether the delivery has a PR backing it:
+This is one of your most common tasks. Two flows depending on whether the delivery has a PR backing it (the PR/PO flow is hidden while **Admin → Purchasing** is Off — see the note above):
 
 - **Has a PR/PO**: open it in the **📋 PRs** tab → receive per line (partial OK) or **Receive all remaining**. Done — receive movements are written automatically. The **📥 Receive PO** sheet also lists open POs at the top ("Receiving against a PO?") and tapping one jumps straight to this panel.
 - **No PR (vendor just showed up)**: use the **📥 Receive PO** sheet manually, walked through below.
