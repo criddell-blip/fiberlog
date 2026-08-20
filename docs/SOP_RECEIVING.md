@@ -301,9 +301,9 @@ Rules of thumb:
 
 ## Related docs
 
-- [INVENTORY_FLOW.md](INVENTORY_FLOW.md) — *Receive PO* and *Field returns → refurbished twins* sections: the why behind the rules above.
-- [INVENTORY_TAB.md](INVENTORY_TAB.md) — the whole Inventory tab, including Record movement, Stock, Activity, labels.
-- [TRAINING.md](TRAINING.md) — Module 4 (warehouse) and the safety rules.
-- [MANAGER_GUIDE.md](MANAGER_GUIDE.md) — the manager portal end to end.
+- [INVENTORY_FLOW.md](INVENTORY_FLOW.md) — *Receive PO (vendor delivery)* and *Field returns → refurbished twins*: the why behind the rules above.
+- [INVENTORY_TAB.md](INVENTORY_TAB.md) — *The most common things you'll do* (Record movement, Stock, Activity, labels) and *Permissions* (who has Receive PO).
+- [TRAINING.md](TRAINING.md) — Module 4 (warehouse), section 4.2 *Receiving deliveries*, and the safety rules.
+- [MANAGER_GUIDE.md](MANAGER_GUIDE.md) — *The actions strip → Receive PO*, in the context of the whole manager portal.
 
 *Last updated: August 2026 — written against the Receive PO sheet as deployed Aug 20 2026 (Receiving-dock default, field returns, Sage ID on inline create, Purchasing switch Off).*

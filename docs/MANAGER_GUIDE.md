@@ -212,8 +212,9 @@ The "Assigned to" dropdown only lists crew members who don't already have a truc
 A **Record movement** button plus these sheets (on phone, everything except Record movement collapses behind **⋯ More**). Record movement defaults to **Transfer** and deliberately has no Receive option — vendor deliveries always go through **Receive PO** so every receipt carries vendor + cost metadata. (The old scan-driven **Move stock** sheet was removed Aug 2026; Record movement's Transfer type covers relocation.)
 
 #### Receive PO
-- Multi-line vendor delivery: vendor + invoice + destination, then SKU + qty + unit cost per line
-- Can create new parts inline; posts as `receive` movements. Notes carry the vendor name for FiberLog's own provenance record (the per-part History panel) — **not** for Sage: receives are no longer exported, because Sage books the purchase from the PO
+- **Purchase order** pill (default): the Sage PO number as the ref, vendor, destination pre-filled to the **Receiving dock** bin, then SKU + qty per line — **no unit cost** (Sage already holds it). A part missing from the catalog is created inline (**＋ Create new part**: SKU, name, unit, department, Sage ID).
+- **Returned from field** pill: used gear pulled from a customer/site lands on the part's `-R` refurbished twin in **Returns – to test**, never as new stock.
+- Posts as `receive` movements. Notes carry the vendor name for FiberLog's own provenance record (the per-part History panel) — **not** for Sage: receives are not exported, because Sage books the purchase from the PO. Step-by-step, including how to fix a mis-receipt: [SOP_RECEIVING.md](./SOP_RECEIVING.md).
 
 #### Reconcile
 - Upload the filled-in Audit CSV; preview the variances (positive = more on hand than recorded, negative = less)
@@ -409,4 +410,4 @@ Everything else in this guide — including retiring locations, decommissioning 
 
 ---
 
-*Last updated: July 2026*
+*Last updated: August 2026*

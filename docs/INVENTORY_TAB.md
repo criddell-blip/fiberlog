@@ -5,7 +5,7 @@ This is the manager portal's home for everything inventory. If you've never used
 > Looking for the end-to-end story (vendor → warehouse → truck → project → Sage)? See **[INVENTORY_FLOW.md](./INVENTORY_FLOW.md)**.
 > Looking for the manager portal at large? See **[MANAGER_GUIDE.md](./MANAGER_GUIDE.md)**.
 
-Last updated: 2026-06-17.
+Last updated: 2026-08-20.
 
 ---
 
@@ -344,11 +344,12 @@ Short list of "this will trip you up if you didn't know it." Not gotchas — jus
 
 ## Permissions: what you can do depends on your role
 
-- **Owner / Manager** — full access to the Inventory tab and everything in it.
-- **Warehouse-only manager** (a Manager with the "Warehouse-only" flag set) — sees ONLY the Inventory tab. No Approvals, no Reports, no Crew status. Use this for an inventory clerk who doesn't approve crew passdowns.
-- **Crew** — does not see this tab at all. Crew interact with inventory through the **Load** and **Return** flows on their own truck, and via passdown submissions that auto-deduct after manager approval.
+Access is set per user as a named **Access type** (Admin → Users → edit user → **Access type**):
 
-To make someone warehouse-only: **Admin → Users → edit user → check "📦 Warehouse-only manager"** (only visible when their role is Manager).
+- **Owner / Full manager / Working manager** — full access to the Inventory tab and everything in it.
+- **Warehouse manager** — Inventory (full ops) + Reports + Admin. No Approvals, no Crew status. Use this for an inventory clerk who doesn't approve crew passdowns.
+- **Accounting** — Reports + a limited Inventory: **📥 Receive PO** is the only action button, and Stock / Parts are read-only. Built for the person who enters Sage POs and books the delivery into FiberLog (see [SOP_RECEIVING.md](./SOP_RECEIVING.md)).
+- **Crew / Contractor** — does not see this tab at all. Crew interact with inventory through the **Load** and **Return** flows on their own truck, **Report found inventory** / **Pulled from customer** (manager-approved in the Found sub-tab), and via passdown submissions that auto-deduct after manager approval.
 
 ---
 

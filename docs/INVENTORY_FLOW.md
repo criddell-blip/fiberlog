@@ -4,7 +4,7 @@ End-to-end map of how materials move through FiberLog: from vendor delivery to S
 
 > Companion docs: **[CREW_GUIDE.md](./CREW_GUIDE.md)** (what crews see) · **[MANAGER_GUIDE.md](./MANAGER_GUIDE.md)** (manager portal operations).
 
-Last updated: 2026-05-29.
+Last updated: 2026-08-20.
 
 ---
 
