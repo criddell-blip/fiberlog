@@ -15,6 +15,32 @@ switched on, this doc gets a new section.
 
 ---
 
+## 0. Where this SOP sits — the whole chain
+
+Material moves through six steps. Three happen in Sage, three in FiberLog. **This SOP is
+step 3.** The Sage steps are shown for reference only — they're done by accounting in
+Sage, and FiberLog neither replaces nor duplicates them.
+
+| # | Step | System | Who | What happens | Where it's documented |
+|---|---|---|---|---|---|
+| 1 | **Sage PO** | Sage *(reference)* | Accounting | The order is placed in Sage. The PO number, vendor, item IDs and quantities created here are what you'll work from in step 3. | Sage |
+| 2 | **Sage Receiver** | Sage *(reference)* | Accounting | When the delivery arrives, it's received against the PO in Sage. This is the accounting receipt — cost lives here. | Sage |
+| 3 | **FiberLog qty update** | FiberLog | Warehouse / Accounting | The same delivery is entered with **📥 Receive PO** so FiberLog's stock goes up at the **Receiving dock**. Quantities only, no cost. | **This SOP** (§3–§6) |
+| 4 | **FiberLog warehouse transfer** | FiberLog | Warehouse, then crew | Put-away: **Record movement → Transfer** from the Receiving dock to the shelf bin. Then crews **Load** onto their trucks from **My Stock**. | [INVENTORY_TAB.md](INVENTORY_TAB.md) · [CREW_GUIDE.md](CREW_GUIDE.md) |
+| 5 | **FiberLog project allocation** | FiberLog | Crew, then manager | The crew logs parts used on a task and submits the passdown; the manager approves and the parts auto-transfer truck → **project bucket**. Field-tech installs reach the same bucket via the Sonar import. | [MANAGER_GUIDE.md](MANAGER_GUIDE.md) · [INVENTORY_FLOW.md](INVENTORY_FLOW.md) |
+| 6 | **Sage asset allocation** | Sage *(reference)* | Accounting | At period end the manager runs **🧾 Sage export** — the CSV of consumption per project — and accounting books it in Sage. Receipts (step 3) are never in this file; Sage already has them from step 2. | [INVENTORY_TAB.md](INVENTORY_TAB.md) → *Export for Sage* |
+
+```
+Sage PO → Sage Receiver → FiberLog qty update → FiberLog warehouse transfer → FiberLog project allocation → Sage asset allocation
+  (1)          (2)              (3) ← you            (4)                          (5)                              (6)
+```
+
+The one rule that ties it together: **every quantity that enters FiberLog in step 3 must
+eventually leave through step 5.** Stock that never gets allocated to a project is either
+still on a shelf or a truck (fine) or was entered wrong (see §7).
+
+---
+
 ## 1. Why we do this in FiberLog
 
 Purchases are received **in Sage first** — Sage is the accounting book. FiberLog is the
