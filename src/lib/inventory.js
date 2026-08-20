@@ -3250,12 +3250,13 @@ export async function createIntakeRequest({
 // ─── RECEIPT KINDS + REFURB TWINS ────────────────────────────────────────────
 // Why stock arrived. Lives on `receive` rows only (DB CHECK). `purchase` is
 // the trigger default so every legacy writer is covered; the others are set
-// explicitly by their one flow. Keep in sync with the DB CHECK constraint.
+// explicitly by their one flow. Keep in sync with the DB CHECK constraint
+// (which also still tolerates 'decommission' — never written; site
+// decommission is accounting-only and recovered gear is a field return).
 export const RECEIPT_KINDS = {
   purchase:     { label: 'Purchase',      short: 'PO',      hint: 'Vendor delivery / purchase order' },
   field_return: { label: 'Field return',  short: 'RETURN',  hint: 'Pulled from a customer or site — booked onto the refurbished twin' },
   found:        { label: 'Found',         short: 'FOUND',   hint: 'Crew-reported found inventory' },
-  decommission: { label: 'Decommission',  short: 'DECOM',   hint: 'Site teardown recovery' },
   seed:         { label: 'Seed',          short: 'SEED',    hint: 'One-time BoxHero baseline' },
 }
 export function receiptKindLabel(kind) {

@@ -240,16 +240,13 @@ A **Record movement** button plus these sheets (on phone, everything except Reco
 
 ## Decommissioning sites
 
-When you retire a site, you have an integrated option to recover physical equipment back to a warehouse. **Available to owners and managers** (staff-guarded as of July 2026 — no longer owner-only).
+Decommissioning is **accounting-only** — it writes no inventory movements. **Available to owners and managers** (staff-guarded as of July 2026 — no longer owner-only).
 
-1. Open the site → **Decommission site**
-2. Modal shows the materials list (what was consumed at this site via tasks → auto-deduct movements)
-3. Decide what to recover:
-   - **Decommission only** — nothing selected. Equipment stays at the site, accounting unchanged. Use this when you're just stopping service and the gear's still there. Site flips to `status=decommissioned` and disappears from the UI.
-   - **Pick parts to recover** — tick checkboxes, adjust qty if you're only recovering some. Pick a destination warehouse. On confirm: transfer movements fire (project bucket → warehouse), THEN the site decommissions. One atomic op — partial failures roll back.
-4. The transfer notes are stamped "Site recovery … (decommissioned)" for the audit trail
+1. Open the site → **View materials** first if you want to see what was installed there
+2. **Decommission site** → confirm. The site flips to `status=decommissioned` and disappears from the UI; its tasks, passdowns and movements stay linked for the audit trail.
+3. If you physically pull equipment back, log it separately as a **field return**: Inventory → **Receive PO → Returned from field**. That books each unit onto its refurbished `-R` twin in the *Returns – to test* bin, so used gear never re-enters stock as new.
 
-> 💡 **Most decommissions are accounting-only.** Don't tick parts unless you're physically pulling them. If in doubt, decommission only and use Record Movement separately later.
+> 💡 The old in-modal "Recover materials" picker was removed Aug 2026. It booked recovered gear as a project-bucket → warehouse transfer, which credited the project's consumption back and put used equipment on the new-stock SKU — the field-return path is the honest booking.
 
 ---
 

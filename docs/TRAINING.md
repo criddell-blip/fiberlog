@@ -231,8 +231,8 @@ with current project/task/footage and the day's summed hours and parts.
   handholes, vaults). Tap a target to edit; each phase has a Permit URL field.
 - **Infra projects** hold **sites** (towers, MDU closets, business installs) with per-site task
   badges. Click a site to edit, move to another project, view tasks, or view materials consumed.
-- **Decommissioning a site** offers equipment recovery to a warehouse — most decommissions are
-  accounting-only; don't tick parts unless you're physically pulling them.
+- **Decommissioning a site** is accounting-only (no movements). Gear you physically pull back
+  is logged as a field return: Inventory → Receive PO → **Returned from field**.
 
 ### 3.6 Assemblies, users, and permissions
 

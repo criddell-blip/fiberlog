@@ -106,14 +106,12 @@ export const RECEIPT_KIND_SOURCE = {
   purchase:     'Vendor',
   field_return: 'Field return',
   found:        'Found',
-  decommission: 'Site decommission',
   seed:         'Seed',
 }
 export const RECEIPT_KIND_LABEL = {
   purchase:     'Purchase',
   field_return: 'Field return',
   found:        'Found',
-  decommission: 'Decommission',
   seed:         'Seed',
 }
 export function receiveSourceName(m) {

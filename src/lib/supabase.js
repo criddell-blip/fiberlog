@@ -298,7 +298,7 @@ export async function updateSite(siteId, patch) {
   return data
 }
 
-// Atomic decommission + optional materials recovery.
+// Decommission a site (accounting-only).
 //
 // Soft-delete via status='decommissioned'. Sites are FK targets for
 // tasks.site_id, so a hard delete would break historical records.
@@ -306,23 +306,17 @@ export async function updateSite(siteId, patch) {
 // decommissioned site falls out of the UI immediately while its tasks
 // (and their submissions / movements) remain linked for the audit trail.
 //
-// recoveryItems is an array of { partId, quantity, unit } — empty means
-// "decommission only, no transfers." destinationLocationId is required
-// when recoveryItems has rows.
-//
-// The RPC writes one transfer movement per item (project bucket →
-// destination) before flipping site.status. All in one tx so a mid-batch
-// failure rolls back cleanly.
-export async function decommissionSiteWithRecovery(siteId, recoveryItems, destinationLocationId) {
-  const items = (recoveryItems || []).map(i => ({
-    part_id: i.partId,
-    quantity: i.quantity,
-    unit: i.unit || 'ea',
-  }))
+// No inventory movements are written. Gear physically pulled from a
+// decommissioned site is logged as a field return (Receive PO → Returned
+// from field) so it books onto the refurbished twin, never as new stock.
+// The RPC still accepts a recovery list (it used to write project-bucket →
+// warehouse transfers); we always pass it empty and keep calling it for
+// the staff guard + atomic status flip.
+export async function decommissionSite(siteId) {
   const { data, error } = await db.rpc('decommission_site_with_recovery', {
     p_site_id: siteId,
-    p_recovery_items: items,
-    p_destination_location_id: destinationLocationId || null,
+    p_recovery_items: [],
+    p_destination_location_id: null,
   })
   if (error) throw error
   return data
@@ -345,15 +339,14 @@ export async function getTasksBySite(siteId) {
 // keyed on (task_id IN site's tasks). Returns a flat array of
 // { partId, name, unit, qty, lastMovedAt }, sorted by qty desc.
 //
-// Powers the "View materials consumed" modal — supports the
-// decommission-and-recover decision (manager sees what was installed
-// before deciding what to physically pull and log as a PO).
+// Powers the "View materials consumed" modal — the manager sees what was
+// installed before decommissioning / deciding what to pull back as a
+// field return.
 //
 // We sum movements regardless of from/to direction — the question is
 // "what landed at this site," and right now auto-deduct transfers
 // (truck → project bucket with task_id set) are the primary signal.
-// If a recovery PO with the same task_id later writes a return, this
-// summary will (correctly) show the net consumption.
+// Field returns don't carry task_id, so this stays the gross consumption.
 export async function getMaterialsAtSite(siteId) {
   // Two-step to avoid relying on a deep PostgREST join: get the site's
   // task ids first, then aggregate movements against them.

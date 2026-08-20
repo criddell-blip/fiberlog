@@ -246,7 +246,7 @@ describe('isExportableMovement', () => {
     expect(isExportableMovement(fr)).toBe(false)
     expect(isExportableMovement(fr, { includeFieldReturns: true })).toBe(true)
     expect(isExportableMovement(fr, { includeFieldReturns: true, strictConsumption: true })).toBe(true)
-    for (const kind of ['purchase', 'found', 'seed', 'decommission', null]) {
+    for (const kind of ['purchase', 'found', 'seed', null]) {
       const r = mv({ movement_type: 'receive', receipt_kind: kind, from_location: null, to_location: WAREHOUSE })
       expect(isExportableMovement(r, { includeFieldReturns: true })).toBe(false)
     }
