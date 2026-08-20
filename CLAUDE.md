@@ -10,6 +10,8 @@ Deployed at https://criddell-blip.github.io/fiberlog/ via GitHub Pages.
 >
 > **The crew-facing how-to (bilingual EN/ES)?** See [docs/CREW_GUIDE.md](docs/CREW_GUIDE.md) — rewritten July 2026 for the is_closed multi-passdown model.
 >
+> **Receiving a delivery or returned equipment?** See [docs/SOP_RECEIVING.md](docs/SOP_RECEIVING.md) — the staff-facing SOP for the Receive PO sheet (vendor delivery, inline part create, field returns, and how to correct a mis-receipt).
+>
 > **Onboarding someone new?** See [docs/TRAINING.md](docs/TRAINING.md) — role-based training modules (everyone / crew / manager / warehouse) with live-app practice exercises, safety rules, and the trainer's cleanup checklist. A presentable web version (EN/ES toggle on the crew module) is linked at the top of that doc.
 
 ---

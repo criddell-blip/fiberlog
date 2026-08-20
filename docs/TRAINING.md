@@ -290,13 +290,18 @@ metadata), plus Receive PO, Reconcile, Sonar, Fiber jobs, Import CSV, Sage expor
 
 ### 4.2 Receiving deliveries
 
-- **Has a PR** — open it in Purchase Reqs → **Mark received**. Done; receive movements are written
-  for you.
-- **No PR** — **Receive PO**: vendor, invoice, destination, then SKU + qty + unit cost per line.
-  New part? Type its SKU and use **+ create** — a draft part is created on the spot. QR labels
-  offered at the end.
-- **PRs** start from **＋ New PR** or bulk-select in Stock/Parts → **Create PR**. Vendor is per
-  *line*. Lifecycle: pending → ordered → received.
+The written procedure is [SOP_RECEIVING.md](SOP_RECEIVING.md) — train from that, screen by screen.
+
+- **Vendor delivery** — **Receive PO**: PO / invoice ref, vendor, destination (pre-filled to the
+  **Receiving dock** bin), then SKU + qty + unit cost per line. New part? **＋ Create new part**
+  right in the line (SKU, name, unit, department, Sage ID). QR labels offered at the end.
+- **Returned equipment** (pulled from a customer / site) — same sheet, **Returned from field**
+  pill. It books onto the part's `-R` refurbished twin in **Returns – to test**, never as new stock.
+- **Mistakes** — no undo on a manual receipt; correct with **Record movement → Adjust →
+  − Found missing** plus a note naming the original ref (table in the SOP).
+- *Only while **Admin → Purchasing** is On (Off since Aug 20 2026):* deliveries with a PR/PO are
+  received per line from **Purchase Reqs**; PRs start from **＋ New PR** or bulk-select in
+  Stock/Parts → **Create PR**. Lifecycle: pending → ordered → received.
 
 ### 4.3 The Sonar morning reports
 

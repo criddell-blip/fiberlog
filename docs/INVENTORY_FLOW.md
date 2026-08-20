@@ -157,6 +157,8 @@ Treated like a crew user with `role='contractor'`. Personal truck auto-created v
 
 ### Receive PO (vendor delivery)
 
+> Step-by-step SOP for warehouse + accounting staff (deliveries, new parts, field returns, fixing mistakes): [SOP_RECEIVING.md](SOP_RECEIVING.md).
+
 Manager opens **Inventory → 📥 Receive PO**:
 - Vendor name + invoice ref + destination warehouse
 - Per-line: SKU + qty + unit + unit_cost

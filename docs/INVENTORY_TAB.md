@@ -172,21 +172,18 @@ This is one of your most common tasks. Two flows depending on whether the delive
 - **Has a PR/PO**: open it in the **📋 PRs** tab → receive per line (partial OK) or **Receive all remaining**. Done — receive movements are written automatically. The **📥 Receive PO** sheet also lists open POs at the top ("Receiving against a PO?") and tapping one jumps straight to this panel.
 - **No PR (vendor just showed up)**: use the **📥 Receive PO** sheet manually, walked through below.
 
-**Manual Receive PO walkthrough:**
+**Manual Receive PO, in brief** (full step-by-step, field returns and the mistake-fixing table live in [SOP_RECEIVING.md](SOP_RECEIVING.md)):
 
-1. Click **📥 Receive PO**
-2. Fill the header: **Vendor**, **Invoice number**, **Destination warehouse**
-3. For each line:
-   - Search for the SKU — pick the part
-   - Enter quantity, unit (auto-fills from the part), and unit cost if you have it
-   - If the part doesn't exist in the catalog yet: type its SKU and click the "+ create" affordance that appears. A draft part is created on the spot.
-4. Click **Save** when done
-5. The sheet will offer to print labels for any new SKUs — accept if you want fresh QR labels on the boxes
+1. **📥 Receive PO** → leave the **Purchase order** pill → **PO / invoice ref** (required), **Vendor**, and a **Destination / Bin** that's pre-filled to the **Receiving dock**.
+2. One line per SKU: search, **Qty** (watch the unit under the box), optional **$ each**. A missing part is created inline via **＋ Create new part** (SKU, name, unit, department, material group, **Sage ID**).
+3. **Receive N items** → optional **🏷 Print labels** for everything you just received.
 
 What this does:
-- Creates one `receive` movement per line (NULL → destination warehouse)
-- Stock at the destination warehouse goes up automatically
+- Creates one `receive` movement per line (NULL → the bin or warehouse you picked), `receipt_kind='purchase'`
+- Stock at the destination goes up automatically; put-away to a shelf bin is a later **Transfer**
 - All lines share the same `vendor_invoice`, so the Activity tab will group them
+
+Used equipment coming back from a customer or site goes through the same sheet's **Returned from field** pill — it lands on the part's `-R` refurbished twin in the **Returns – to test** bin. See the SOP.
 
 **If you typed a new SKU and want to use it again later in the same PO**, close and reopen the sheet — the search index doesn't refresh mid-session. Cosmetic, not data-losing.
 
