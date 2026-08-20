@@ -38,10 +38,16 @@ you'll see — that's by design.
 
 ## 2. Before you open the sheet
 
-- [ ] Have the **packing slip or invoice** in hand. You need its reference number.
-- [ ] **Count the boxes / reels / feet against the slip.** Receive what arrived, not what
-      was ordered. Short-shipped? Receive the short quantity and write the rest in the
-      Vendor field (e.g. `Acme — 2 of 5 reels, balance to follow`).
+- [ ] Have the **Sage PO** open (printed or on screen). It is your source document:
+      the PO number is the ref, the vendor is on the header, and each PO line gives you
+      the Sage item ID, description, quantity ordered and unit cost — everything the
+      sheet asks for, in order.
+- [ ] Have the vendor's **packing slip** too. The PO tells you what was *ordered*; the
+      slip and the boxes tell you what *arrived*. You receive what arrived.
+- [ ] **Count the boxes / reels / feet against the PO lines.** Short-shipped? Receive
+      the short quantity and write the rest in the Vendor field (e.g. `Acme — 2 of 5
+      reels, balance to follow`). Something on the slip that isn't on the PO? Receive it
+      on its own line and flag it to accounting.
 - [ ] **Enter it the day it arrives.** The sheet has no date field — the movement is
       dated by the moment you press Receive. If you're catching up on a late entry, put
       the real arrival date in the **Vendor** field text (`Acme (arrived 08/18)`).
@@ -49,7 +55,7 @@ you'll see — that's by design.
       **Purchase order** (anything bought from a vendor — the default) or
       **Returned from field** (a used unit coming back from a customer or site).
       Switching the pill **clears every line**, so decide first.
-- [ ] One sheet per packing slip. Two slips from the same vendor = two sheets.
+- [ ] One sheet per Sage PO. A PO that arrives in two shipments = two sheets with the same ref; two POs on one truck = two sheets.
 
 > ⚠️ **Never practice on this sheet with made-up numbers.** It posts real stock. Walk
 > through it on screen with a real delivery instead.
@@ -62,13 +68,14 @@ you'll see — that's by design.
 
 1. Tap **📥 Receive PO**. The sheet opens titled **Receive PO / vendor delivery** with the
    **Purchase order** pill already selected. Leave it.
-2. **PO / invoice ref \*** (required) — type the reference off the paperwork. Use the PO
-   number if you have it, otherwise the invoice number, otherwise the packing-slip
-   number. Be consistent across the team: the Activity tab groups lines by this value,
-   and it's what accounting will search for later.
-3. **Vendor (optional)** — the vendor's name (`Graybar`, `Clearfield`, …). Fill it in;
-   "optional" just means the sheet won't block you. This is also the only free-text spot
-   on the header, so short-ship / late-entry notes go here too.
+2. **PO / invoice ref \*** (required) — the **Sage PO number**, typed exactly as Sage
+   shows it. Same number every time, no prefixes or notes: the Activity tab groups lines
+   by this value and it's how accounting will tie the FiberLog receipt back to the Sage
+   PO. (Only if there genuinely is no Sage PO — a walk-in purchase — fall back to the
+   invoice or packing-slip number.)
+3. **Vendor (optional)** — the vendor name off the PO header (`Graybar`, `Clearfield`, …).
+   Fill it in; "optional" just means the sheet won't block you. This is also the only
+   free-text spot on the header, so short-ship / late-entry notes go here too.
 4. **Destination \*** — pre-filled with the warehouse that owns the **Receiving dock**
    bin. Leave it unless the stock genuinely went somewhere else (a truck or a crew
    group is allowed — e.g. a crew took the whole delivery straight off the freight
@@ -79,21 +86,31 @@ you'll see — that's by design.
 
 ### Line items
 
-6. In the first line, **Search part name or SKU…** — type at least two characters, pick
-   the part from the dropdown (name on top, SKU underneath). Read the SKU, not just the
-   name — several parts have near-identical names (e.g. reel lengths, `-R` refurbished
-   twins).
-7. **Qty** — the number that arrived, in the **unit shown under the box** (`ea`, `ft`,
-   `roll`, …). Cable is usually in **ft**, not reels. If the unit shown is wrong for the
-   part, see SOP 2 → *Fix a part's unit*.
-8. **$ each** (optional) — the unit cost from the invoice if you have it. The
-   **Estimated total** strip at the bottom is there so you can eyeball it against the
-   invoice total; it is **not stored** anywhere.
+Work **down the PO, one PO line = one sheet line**, in the same order — it makes the
+check at the end trivial.
+
+6. **Search part name or SKU…** — type a distinctive word from the PO line's
+   description, or the Sage item ID itself (`UB000011` — most parts carry their Sage ID
+   and search finds it). Pick the part from the dropdown (name on top, SKU underneath;
+   the picked chip shows `Sage <id>` so you can confirm it matches the PO). Read the
+   SKU, not just the name — several parts have near-identical names (reel lengths, `-R`
+   refurbished twins). PO line not in the catalog at all → SOP 2.
+7. **Qty** — the number that **arrived**, in the **unit shown under the box** (`ea`,
+   `ft`, `roll`, …). Start from the PO quantity and reduce it if the count is short.
+   Watch for unit mismatches between Sage and FiberLog — Sage may order *1 reel*, the
+   FiberLog part counts **ft**; enter the feet. If the unit shown is wrong for the part,
+   see SOP 2 → *Fix a part's unit*.
+8. **$ each** (optional) — the unit cost off the PO line. If the PO's unit is different
+   from FiberLog's (reel vs ft), convert or leave it blank — don't put a per-reel price
+   on a per-foot part. The **Estimated total** strip at the bottom is there so you can
+   eyeball it against the PO total; it is **not stored** anywhere.
 9. **＋ Add line** for each additional SKU. **×** on the right removes a line (hidden
    when there's only one).
 10. Watch the counter next to **Line items** — it reads `N valid · M total`. A line is
     only *valid* when it has both a part and a qty above 0. Invalid lines are silently
     skipped, so if the two numbers differ, find the blank line before you submit.
+    Then the final check: **same number of lines as the PO** (minus anything that
+    didn't ship), and the **Estimated total** in the ballpark of the PO total.
 
 ### Submit
 
@@ -136,18 +153,21 @@ Only for **purchases**. Returned equipment must already be a catalog part (see S
    dropdown. A teal **＋ Create new part** form opens:
    - **SKU \*** — the vendor's part number / manufacturer SKU, in CAPS, no spaces
      (`ACM-1234`). This becomes the permanent ID; it cannot be changed later.
-   - **Part name \*** — pre-filled from what you typed. Make it match how the item reads
-     on the invoice / in Sage (that's how accounting will recognise it).
+   - **Part name \*** — pre-filled from what you typed. Make it match the **description
+     on the Sage PO line** (that's how accounting will recognise it).
    - Unit — `ea` by default; pick `ft` for cable, `roll`/`box` only if we really count it
      that way.
    - **Department (optional)** — pick from the list (Fiber Construction, Drop
      Installation, Underground construction, Splice, Customer Installation). This drives
      which crews may load the part, so fill it in when you know it.
    - **Material group (optional)** — e.g. `Fiber cable`, `Conduit`, `CPE`.
-   - **Sage ID (optional, e.g. UB000011)** — the Sage Intacct *item ID* for this part.
-     Accounting has the list. If you don't know it, **leave it blank** rather than guess
-     (the Parts tab has a "No Sage ID" filter so it can be filled in later). A Sage ID
-     already used by another part is rejected when you press Receive.
+   - **Sage ID (optional, e.g. UB000011)** — the Sage *item ID* **straight off the PO
+     line**. That's the whole point of having the PO in front of you: copy it exactly.
+     If the PO line has no item ID (a non-stock / expensed line, or accounting hasn't
+     set it up yet), **leave it blank** rather than guess — the Parts tab has a
+     "No Sage ID" filter so it can be filled in later. A Sage ID already used by another
+     part is rejected when you press Receive — that usually means the part *does* exist
+     under a different name; cancel and search by that Sage ID instead.
 3. **Save part**. The line now shows the part with a **NEW** badge. Enter **Qty** as
    normal.
 4. Finish the sheet (SOP 1 steps 9–13). The part is created *when you press Receive*,
@@ -254,8 +274,9 @@ Rules of thumb:
 
 | ✅ Do | ❌ Don't |
 |---|---|
+| Work from the Sage PO: its number as the ref, its item IDs to find parts, its costs. | Type a ref from memory or a packing-slip number when a PO exists. |
 | Count before you type. | Receive the PO quantity when fewer boxes arrived. |
-| One sheet per packing slip, ref typed the same way every time. | Lump three deliveries into one sheet. |
+| One sheet per PO, ref typed exactly as Sage shows it. | Lump three POs into one sheet. |
 | Leave Destination / Bin on the Receiving dock default. | Receive straight to a job site or Scrap (not offered) — or to a truck unless the crew really drove off with it. |
 | Check the **unit** under the Qty box — ft vs ea vs roll. | Type reels when the part counts feet. |
 | Search by name before creating a new part. | Create a second SKU for a part that's already there. |
