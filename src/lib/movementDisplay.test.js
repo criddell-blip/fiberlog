@@ -76,6 +76,18 @@ describe('movementDisplay', () => {
   // location objects but NOT the scalar from_location_id/to_location_id
   // columns. A derivation that only reads the scalars classifies every
   // exported adjust-down as an "adjust up" with a positive quantity.
+  it('labels a PR-linked adjust-down as a receipt reversal without changing its arithmetic', () => {
+    const rev = movementDisplay({ movement_type: 'adjust', from_location_id: 'bin1', purchase_request_line_id: 'line1', quantity: 2 })
+    expect(rev.isReceiptReversal).toBe(true)
+    expect(rev.isAdjustDown).toBe(true)
+    expect(rev.label).toBe('Receipt reversal')
+    expect(rev.sign).toBe(-1)
+    expect(signedQty({ movement_type: 'adjust', from_location_id: 'bin1', purchase_request_line_id: 'line1', quantity: 2 })).toBe(-2)
+    // A PR-linked receive is still just a receive; an adjust-UP is never a reversal.
+    expect(movementDisplay({ movement_type: 'receive', to_location_id: 'bin1', purchase_request_line_id: 'line1' }).isReceiptReversal).toBe(false)
+    expect(movementDisplay({ movement_type: 'adjust', to_location_id: 'bin1', purchase_request_line_id: 'line1' }).label).toBe('Adjust up')
+  })
+
   it('reads adjust direction from the joined objects when the scalars are absent', () => {
     const down = movementDisplay({ movement_type: 'adjust', from_location: { id: 'w1', name: 'Warehouse' } })
     expect(down.isAdjustDown).toBe(true)

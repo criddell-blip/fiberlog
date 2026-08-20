@@ -5,6 +5,7 @@ import {
   createPurchaseRequest, getPurchaseRequest, getPurchaseRequests,
   updatePurchaseRequest, replacePurchaseRequestLines, deletePurchaseRequest,
   markPurchaseRequestReceived, receivePurchaseRequestLine, createPart,
+  reversePurchaseRequestLineReceipt, getDefaultReceivingLocation, RECEIVING_BIN_NAME,
   getLastUnitCost, getRecentVendors, getBinsForWarehouse,
   buildPurchaseRequestCsv, buildPurchaseRequestEmail,
 } from '../../lib/inventory'
@@ -127,6 +128,19 @@ export default function PurchaseRequestSheet({
     return () => { cancelled = true }
   }, [])
 
+  // New mode: default "Deliver to" to the warehouse that owns the Receiving
+  // dock bin (the dock then defaults the bin itself at receive time). Only
+  // fills an untouched field — never overrides a pick the user already made.
+  useEffect(() => {
+    if (mode !== 'new') return
+    let cancelled = false
+    getDefaultReceivingLocation().then(d => {
+      if (cancelled || !d) return
+      setTargetLocationId(prev => prev || d.warehouseId)
+    })
+    return () => { cancelled = true }
+  }, [mode])
+
   // Detail mode: load the PR + map its lines into local state.
   useEffect(() => {
     if (mode !== 'detail' || !prId) return
@@ -141,16 +155,7 @@ export default function PurchaseRequestSheet({
         setNotes(loaded.notes || '')
         setPoNumber(loaded.po_number || '')
         setExpectedAt(loaded.expected_at || '')
-        setLines((loaded.lines || []).map((l, i) => ({
-          tempId: l.id || `loaded-${i}`,
-          part_id: l.part_id || null,
-          item_number: l.item_number || '',
-          description: l.description || '',
-          vendor: l.vendor || '',
-          quantity: l.quantity != null ? String(l.quantity) : '',
-          project_reason: l.project_reason || '',
-          unit_cost: l.unit_cost != null ? String(l.unit_cost) : '',
-        })))
+        setLines(mapLoadedLines(loaded.lines))
         setLinesTouched(false)
       })
       .catch(e => { if (!cancelled) setError(e.message || 'Failed to load PR') })
@@ -428,6 +433,16 @@ export default function PurchaseRequestSheet({
     if (!fresh) return
     setPr(fresh)
     onChanged?.(fresh)
+    // A full reversal re-unlocks the line table. Re-seed it from the DB rows:
+    // receive_pr_line persisted part_id on any freeform line, and the local
+    // copy (mapped once at load) still says null — saving that back would
+    // un-resolve the line. linesTouched is necessarily false here (the panel
+    // was blocked otherwise), so nothing of the user's is overwritten.
+    const unlocked = fresh.status === 'ordered' && !(fresh.lines || []).some(l => Number(l.received_qty || 0) > 0)
+    if (unlocked) {
+      setLines(mapLoadedLines(fresh.lines))
+      setLinesTouched(false)
+    }
     if (receivedParts.length > 0) {
       setSessionReceived(prev => {
         const seen = new Set(prev.map(p => p.id))
@@ -774,7 +789,9 @@ export default function PurchaseRequestSheet({
                 </button>
               </div>
             )}
-            {(status === 'ordered' || status === 'partial') && (
+            {/* `received` stays in: a mis-receipt is usually noticed after the
+                last line landed, and ↩ Reverse lives on the line rows. */}
+            {(status === 'ordered' || status === 'partial' || status === 'received') && (
               <>
                 {status === 'ordered' && !anyReceived ? (
                   // Nothing received yet — a mistyped Sage number / ETA is
@@ -1161,7 +1178,8 @@ function ReceivePanel({ pr, blocked = false, labelCount = 0, onPrintLabels, onRe
   const lines = pr?.lines || []
 
   // Optional bin destination inside the target warehouse (bin-first UX).
-  // Empty = warehouse-level ("unbinned"), same as before the override.
+  // Defaults to the Receiving dock bin when the target warehouse has one;
+  // empty = warehouse-level ("unbinned"). Sticky across lines.
   const [bins, setBins] = useState([])
   const [binId, setBinId] = useState('')
   const isWarehouseTarget = pr?.target_location?.type === 'warehouse'
@@ -1169,7 +1187,12 @@ function ReceivePanel({ pr, blocked = false, labelCount = 0, onPrintLabels, onRe
     if (!isWarehouseTarget || !pr?.target_location_id) { setBins([]); setBinId(''); return }
     let cancelled = false
     getBinsForWarehouse(pr.target_location_id)
-      .then(b => { if (!cancelled) setBins(b || []) })
+      .then(b => {
+        if (cancelled) return
+        setBins(b || [])
+        const dock = (b || []).find(x => x.name === RECEIVING_BIN_NAME)
+        setBinId(prev => prev || dock?.id || '')
+      })
       .catch(() => { if (!cancelled) setBins([]) })
     return () => { cancelled = true }
   }, [isWarehouseTarget, pr?.target_location_id])
@@ -1254,6 +1277,7 @@ function ReceivePanel({ pr, blocked = false, labelCount = 0, onPrintLabels, onRe
             pr={pr}
             disabled={busy || blocked}
             toLocationId={binId || null}
+            bins={bins}
             onReceived={onReceived}
             onError={onError}
           />
@@ -1272,7 +1296,12 @@ function ReceivePanel({ pr, blocked = false, labelCount = 0, onPrintLabels, onRe
 // a qty field (defaults to the remaining amount, capped at it) and, for
 // freeform lines, a resolve-part step (link existing via catalog search, or
 // create a new part inline) before the qty field appears.
-function ReceiveLineRow({ line, disabled, toLocationId = null, onReceived, onError }) {
+//
+// A line with any receipt also offers "↩ Reverse" — credit some/all of it
+// back to the PO (stock comes back out, received_qty drops, PO reopens).
+// Reason is required; the RPC refuses more than was received or more than
+// is on hand at the chosen source.
+function ReceiveLineRow({ line, pr, disabled, toLocationId = null, bins = [], onReceived, onError }) {
   const { currentUser, showToast } = useApp()
   const received = Number(line.received_qty || 0)
   const total = Number(line.quantity || 0)
@@ -1283,6 +1312,59 @@ function ReceiveLineRow({ line, disabled, toLocationId = null, onReceived, onErr
   const [open, setOpen] = useState(false)
   const [qty, setQty] = useState(String(remaining > 0 ? remaining : ''))
   const [busy, setBusy] = useState(false)
+
+  // ── Reverse a receipt ──
+  // Where the receipts on this line actually landed (most recent first), so
+  // the source defaults to the right bin even if the panel's picker moved on.
+  const receipts = line.receipts || []
+  const lastReceiveInto = [...receipts].reverse().find(m => m.movement_type === 'receive')?.to_location
+  const [reverseOpen, setReverseOpen] = useState(false)
+  const [reverseQty, setReverseQty] = useState('')
+  const [reverseFrom, setReverseFrom] = useState('')
+  const [reverseReason, setReverseReason] = useState('')
+  const [reversing, setReversing] = useState(false)
+  // Source options = the PR's Deliver-to + its bins (mirror of the RPC rule).
+  const sourceOptions = useMemo(() => {
+    const opts = []
+    const t = pr?.target_location
+    if (t) opts.push({ id: t.id, name: t.type === 'warehouse' ? `${t.name} (warehouse-level)` : t.name })
+    for (const b of bins) opts.push({ id: b.id, name: b.name })
+    // The bin the receipt landed in may have been deactivated since (the
+    // active-bins list omits it) — keep it selectable so the default isn't a
+    // blank select holding a value.
+    if (lastReceiveInto?.id && !opts.some(o => o.id === lastReceiveInto.id)) {
+      opts.push({ id: lastReceiveInto.id, name: `${lastReceiveInto.name} (inactive)` })
+    }
+    return opts
+  }, [pr?.target_location, bins, lastReceiveInto?.id, lastReceiveInto?.name])
+
+  function startReverse() {
+    setReverseQty(String(received))
+    setReverseFrom(lastReceiveInto?.id || toLocationId || pr?.target_location_id || '')
+    setReverseReason('')
+    setOpen(false)
+    setReverseOpen(true)
+  }
+
+  async function confirmReverse() {
+    const q = Number(reverseQty)
+    if (!q || q <= 0) { onError?.('Enter a quantity greater than 0'); return }
+    if (q - received > 1e-9) { onError?.(`Only ${received} received on this line`); return }
+    if (!reverseFrom) { onError?.('Pick where the stock is coming back out of'); return }
+    if (!reverseReason.trim()) { onError?.('A reason is required to reverse a receipt'); return }
+    setReversing(true)
+    onError?.(null)
+    try {
+      const fresh = await reversePurchaseRequestLineReceipt({ lineId: line.id, quantity: q, fromLocationId: reverseFrom, reason: reverseReason })
+      onReceived?.(fresh, [])
+      showToast(`Reversed ${q}${line.part?.unit ? ' ' + line.part.unit : ''} · ${line.description || line.part_id} — back on the PO`)
+      setReverseOpen(false)
+    } catch (e) {
+      onError?.(e.message || 'Reverse failed')
+    } finally {
+      setReversing(false)
+    }
+  }
 
   // Freeform part resolution
   const [resolvedPart, setResolvedPart] = useState(null)   // { id, name }
@@ -1361,9 +1443,32 @@ function ReceiveLineRow({ line, disabled, toLocationId = null, onReceived, onErr
           </div>
           <div style={{ fontSize: 11, color: 'var(--hint)' }}>
             {skuLabel ? `${skuLabel} · ` : ''}{received} / {total} received
+            {received > 0 && lastReceiveInto?.name ? ` · into ${lastReceiveInto.name}` : ''}
           </div>
         </div>
-        {done ? (
+        {received > 0 && !reverseOpen && (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            style={{ padding: '5px 9px', fontSize: 12, color: 'var(--amber)' }}
+            onClick={startReverse}
+            disabled={disabled || busy}
+            title="Credit some or all of this receipt back to the PO"
+          >
+            ↩ Reverse
+          </button>
+        )}
+        {reverseOpen ? (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            style={{ padding: '5px 10px', fontSize: 12 }}
+            onClick={() => setReverseOpen(false)}
+            disabled={reversing}
+          >
+            Cancel
+          </button>
+        ) : done ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>
             <Icon name="check" size={14} /> Received
           </span>
@@ -1390,7 +1495,53 @@ function ReceiveLineRow({ line, disabled, toLocationId = null, onReceived, onErr
         )}
       </div>
 
-      {open && !done && (
+      {reverseOpen && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 11, color: 'var(--amber)', fontWeight: 600, marginBottom: 6 }}>
+            Reverse receipt — stock comes back out and the quantity goes back on the PO.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+            <div className="field" style={{ marginBottom: 0, width: 110 }}>
+              <label>Qty (of {received})</label>
+              <input
+                type="number" min="0" step="any"
+                value={reverseQty}
+                onChange={e => setReverseQty(e.target.value)}
+                style={{ textAlign: 'right' }}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0, flex: '1 1 160px' }}>
+              <label>Take back from</label>
+              <select value={reverseFrom} onChange={e => setReverseFrom(e.target.value)}>
+                <option value="">— pick a location —</option>
+                {sourceOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            </div>
+            <div className="field" style={{ marginBottom: 0, flex: '2 1 200px' }}>
+              <label>Reason *</label>
+              <input
+                type="text"
+                value={reverseReason}
+                onChange={e => setReverseReason(e.target.value)}
+                placeholder="e.g. counted 8, not 10 · wrong part received"
+                autoComplete="off"
+                name="pr-reverse-reason"
+              />
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', fontSize: 13, background: 'var(--amber)', borderColor: 'var(--amber)' }}
+              onClick={confirmReverse}
+              disabled={reversing}
+            >
+              ↩ {reversing ? 'Reversing…' : `Reverse ${Number(reverseQty) > 0 ? reverseQty : ''}`.trim()}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {open && !done && !reverseOpen && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
           {isFreeform && !resolvedPart && (
             <div style={{ marginBottom: 8 }}>
@@ -1481,6 +1632,21 @@ function ReceiveLineRow({ line, disabled, toLocationId = null, onReceived, onErr
       )}
     </div>
   )
+}
+
+// DB line rows → the editable local line shape (detail-mode load + the
+// re-seed after a full reversal unlocks the table).
+function mapLoadedLines(dbLines) {
+  return (dbLines || []).map((l, i) => ({
+    tempId: l.id || `loaded-${i}`,
+    part_id: l.part_id || null,
+    item_number: l.item_number || '',
+    description: l.description || '',
+    vendor: l.vendor || '',
+    quantity: l.quantity != null ? String(l.quantity) : '',
+    project_reason: l.project_reason || '',
+    unit_cost: l.unit_cost != null ? String(l.unit_cost) : '',
+  }))
 }
 
 function miniToggle(active) {

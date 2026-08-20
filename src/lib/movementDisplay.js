@@ -66,17 +66,27 @@ export function movementDisplay(m) {
   const isAdjustUp   = isAdjust && !fromId && !!toId
   const isAdjustDown = isAdjust && !!fromId && !toId
 
+  // An adjust-down stamped with a PR line is a receipt REVERSAL (Aug 2026):
+  // the dock credited a mis-receipt back to the PO. Same arithmetic as any
+  // adjust-down (signedQty is unchanged); only the label tells the reader it
+  // was a PO correction rather than a count fix.
+  const isReceiptReversal = isAdjustDown && !!m?.purchase_request_line_id
+
   const colors = isAdjustUp
     ? { bg: 'var(--teal-lt)', text: 'var(--accent-dk)', icon: 'plus' }
     : isAdjustDown
-    ? { bg: 'var(--red-lt)',  text: 'var(--red)',       icon: 'x' }
+    ? { bg: 'var(--red-lt)',  text: 'var(--red)',       icon: isReceiptReversal ? 'rotate' : 'x' }
     : base
 
   return {
     colors,
     isAdjustUp,
     isAdjustDown,
-    label: isAdjustUp ? 'Adjust up' : isAdjustDown ? 'Adjust down' : (TYPE_LABELS[type] || type || 'Movement'),
+    isReceiptReversal,
+    label: isAdjustUp ? 'Adjust up'
+      : isReceiptReversal ? 'Receipt reversal'
+      : isAdjustDown ? 'Adjust down'
+      : (TYPE_LABELS[type] || type || 'Movement'),
     sign: isAdjustDown ? -1 : 1,
     qtyPrefix: isAdjustUp ? '+' : isAdjustDown ? '−' : '',
     qtyColor: isAdjustUp ? 'var(--accent-dk)' : isAdjustDown ? 'var(--red)' : 'var(--text)',

@@ -3,6 +3,7 @@ import {
   recordMovementsBatch, getBinsForWarehouse,
   createPart, updatePart, getPurchaseRequests,
   getRefurbTwin, createRefurbTwin,
+  getDefaultReceivingLocation, RECEIVING_BIN_NAME, RETURNS_BIN_NAME,
 } from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
 import SkuLabelSheet from './SkuLabelSheet'
@@ -22,9 +23,8 @@ import Icon from '../shared/Icon'
 // from purchases, and each line is booked onto the part's REFURBISHED TWIN
 // (`<sku>-R`, Sage `UB…_R`) so a used unit never re-enters stock as new.
 // In that mode there is no PO, no vendor and no unit cost; the destination
-// defaults to the "Returns – to test" quarantine bin.
-
-const RETURNS_BIN_NAME = 'Returns – to test'
+// defaults to the "Returns – to test" quarantine bin. Purchases default to
+// the Receiving dock (both bin names live in lib/inventory.js).
 
 const TYPE_ICON = {
   warehouse: '🏭',
@@ -89,16 +89,28 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
       .then(b => {
         if (cancelled) return
         setBins(b)
-        // Field returns quarantine by default: land in the returns bin when
-        // this warehouse has one (manager can still override).
-        if (receiptKind === 'field_return') {
-          const rb = (b || []).find(x => x.name === RETURNS_BIN_NAME)
-          if (rb) setToBinId(rb.id)
-        }
+        // Default bin by receipt type (manager can still override):
+        //   field return → the returns quarantine bin
+        //   purchase     → the Receiving dock
+        const wantName = receiptKind === 'field_return' ? RETURNS_BIN_NAME : RECEIVING_BIN_NAME
+        const rb = (b || []).find(x => x.name === wantName)
+        if (rb) setToBinId(rb.id)
       })
       .catch(() => { if (!cancelled) setBins([]) })
     return () => { cancelled = true }
   }, [toTopId, locations, receiptKind])
+
+  // Purchase mode opens with the Receiving dock's warehouse pre-picked (the
+  // bins effect above then lands on the dock). Once only, on mount — never
+  // fights a later manual pick or clear.
+  useEffect(() => {
+    let cancelled = false
+    getDefaultReceivingLocation().then(d => {
+      if (cancelled || !d) return
+      setToTopId(prev => prev || d.warehouseId)
+    })
+    return () => { cancelled = true }
+  }, [])
 
   // Switching to field-return mode pre-picks a warehouse so the bins effect
   // above can land on the returns bin. `locations` excludes bins (the parent

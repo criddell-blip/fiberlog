@@ -86,6 +86,35 @@ export async function getBinsForWarehouse(warehouseId, { includeInactive = false
   return (data || []).sort((a, b) => compareNamesNatural(a.name, b.name))
 }
 
+// ─── Well-known bins ─────────────────────────────────────────────────────────
+// Resolved by NAME, not by a flag column — same precedent as the field-return
+// quarantine bin. Renaming the bin in the Locations admin silently turns the
+// default off (falls back to "pick one"), which is the right failure mode.
+export const RECEIVING_BIN_NAME = 'Receiving dock'
+export const RETURNS_BIN_NAME   = 'Returns – to test'
+
+// Where a PO delivery should land by default: the active bin named
+// RECEIVING_BIN_NAME plus the warehouse that owns it. Fetches the bin rows
+// itself (getLocations() excludes bins). Never throws — a missing bin just
+// means no default.
+export async function getDefaultReceivingLocation() {
+  try {
+    const { data, error } = await db
+      .from('inventory_locations')
+      .select('id, name, parent_location_id')
+      .eq('type', 'bin')
+      .eq('is_active', true)
+      .eq('name', RECEIVING_BIN_NAME)
+      .limit(1)
+    if (error || !data?.length) return null
+    const bin = data[0]
+    if (!bin.parent_location_id) return null
+    return { warehouseId: bin.parent_location_id, binId: bin.id, binName: bin.name }
+  } catch {
+    return null
+  }
+}
+
 export async function createLocation({ name, type, assigned_to, notes, parent_location_id }) {
   const payload = {
     name,
@@ -2264,7 +2293,7 @@ export async function getMovementsForActivityExport({ since, until, type = null,
     let q = db.from('inventory_movements')
       .select(`
         id, movement_type, receipt_kind, quantity, unit, unit_cost, notes, created_at, occurred_at,
-        submission_id, task_id, vendor_invoice,
+        submission_id, task_id, vendor_invoice, purchase_request_line_id,
         from_location_id, to_location_id,
         part:parts_catalog(id, name, unit),
         from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type),
@@ -2808,7 +2837,24 @@ export async function getPurchaseRequest(prId) {
     .eq('request_id', prId)
     .order('ordered_position', { ascending: true, nullsFirst: false })
   if (linesErr) throw linesErr
-  return { ...pr, lines: lines || [] }
+
+  // Receipt history per line (receives + reversals stamped with the line
+  // link since Aug 2026). Powers the "received into <bin>" readout and the
+  // reversal's default source. Fail-soft: older receipts predate the link
+  // and simply show no history.
+  const receiptsByLine = {}
+  const lineIds = (lines || []).map(l => l.id)
+  if (lineIds.length > 0) {
+    const { data: mv } = await db
+      .from('inventory_movements')
+      .select('id, movement_type, quantity, created_at, notes, from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type), to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type), purchase_request_line_id')
+      .in('purchase_request_line_id', lineIds)
+      .order('created_at', { ascending: true })
+    for (const m of mv || []) {
+      ;(receiptsByLine[m.purchase_request_line_id] ||= []).push(m)
+    }
+  }
+  return { ...pr, lines: (lines || []).map(l => ({ ...l, receipts: receiptsByLine[l.id] || [] })) }
 }
 
 // Update PR header fields (status, vendor, po, ETA, notes, etc.).
@@ -2829,19 +2875,26 @@ export async function updatePurchaseRequest(prId, fields = {}) {
   return data
 }
 
-// Replace a PR's lines (delete all + insert new). Used by the edit flow.
+// Replace a PR's lines. Used by the edit flow.
 // Allowed while pending, or while ordered as long as NOTHING has been
-// received — the delete+reinsert would clobber received_qty, so that guard
-// is load-bearing, not cosmetic. (A wrongly-typed PO is fixable until the
-// first receipt; after that, cancel + re-create.)
+// received — a rewrite would clobber received_qty, so that guard is
+// load-bearing, not cosmetic. (A wrongly-typed PO is fixable until the
+// first receipt, and again after a FULL reversal brings it back to 0.)
+//
+// Lines that still exist (the caller passes the DB id as `tempId`/`id`) are
+// UPDATED in place rather than deleted+reinserted: a reversed-then-edited PO
+// has receive + reversal movements linked to those line ids
+// (inventory_movements.purchase_request_line_id, ON DELETE SET NULL), and a
+// delete would silently strip that provenance. Removed lines are deleted,
+// new lines inserted.
 export async function replacePurchaseRequestLines(prId, lines = []) {
   if (!prId) throw new Error('prId required')
   if (lines.length === 0) throw new Error('At least one line is required')
   // Fail CLOSED: if this read errors, we must not fall through to the
-  // delete+reinsert — that's the received_qty clobber the gate exists for.
+  // rewrite — that's the received_qty clobber the gate exists for.
   const { data: pr, error: prErr } = await db
     .from('purchase_requests')
-    .select('status, lines:purchase_request_lines(received_qty)')
+    .select('status, lines:purchase_request_lines(id, received_qty)')
     .eq('id', prId)
     .maybeSingle()
   if (prErr) throw prErr
@@ -2851,9 +2904,10 @@ export async function replacePurchaseRequestLines(prId, lines = []) {
   if (!editable) {
     throw new Error('Lines can only be edited while pending, or on an ordered PO before anything is received')
   }
-  const { error: delErr } = await db.from('purchase_request_lines').delete().eq('request_id', prId)
-  if (delErr) throw delErr
+  const existingIds = new Set((pr.lines || []).map(l => l.id))
+  const keptIds = new Set()
   const linesPayload = lines.map((l, i) => ({
+    _existingId: existingIds.has(l.id || l.tempId) ? (l.id || l.tempId) : null,
     request_id: prId,
     ordered_position: i,
     vendor: (l.vendor || null) && String(l.vendor).trim() || null,
@@ -2868,12 +2922,38 @@ export async function replacePurchaseRequestLines(prId, lines = []) {
   for (const lp of linesPayload) {
     if (!lp.description) throw new Error('Each line needs a description')
     if (!lp.quantity || lp.quantity <= 0) throw new Error('Each line needs a quantity > 0')
+    if (lp._existingId) {
+      if (keptIds.has(lp._existingId)) throw new Error('Duplicate line id in payload')
+      keptIds.add(lp._existingId)
+    }
   }
-  const { data, error: insErr } = await db
+
+  // 1) Drop lines the user removed (received_qty is 0 everywhere here, so the
+  //    prl_block_received_delete trigger can't fire).
+  const toDelete = [...existingIds].filter(id => !keptIds.has(id))
+  if (toDelete.length > 0) {
+    const { error: delErr } = await db.from('purchase_request_lines').delete().in('id', toDelete)
+    if (delErr) throw delErr
+  }
+  // 2) Update survivors in place.
+  for (const lp of linesPayload) {
+    if (!lp._existingId) continue
+    const { _existingId, ...fields } = lp
+    const { error: upErr } = await db.from('purchase_request_lines').update(fields).eq('id', _existingId)
+    if (upErr) throw upErr
+  }
+  // 3) Insert the new ones.
+  const fresh = linesPayload.filter(lp => !lp._existingId).map(({ _existingId, ...fields }) => fields)
+  if (fresh.length > 0) {
+    const { error: insErr } = await db.from('purchase_request_lines').insert(fresh)
+    if (insErr) throw insErr
+  }
+  const { data, error: readErr } = await db
     .from('purchase_request_lines')
-    .insert(linesPayload)
     .select()
-  if (insErr) throw insErr
+    .eq('request_id', prId)
+    .order('ordered_position', { ascending: true })
+  if (readErr) throw readErr
   return data || []
 }
 
@@ -2891,6 +2971,22 @@ export async function deletePurchaseRequest(prId) {
   if (rErr) throw rErr
   if (recv && recv.length > 0) {
     throw new Error('This PR has received stock — its receipts reference it, so it can\'t be deleted. Set it to Cancelled instead.')
+  }
+  // A fully REVERSED PR passes the received_qty check (it's back to 0) but its
+  // receive + reversal movements still link to its lines
+  // (purchase_request_line_id, ON DELETE SET NULL). Deleting would silently
+  // strip that provenance, so any movement history also blocks delete.
+  const { data: lineRows, error: lErr } = await db
+    .from('purchase_request_lines').select('id').eq('request_id', prId)
+  if (lErr) throw lErr
+  const lineIds = (lineRows || []).map(l => l.id)
+  if (lineIds.length > 0) {
+    const { data: hist, error: hErr } = await db
+      .from('inventory_movements').select('id').in('purchase_request_line_id', lineIds).limit(1)
+    if (hErr) throw hErr
+    if (hist && hist.length > 0) {
+      throw new Error('This PR has receipt history (received then reversed) — it can\'t be deleted. Set it to Cancelled instead.')
+    }
   }
   const { error } = await db.from('purchase_requests').delete().eq('id', prId)
   if (error) throw error
@@ -2935,6 +3031,31 @@ export async function receivePurchaseRequestLine({ lineId, partId = null, quanti
   })
   if (error) throw error
   // RPC returns the header row; reload with lines joined for the sheet.
+  return getPurchaseRequest(pr.id)
+}
+
+// Reverse (part of) a receipt on a PR line — "credit it back to the PO".
+// Atomic RPC `reverse_pr_line_receipt`: books an `adjust` OUT of
+// fromLocationId (must be the PR's Deliver-to or a bin under it, with enough
+// on hand — the RPC blocks rather than driving a bin negative), lowers the
+// line's received_qty, and recomputes the header status (everything back to
+// 0 → 'ordered', which re-unlocks the lines). Reason is required — it's the
+// audit trail in the movement notes. Sage never sees receives or adjusts, so
+// the pair nets to zero there. Returns the reloaded PR.
+export async function reversePurchaseRequestLineReceipt({ lineId, quantity, fromLocationId, reason } = {}) {
+  if (!lineId) throw new Error('lineId required')
+  const qty = Number(quantity)
+  if (!qty || qty <= 0) throw new Error('quantity must be > 0')
+  if (!fromLocationId) throw new Error('fromLocationId required')
+  if (!String(reason || '').trim()) throw new Error('A reason is required')
+
+  const { data: pr, error } = await db.rpc('reverse_pr_line_receipt', {
+    p_line_id: lineId,
+    p_quantity: qty,
+    p_from_location_id: fromLocationId,
+    p_reason: String(reason).trim(),
+  })
+  if (error) throw error
   return getPurchaseRequest(pr.id)
 }
 
