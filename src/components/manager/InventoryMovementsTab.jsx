@@ -3,7 +3,7 @@ import { useApp } from '../../AppContext'
 import { getRecentMovements, getMovementsForActivityExport, movementEffectiveDate } from '../../lib/inventory'
 import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
 import { fmtWhen } from '../../lib/format'
-import { TYPE_COLORS, TYPE_LABELS, movementDisplay, signedQty, resolveReceiveMeta } from '../../lib/movementDisplay'
+import { TYPE_COLORS, TYPE_LABELS, RECEIPT_KIND_LABEL, movementDisplay, signedQty, resolveReceiveMeta } from '../../lib/movementDisplay'
 import { chipStyle, cardSurface, LoadingBlock, EmptyState } from './chrome'
 import Icon from '../shared/Icon'
 
@@ -21,7 +21,12 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
   const [movements, setMovements] = useState([])
   const [loading, setLoading] = useState(true)
   const [filterType, setFilterType] = useState('all')
+  // Receipt-kind sub-filter, meaningful only while the Receive chip is
+  // active: purchases vs field returns vs found. This is the separation the
+  // owner asked for — a returned unit must never be mistaken for a PO.
+  const [filterKind, setFilterKind] = useState('all')
   const [filterLocation, setFilterLocation] = useState('all')
+  const kindFilter = filterType === 'receive' && filterKind !== 'all' ? filterKind : null
   // Export date range — applies ONLY to the CSV export; the live feed above
   // stays "200 most recent" regardless. Defaults to the last 30 days.
   const [exportFrom, setExportFrom] = useState(() =>
@@ -44,12 +49,13 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
         since: new Date(`${exportFrom}T00:00:00`).toISOString(),
         until: new Date(`${exportTo}T23:59:59.999`).toISOString(),
         type: filterType === 'all' ? null : filterType,
+        receiptKind: kindFilter,
         locationId: filterLocation === 'all' ? null : filterLocation,
         maxRows: MAX,
       })
       if (rows.length === 0) { showToast('No movements in that range'); return }
       const headers = [
-        'Date', 'Recorded', 'Type', 'SKU', 'Part', 'Qty', 'Unit',
+        'Date', 'Recorded', 'Type', 'Receipt kind', 'SKU', 'Part', 'Qty', 'Unit',
         'From', 'To', 'By', 'Vendor/Invoice', 'Notes', 'Movement ID',
       ]
       const lines = [headers.map(escapeCsvField).join(',')]
@@ -75,6 +81,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
           eff ? String(eff).slice(0, 10) : '',
           m.created_at ? String(m.created_at).slice(0, 10) : '',
           typeLabel,
+          d.receiptKind ? (RECEIPT_KIND_LABEL[d.receiptKind] || d.receiptKind).toLowerCase() : '',
           m.part?.id || m.part_id || '',
           m.part?.name || '',
           qtySigned,
@@ -105,6 +112,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
       const data = await getRecentMovements({
         limit: 200,
         type: filterType === 'all' ? null : filterType,
+        receiptKind: kindFilter,
         locationId: filterLocation === 'all' ? null : filterLocation,
       })
       setMovements(data)
@@ -115,7 +123,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
     }
   }
 
-  useEffect(() => { load() }, [filterType, filterLocation, refreshKey])
+  useEffect(() => { load() }, [filterType, kindFilter, filterLocation, refreshKey])
 
   return (
     <div>
@@ -128,6 +136,17 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
           </button>
         ))}
       </div>
+      {filterType === 'receive' && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--hint)', fontWeight: 600, marginRight: 2 }}>Receipt kind</span>
+          <button onClick={() => setFilterKind('all')} style={chipStyle(filterKind === 'all')}>All</button>
+          {['purchase', 'field_return', 'found'].map(k => (
+            <button key={k} onClick={() => setFilterKind(k)} style={chipStyle(filterKind === k, k === 'field_return' ? { color: 'amber' } : undefined)}>
+              {RECEIPT_KIND_LABEL[k]}
+            </button>
+          ))}
+        </div>
+      )}
 
       <select
         value={filterLocation}
@@ -174,7 +193,10 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
             // Type accent, adjust direction and endpoint fallbacks all come
             // from lib/movementDisplay so this feed, its CSV export and the
             // part-history panel can't drift apart.
-            const { colors, label, qtyColor, qtyPrefix, fromName, toName } = movementDisplay(m)
+            const { colors, label, qtyColor, qtyPrefix, fromName, toName, receiptKind } = movementDisplay(m)
+            // Non-purchase receipts get a second pill so a field return is
+            // never read as a PO delivery at a glance.
+            const kindPill = receiptKind && receiptKind !== 'purchase' ? (RECEIPT_KIND_LABEL[receiptKind] || receiptKind) : null
             return (
               <div key={m.id} style={{
                 ...cardSurface,
@@ -187,6 +209,13 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
                     fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 999,
                     background: colors.bg, color: colors.text, whiteSpace: 'nowrap',
                   }}><Icon name={colors.icon} size={12} /> {label}</span>
+                  {kindPill && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 999, whiteSpace: 'nowrap',
+                      background: receiptKind === 'field_return' ? 'var(--amber-lt)' : 'var(--gray-lt)',
+                      color: receiptKind === 'field_return' ? 'var(--amber)' : 'var(--muted)',
+                    }}>{kindPill.toUpperCase()}</span>
+                  )}
                   <div style={{ flex: 1, fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {m.part?.name || m.part_id}
                   </div>
@@ -213,6 +242,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
                       const meta = resolveReceiveMeta(m)
                       const bits = []
                       if (meta.vendor) bits.push(`Vendor: ${meta.vendor}`)
+                      if (meta.returnedFrom) bits.push(`Returned from: ${meta.returnedFrom}`)
                       if (meta.reference) bits.push(`Ref: ${meta.reference}`)
                       // Non-receives never resolve, so fall back to the raw column.
                       if (!bits.length && m.vendor_invoice) bits.push(m.vendor_invoice)

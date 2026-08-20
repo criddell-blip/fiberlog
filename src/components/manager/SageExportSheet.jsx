@@ -48,6 +48,10 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
   // consumption + purchases" export. Default off so today's behavior is
   // preserved unless the accountant flips it.
   const [strictConsumption, setStrictConsumption] = useState(false)
+  // Field returns (receipt_kind='field_return') are the one receive class
+  // Sage can't learn about from the AP side — no PO, no invoice. OFF until
+  // accounting says how they want UB…_R receipts booked (Aug 2026).
+  const [includeFieldReturns, setIncludeFieldReturns] = useState(false)
   const [movements, setMovements] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -80,7 +84,7 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
   // Filter to exportable + count by type. Pass strict-consumption flag
   // so the same filter decision drives both the on-screen preview and
   // the CSV builder (buildSageCsv runs the same filter at write time).
-  const filterOpts = useMemo(() => ({ strictConsumption }), [strictConsumption])
+  const filterOpts = useMemo(() => ({ strictConsumption, includeFieldReturns }), [strictConsumption, includeFieldReturns])
   const exportable = useMemo(
     () => movements.filter(m => isExportableMovement(m, filterOpts)),
     [movements, filterOpts]
@@ -193,6 +197,18 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
             />
             Strict consumption only
           </label>
+          <label
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}
+            title="Also export field returns — used units received onto their refurbished twin (Sage UB…_R) — as Inventory Receipt lines. Purchases never export. Leave OFF until accounting confirms how they want these booked."
+          >
+            <input
+              type="checkbox"
+              checked={includeFieldReturns}
+              onChange={e => setIncludeFieldReturns(e.target.checked)}
+              disabled={submitting}
+            />
+            Include field returns <span style={{ color: 'var(--amber)', fontWeight: 700 }}>(pending accounting)</span>
+          </label>
           <button onClick={load} className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12 }} disabled={loading || submitting}>
             {loading ? 'Loading…' : 'Refresh'}
           </button>
@@ -230,7 +246,7 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
             <span><strong style={{ color: 'var(--text)' }}>{exportable.length}</strong> ready to export</span>
             {skippedInternal > 0 && (
               <span style={{ color: 'var(--hint)' }}>
-                {skippedInternal} skipped (receipts + adjusts + internal staging{strictConsumption ? ' + crew loads/returns' : ''})
+                {skippedInternal} skipped ({includeFieldReturns ? 'purchase receipts' : 'receipts'} + adjusts + internal staging{strictConsumption ? ' + crew loads/returns' : ''})
               </span>
             )}
             {Object.entries(typeCounts).map(([type, count]) => (

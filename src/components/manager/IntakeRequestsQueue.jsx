@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getIntakeRequests, approveIntakeRequest, rejectIntakeRequest, stampPartCreatedVia } from '../../lib/inventory'
+import { getIntakeRequests, approveIntakeRequest, rejectIntakeRequest, stampPartCreatedVia, getRefurbTwin } from '../../lib/inventory'
 import { db } from '../../lib/supabase'
 import { useApp } from '../../AppContext'
 import useRealtimeQueue from '../../lib/useRealtimeQueue'
@@ -61,7 +61,7 @@ export default function IntakeRequestsQueue() {
     channelPrefix: 'manager_intake_',
     onEvent: type => {
       loadRequests()
-      if (type === 'INSERT') showToast('New found-inventory request')
+      if (type === 'INSERT') showToast('New found-inventory / field-return request')
     },
   })
 
@@ -148,6 +148,7 @@ export default function IntakeRequestsQueue() {
                     <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {partLabel(r)}
                       {r.is_draft && <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 4, background: 'var(--purple-lt)', color: 'var(--purple)' }}>NEW</span>}
+                      {r.intake_kind === 'field_return' && <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 4, background: 'var(--amber-lt)', color: 'var(--amber)' }}>FIELD RETURN</span>}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                       {r.requested_by_user?.name} · {fmtShortDateTime(r.created_at)}
@@ -174,6 +175,7 @@ export default function IntakeRequestsQueue() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
           <div style={{ fontWeight: 800, fontSize: 17 }}>{partLabel(sel)}</div>
           {sel.is_draft && <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 4, background: 'var(--purple-lt)', color: 'var(--purple)' }}>NEW PART</span>}
+          {sel.intake_kind === 'field_return' && <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 4, background: 'var(--amber-lt)', color: 'var(--amber)' }}>FIELD RETURN</span>}
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
           Reported by {sel.requested_by_user?.name} · {new Date(sel.created_at).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
@@ -186,7 +188,7 @@ export default function IntakeRequestsQueue() {
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>Book into</div>
-            <div style={{ fontWeight: 700 }}>🏭 {sel.target_location?.name || '—'}</div>
+            <div style={{ fontWeight: 700 }}>{sel.target_location?.type === 'bin' ? '📥' : '🏭'} {sel.target_location?.name || '—'}</div>
           </div>
           {sel.part_id && (
             <div style={{ gridColumn: '1 / -1' }}>
@@ -200,6 +202,7 @@ export default function IntakeRequestsQueue() {
               Will be created as a <strong>draft part</strong> on approval — review it under Parts → Drafts afterward.
             </div>
           )}
+          {sel.intake_kind === 'field_return' && <FieldReturnBooking req={sel} />}
         </div>
 
         {sel.reason && (
@@ -227,4 +230,42 @@ export default function IntakeRequestsQueue() {
       </>
     )
   }
+}
+
+// ─── Field-return booking preview ────────────────────────────────────────────
+// Approval books the part's refurbished twin (approve_intake_request swaps it
+// server-side). Show the manager exactly what will land so a missing twin is
+// caught BEFORE the irreversible receive, not after. Already-approved rows
+// carry the booked part_id, so the lookup is only for pending ones.
+function FieldReturnBooking({ req }) {
+  const [twin, setTwin] = useState(undefined)   // undefined = looking
+  const partId = req?.part_id
+  const pending = req?.status === 'pending'
+  useEffect(() => {
+    let cancelled = false
+    setTwin(undefined)
+    if (!partId || !pending) { setTwin(null); return }
+    getRefurbTwin(partId).then(t => { if (!cancelled) setTwin(t) }).catch(() => { if (!cancelled) setTwin(null) })
+    return () => { cancelled = true }
+  }, [partId, pending])
+
+  if (!pending) {
+    return (
+      <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--muted)' }}>
+        Booked as a <strong>field return</strong>{req.part?.name ? <> onto <strong>{req.part.name}</strong></> : null}.
+      </div>
+    )
+  }
+  if (twin === undefined) return null
+  return twin ? (
+    <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--text)', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+      <Icon name="rotate" size={13} style={{ marginTop: 1, flexShrink: 0, color: 'var(--amber)' }} />
+      <span>Will be booked as <strong>{twin.name}</strong> <span className="mono" style={{ color: 'var(--muted)' }}>{twin.id}{twin.sage_id ? ` · Sage ${twin.sage_id}` : ''}</span> — a <strong>field return</strong>, kept separate from purchases.</span>
+    </div>
+  ) : (
+    <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--amber)', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+      <Icon name="alert" size={13} style={{ marginTop: 1, flexShrink: 0 }} />
+      <span>No refurbished twin in the catalog — approving books the used unit onto the <strong>original part</strong> as a field return. To keep it separate, create <span className="mono">{partId}-R</span> first (Receive PO → Returned from field does this in one tap), then approve.</span>
+    </div>
+  )
 }

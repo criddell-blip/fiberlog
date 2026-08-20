@@ -677,6 +677,10 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                           {t('akaWord', lang)} {group.nickname}
                         </span>
                       )}
+                      {/* Refurbished twin — so a crew loading "Wave LR" can tell the used ones from new. */}
+                      {group.refurb_of && (
+                        <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 4, background: 'var(--amber-lt)', color: 'var(--amber)', verticalAlign: '1px' }}>REFURB</span>
+                      )}
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'var(--font-mono)' }}>
                       {group.partId} · {group.totalQty.toLocaleString()} {group.unit || 'ea'} {t('acrossWord', lang)} {group.locations.length} {group.locations.length === 1 ? t('locationOne', lang) : t('locationMany', lang)}

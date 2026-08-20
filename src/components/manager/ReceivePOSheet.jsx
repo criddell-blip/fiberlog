@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import {
   recordMovementsBatch, getBinsForWarehouse,
   createPart, updatePart, getPurchaseRequests,
+  getRefurbTwin, createRefurbTwin,
 } from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
 import SkuLabelSheet from './SkuLabelSheet'
@@ -14,6 +15,16 @@ import Icon from '../shared/Icon'
 // (saved into each row's vendor_invoice) and a single destination location.
 // Vendor name (free text) is stored in the row's notes when provided —
 // no vendor catalog yet, see backlog #12 for the bigger version.
+//
+// Receipt type (Aug 2026): the same sheet also books FIELD RETURNS — used
+// units pulled from a customer/site. Those are `receive` rows too, but with
+// receipt_kind='field_return' so Activity / reports / Sage can separate them
+// from purchases, and each line is booked onto the part's REFURBISHED TWIN
+// (`<sku>-R`, Sage `UB…_R`) so a used unit never re-enters stock as new.
+// In that mode there is no PO, no vendor and no unit cost; the destination
+// defaults to the "Returns – to test" quarantine bin.
+
+const RETURNS_BIN_NAME = 'Returns – to test'
 
 const TYPE_ICON = {
   warehouse: '🏭',
@@ -27,6 +38,9 @@ let nextLineId = 1
 const newLine = () => ({ tempId: nextLineId++, part: null, quantity: '', unit_cost: '' })
 
 export default function ReceivePOSheet({ locations, currentUser, onClose, onRecorded, onOpenPr, onCreatePo }) {
+  // 'purchase' (PO / vendor delivery — the original sheet) | 'field_return'
+  const [receiptKind, setReceiptKind] = useState('purchase')
+  const isReturn = receiptKind === 'field_return'
   const [poRef, setPoRef]         = useState('')
   const [vendorName, setVendorName] = useState('')
   const [toTopId, setToTopId]     = useState('')
@@ -72,10 +86,44 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
     if (loc?.type !== 'warehouse') { setBins([]); return }
     let cancelled = false
     getBinsForWarehouse(toTopId)
-      .then(b => { if (!cancelled) setBins(b) })
+      .then(b => {
+        if (cancelled) return
+        setBins(b)
+        // Field returns quarantine by default: land in the returns bin when
+        // this warehouse has one (manager can still override).
+        if (receiptKind === 'field_return') {
+          const rb = (b || []).find(x => x.name === RETURNS_BIN_NAME)
+          if (rb) setToBinId(rb.id)
+        }
+      })
       .catch(() => { if (!cancelled) setBins([]) })
     return () => { cancelled = true }
-  }, [toTopId, locations])
+  }, [toTopId, locations, receiptKind])
+
+  // Switching to field-return mode pre-picks a warehouse so the bins effect
+  // above can land on the returns bin. `locations` excludes bins (the parent
+  // loads getLocations() without includeBins), so the bin itself is found
+  // there, not here — this only has to choose the warehouse.
+  useEffect(() => {
+    if (receiptKind !== 'field_return' || toTopId) return
+    const wh = locations.find(l => l.type === 'warehouse' && l.is_active !== false)
+    if (wh) setToTopId(wh.id)
+  }, [receiptKind, toTopId, locations])
+
+  // Changing the receipt type invalidates every picked line: the twin swap
+  // happens at pick time, so lines keyed under Purchase would go out as
+  // field returns on the PARENT part — the exact "used unit re-enters stock
+  // as new" this mode exists to prevent. Clear them (confirm if any exist).
+  function switchReceiptKind(k) {
+    if (k === receiptKind) return
+    const hasLines = lines.some(l => l.part || String(l.quantity).trim())
+    if (hasLines && !window.confirm('Switching receipt type clears the line items (they must be re-picked so returns land on the refurbished part). Continue?')) return
+    setLines([newLine()])
+    setPoRef('')
+    setVendorName('')
+    setError('')
+    setReceiptKind(k)
+  }
 
   function updateLine(tempId, patch) {
     setLines(prev => prev.map(l => l.tempId === tempId ? { ...l, ...patch } : l))
@@ -85,7 +133,9 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
 
   const validLines = lines.filter(l => l.part && Number(l.quantity) > 0)
   const dest = toBinId || toTopId
-  const canSubmit = poRef.trim() && dest && validLines.length > 0 && !submitting
+  // A PO ref is required for purchases (it's the AP tie-back); a field
+  // return has no PO — the ref field becomes an optional ticket/RMA number.
+  const canSubmit = (isReturn || poRef.trim()) && dest && validLines.length > 0 && !submitting
 
   async function handleSubmit() {
     setError('')
@@ -145,11 +195,14 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
       }
 
       // Step 3: insert all the receive movements as a batch
+      // "Vendor: X" vs "Returned from: X" — resolveReceiveMeta keys on the
+      // prefix, and a customer name must never be parsed as a vendor.
       const noteFromVendor = vendorName.trim()
-        ? `Vendor: ${vendorName.trim()}`
+        ? (isReturn ? `Returned from: ${vendorName.trim()}` : `Vendor: ${vendorName.trim()}`)
         : null
       const movements = validLines.map(l => ({
         movement_type: 'receive',
+        receipt_kind: receiptKind,
         part_id: l.part.id,
         quantity: Number(l.quantity),
         // An attrs-edit changes the catalog unit above — the movement row
@@ -157,8 +210,9 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
         unit: l.pendingAttrs?.unit || l.part.unit || null,
         from_location_id: null,
         to_location_id: dest,
-        vendor_invoice: poRef.trim(),
-        unit_cost: l.unit_cost === '' ? null : Number(l.unit_cost),
+        vendor_invoice: poRef.trim() || null,
+        // A returned unit's value is Sage's business (the _R item); no line cost.
+        unit_cost: isReturn || l.unit_cost === '' ? null : Number(l.unit_cost),
         notes: noteFromVendor,
         created_by: currentUser?.id,
       }))
@@ -168,6 +222,7 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
       // showing the print-labels offer instead of closing.
       setJustReceived(validLines.map(l => ({
         id: l.part.id, name: l.part.name, unit: l.part.unit,
+        refurb_of: l.part.refurb_of || null, sage_id: l.part.sage_id || null,
       })))
     } catch (e) {
       setError(e.message || String(e))
@@ -232,11 +287,37 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
     <div className="overlay open">
       <div className="overlay-sheet" style={{ maxWidth: 760, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-          <Icon name="download" size={18} />
-          <span style={{ fontWeight: 800, fontSize: 17 }}>Receive PO / vendor delivery</span>
+          <Icon name={isReturn ? 'rotate' : 'download'} size={18} />
+          <span style={{ fontWeight: 800, fontSize: 17 }}>{isReturn ? 'Receive returned equipment' : 'Receive PO / vendor delivery'}</span>
         </div>
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
-          Each line becomes its own <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>receive</code> movement, all sharing the PO ref and destination.
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+          {isReturn
+            ? <>Used units pulled from a customer or site. Each line is booked onto the part's <strong>refurbished twin</strong> (Sage <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>UB…_R</code>) as a <em>field return</em> — kept separate from purchases everywhere.</>
+            : <>Each line becomes its own <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>receive</code> movement, all sharing the PO ref and destination.</>}
+        </div>
+
+        {/* Receipt type. Same table, different receipt_kind — the owner's
+            requirement is that a returned unit can never be mistaken for a
+            new-purchase receipt in any report. */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+          {[['purchase', 'download', 'Purchase order'], ['field_return', 'rotate', 'Returned from field']].map(([k, icon, label]) => {
+            const on = receiptKind === k
+            const accent = k === 'field_return' ? 'var(--amber)' : 'var(--dark-bar)'
+            return (
+              <button
+                key={k}
+                onClick={() => switchReceiptKind(k)}
+                disabled={submitting}
+                style={{
+                  flex: 1, height: 34, borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  background: on ? accent : 'var(--surface)',
+                  color: on ? '#fff' : 'var(--muted)',
+                  border: `1px solid ${on ? accent : 'var(--border2)'}`,
+                }}
+              ><Icon name={icon} size={13} /> {label}</button>
+            )
+          })}
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
@@ -245,8 +326,9 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
               the PR sheet's receive panel instead of re-keying them here.
               This section is the PO front door: it also carries the
               "Create a PO" affordance so a delivery you're EXPECTING gets
-              typed in ahead of time instead of re-keyed at the dock. */}
-          {(openPos.length > 0 || onCreatePo) && (
+              typed in ahead of time instead of re-keyed at the dock.
+              Irrelevant to a field return — there is no PO. */}
+          {!isReturn && (openPos.length > 0 || onCreatePo) && (
             <div style={{ marginBottom: 14 }}>
               <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -325,21 +407,21 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
           {/* PO ref + Vendor (optional free text) */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label>PO / invoice ref *</label>
+              <label>{isReturn ? 'Ticket / RMA ref (optional)' : 'PO / invoice ref *'}</label>
               <input
                 type="text" value={poRef}
                 onChange={e => setPoRef(e.target.value)}
-                placeholder="e.g. PO-12345"
+                placeholder={isReturn ? 'e.g. Sonar ticket 48213' : 'e.g. PO-12345'}
                 autoFocus
                 autoComplete="off" name="po-ref"
               />
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label>Vendor (optional)</label>
+              <label>{isReturn ? 'Returned from (customer / site / tech)' : 'Vendor (optional)'}</label>
               <input
                 type="text" value={vendorName}
                 onChange={e => setVendorName(e.target.value)}
-                placeholder="e.g. Acme Supply Co"
+                placeholder={isReturn ? 'e.g. 123 Main St, Heber — J. Smith' : 'e.g. Acme Supply Co'}
                 autoComplete="off" name="po-vendor"
               />
             </div>
@@ -399,6 +481,8 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
             <ReceiveLineRow
               key={line.tempId}
               line={line}
+              isReturn={isReturn}
+              currentUser={currentUser}
               onChange={patch => updateLine(line.tempId, patch)}
               onRemove={lines.length > 1 ? () => removeLine(line.tempId) : null}
             />
@@ -415,7 +499,7 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
             }}
           ><Icon name="plus" size={14} /> Add line</button>
 
-          {total > 0 && (
+          {!isReturn && total > 0 && (
             <div style={{
               marginTop: 12, padding: '8px 12px',
               background: 'var(--surface2)', borderRadius: 'var(--r-sm)',
@@ -461,8 +545,11 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
 // The parent's handleSubmit reads both and does the catalog work before
 // inserting the receive movements.
 
-function ReceiveLineRow({ line, onChange, onRemove }) {
+function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUser = null }) {
   const [query, setQuery] = useState('')
+  const [twinBusy, setTwinBusy] = useState(false)
+  const pickSeq = useRef(0)   // guards the async twin lookup against a faster second pick
+  const [twinError, setTwinError] = useState('')
   const [results, setResults] = useState([])
   const [searching, setSearching] = useState(false)
   const searchTimer = useRef(null)
@@ -483,7 +570,9 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
     setSearching(true)
     searchTimer.current = setTimeout(async () => {
       try {
-        const data = await searchPartsCatalog(query, { limit: 8 })
+        // Full attrs so a field return can mint the refurb twin from the
+        // picked parent without a second round-trip.
+        const data = await searchPartsCatalog(query, { limit: 8, cols: 'id, name, nickname, unit, department, material_group, sage_id, refurb_of, is_active' })
         setResults(data)
       } catch (e) {
         console.warn('Part search failed:', e)
@@ -495,14 +584,53 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current) }
   }, [query, line.part, mode])
 
-  function pickPart(p) {
-    onChange({
-      part: { id: p.id, name: p.name, unit: p.unit, isNew: false,
-              department: p.department, material_group: p.material_group },
-      pendingAttrs: null,
-    })
+  const asLinePart = p => ({
+    id: p.id, name: p.name, unit: p.unit, isNew: false,
+    department: p.department, material_group: p.material_group,
+    sage_id: p.sage_id || null, refurb_of: p.refurb_of || null,
+  })
+
+  async function pickPart(p) {
     setQuery('')
     setResults([])
+    setTwinError('')
+    if (!isReturn || p.refurb_of) {
+      // Purchase, or the manager picked the twin directly.
+      onChange({ part: asLinePart(p), pendingAttrs: null })
+      return
+    }
+    // Field return: book onto the refurbished twin. Put the parent on the
+    // line immediately (flagged "resolving") so the row never looks empty,
+    // then upgrade to the twin when the lookup lands — unless a later pick
+    // superseded this one (seq guard), in which case the stale result is
+    // dropped instead of overwriting the newer choice.
+    const seq = ++pickSeq.current
+    onChange({ part: { ...asLinePart(p), resolvingTwin: true, parentFull: p }, pendingAttrs: null })
+    let twin = null
+    try { twin = await getRefurbTwin(p.id) } catch { /* fall through to the no-twin path */ }
+    if (seq !== pickSeq.current) return
+    if (twin) {
+      onChange({ part: { ...asLinePart(twin), swappedFrom: { id: p.id, name: p.name } }, pendingAttrs: null })
+    } else {
+      onChange({ part: { ...asLinePart(p), noTwin: true, parentFull: p }, pendingAttrs: null })
+    }
+  }
+
+  async function mintTwin() {
+    const parent = line.part?.parentFull
+    if (!parent) return
+    setTwinBusy(true)
+    setTwinError('')
+    try {
+      const twin = await createRefurbTwin(parent, {
+        created_via: { source: 'Receive PO (field return)', by: currentUser?.name || null },
+      })
+      onChange({ part: { ...asLinePart(twin), swappedFrom: { id: parent.id, name: parent.name } }, pendingAttrs: null })
+    } catch (e) {
+      setTwinError(e?.message || String(e))
+    } finally {
+      setTwinBusy(false)
+    }
   }
 
   function startCreate() {
@@ -692,8 +820,31 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
                 {line.pendingAttrs && (
                   <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 6, background: 'var(--orange)', color: 'white' }}>EDITED</span>
                 )}
+                {line.part.refurb_of && (
+                  <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 6, background: 'var(--amber)', color: 'white' }}>REFURB</span>
+                )}
               </div>
-              <div style={{ fontSize: 10, color: 'var(--hint)' }}>{line.part.id}</div>
+              <div style={{ fontSize: 10, color: 'var(--hint)' }}>
+                {line.part.id}
+                {line.part.sage_id && <span> · Sage {line.part.sage_id}</span>}
+                {line.part.swappedFrom && <span> · picked as {line.part.swappedFrom.name}</span>}
+              </div>
+              {/* Field return onto a part with no refurbished twin: the
+                  honest booking is the _R item, so offer to mint it here
+                  rather than silently receiving a used unit as new. */}
+              {isReturn && line.part.resolvingTwin && (
+                <div style={{ marginTop: 4, fontSize: 10, color: 'var(--hint)' }}>Looking up refurbished twin…</div>
+              )}
+              {isReturn && line.part.noTwin && (
+                <div style={{ marginTop: 4, fontSize: 10, color: 'var(--amber)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <Icon name="alert" size={11} /> No refurbished twin — will receive as the original part.
+                  <button
+                    onClick={mintTwin} disabled={twinBusy}
+                    style={{ fontSize: 10, color: 'var(--amber)', background: 'none', border: '1px solid var(--amber)', borderRadius: 6, padding: '1px 7px', cursor: 'pointer', fontWeight: 700 }}
+                  >{twinBusy ? 'Creating…' : `Create ${line.part.id}-R`}</button>
+                  {twinError && <span style={{ color: 'var(--red)' }}>{twinError}</span>}
+                </div>
+              )}
             </div>
             {!line.part.isNew && (
               <button
@@ -734,19 +885,30 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
                   </div>
                 ))}
                 {/* "No match" / "Add new" affordance always visible at bottom
-                    when we have a query, even if there are partial matches */}
-                <div
-                  onClick={startCreate}
-                  style={{
-                    padding: '8px 10px', cursor: 'pointer',
-                    background: 'var(--teal-lt)', color: 'var(--teal-dk)',
-                    fontWeight: 700, fontSize: 12,
-                    borderTop: results.length > 0 ? '1px solid var(--border)' : 'none',
-                    display: 'flex', alignItems: 'center', gap: 5,
-                  }}
-                >
-                  <Icon name="plus" size={13} /> Create new part {query.trim() && <span style={{ fontWeight: 400 }}>— "{query.trim()}"</span>}
-                </div>
+                    when we have a query, even if there are partial matches.
+                    Not for field returns: returned gear is by definition an
+                    existing catalog part, and a part minted here would have
+                    no refurb twin to land on. */}
+                {isReturn ? (
+                  results.length === 0 && (
+                    <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--hint)' }}>
+                      No match. Returned equipment must already be a catalog part — receive it as a purchase first if it's genuinely new.
+                    </div>
+                  )
+                ) : (
+                  <div
+                    onClick={startCreate}
+                    style={{
+                      padding: '8px 10px', cursor: 'pointer',
+                      background: 'var(--teal-lt)', color: 'var(--teal-dk)',
+                      fontWeight: 700, fontSize: 12,
+                      borderTop: results.length > 0 ? '1px solid var(--border)' : 'none',
+                      display: 'flex', alignItems: 'center', gap: 5,
+                    }}
+                  >
+                    <Icon name="plus" size={13} /> Create new part {query.trim() && <span style={{ fontWeight: 400 }}>— "{query.trim()}"</span>}
+                  </div>
+                )}
               </div>
             )}
           </>
@@ -770,17 +932,20 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
         )}
       </div>
 
-      {/* Unit cost (optional) */}
-      <div style={{ width: 90 }}>
-        <input
-          type="number" min="0" step="any"
-          value={line.unit_cost}
-          onChange={e => onChange({ unit_cost: e.target.value })}
-          placeholder="$ each"
-          autoComplete="off" name={`po-line-cost-${line.tempId}`}
-          style={{ width: '100%', padding: '6px 10px', fontSize: 12, border: '1px solid var(--border2)', borderRadius: 6, background: 'var(--bg)', textAlign: 'right' }}
-        />
-      </div>
+      {/* Unit cost (optional) — not for field returns; a returned unit's
+          value lives on Sage's _R item, not on this line. */}
+      {!isReturn && (
+        <div style={{ width: 90 }}>
+          <input
+            type="number" min="0" step="any"
+            value={line.unit_cost}
+            onChange={e => onChange({ unit_cost: e.target.value })}
+            placeholder="$ each"
+            autoComplete="off" name={`po-line-cost-${line.tempId}`}
+            style={{ width: '100%', padding: '6px 10px', fontSize: 12, border: '1px solid var(--border2)', borderRadius: 6, background: 'var(--bg)', textAlign: 'right' }}
+          />
+        </div>
+      )}
 
       {onRemove ? (
         <button

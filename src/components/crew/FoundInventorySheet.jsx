@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../AppContext'
 import { searchParts } from '../../lib/supabase'
-import { getLocations, createIntakeRequest } from '../../lib/inventory'
+import { getLocations, createIntakeRequest, getRefurbTwin } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
 import { t } from '../../lib/i18n'
 import Icon from '../shared/Icon'
@@ -13,11 +13,24 @@ import Icon from '../shared/Icon'
 // no qty cap (found stock has no on-hand to bound it), and the draft fields are
 // carried on the request (the part is created by the approval RPC, not here —
 // crew can't write parts_catalog).
-export default function FoundInventorySheet({ onClose, onComplete }) {
+//
+// mode='field_return' (Aug 2026) reuses the same request pipeline for a used
+// unit PULLED FROM A CUSTOMER / SITE: intake_kind='field_return', destination
+// is the "Returns – to test" quarantine bin, no new-part drafts (returned
+// gear is by definition a catalog part), and on approval the RPC books the
+// part's REFURBISHED TWIN (<sku>-R, Sage UB…_R) so a used unit never re-enters
+// stock as new. The sheet previews that twin so the crew sees what will land.
+const RETURNS_BIN_NAME = 'Returns – to test'
+
+export default function FoundInventorySheet({ onClose, onComplete, mode = 'found' }) {
   const { currentUser, showToast, lang } = useApp()
+  const isReturn = mode === 'field_return'
 
   // Part selection: either an existing catalog part, or a new draft.
   const [partSel, setPartSel] = useState(null)      // { id, name, unit } | null
+  const [twin, setTwin] = useState(undefined)       // field_return: undefined = looking, null = none, obj = twin
+  const twinSeq = useRef(0)
+  const [returnsBin, setReturnsBin] = useState(null) // field_return: { id, name, parentName } when the bin exists
   const [showDraft, setShowDraft] = useState(false)
   const [draftName, setDraftName] = useState('')
   const [draftUnit, setDraftUnit] = useState('ea')
@@ -45,16 +58,27 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
   // Load warehouses once; auto-select if there's only one.
   useEffect(() => {
     let cancelled = false
-    getLocations()
+    getLocations({ includeBins: isReturn })
       .then(list => {
         if (cancelled) return
         const whs = (list || []).filter(l => l.type === 'warehouse')
         setWarehouses(whs)
+        // Field returns quarantine: land in the returns bin when it exists
+        // and skip the picker. Falls back to the warehouse list otherwise.
+        if (isReturn) {
+          const rb = (list || []).find(l => l.type === 'bin' && l.name === RETURNS_BIN_NAME && l.is_active !== false)
+          if (rb) {
+            const parent = whs.find(w => w.id === rb.parent_location_id)
+            setReturnsBin({ id: rb.id, name: rb.name, parentName: parent?.name || '' })
+            setLocId(rb.id)
+            return
+          }
+        }
         if (whs.length === 1) setLocId(whs[0].id)
       })
       .catch(e => console.warn('Load warehouses failed:', e))
     return () => { cancelled = true }
-  }, [])
+  }, [isReturn])
 
   async function handleSearch(q) {
     setQuery(q)
@@ -70,13 +94,25 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
   }
 
   function pickExisting(p) {
-    setPartSel({ id: p.id, name: p.name, unit: p.unit || 'ea' })
+    setPartSel({ id: p.id, name: p.name, unit: p.unit || 'ea', refurb_of: p.refurb_of || null })
     setShowDraft(false)
     setError('')
+    if (isReturn) {
+      // Preview what approval will book. Picking the twin itself = no swap.
+      // Seq-guarded: a faster second pick must not be overwritten by the
+      // first pick's late result (display only — the RPC does the real swap).
+      if (p.refurb_of) { setTwin(null); return }
+      setTwin(undefined)
+      const seq = ++twinSeq.current
+      getRefurbTwin(p.id)
+        .then(t => { if (seq === twinSeq.current) setTwin(t) })
+        .catch(() => { if (seq === twinSeq.current) setTwin(null) })
+    }
   }
 
   function clearPart() {
     setPartSel(null)
+    setTwin(undefined)
     setShowDraft(false)
     setQuery('')
     setResults([])
@@ -111,6 +147,7 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
         targetLocationId: locId,
         reason,
         requestedBy: currentUser?.id,
+        intakeKind: isReturn ? 'field_return' : 'found',
       })
       showToast(t('sentForApproval', lang))
       onComplete ? onComplete() : onClose()
@@ -128,8 +165,8 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
     <div className="overlay open">
       <div className="overlay-sheet" style={{ maxWidth: 480, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14, flexShrink: 0 }}>
-          <Icon name="box" size={19} />
-          <div style={{ fontWeight: 800, fontSize: 17 }}>{t('reportFoundInventory', lang)}</div>
+          <Icon name={isReturn ? 'rotate' : 'box'} size={19} />
+          <div style={{ fontWeight: 800, fontSize: 17 }}>{t(isReturn ? 'pulledFromCustomer' : 'reportFoundInventory', lang)}</div>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -143,6 +180,16 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{partSel.name}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{partSel.id}</div>
+                {/* Field return: what approval will actually book. */}
+                {isReturn && !partSel.refurb_of && twin !== undefined && (
+                  twin
+                    ? <div style={{ fontSize: 12, marginTop: 6, color: 'var(--text)' }}>
+                        <Icon name="rotate" size={12} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 4 }} />
+                        {t('bookedAsRefurb', lang)} <strong>{twin.name}</strong>
+                        <span style={{ color: 'var(--muted)', fontFamily: 'var(--font-mono)', marginLeft: 4 }}>{twin.id}</span>
+                      </div>
+                    : <div style={{ fontSize: 11, marginTop: 6, color: 'var(--amber)' }}>{t('noRefurbTwin', lang)}</div>
+                )}
               </div>
               <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} onClick={clearPart}>{t('change', lang)}</button>
             </div>
@@ -201,17 +248,34 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
                   </div>
                 </div>
               ))}
-              <button
-                className="btn btn-ghost"
-                style={{ width: '100%', marginTop: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-                onClick={startDraft}
-              >
-                <Icon name="plus" size={15} /> {t('cantFindAddNew', lang)}
-              </button>
+              {/* Returned equipment is always an existing catalog part — no
+                  drafts in field-return mode. */}
+              {isReturn ? (
+                query.trim().length >= 2 && !searching && results.length === 0 && (
+                  <div style={{ fontSize: 12, color: 'var(--hint)', padding: '8px 0' }}>{t('pulledOnlyCatalog', lang)}</div>
+                )
+              ) : (
+                <button
+                  className="btn btn-ghost"
+                  style={{ width: '100%', marginTop: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                  onClick={startDraft}
+                >
+                  <Icon name="plus" size={15} /> {t('cantFindAddNew', lang)}
+                </button>
+              )}
             </div>
           )}
 
           {/* ── Destination warehouse ────────────────────────────────────── */}
+          {returnsBin ? (
+            <div className="field">
+              <label>{t('booksInto', lang)}</label>
+              <div style={{ padding: '10px 12px', background: 'var(--bg)', border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', fontSize: 14, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                <span aria-hidden>📥</span>{returnsBin.name}
+                {returnsBin.parentName && <span style={{ color: 'var(--hint)', fontWeight: 400, fontSize: 12 }}>· {returnsBin.parentName}</span>}
+              </div>
+            </div>
+          ) : (
           <div className="field">
             <label>{t('bookIntoWarehouse', lang)}</label>
             {warehouses.length === 0 ? (
@@ -239,6 +303,7 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
               </div>
             )}
           </div>
+          )}
 
           {/* ── Quantity + reason ────────────────────────────────────────── */}
           <div className="field">
@@ -254,11 +319,11 @@ export default function FoundInventorySheet({ onClose, onComplete }) {
           </div>
 
           <div className="field">
-            <label>{t('whereWhyFound', lang)}</label>
+            <label>{t(isReturn ? 'pulledWhereWhy' : 'whereWhyFound', lang)}</label>
             <textarea
               value={reason}
               onChange={e => setReason(e.target.value)}
-              placeholder={t('foundReasonPh', lang)}
+              placeholder={t(isReturn ? 'pulledReasonPh' : 'foundReasonPh', lang)}
               rows={2}
               style={{ width: '100%', resize: 'vertical' }}
             />

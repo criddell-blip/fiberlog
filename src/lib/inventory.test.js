@@ -238,6 +238,24 @@ describe('isExportableMovement', () => {
     }))).toBe(false)
   })
 
+  // A field return is a used unit booked onto its refurbished twin (Sage
+  // UB…_R). No PO / AP invoice exists, so it's the one receive Sage can only
+  // learn about from us — but only when accounting has opted in.
+  it('exports a field_return receive ONLY with includeFieldReturns; never purchases/found/seed', () => {
+    const fr = mv({ movement_type: 'receive', receipt_kind: 'field_return', from_location: null, to_location: BIN_A })
+    expect(isExportableMovement(fr)).toBe(false)
+    expect(isExportableMovement(fr, { includeFieldReturns: true })).toBe(true)
+    expect(isExportableMovement(fr, { includeFieldReturns: true, strictConsumption: true })).toBe(true)
+    for (const kind of ['purchase', 'found', 'seed', 'decommission', null]) {
+      const r = mv({ movement_type: 'receive', receipt_kind: kind, from_location: null, to_location: WAREHOUSE })
+      expect(isExportableMovement(r, { includeFieldReturns: true })).toBe(false)
+    }
+    const rows = csvRows(buildSageCsv([fr, mv({ movement_type: 'receive', receipt_kind: 'purchase', from_location: null, to_location: WAREHOUSE })], { includeFieldReturns: true }))
+    expect(rows).toHaveLength(1)
+    expect(rows[0][col('TRANSACTIONTYPE')]).toBe('Inventory Receipt')
+    expect(rows[0][col('VENDORID')]).toBe('')
+  })
+
   it('keeps consumption transfers, issues, and scraps', () => {
     expect(isExportableMovement(mv({ from_location: TRUCK1, to_location: BUCKET }))).toBe(true)
     expect(isExportableMovement(mv({ movement_type: 'issue', from_location: TRUCK1, to_location: null }))).toBe(true)

@@ -266,6 +266,15 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
         showToast(`Sage ID ${updates.sage_id} is already on ${holder ? holder.id : 'another part'}`)
         return
       }
+      if (e?.code === '23505' && /refurb_of/.test(e.message || '')) {
+        const holder = parts.find(p => p.id !== editing.id && p.refurb_of === updates.refurb_of)
+        showToast(`${updates.refurb_of} already has a refurbished twin${holder ? ` (${holder.id})` : ''}`)
+        return
+      }
+      if (e?.code === '23503' && /refurb_of/.test(e.message || '')) {
+        showToast(`No part with SKU "${updates.refurb_of}" — check the parent SKU`)
+        return
+      }
       showToast('Save failed: ' + e.message)
     }
   }
@@ -467,10 +476,19 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                       aka {p.nickname}
                     </span>
                   )}
+                  {/* Refurbished twin (used units, Sage _R) / expensed
+                      non-inventory (Sage UB_9…, not cycle counted). */}
+                  {p.refurb_of && (
+                    <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 4, background: 'var(--amber-lt)', color: 'var(--amber)', verticalAlign: '1px' }}>REFURB</span>
+                  )}
+                  {/^UB_9/i.test(p.sage_id || '') && (
+                    <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 4, background: 'var(--gray-lt)', color: 'var(--muted)', verticalAlign: '1px' }} title="Non-inventory: expensed on receipt, not cycle counted">EXPENSED</span>
+                  )}
                 </div>
                 <div className="mono" style={{ fontSize: 12, color: 'var(--hint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {p.id}
                   {p.sage_id && <span style={{ color: 'var(--accent-dk)' }}> · Sage {p.sage_id}</span>}
+                  {p.refurb_of && <span style={{ color: 'var(--amber)' }}> · refurb of {p.refurb_of}</span>}
                   {' · '}{p.unit || 'ea'} · {p.category || 'Uncategorized'}
                 </div>
                 {/* Draft provenance: which flow minted this draft, who, when.
@@ -909,6 +927,10 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
   // Sage Intacct Item ID — a cross-reference that rides next to the SKU; the
   // SKU itself is the immutable key and is not editable here.
   const [sageId, setSageId] = useState(part.sage_id || '')
+  // Parent SKU when this part is a refurbished twin. Free SKU entry (the FK
+  // rejects an unknown one on save); twins are normally minted by Receive PO
+  // → Returned from field, so this is the fix-up path, not the main one.
+  const [refurbOf, setRefurbOf] = useState(part.refurb_of || '')
 
   // Open-ended attribute bag. Stored as an array of {key, value} for
   // stable rendering during editing; serialized to a plain object on
@@ -977,6 +999,7 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
         name: name.trim(),
         nickname: nickname.trim() || null,
         sage_id: sageId.trim().toUpperCase() || null,   // Sage IDs are uppercase; the unique index is case-sensitive
+        refurb_of: refurbOf.trim() || null,
         attributes,
         unit: unit.trim() || 'ea',
         department: department.trim() || null,
@@ -1035,6 +1058,22 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
             />
             <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
               Written as ITEMID in the Sage export (the SKU is used when this is blank). One Sage ID per part.
+            </div>
+          </div>
+
+          <div className="field">
+            <label>Refurbished twin of <span style={{ fontWeight: 400, color: 'var(--hint)' }}>— parent SKU, only for a used/returned-unit part</span></label>
+            <input
+              type="text"
+              value={refurbOf}
+              onChange={e => setRefurbOf(e.target.value)}
+              placeholder="e.g. Wave-LR-US (leave blank for a normal part)"
+              autoComplete="off"
+              name="part-refurb-of"
+              style={{ fontFamily: 'monospace' }}
+            />
+            <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
+              Field returns of the parent are booked onto this part. Its Sage ID should be the parent's with <span className="mono">_R</span>.
             </div>
           </div>
 

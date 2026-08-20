@@ -529,7 +529,7 @@ export async function deleteAssembly(id) {
 
 export async function searchParts(query, { activeOnly = false } = {}) {
   return searchPartsCatalog(query, {
-    cols: 'id, name, nickname, unit, category, department, material_group',
+    cols: 'id, name, nickname, unit, category, department, material_group, refurb_of, sage_id',
     limit: 20,
     activeOnly,
   })

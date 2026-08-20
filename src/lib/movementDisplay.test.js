@@ -22,6 +22,26 @@ describe('movementDisplay', () => {
     expect(d.qtyPrefix).toBe('')
   })
 
+  // receipt_kind decides the receive's "source": a field return did not come
+  // from a vendor, and the Activity feed must not say it did.
+  it('names the receive source by receipt_kind (purchase default)', () => {
+    expect(movementDisplay({ movement_type: 'receive', receipt_kind: 'purchase' }).fromName).toBe('Vendor')
+    expect(movementDisplay({ movement_type: 'receive', receipt_kind: 'field_return' }).fromName).toBe('Field return')
+    expect(movementDisplay({ movement_type: 'receive', receipt_kind: 'found' }).fromName).toBe('Found')
+    expect(movementDisplay({ movement_type: 'receive', receipt_kind: 'field_return' }).receiptKind).toBe('field_return')
+    expect(movementDisplay({ movement_type: 'receive' }).receiptKind).toBe('purchase')
+    expect(movementDisplay({ movement_type: 'transfer', receipt_kind: 'purchase' }).receiptKind).toBeNull()
+  })
+
+  it('resolveReceiveMeta reads "Returned from:" on field returns and never as a vendor', () => {
+    const m = resolveReceiveMeta({ movement_type: 'receive', receipt_kind: 'field_return', notes: 'Returned from: 123 Main St — J. Smith', vendor_invoice: 'TKT-48213' })
+    expect(m.source).toBe('field_return')
+    expect(m.vendor).toBeNull()
+    expect(m.returnedFrom).toBe('123 Main St — J. Smith')
+    expect(m.reference).toBe('TKT-48213')
+    expect(m.notesConsumed).toBe(true)
+  })
+
   it('calls a missing destination "Consumed" for issue and scrap only', () => {
     expect(movementDisplay({ movement_type: 'issue', from_location_id: 't1' }).toName).toBe('Consumed')
     expect(movementDisplay({ movement_type: 'scrap', from_location_id: 't1' }).toName).toBe('Consumed')

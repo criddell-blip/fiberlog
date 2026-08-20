@@ -1149,6 +1149,9 @@ function lineLabelPart(line, resolvedPart = null) {
     id,
     name: line.part?.name || resolvedPart?.name || line.description || id,
     unit: line.part?.unit || 'ea',
+    // Label bands (REFURB / EXPENSED) key off these when the join carries them.
+    refurb_of: line.part?.refurb_of || resolvedPart?.refurb_of || null,
+    sage_id: line.part?.sage_id || resolvedPart?.sage_id || null,
   }
 }
 

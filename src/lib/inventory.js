@@ -204,7 +204,7 @@ export async function getAllStockGrouped({ excludeLocationId = null, excludeType
       .order('part_id').order('location_id')),
     fetchAllRows(() => db
       .from('parts_catalog')
-      .select('id, name, nickname, attributes, unit, category, material_group, department')
+      .select('id, name, nickname, attributes, unit, category, material_group, department, refurb_of')
       .eq('is_active', true)
       .order('id')),
     fetchAllRows(() => db
@@ -241,6 +241,7 @@ export async function getAllStockGrouped({ excludeLocationId = null, excludeType
         category: part.category,
         material_group: part.material_group,
         department: part.department,
+        refurb_of: part.refurb_of || null,   // crew pickers badge refurbished twins
         locations: [],
         totalQty: 0,
       })
@@ -836,7 +837,7 @@ export function validateMovement({ movement_type, from_location_id, to_location_
   }
 }
 
-export async function getRecentMovements({ limit = 100, locationId = null, type = null, partId = null } = {}) {
+export async function getRecentMovements({ limit = 100, locationId = null, type = null, partId = null, receiptKind = null } = {}) {
   let q = db
     .from('inventory_movements')
     .select(`
@@ -849,6 +850,7 @@ export async function getRecentMovements({ limit = 100, locationId = null, type 
     .order('created_at', { ascending: false })
     .limit(limit)
   if (type) q = q.eq('movement_type', type)
+  if (receiptKind) q = q.eq('receipt_kind', receiptKind)
   if (partId) q = q.eq('part_id', partId)
   if (locationId) {
     q = q.or(`from_location_id.eq.${locationId},to_location_id.eq.${locationId}`)
@@ -882,6 +884,7 @@ export async function recordMovement({
   from_location_id, to_location_id,
   vendor_invoice, unit_cost, notes,
   task_id, submission_id, created_by,
+  receipt_kind = null,   // receive rows only; DB trigger defaults to 'purchase'
 }) {
   if (!created_by) throw new Error('recordMovement requires created_by')
   if (!part_id) throw new Error('recordMovement requires part_id')
@@ -899,6 +902,7 @@ export async function recordMovement({
       notes: notes || null,
       task_id: task_id || null,
       submission_id: submission_id || null,
+      receipt_kind: receipt_kind || null,
       created_by,
     })
     .select(`
@@ -1076,6 +1080,10 @@ export async function recordMovementsBatch(movements, { chunk = false, chunkSize
     // Real work date (job completion) for imported rows. Non-import callers
     // omit it → NULL → reports/Sage COALESCE(occurred_at, created_at).
     occurred_at: m.occurred_at || null,
+    // Why stock arrived — receive rows only (Receive PO sets purchase /
+    // field_return; the DB trigger defaults a bare receive to purchase and
+    // blanks it on every other type). See RECEIPT_KINDS.
+    receipt_kind: m.receipt_kind || null,
     created_by: m.created_by,
   })
 
@@ -1671,7 +1679,7 @@ export async function updatePartsBatch(ids, updates) {
 // attributes.created_via so a draft sitting in the Parts tab months later
 // still says which flow minted it and who was driving. created_at (DB
 // default) covers the when.
-export async function createPart({ id, name, unit, department, material_group, barcode, sage_id, is_active = true, created_via = null }) {
+export async function createPart({ id, name, unit, department, material_group, barcode, sage_id, refurb_of = null, is_active = true, created_via = null }) {
   if (!id || !String(id).trim()) throw new Error('Part SKU is required')
   if (!name || !String(name).trim()) throw new Error('Part name is required')
   const cleanId = String(id).trim()
@@ -1689,6 +1697,7 @@ export async function createPart({ id, name, unit, department, material_group, b
     barcode: barcode && String(barcode).trim() ? String(barcode).trim() : null,
     // Sage Intacct Item ID — an extra cross-reference, never a substitute for the SKU.
     sage_id: sage_id && String(sage_id).trim() ? String(sage_id).trim().toUpperCase() : null,
+    refurb_of: refurb_of || null,
     is_active,
   }
   if (created_via) payload.attributes = { created_via }
@@ -2147,8 +2156,10 @@ export function pickFiberCustomerColumn(headers = []) {
 // Movement type → Sage Intacct transaction type. Defaults; customize per
 // company in Sage Settings if these names don't match.
 //
-// `receive` and `adjust` are filtered out before this map is ever consulted
-// (isExportableMovement rules 0a/0b). Do NOT delete their entries as dead
+// `adjust` (and every `receive` except an opt-in field return) is filtered
+// out before this map is consulted (isExportableMovement rules 0a/0b). The
+// `receive` entry is LIVE config since Aug 2026: an opt-in field return
+// exports as 'Inventory Receipt'. Do NOT delete entries as dead
 // config: the lookup below falls back to `|| 'Inventory Adjustment'`, so a
 // row that ever slips past the filter — a future refactor, a caller passing
 // an unfiltered array — would be silently relabeled, booking a purchase
@@ -2211,7 +2222,7 @@ export async function getMovementsForSageExport({ since, until, includeExported 
   const makeQuery = () => {
     let q = db.from('inventory_movements')
       .select(`
-        id, movement_type, quantity, unit, unit_cost, notes, created_at, occurred_at,
+        id, movement_type, receipt_kind, quantity, unit, unit_cost, notes, created_at, occurred_at,
         exported_at, export_batch_id, submission_id, task_id, vendor_invoice,
         part:parts_catalog(id, name, unit, department, material_group, category, sage_id),
         from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type, parent_location_id, project_id),
@@ -2248,11 +2259,11 @@ export async function getMovementsForSageExport({ since, until, includeExported 
 //
 // maxRows caps a runaway range so a phone can't hang building a giant file —
 // same idiom as getStockForAudit. Callers detect the cap by length === maxRows.
-export async function getMovementsForActivityExport({ since, until, type = null, locationId = null, maxRows = 20000 } = {}) {
+export async function getMovementsForActivityExport({ since, until, type = null, receiptKind = null, locationId = null, maxRows = 20000 } = {}) {
   const makeQuery = () => {
     let q = db.from('inventory_movements')
       .select(`
-        id, movement_type, quantity, unit, unit_cost, notes, created_at, occurred_at,
+        id, movement_type, receipt_kind, quantity, unit, unit_cost, notes, created_at, occurred_at,
         submission_id, task_id, vendor_invoice,
         from_location_id, to_location_id,
         part:parts_catalog(id, name, unit),
@@ -2264,6 +2275,7 @@ export async function getMovementsForActivityExport({ since, until, type = null,
       .order('id', { ascending: true })
     if (since) q = q.gte('created_at', since)
     if (type) q = q.eq('movement_type', type)
+    if (receiptKind) q = q.eq('receipt_kind', receiptKind)
     if (locationId) q = q.or(`from_location_id.eq.${locationId},to_location_id.eq.${locationId}`)
     return q
   }
@@ -2365,7 +2377,7 @@ export function consumptionSource(m) {
 // What always stays in the export (default mode AND strict):
 //   transfer to job_site (consumption), issue/scrap, inter-warehouse
 //   transfers (warehouse → warehouse under different parents).
-export function isExportableMovement(m, { strictConsumption = false } = {}) {
+export function isExportableMovement(m, { strictConsumption = false, includeFieldReturns = false } = {}) {
   // (0a) Always exclude `adjust` — count corrections are FiberLog-internal
   // bookkeeping (cycle-count reconciliations, audit-CSV variances, manual
   // fixes). They don't represent purchases, consumption, transfers, or
@@ -2382,7 +2394,16 @@ export function isExportableMovement(m, { strictConsumption = false } = {}) {
   // This also permanently prevents the 660 one-time BoxHero seed rows
   // (opening stock, Jun 3 2026, ~430k units) from being pushed into Sage
   // as purchases by anyone exporting a range that covers them.
-  if (m.movement_type === 'receive') return false
+  //
+  // The ONE exception, opt-in: `receipt_kind = 'field_return'` — a used unit
+  // pulled from a customer/site and booked onto its refurbished twin
+  // (UB…_R). There is no PO and no AP invoice behind it, so Sage learns of
+  // the _R asset only if we tell it. Off by default until accounting says
+  // how they want these booked (Aug 2026). Purchases / found / seed never
+  // export regardless of the flag.
+  if (m.movement_type === 'receive') {
+    if (!(includeFieldReturns && m.receipt_kind === 'field_return')) return false
+  }
 
   const fromType = m.from_location?.type
   const toType = m.to_location?.type
@@ -2492,10 +2513,12 @@ export function buildSageCsv(movements, opts = {}) {
     const classId = m.phase?.name || ''
 
     // VENDORID is intentionally always blank, and this is NOT a bug to fix.
-    // Vendors only ever attach to receives, and receives are excluded from
-    // the export (see isExportableMovement rule 0b) because Sage books the
-    // purchase from the PO. The column is kept so the 18-column layout — and
-    // whatever import mapping Sage has saved against it — stays stable.
+    // Vendors only ever attach to purchase receives, and those are excluded
+    // from the export (see isExportableMovement rule 0b) because Sage books
+    // the purchase from the PO. The only receive that can reach here is an
+    // opt-in field return, which has no vendor by definition. The column is
+    // kept so the 18-column layout — and whatever import mapping Sage has
+    // saved against it — stays stable.
     const vendorId = ''
 
     const row = [
@@ -3072,9 +3095,11 @@ export async function createIntakeRequest({
   partId = null, isDraft = false,
   draftName = null, draftUnit = null, draftDepartment = null, draftMaterialGroup = null,
   quantity, targetLocationId, reason = null, requestedBy = null,
+  intakeKind = 'found',   // 'found' | 'field_return' — decides receipt_kind + refurb-twin booking on approval
 } = {}) {
   if (!requestedBy) throw new Error('requestedBy required')
   if (!targetLocationId) throw new Error('Pick a destination warehouse')
+  if (!['found', 'field_return'].includes(intakeKind)) throw new Error('Bad intake kind')
   const qty = Number(quantity)
   if (!qty || qty <= 0) throw new Error('Quantity must be greater than 0')
   if (!partId && !isDraft) throw new Error('Pick a part or add a new one')
@@ -3093,11 +3118,64 @@ export async function createIntakeRequest({
       target_location_id: targetLocationId,
       reason: (reason || '').trim() || null,
       requested_by: requestedBy,
+      intake_kind: intakeKind,
     })
     .select()
     .single()
   if (error) throw error
   return data
+}
+
+// ─── RECEIPT KINDS + REFURB TWINS ────────────────────────────────────────────
+// Why stock arrived. Lives on `receive` rows only (DB CHECK). `purchase` is
+// the trigger default so every legacy writer is covered; the others are set
+// explicitly by their one flow. Keep in sync with the DB CHECK constraint.
+export const RECEIPT_KINDS = {
+  purchase:     { label: 'Purchase',      short: 'PO',      hint: 'Vendor delivery / purchase order' },
+  field_return: { label: 'Field return',  short: 'RETURN',  hint: 'Pulled from a customer or site — booked onto the refurbished twin' },
+  found:        { label: 'Found',         short: 'FOUND',   hint: 'Crew-reported found inventory' },
+  decommission: { label: 'Decommission',  short: 'DECOM',   hint: 'Site teardown recovery' },
+  seed:         { label: 'Seed',          short: 'SEED',    hint: 'One-time BoxHero baseline' },
+}
+export function receiptKindLabel(kind) {
+  return RECEIPT_KINDS[kind]?.label || (kind ? String(kind) : '')
+}
+
+// The refurbished twin of a part, if the catalog has one. A twin is a real
+// part with `refurb_of = parent.id` and `sage_id = <parent sage_id>_R`;
+// field returns book onto it so a used unit never re-enters stock as new.
+export function refurbTwinOf(partId, parts) {
+  if (!partId || !Array.isArray(parts)) return null
+  return parts.find(p => p.refurb_of === partId && p.is_active !== false) || null
+}
+export async function getRefurbTwin(partId) {
+  if (!partId) return null
+  const { data, error } = await db
+    .from('parts_catalog')
+    .select('id, name, unit, sage_id, refurb_of, is_active')
+    .eq('refurb_of', partId)
+    .eq('is_active', true)
+    .maybeSingle()
+  if (error) throw error
+  return data || null
+}
+// Mint the twin for a parent. SKU = parent + '-R', Sage ID = parent's + '_R'
+// (only when the parent has one — accounting creates the _R item, we just
+// mirror the convention). Same unit/department/material_group as the parent.
+export async function createRefurbTwin(parent, { created_via = null } = {}) {
+  if (!parent?.id) throw new Error('Parent part required')
+  if (parent.refurb_of) throw new Error(`${parent.id} is already a refurbished twin`)
+  return createPart({
+    id: `${parent.id}-R`,
+    name: `${parent.name} (Refurbished)`,
+    unit: parent.unit,
+    department: parent.department,
+    material_group: parent.material_group,
+    sage_id: parent.sage_id ? `${parent.sage_id}_R` : null,
+    refurb_of: parent.id,
+    is_active: true,
+    created_via,
+  })
 }
 
 // List intake requests (manager queue). Defaults to pending. Joins the

@@ -24,6 +24,21 @@ import QrLabelSheet from '../shared/QrLabelSheet'
 //     to a board and scan from there instead of walking to each part.
 //     Denser, smaller QR. Tested down to ~0.55in (camera scanning is
 //     comfortable to ~0.5in with errorCorrectionLevel='M').
+//
+// Bands (Aug 2026): a label prints a top stripe when the part is a
+// REFURBISHED twin (`refurb_of` set — used unit, Sage UB…_R) or an EXPENSED
+// non-inventory item (Sage id `UB_9…` — written off on receipt, not cycle
+// counted). The owner wants both identifiable on the shelf; the band only
+// renders when the caller passes `refurb_of` / `sage_id` on the item, so
+// callers that pass the bare {id, name, unit} shape print exactly as before.
+// The dense scan-sheet preset has no vertical room — it colors the cell
+// border instead.
+
+export function labelBand(p) {
+  if (p?.refurb_of) return { text: 'REFURB', bg: '#b45309' }     // print-safe amber; no CSS vars on paper
+  if (/^UB_9/i.test(p?.sage_id || '')) return { text: 'EXPENSED', bg: '#6b7280' }
+  return null
+}
 const FORMAT_PRESETS = {
   letter_4up: {
     label: 'Label — US Letter, 4 per page',
@@ -116,6 +131,21 @@ export default function SkuLabelSheet({ parts, title = 'Print SKU labels', onClo
       cellPadding={format => format === 'avery_5160' || format === 'scan_sheet_120' ? '0.04in' : '0.1in'}
       renderLabel={(p, preset, qrDataUrl) => (
         <>
+          {(() => {
+            const band = labelBand(p)
+            if (!band) return null
+            // Scan sheets have no vertical room: a thin colored rule instead of a stripe.
+            const thin = !preset.showName
+            return (
+              <div style={{
+                alignSelf: 'stretch', background: band.bg, color: '#fff',
+                fontSize: thin ? 0 : Math.max(7, Math.round((preset.skuFontPx || 9) * 0.9)),
+                fontWeight: 800, letterSpacing: '.08em', textAlign: 'center',
+                lineHeight: thin ? '3px' : 1.4, height: thin ? 3 : undefined,
+                marginBottom: 2, borderRadius: 2,
+              }}>{thin ? '' : band.text}</div>
+            )
+          })()}
           {preset.showName && (
             <div style={{
               fontSize: preset.nameFontPx,

@@ -62,7 +62,8 @@ Every movement automatically triggers an update to `inventory_stock` (via `updat
 | 2 | **Crew Return** | `return` | Crew | Caller's truck → warehouse/bin. Permission-checked. |
 | 3 | **Auto-deduct on submission approval** | `transfer` × N | Manager | Truck/trailer → project bucket. Stamps `phase_id` from task's phase. Gated on crew_type ∈ {aerial, underground, splice, infrastructure, fiber_tech}. |
 | 4 | **Manager Record Movement** | any | Manager | Free-form, no permission filter. For one-off adjustments. |
-| 5 | **Receive PO** (vendor delivery) | `receive` × N | Manager | NULL → destination. Multi-line; can create new parts inline. |
+| 5 | **Receive PO** (vendor delivery) | `receive` × N (`receipt_kind='purchase'`) | Manager | NULL → destination. Multi-line; can create new parts inline. |
+| 5b | **Field return** (Receive PO → *Returned from field*, or crew *Pulled from customer* → intake approval) | `receive` × N (`receipt_kind='field_return'`) | Manager / Crew (approved) | NULL → `Returns – to test` bin, booked onto the part's refurbished twin (`-R`, Sage `_R`). See "Field returns → refurbished twins" below. |
 | 6 | **Reconcile** (audit CSV round-trip) | `adjust` × N | Manager | One-sided adjustments to align system stock with physical count. |
 | 7 | **Sonar daily install import** | `transfer` × N | Manager | Truck → project bucket. Stamps `phase_id` from Sonar Project column via `sonar_project_phase_map`. |
 | 8 | **Cycle count reconciliation** | `transfer` × N (or `adjust` if discrepancy) | Manager / Crew counter | Bin-level discovery; pairs of variances auto-reconcile, leftovers go to manager review. |
@@ -166,6 +167,15 @@ Manager opens **Inventory → 📥 Receive PO**:
 Stock immediately updates in `inventory_stock` via the trigger. Lands in the warehouse-level stock (or a specific bin if picked).
 
 **Receiving against a PO (Aug 2026):** the sheet now lists open POs (ordered/partial purchase_requests) at the top — tapping one opens that PR's detail sheet and its per-line receive panel (partial quantities, optional bin destination, atomic `receive_pr_line` RPC) instead of re-typing lines. The manual flow above remains for PO-less deliveries. POs are created either as a PR marked ordered, or directly via **＋ New PO** in the PRs sub-tab or **＋ Create a PO** inside the Receive PO sheet (born `ordered` with Sage's typed PO number — accounting enters it when the purchase is placed, warehouse receives at the dock).
+
+### Field returns → refurbished twins (Aug 2026)
+
+Sage gives a returned/refurbished unit its own item ID (`UB000531_R` beside `UB000531`). FiberLog mirrors that with a **refurbished twin part** — `<sku>-R`, `parts_catalog.refurb_of = <parent sku>`, `sage_id = <parent sage_id>_R` — and a **receipt kind** on the movement so purchases and returns never mix:
+
+- **Lifecycle of a Wave LR:** PO → Receive PO (`receive`, `receipt_kind='purchase'`, part `Wave-LR-US`) → crew load → install (auto-deduct exports as `UB000531`) → months later a tech pulls it. In FiberLog that unit was consumed, so the pull is a *new inflow*: a `receive` with `receipt_kind='field_return'` on **`Wave-LR-US-R`** (`UB000531_R`), landing in the **`Returns – to test`** bin (Main Warehouse). A manager bin-moves good units to shelf stock and scraps dead ones; reissuing a refurb is then an ordinary load/consume/export of the `-R` part.
+- **Two doors, same booking.** (1) Warehouse manager: **Receive PO → Returned from field** — no PO ref required (optional ticket/RMA), "Returned from" instead of Vendor, no unit cost, destination defaults to the returns bin; picking the parent swaps the line to its twin, and a parent with no twin gets an inline **Create `<sku>-R`** button. (2) Crew/field tech: **My Stock → Pulled from customer** (beside *Report found inventory*) files a pending intake request (`intake_kind='field_return'`); the manager's Found queue shows a **FIELD RETURN** pill + "will be booked as <twin>", and `approve_intake_request` swaps to the twin server-side.
+- **Separation everywhere:** Activity tab → Receive chip → *Purchases / Field returns / Found* sub-chips + a `Receipt kind` CSV column; the feed's source reads "Field return" not "Vendor". Sage export keeps excluding receipts, with an opt-in **Include field returns** checkbox (exports as `Inventory Receipt` on `UB…_R`, VENDORID blank) — OFF until accounting says how they want these booked.
+- **Crew load returns (truck → warehouse, `return` type) are unchanged** — an unused new unit coming back off a truck is still new stock.
 
 ### Reconcile (audit CSV round-trip)
 

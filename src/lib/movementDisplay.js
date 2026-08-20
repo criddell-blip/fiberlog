@@ -81,10 +81,33 @@ export function movementDisplay(m) {
     qtyPrefix: isAdjustUp ? '+' : isAdjustDown ? '−' : '',
     qtyColor: isAdjustUp ? 'var(--accent-dk)' : isAdjustDown ? 'var(--red)' : 'var(--text)',
     // A receive has no source location (it comes from outside the system) and
-    // issue/scrap have no destination (the stock is gone).
-    fromName: m?.from_location?.name || (type === 'receive' ? 'Vendor' : null),
+    // issue/scrap have no destination (the stock is gone). The receive's
+    // "source" is its receipt_kind — a field return did not come from a vendor.
+    fromName: m?.from_location?.name || (type === 'receive' ? receiveSourceName(m) : null),
+    receiptKind: type === 'receive' ? (m?.receipt_kind || 'purchase') : null,
     toName:   m?.to_location?.name   || (type === 'issue' || type === 'scrap' ? 'Consumed' : null),
   }
+}
+
+// Where a receive "came from", by receipt_kind. Rows that predate the column
+// are NULL only in theory (the migration backfilled every receive) but the
+// trigger default is 'purchase', so treat missing as purchase.
+export const RECEIPT_KIND_SOURCE = {
+  purchase:     'Vendor',
+  field_return: 'Field return',
+  found:        'Found',
+  decommission: 'Site decommission',
+  seed:         'Seed',
+}
+export const RECEIPT_KIND_LABEL = {
+  purchase:     'Purchase',
+  field_return: 'Field return',
+  found:        'Found',
+  decommission: 'Decommission',
+  seed:         'Seed',
+}
+export function receiveSourceName(m) {
+  return RECEIPT_KIND_SOURCE[m?.receipt_kind] || RECEIPT_KIND_SOURCE.purchase
 }
 
 // Quantity signed for arithmetic: adjust-down is negative, everything else
@@ -134,6 +157,22 @@ export function resolveReceiveMeta(m) {
 
   const notes = typeof m?.notes === 'string' ? m.notes : ''
   const invoice = clean(m?.vendor_invoice)
+
+  // Shape 0 — field return (receipt_kind column, Aug 2026). No vendor by
+  // definition; "Returned from: X" names the customer/site/tech and the
+  // optional vendor_invoice holds a ticket/RMA ref. Checked first so a
+  // customer name never gets parsed as a vendor below.
+  if (m?.receipt_kind === 'field_return') {
+    const rf = notes.match(/Returned from:\s*([^|·\n]+)/i)
+    return {
+      vendor: null,
+      returnedFrom: rf ? clean(rf[1]) : null,
+      reference: invoice,
+      unitCost,
+      source: 'field_return',
+      notesConsumed: !!rf && /^Returned from:\s*[^|·\n]+$/i.test(notes.trim()),
+    }
+  }
 
   // Shape 1 — ReceivePOSheet. Stop the vendor at the first separator so
   // "Vendor: Graybar · PO 88" doesn't swallow the tail (same shape the Sage
