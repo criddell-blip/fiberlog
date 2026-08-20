@@ -40,7 +40,7 @@ you'll see — that's by design.
 
 - [ ] Have the **Sage PO** open (printed or on screen). It is your source document:
       the PO number is the ref, the vendor is on the header, and each PO line gives you
-      the Sage item ID, description, quantity ordered and unit cost — everything the
+      the Sage item ID, description, quantity ordered — everything the
       sheet asks for, in order.
 - [ ] Have the vendor's **packing slip** too. The PO tells you what was *ordered*; the
       slip and the boxes tell you what *arrived*. You receive what arrived.
@@ -100,17 +100,16 @@ check at the end trivial.
    Watch for unit mismatches between Sage and FiberLog — Sage may order *1 reel*, the
    FiberLog part counts **ft**; enter the feet. If the unit shown is wrong for the part,
    see SOP 2 → *Fix a part's unit*.
-8. **$ each** (optional) — the unit cost off the PO line. If the PO's unit is different
-   from FiberLog's (reel vs ft), convert or leave it blank — don't put a per-reel price
-   on a per-foot part. The **Estimated total** strip at the bottom is there so you can
-   eyeball it against the PO total; it is **not stored** anywhere.
+8. **$ each** — **leave it blank.** Sage already holds the cost; FiberLog doesn't need
+   it. (If you do type one, the **Estimated total** strip at the bottom is just a
+   sanity check — it is not stored anywhere.)
 9. **＋ Add line** for each additional SKU. **×** on the right removes a line (hidden
    when there's only one).
 10. Watch the counter next to **Line items** — it reads `N valid · M total`. A line is
     only *valid* when it has both a part and a qty above 0. Invalid lines are silently
     skipped, so if the two numbers differ, find the blank line before you submit.
     Then the final check: **same number of lines as the PO** (minus anything that
-    didn't ship), and the **Estimated total** in the ballpark of the PO total.
+    didn't ship). Cost is not part of the check.
 
 ### Submit
 
@@ -257,7 +256,7 @@ exported.
 | **Entered the same delivery twice** | Adjust **− Found missing** every line of the duplicate, notes `Duplicate of receive <ref>`. |
 | **Wrong destination or bin** | **＋ Record movement → Transfer** from where it landed to where it should be. (That's a real move — no adjust needed.) |
 | **Wrong receipt kind** (booked a field return as a purchase, or vice-versa) | Adjust the wrong part out, re-receive under the right pill. This matters: purchases land on the normal SKU, returns on the `-R` twin, and Sage keeps them separate. |
-| **Forgot the unit cost / vendor / ref** | Leave it. These fields are informational; don't adjust stock to fix text. Tell accounting if they need the number. |
+| **Forgot the vendor / ref** | Leave it. These fields are informational; don't adjust stock to fix text. Tell accounting if they need the number. |
 | **Typo in a new part's SKU** | The SKU can't be renamed. Adjust its stock out, ask a manager to retire the part in the **Parts** tab, create the right one. |
 
 Rules of thumb:
@@ -274,7 +273,7 @@ Rules of thumb:
 
 | ✅ Do | ❌ Don't |
 |---|---|
-| Work from the Sage PO: its number as the ref, its item IDs to find parts, its costs. | Type a ref from memory or a packing-slip number when a PO exists. |
+| Work from the Sage PO: its number as the ref, its item IDs to find parts. Skip cost. | Type a ref from memory or a packing-slip number when a PO exists. |
 | Count before you type. | Receive the PO quantity when fewer boxes arrived. |
 | One sheet per PO, ref typed exactly as Sage shows it. | Lump three POs into one sheet. |
 | Leave Destination / Bin on the Receiving dock default. | Receive straight to a job site or Scrap (not offered) — or to a truck unless the crew really drove off with it. |

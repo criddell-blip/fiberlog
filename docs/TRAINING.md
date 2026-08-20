@@ -293,7 +293,7 @@ metadata), plus Receive PO, Reconcile, Sonar, Fiber jobs, Import CSV, Sage expor
 The written procedure is [SOP_RECEIVING.md](SOP_RECEIVING.md) — train from that, screen by screen.
 
 - **Vendor delivery** — **Receive PO**: PO / invoice ref, vendor, destination (pre-filled to the
-  **Receiving dock** bin), then SKU + qty + unit cost per line. New part? **＋ Create new part**
+  **Receiving dock** bin), then SKU + qty per line (skip cost — Sage has it). New part? **＋ Create new part**
   right in the line (SKU, name, unit, department, Sage ID). QR labels offered at the end.
 - **Returned equipment** (pulled from a customer / site) — same sheet, **Returned from field**
   pill. It books onto the part's `-R` refurbished twin in **Returns – to test**, never as new stock.
