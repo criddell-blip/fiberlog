@@ -7,6 +7,7 @@ import {
   markMovementsExported,
   movementEffectiveDate,
   sageProjectId,
+  sageItemId,
 } from '../../lib/inventory'
 import { downloadTextAsFile } from '../../lib/csvImport'
 import { isoLocalDate } from '../../lib/format'
@@ -273,7 +274,12 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
                     <td style={tdStyle}>{m.movement_type}</td>
                     <td style={tdStyle}>
                       <div style={{ fontWeight: 600 }}>{m.part?.name || m.part?.id || '—'}</div>
-                      <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'monospace' }}>{m.part?.id || ''}</div>
+                      {/* Same value the CSV's ITEMID writes (sageItemId): Sage ID
+                          when mapped, else the raw SKU — flagged amber so an
+                          unmapped part is visible before the file goes out. */}
+                      <div style={{ fontSize: 10, color: m.part?.sage_id ? 'var(--hint)' : 'var(--amber)', fontFamily: 'monospace' }}>
+                        {sageItemId(m.part)}{!m.part?.sage_id && m.part?.id ? ' (SKU — no Sage ID)' : ''}
+                      </div>
                     </td>
                     <td style={tdStyle}>{m.quantity} {m.unit || m.part?.unit || ''}</td>
                     <td style={tdStyle}>{m.from_location?.name || <span style={{ color: 'var(--hint)' }}>—</span>}</td>

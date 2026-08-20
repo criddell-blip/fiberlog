@@ -90,6 +90,7 @@ export async function searchPartsCatalog(query, { cols = 'id, name, nickname, un
     'id',             // SKU
     'barcode',        // scanned UPC/EAN
     'boxhero_id',     // legacy BoxHero text id (e.g. UB-12345)
+    'sage_id',        // Sage Intacct Item ID (UB000011) — accounting types these
     'department',     // e.g. "Construction"
     'material_group', // e.g. "Fiber"
     'item_type',      // e.g. "Splice"

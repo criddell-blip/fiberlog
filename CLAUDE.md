@@ -248,6 +248,7 @@ The common reason to flag a passdown is "the materials aren't right." Rather tha
 ### Parts catalog
 - `parts_catalog.id` is the SKU (text PK)
 - `parts_catalog.is_active = false` means it's a **draft** (auto-created during CSV imports for SKUs not yet in catalog)
+- `parts_catalog.sage_id` (migration `20260820120000_parts_catalog_sage_id.sql`; nullable, partial-unique, stored uppercase) is the **Sage Intacct Item ID** (`UB000011` / `UB_900001`) — a cross-reference ADDED beside the SKU, never a replacement for it (the SKU stays the PK + movement anchor). The Sage export writes `ITEMID = sage_id ?? SKU` (`sageItemId()` in `lib/inventory.js`; preview flags SKU fallbacks amber). Editable in the Parts tab (+ a "No Sage ID" filter chip); backfilled by `scripts/sage-id-backfill.mjs` from accounting's "Sage Inventory Item IDs" workbook, which has NO SKU column — matching is by part name (exact/normalised/token auto, fuzzy → `imports/sage-ids/review.csv`). Sage carries parallel IDs for one item (`UB000024` vs `UB_L024`, different GL groups; `_R` variants) — the canonical `UB000nnn` form wins, alternates are listed in `variants.csv`.
 - `parts_catalog.category` is computed as `Department / Material Group` automatically — **don't update it manually**, instead update `department` and/or `material_group` and let the helpers in `lib/inventory.js` rebuild it
 
 ### Realtime publication

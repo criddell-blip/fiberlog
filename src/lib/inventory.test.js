@@ -11,6 +11,7 @@ import {
   validateMovement,
   isExportableMovement,
   buildSageCsv,
+  sageItemId,
   movementEffectiveDate,
   buildLocationQtyMaps,
   aggregateDeductions,
@@ -333,6 +334,24 @@ describe('buildSageCsv', () => {
     expect(rows[0][col('UNIT')]).toBe('ft')
     expect(rows[1][col('UNIT')]).toBe('lb')
     expect(rows[2][col('UNIT')]).toBe('ea') // final fallback
+  })
+
+  // ITEMID is what Sage keys on. The catalog's sage_id is a cross-reference
+  // ADDED next to the SKU (the SKU stays the FiberLog key); when it's absent
+  // the SKU still ships so an unmapped part is visible rather than dropped.
+  it('ITEMID prefers the part sage_id and falls back to the SKU', () => {
+    const rows = csvRows(buildSageCsv([
+      mv({ part: { ...PART, sage_id: 'UB000042' } }),
+      mv({ part: { ...PART, sage_id: null } }),
+      mv({ part: { ...PART, sage_id: '' } }),
+    ]))
+    expect(rows[0][col('ITEMID')]).toBe('UB000042')
+    expect(rows[0][col('ITEMDESC')]).toBe('Lag Bolt') // description unchanged
+    expect(rows[1][col('ITEMID')]).toBe('SKU-1')
+    expect(rows[2][col('ITEMID')]).toBe('SKU-1')
+    expect(sageItemId({ id: 'SKU-9', sage_id: 'UB000001' })).toBe('UB000001')
+    expect(sageItemId({ id: 'SKU-9' })).toBe('SKU-9')
+    expect(sageItemId(null)).toBe('')
   })
 
   it('is bin-aware on the destination: TO_WAREHOUSE blank, TO_BIN set', () => {

@@ -107,6 +107,7 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
             department: l.part.department,
             material_group: l.part.material_group,
             barcode: l.part.barcode,
+            sage_id: l.part.sage_id,
             is_active: true,
             created_via: {
               source: 'Receive PO',
@@ -120,8 +121,15 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
           // hard-abort left the manager stuck re-picking every NEW part) or
           // by the manager typing an existing SKU. Either way the part
           // exists, which is all the movement insert needs — continue.
-          const isDup = e?.code === '23505' || /duplicate key|already exists/i.test(e?.message || '')
-          if (!isDup) throw new Error(`Couldn't create part "${l.part.id}": ${e.message || e}`)
+          // …EXCEPT a sage_id unique violation (same 23505 code, index name
+          // parts_catalog_sage_id_idx in the message): then the part was NOT
+          // created and the movement insert would die on an opaque FK error.
+          const msg = e?.message || ''
+          if (/sage_id/.test(msg)) {
+            throw new Error(`Couldn't create part "${l.part.id}": Sage ID ${l.part.sage_id} is already on another part`)
+          }
+          const isDup = e?.code === '23505' || /duplicate key|already exists/i.test(msg)
+          if (!isDup) throw new Error(`Couldn't create part "${l.part.id}": ${msg || e}`)
         }
       }
 
@@ -465,6 +473,7 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
   const [fUnit, setFUnit]     = useState('ea')
   const [fDept, setFDept]     = useState('')
   const [fMatGrp, setFMatGrp] = useState('')
+  const [fSageId, setFSageId] = useState('')   // create-only: Sage Intacct item, if accounting already minted one
 
   // Search active only when no part picked AND we're not in a form mode
   useEffect(() => {
@@ -502,6 +511,7 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
     setFUnit('ea')
     setFDept('')
     setFMatGrp('')
+    setFSageId('')
     setMode('creating')
   }
 
@@ -523,6 +533,7 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
         unit: fUnit.trim() || 'ea',
         department: fDept.trim() || null,
         material_group: fMatGrp.trim() || null,
+        sage_id: fSageId.trim().toUpperCase() || null,
         isNew: true,
       },
       pendingAttrs: null,
@@ -625,6 +636,15 @@ function ReceiveLineRow({ line, onChange, onRemove }) {
             <option value="Customer Installation" />
           </datalist>
         </div>
+        {isCreate && (
+          <input
+            type="text" value={fSageId}
+            onChange={e => setFSageId(e.target.value)}
+            placeholder="Sage ID (optional, e.g. UB000011)"
+            autoComplete="off" name={`po-form-sage-${line.tempId}`}
+            style={{ ...inputStyle(), marginBottom: 8, fontFamily: 'monospace' }}
+          />
+        )}
 
         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
           <button onClick={cancelForm}

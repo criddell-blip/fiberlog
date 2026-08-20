@@ -1671,7 +1671,7 @@ export async function updatePartsBatch(ids, updates) {
 // attributes.created_via so a draft sitting in the Parts tab months later
 // still says which flow minted it and who was driving. created_at (DB
 // default) covers the when.
-export async function createPart({ id, name, unit, department, material_group, barcode, is_active = true, created_via = null }) {
+export async function createPart({ id, name, unit, department, material_group, barcode, sage_id, is_active = true, created_via = null }) {
   if (!id || !String(id).trim()) throw new Error('Part SKU is required')
   if (!name || !String(name).trim()) throw new Error('Part name is required')
   const cleanId = String(id).trim()
@@ -1687,6 +1687,8 @@ export async function createPart({ id, name, unit, department, material_group, b
     material_group: matGrp,
     category: buildCategory(dept, matGrp),
     barcode: barcode && String(barcode).trim() ? String(barcode).trim() : null,
+    // Sage Intacct Item ID — an extra cross-reference, never a substitute for the SKU.
+    sage_id: sage_id && String(sage_id).trim() ? String(sage_id).trim().toUpperCase() : null,
     is_active,
   }
   if (created_via) payload.attributes = { created_via }
@@ -1791,6 +1793,7 @@ export async function createDraftParts(drafts, { created_via = null } = {}) {
       item_type: d.item_type || null,
       material_group: d.material_group || null,
       category: buildCategory(d.department, d.material_group),
+      sage_id: d.sage_id || null,
     }
     if (created_via) row.attributes = { created_via }
     const { data, error } = await db
@@ -2210,7 +2213,7 @@ export async function getMovementsForSageExport({ since, until, includeExported 
       .select(`
         id, movement_type, quantity, unit, unit_cost, notes, created_at, occurred_at,
         exported_at, export_batch_id, submission_id, task_id, vendor_invoice,
-        part:parts_catalog(id, name, unit, department, material_group, category),
+        part:parts_catalog(id, name, unit, department, material_group, category, sage_id),
         from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type, parent_location_id, project_id),
         to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type, parent_location_id, project_id),
         phase:phases!inventory_movements_phase_id_fkey(id, name, project_id, project:projects(id, name))
@@ -2423,6 +2426,15 @@ export function sageProjectId(m) {
     || (m?.to_location?.type === 'job_site' ? (m.to_location.name || '') : '')
 }
 
+// The ITEMID a movement exports with: the part's Sage Intacct Item ID when the
+// catalog has one, else the FiberLog SKU. The SKU fallback is deliberate — an
+// unmapped part still lands in the file (as a SKU accounting won't recognise)
+// rather than silently vanishing, so the gap gets noticed and fixed in the
+// Parts tab. Exported so the SageExportSheet preview renders the same value.
+export function sageItemId(part) {
+  return part?.sage_id || part?.id || ''
+}
+
 // Build CSV text in Sage Intacct Inventory Transactions format.
 // One row per movement. Quote anything with commas/newlines.
 export function buildSageCsv(movements, opts = {}) {
@@ -2491,7 +2503,7 @@ export function buildSageCsv(movements, opts = {}) {
       date,
       referenceNo,
       lineIdx,
-      m.part?.id || '',
+      sageItemId(m.part),
       m.part?.name || '',
       m.quantity,
       m.unit || m.part?.unit || 'ea',

@@ -33,7 +33,7 @@
     - Shares the **consumption ledger definition** with Reports → Consumption (`getConsumptionLedger` = transfers landing in `job_site` buckets, dated by effective work date) so the two can never disagree.
 
     **Still open (why it's labeled "prototype" in the UI):**
-    1. Sage code mappings — warehouse names, project names, and `parts_catalog.id` SKUs are used verbatim; confirm/map them to the owner's actual Sage codes (transaction-type names are Intacct defaults, customizable per company)
+    1. Sage code mappings — warehouse names and project names are used verbatim; confirm/map them to the owner's actual Sage codes (transaction-type names are Intacct defaults, customizable per company). **Items: DONE Aug 20 2026** — `parts_catalog.sage_id` holds the Sage Item ID and `ITEMID` exports it (SKU fallback, flagged amber in the preview). 490/609 active parts mapped from accounting's workbook; the remaining ~119 are in `imports/sage-ids/review.csv` (fuzzy/ambiguous, owner to approve) + the "No Sage ID" Parts-tab chip.
     2. Bin-source rows leave `FROM_WAREHOUSE` blank (parent warehouse name isn't joined for the from-side yet)
     3. Cadence/automation — currently a manual button; an Edge-Function scheduled export is the "bigger version"
     4. `STATE`/`BASECURR` columns from the original 46-column template spec were dropped from the prototype

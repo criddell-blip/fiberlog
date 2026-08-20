@@ -112,6 +112,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
       const q = search.toLowerCase()
       const matchesSearch = (target.name || '').toLowerCase().includes(q)
         || (target.id || '').toLowerCase().includes(q)
+        || (target.sage_id || '').toLowerCase().includes(q)
         || (target.category || '').toLowerCase().includes(q)
       if (!matchesSearch) setSearch('')
     }
@@ -146,18 +147,23 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
     all:    parts.length,
     active: parts.filter(p => p.is_active).length,
     draft:  parts.filter(p => !p.is_active).length,
+    nosage: parts.filter(p => p.is_active && !p.sage_id).length,
   }), [parts])
 
   const filtered = useMemo(() => {
     let list = parts
     if (filter === 'active') list = list.filter(p => p.is_active)
     if (filter === 'draft')  list = list.filter(p => !p.is_active)
+    // Active parts the Sage export still ships as a raw SKU — the work-down
+    // list for whoever curates the Sage cross-reference.
+    if (filter === 'nosage') list = list.filter(p => p.is_active && !p.sage_id)
 
     if (search && search.trim().length >= 2) {
       const q = search.toLowerCase()
       list = list.filter(p =>
         (p.name || '').toLowerCase().includes(q) ||
         (p.id   || '').toLowerCase().includes(q) ||
+        (p.sage_id || '').toLowerCase().includes(q) ||
         (p.category || '').toLowerCase().includes(q)
       )
     }
@@ -221,13 +227,13 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   // half useless on a warehouse floor).
   function handleExportCsv() {
     const headers = [
-      'SKU', 'Name', 'Nickname', 'Unit', 'Department', 'Item Type',
+      'SKU', 'Sage ID', 'Name', 'Nickname', 'Unit', 'Department', 'Item Type',
       'Material Group', 'Category', 'Status', 'Barcode', 'BoxHero ID', 'On Hand',
     ]
     const lines = [headers.map(escapeCsvField).join(',')]
     for (const p of filtered) {
       lines.push([
-        p.id, p.name || '', p.nickname || '', p.unit || 'ea',
+        p.id, p.sage_id || '', p.name || '', p.nickname || '', p.unit || 'ea',
         p.department || '', p.item_type || '', p.material_group || '',
         p.category || '', p.is_active ? 'active' : 'draft',
         p.barcode || '', p.boxhero_id || '',
@@ -251,6 +257,15 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
       showToast('Saved')
     } catch (e) {
       console.error('Save part failed:', e)
+      // Partial unique index on sage_id: one Sage item ↔ one SKU. Keyed on
+      // the index name (parts_catalog_sage_id_idx) appearing in the message —
+      // renaming the index demotes this to the generic toast. Name the SKU
+      // already holding it so the manager can go fix the right row.
+      if (e?.code === '23505' && /sage_id/.test(e.message || '')) {
+        const holder = parts.find(p => p.id !== editing.id && p.sage_id === updates.sage_id)
+        showToast(`Sage ID ${updates.sage_id} is already on ${holder ? holder.id : 'another part'}`)
+        return
+      }
       showToast('Save failed: ' + e.message)
     }
   }
@@ -353,7 +368,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
 
   return (
     <div style={{ position: 'relative', paddingBottom: selectedCount > 0 ? 76 : 0 }}>
-      {/* Compact filter pills — only 3 options, stay visible. Reduced
+      {/* Compact filter pills — 4 options, stay visible. Reduced
           padding from previous so they sit at ~28px row instead of 35px. */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
         <button onClick={() => setFilter('all')} style={chipStyle(filter === 'all')}>
@@ -364,6 +379,9 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
         </button>
         <button onClick={() => setFilter('draft')} style={chipStyle(filter === 'draft', { color: 'amber' })}>
           <Icon name="alert" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Drafts ({counts.draft})
+        </button>
+        <button onClick={() => setFilter('nosage')} style={chipStyle(filter === 'nosage')} title="Active parts with no Sage Intacct item ID yet">
+          No Sage ID ({counts.nosage})
         </button>
       </div>
 
@@ -451,7 +469,9 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                   )}
                 </div>
                 <div className="mono" style={{ fontSize: 12, color: 'var(--hint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {p.id} · {p.unit || 'ea'} · {p.category || 'Uncategorized'}
+                  {p.id}
+                  {p.sage_id && <span style={{ color: 'var(--accent-dk)' }}> · Sage {p.sage_id}</span>}
+                  {' · '}{p.unit || 'ea'} · {p.category || 'Uncategorized'}
                 </div>
                 {/* Draft provenance: which flow minted this draft, who, when.
                     attributes.created_via is stamped at every creation path
@@ -886,6 +906,9 @@ function bulkActionBtn(variant) {
 function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
   const [name, setName] = useState(part.name || '')
   const [nickname, setNickname] = useState(part.nickname || '')
+  // Sage Intacct Item ID — a cross-reference that rides next to the SKU; the
+  // SKU itself is the immutable key and is not editable here.
+  const [sageId, setSageId] = useState(part.sage_id || '')
 
   // Open-ended attribute bag. Stored as an array of {key, value} for
   // stable rendering during editing; serialized to a plain object on
@@ -953,6 +976,7 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
       await onSave({
         name: name.trim(),
         nickname: nickname.trim() || null,
+        sage_id: sageId.trim().toUpperCase() || null,   // Sage IDs are uppercase; the unique index is case-sensitive
         attributes,
         unit: unit.trim() || 'ea',
         department: department.trim() || null,
@@ -995,6 +1019,22 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
             />
             <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
               Searched alongside name and SKU. Shows up next to the part name as <em>aka nickname</em>.
+            </div>
+          </div>
+
+          <div className="field">
+            <label>Sage ID <span style={{ fontWeight: 400, color: 'var(--hint)' }}>— Sage Intacct item (SKU stays as-is)</span></label>
+            <input
+              type="text"
+              value={sageId}
+              onChange={e => setSageId(e.target.value)}
+              placeholder="e.g. UB000011"
+              autoComplete="off"
+              name="part-sage-id"
+              style={{ fontFamily: 'monospace' }}
+            />
+            <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
+              Written as ITEMID in the Sage export (the SKU is used when this is blank). One Sage ID per part.
             </div>
           </div>
 
