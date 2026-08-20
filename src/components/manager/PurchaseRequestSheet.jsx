@@ -1375,13 +1375,17 @@ function ReceiveLineRow({ line, pr, disabled, toLocationId = null, bins = [], on
   const [newSku, setNewSku] = useState('')
   const [newName, setNewName] = useState(line.description || '')
   const [newUnit, setNewUnit] = useState('ea')
+  // The part already exists in Sage by the time a PO line is received, so it
+  // has a Sage Item ID — capture it here rather than leaving a "No Sage ID"
+  // chip for the Parts tab to chase later.
+  const [newSageId, setNewSageId] = useState('')
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
     if (resolveMode !== 'link' || !search || search.length < 2) { setResults([]); return }
     if (searchTimer.current) clearTimeout(searchTimer.current)
     searchTimer.current = setTimeout(async () => {
-      try { setResults(await searchPartsCatalog(search, { limit: 10 }) || []) }
+      try { setResults(await searchPartsCatalog(search, { limit: 10, cols: 'id, name, nickname, unit, category, sage_id, refurb_of, is_active' }) || []) }
       catch (e) { console.warn('part search:', e) }
     }, 200)
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current) }
@@ -1398,13 +1402,21 @@ function ReceiveLineRow({ line, pr, disabled, toLocationId = null, bins = [], on
     setCreating(true)
     onError?.(null)
     try {
+      const sageId = newSageId.trim().toUpperCase() || null
       const p = await createPart({
         id: newSku.trim(), name: newName.trim(), unit: newUnit.trim() || 'ea', is_active: true,
+        sage_id: sageId,
         created_via: { source: 'Purchase request', by: currentUser?.name || null },
       })
-      setResolvedPart({ id: p?.id || newSku.trim(), name: p?.name || newName.trim() })
+      setResolvedPart({ id: p?.id || newSku.trim(), name: p?.name || newName.trim(), sage_id: p?.sage_id || sageId })
     } catch (e) {
-      onError?.(e.message || 'Could not create part')
+      // Partial unique index on sage_id — one Sage item ↔ one SKU (same
+      // detection as the Parts tab: 23505 + the index name in the message).
+      if (e?.code === '23505' && /sage_id/.test(e.message || '')) {
+        onError?.(`Sage ID ${newSageId.trim().toUpperCase()} is already on another part — link that part instead`)
+      } else {
+        onError?.(e.message || 'Could not create part')
+      }
     } finally {
       setCreating(false)
     }
@@ -1568,18 +1580,18 @@ function ReceiveLineRow({ line, pr, disabled, toLocationId = null, bins = [], on
                       {results.map(p => (
                         <div
                           key={p.id}
-                          onClick={() => setResolvedPart({ id: p.id, name: p.name })}
+                          onClick={() => setResolvedPart({ id: p.id, name: p.name, sage_id: p.sage_id || null, refurb_of: p.refurb_of || null })}
                           style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border)', fontSize: 13 }}
                         >
                           <div style={{ fontWeight: 600 }}>{p.name}</div>
-                          <div style={{ fontSize: 11, color: 'var(--hint)' }}>{p.id}{p.category ? ` · ${p.category}` : ''}</div>
+                          <div style={{ fontSize: 11, color: 'var(--hint)' }}>{p.id}{p.sage_id ? ` · Sage ${p.sage_id}` : ''}{p.category ? ` · ${p.category}` : ''}</div>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 70px auto', gap: 6, alignItems: 'end' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(90px,1fr) minmax(120px,1.4fr) 60px minmax(110px,1fr) auto', gap: 6, alignItems: 'end' }}>
                   <div className="field" style={{ marginBottom: 0 }}>
                     <label>SKU</label>
                     <input value={newSku} onChange={e => setNewSku(e.target.value)} placeholder="SKU" autoComplete="off" name="pr-new-sku" />
@@ -1591,6 +1603,10 @@ function ReceiveLineRow({ line, pr, disabled, toLocationId = null, bins = [], on
                   <div className="field" style={{ marginBottom: 0 }}>
                     <label>Unit</label>
                     <input value={newUnit} onChange={e => setNewUnit(e.target.value)} placeholder="ea" autoComplete="off" name="pr-new-unit" />
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>Sage ID</label>
+                    <input value={newSageId} onChange={e => setNewSageId(e.target.value)} placeholder="UB000011" autoComplete="off" name="pr-new-sage-id" style={{ fontFamily: '"DM Mono", monospace' }} />
                   </div>
                   <button type="button" className="btn btn-ghost" style={{ padding: '7px 12px', fontSize: 12 }} onClick={createAndUse} disabled={creating}>
                     {creating ? 'Creating…' : 'Create'}
@@ -1604,7 +1620,7 @@ function ReceiveLineRow({ line, pr, disabled, toLocationId = null, bins = [], on
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
               {resolvedPart && (
                 <div style={{ flex: '1 1 160px', fontSize: 12, color: 'var(--muted)' }}>
-                  → <strong style={{ color: 'var(--text)' }}>{resolvedPart.name}</strong> <span style={{ color: 'var(--hint)' }}>({resolvedPart.id})</span>
+                  → <strong style={{ color: 'var(--text)' }}>{resolvedPart.name}</strong> <span style={{ color: 'var(--hint)' }}>({resolvedPart.id}{resolvedPart.sage_id ? ` · Sage ${resolvedPart.sage_id}` : ' · no Sage ID'})</span>
                   <button type="button" onClick={() => setResolvedPart(null)} style={{ marginLeft: 8, background: 'none', border: 'none', color: 'var(--blue)', cursor: 'pointer', fontSize: 11 }}>change</button>
                 </div>
               )}
