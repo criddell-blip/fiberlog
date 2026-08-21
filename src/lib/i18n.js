@@ -193,6 +193,9 @@ const strings = {
   statPartTypes:      { en: 'Part types',                 es: 'Tipos de parte' },
   statTotalUnits:     { en: 'Total units',                es: 'Unidades totales' },
   loadBtn:            { en: 'Load',                       es: 'Cargar' },
+  // Stock-first (installer) My Stock
+  commonItems:        { en: 'Common items',               es: 'Artículos comunes' },
+  projectsLink:       { en: 'Projects',                   es: 'Proyectos' },
   returnBtn:          { en: 'Return',                     es: 'Devolver' },
   refresh:            { en: 'Refresh',                    es: 'Actualizar' },
   noMovementsPermitted:{ en: 'No movements permitted — ask your manager.',

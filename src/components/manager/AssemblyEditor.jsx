@@ -420,11 +420,18 @@ export default function AssemblyEditor() {
               </div>
             ) : selTab === 'install' ? (
               <div style={{ fontSize: 12, maxWidth: 360, margin: '0 auto', lineHeight: 1.5 }}>
-                Author kits field-tech crew taps when logging customer installs — ONT swap, router install, drop bury. (Currently unused — field tech UI is backlogged behind Sonar polygon data.)
+                Parts in Install assemblies show up as <strong>Common items</strong> at the top of an installer's My Stock — one tap loads the part onto their truck. Build one kit (or several) of the parts installers grab every day. Installers don't log passdowns here, so there are no behavior flags.
               </div>
             ) : (
               <div style={{ fontSize: 12 }}>Click <strong>+ New</strong> to add one, or duplicate an existing assembly from another tab.</div>
             )}
+          </div>
+        )}
+        {/* Install assemblies double as the installers' Common-items strip
+            (MyStockView) — say so where the owner edits them. */}
+        {!loading && selTab === 'install' && tabAsms.length > 0 && (
+          <div style={{ fontSize: 12, color: 'var(--muted)', padding: '0 2px 10px', lineHeight: 1.5 }}>
+            Parts listed here appear as <strong>Common items</strong> on installers' My Stock (tap-to-load). Order follows the assembly + part order below; duplicates across kits collapse to one chip.
           </div>
         )}
         {tabAsms.map(asm => (

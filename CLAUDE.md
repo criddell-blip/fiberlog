@@ -33,7 +33,7 @@ We can't integrate directly with Sonar (CRM) or Sage (accounting). The strategy 
 |---|---|---|---|
 | **Fiber construction** (aerial / underground / splice / drop / locator) | Project → Phase → Task → Daily passdown | FiberLog only | ✅ Shipped |
 | **Infrastructure** (towers, sites, business installs) | Project → **Site** → Task → Daily passdown (sites-shaped shell) | FiberLog only | 🚧 Shell shipped — onboarding next |
-| **Field tech** (Calix/UBNT installs, Wave/wireless) | Customer install ticket (Sonar-scheduled) | Sonar for scheduling + logging; FiberLog imports daily | ✅ Routing unblocked Aug 2026 — Sonar tags jobs with a project |
+| **Field tech** (Calix/UBNT installs, Wave/wireless) | Customer install ticket (Sonar-scheduled) | Sonar for scheduling + logging; FiberLog imports daily | ✅ Routing unblocked Aug 2026 — Sonar tags jobs with a project. In-app, `crew_type='install'` is **stock-first**: `CrewApp` opens on My Stock (projects behind a link) with an owner-curated **Common items** tap-to-load strip sourced from `assemblies.crew_type='install'` (`isStockFirstCrew()` in `lib/crewTypes.js`, Aug 21 2026) |
 
 **Why this split:** Fiber and infrastructure crews work plan-driven jobs against geographic projects — they know which project they're on. Field techs work ticket-driven jobs against customer addresses and don't reliably know which fiber region a customer falls into. That used to make their consumption unroutable; it no longer does — Sonar now stamps a `Project` on each fiber job and FiberLog maps every one of those tags to a phase (see "Field tech — routing" below). Field tech intake still lives in Sonar; FiberLog imports the daily report.
 

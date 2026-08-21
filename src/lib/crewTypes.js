@@ -61,3 +61,13 @@ export function visibleProjectsForCrew(projects, crewType) {
   if (CREW_TYPES_SEE_WIRELESS.includes(crewType)) return projects
   return projects.filter(p => !WIRELESS_ONLY_PROJECTS.includes(p?.name))
 }
+
+// Crews whose FiberLog day is inventory-only. Installers (field techs) log
+// their jobs in Sonar — FiberLog imports the report — so the project tree is
+// noise for them. CrewApp opens them on My Stock with the projects reachable
+// behind a link, and MyStockView shows the owner-curated "Common items" strip
+// (assemblies.crew_type='install' doubles as that list).
+export const STOCK_FIRST_CREW_TYPES = ['install']
+export function isStockFirstCrew(crewType) {
+  return STOCK_FIRST_CREW_TYPES.includes(crewType)
+}
