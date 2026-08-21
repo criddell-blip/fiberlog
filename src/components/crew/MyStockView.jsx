@@ -18,8 +18,12 @@ import Icon from '../shared/Icon'
 // in the supabase_realtime publication. We refetch on mount, on manual
 // refresh, and after any successful movement. Good enough for a single
 // crew member's session.
-export default function MyStockView({ onBack, onUserTap }) {
-  const { currentUser, showToast, isQtyPaused, lang } = useApp()
+// onOpenProjects — passed only for stock-first crews (installers), for whom
+// this view is HOME: it renders the "Projects →" escape-hatch link, and the
+// owner-curated Common items strip (Assemblies → Install) appears above the
+// stock list.
+export default function MyStockView({ onBack, onUserTap, onOpenProjects }) {
+  const { currentUser, showToast, isQtyPaused, lang, assemblies } = useApp()
   const [truck, setTruck] = useState(null)
   const [stock, setStock] = useState([])
   const [loading, setLoading] = useState(true)
@@ -30,6 +34,9 @@ export default function MyStockView({ onBack, onUserTap }) {
   // sheet with it (skips the part picker). Null = the top Return button's
   // normal flow.
   const [returnPartId, setReturnPartId] = useState(null)
+  // Same idea for Load, fed by the Common items strip: tap a curated part →
+  // the load sheet opens with it pre-selected (crew picks source + qty).
+  const [loadPartId, setLoadPartId] = useState(null)
   // Set of operation strings the caller is *denied* (per crew_operation_permissions).
   // Empty by default = everything allowed. RPC enforces server-side too.
   const [deniedOps, setDeniedOps] = useState(() => new Set())
@@ -79,9 +86,34 @@ export default function MyStockView({ onBack, onUserTap }) {
     [stock]
   )
 
+  // Owner-curated "Common items": every active install assembly's parts,
+  // flattened in sort_order and deduped by SKU. The Install tab of the
+  // Assembly editor is the ONLY place this list is managed — no separate
+  // setting. Only rendered for stock-first crews (the strip is meaningless
+  // for fiber crews, whose assemblies drive the task workspace instead).
+  const commonItems = useMemo(() => {
+    if (!onOpenProjects) return []
+    const seen = new Set()
+    const out = []
+    for (const asm of assemblies?.install || []) {
+      for (const ap of asm.parts || []) {   // shape from getAssemblies(): { id, qty, name, unit }
+        if (!ap.id || seen.has(ap.id)) continue
+        seen.add(ap.id)
+        out.push({ id: ap.id, name: ap.name || ap.id })
+      }
+    }
+    return out
+  }, [assemblies, onOpenProjects])
+  const onHandById = useMemo(() => {
+    const m = new Map()
+    for (const r of stock) m.set(r.parts_catalog?.id, Number(r.quantity || 0))
+    return m
+  }, [stock])
+
   function handleMovementComplete() {
     setSheetMode(null)
     setReturnPartId(null)
+    setLoadPartId(null)
     load()
   }
 
@@ -136,7 +168,7 @@ export default function MyStockView({ onBack, onUserTap }) {
             <button
               className="btn btn-primary"
               style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
-              onClick={() => { setReturnPartId(null); setSheetMode('load') }}
+              onClick={() => { setReturnPartId(null); setLoadPartId(null); setSheetMode('load') }}
               disabled={!truck || loading}
             >
               <Icon name="download" size={16} /> {t('loadBtn', lang)}
@@ -209,7 +241,58 @@ export default function MyStockView({ onBack, onUserTap }) {
             <Icon name="rotate" size={15} /> {t('pulledFromCustomer', lang)}
           </button>
         </div>
+
+        {/* Stock-first crews: the project tree is one tap away, not gone. */}
+        {onOpenProjects && (
+          <button
+            onClick={onOpenProjects}
+            className="btn btn-ghost"
+            style={{ marginTop: 8, width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, fontSize: 13 }}
+          >
+            <Icon name="folder" size={15} /> {t('projectsLink', lang)} →
+          </button>
+        )}
       </div>
+
+      {/* ─── Common items (owner-curated quick-load) ───────────────────── */}
+      {canLoad && commonItems.length > 0 && (
+        <div style={{ padding: '10px 16px 4px', flexShrink: 0, background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
+          <div className="sec-label" style={{ margin: '0 0 6px' }}>{t('commonItems', lang)}</div>
+          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, WebkitOverflowScrolling: 'touch' }}>
+            {commonItems.map(ci => {
+              const onHand = onHandById.get(ci.id) || 0
+              return (
+                <button
+                  key={ci.id}
+                  onClick={() => { setReturnPartId(null); setLoadPartId(ci.id); setSheetMode('load') }}
+                  disabled={!truck || loading}
+                  title={ci.id}
+                  style={{
+                    flex: '0 0 auto', minWidth: 120, maxWidth: 180,
+                    padding: '8px 10px', textAlign: 'left',
+                    background: 'var(--bg)', color: 'var(--text)',
+                    border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.25, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                    {ci.name}
+                  </div>
+                  <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                    {/* Zero is dimmed, not hidden — "I'm out, load some" is the whole point. */}
+                    <span style={{ fontSize: 14, fontWeight: 800, color: onHand > 0 ? 'var(--teal)' : 'var(--hint)' }}>
+                      {isQtyPaused ? '—' : onHand}
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--orange)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                      <Icon name="download" size={12} /> {t('loadBtn', lang)}
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ─── Search ────────────────────────────────────────────────────── */}
       {stock.length > 4 && (
@@ -340,8 +423,8 @@ export default function MyStockView({ onBack, onUserTap }) {
           mode={sheetMode}
           myTruck={truck}
           myStock={stock}
-          prefillPartId={sheetMode === 'return' ? returnPartId : null}
-          onClose={() => { setSheetMode(null); setReturnPartId(null) }}
+          prefillPartId={sheetMode === 'return' ? returnPartId : loadPartId}
+          onClose={() => { setSheetMode(null); setReturnPartId(null); setLoadPartId(null) }}
           onComplete={handleMovementComplete}
         />
       )}

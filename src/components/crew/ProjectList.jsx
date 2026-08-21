@@ -7,7 +7,10 @@ import Icon from '../shared/Icon'
 // they still sat in the Active list one level deeper. Progress = closed/total.
 import { isCompletedTask } from './taskState'
 
-export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
+// onBack is only passed for stock-first crews (installers), whose home is
+// My Stock — the project list is then one level in, so it gets the ← arrow
+// and drops its own My Stock card.
+export default function ProjectList({ onSelect, onOpenMyStock, onBack, onUserTap }) {
   const { projects: allProjects, currentUser, lang } = useApp()
   // Hide Gigwave / Fixed Wireless from crews that aren't infra/field-tech.
   const projects = visibleProjectsForCrew(allProjects, currentUser?.crew_type)
@@ -18,6 +21,7 @@ export default function ProjectList({ onSelect, onOpenMyStock, onUserTap }) {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Topbar */}
       <div className="topbar">
+        {onBack && <button className="back-btn" onClick={onBack}>←</button>}
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.5px', lineHeight: 1 }}>
             <span style={{ color: 'var(--text)' }}>Fiber</span><span style={{ color: 'var(--orange)' }}>Log</span>

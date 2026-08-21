@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
-import { crewTypeLabel, visibleProjectsForCrew } from '../../lib/crewTypes'
+import { crewTypeLabel, visibleProjectsForCrew, isStockFirstCrew } from '../../lib/crewTypes'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 import ProjectList from './ProjectList'
@@ -19,8 +19,8 @@ const JOB_ICONS = { aerial: '🏗️', underground: '⛏️', splice: '🔌', fi
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 function CrewSidebar({
-  projects, selTask, view, onSelectMyStock, onSelectTask, onSelectPhase,
-  currentUser, onUserTap, darkMode, toggleDarkMode, exitCrewMode,
+  projects, selTask, view, onSelectMyStock, onSelectProjects, onSelectTask, onSelectPhase,
+  currentUser, onUserTap, darkMode, toggleDarkMode, exitCrewMode, stockFirst = false,
 }) {
   // Remember which project this user last had open — field crews work one
   // project for weeks, and the old default (auto-expand projects[0]) made
@@ -41,6 +41,23 @@ function CrewSidebar({
   }
 
   const isMyStock = view === 'mystock'
+  // Stock-first crews (installers) get My Stock as home and the project
+  // tree folded behind a "Projects" entry — see isStockFirstCrew().
+  const showTree = !stockFirst || view === 'projects'
+
+  const navBtnStyle = active => ({
+    display: 'flex', alignItems: 'center', gap: 10,
+    padding: '10px 14px',
+    background: active ? 'var(--orange-lt)' : 'transparent',
+    border: 'none',
+    borderLeft: active ? '3px solid var(--orange)' : '3px solid transparent',
+    color: active ? 'var(--orange)' : 'var(--text)',
+    fontWeight: active ? 800 : 600,
+    fontSize: 13,
+    cursor: 'pointer',
+    textAlign: 'left',
+    flexShrink: 0,
+  })
 
   return (
     <div style={{
@@ -93,31 +110,25 @@ function CrewSidebar({
 
       {/* My Stock entry — sits above the project tree per the design.
           Active state mirrors the main panel's view. */}
-      <button
-        onClick={onSelectMyStock}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          padding: '10px 14px',
-          background: isMyStock ? 'var(--orange-lt)' : 'transparent',
-          border: 'none',
-          borderLeft: isMyStock ? '3px solid var(--orange)' : '3px solid transparent',
-          color: isMyStock ? 'var(--orange)' : 'var(--text)',
-          fontWeight: isMyStock ? 800 : 600,
-          fontSize: 13,
-          cursor: 'pointer',
-          textAlign: 'left',
-          flexShrink: 0,
-        }}
-      >
+      <button onClick={onSelectMyStock} style={navBtnStyle(isMyStock)}>
         <Icon name="box" size={17} />
         <span>My Stock</span>
       </button>
 
+      {/* Stock-first crews: the tree is an opt-in destination, not the
+          default landscape. */}
+      {stockFirst && (
+        <button onClick={onSelectProjects} style={navBtnStyle(view === 'projects')}>
+          <Icon name="folder" size={17} />
+          <span>Projects</span>
+        </button>
+      )}
+
       {/* Project / phase / task tree */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 20px' }}>
-        <div className="sec-label" style={{ padding: '8px 14px 4px', margin: 0 }}>Projects</div>
+        {showTree && <div className="sec-label" style={{ padding: '8px 14px 4px', margin: 0 }}>Projects</div>}
 
-        {projects.map(p => {
+        {showTree && projects.map(p => {
           const isExpP = expandedProject === p.id
           const totalTasks = p.phases.reduce((a, ph) => a + ph.tasks.length, 0)
           const doneTasks = p.phases.reduce((a, ph) => a + ph.tasks.filter(isCompletedTask).length, 0)
@@ -266,12 +277,20 @@ export default function CrewApp() {
   // project simply can't be reached through the filtered sidebar).
   const visibleProjects = visibleProjectsForCrew(projects, currentUser?.crew_type)
 
-  const [screen, setScreen] = useState('projects')
+  // Installers (crew_type='install') live in Sonar for their jobs; FiberLog
+  // is their truck-stock tool. For them My Stock is HOME and the project
+  // tree sits one step away behind a "Projects" link. Everyone else keeps
+  // projects as home. Same identity rule for crew users and staff acting
+  // as crew — it's keyed purely on crew_type.
+  const stockFirst = isStockFirstCrew(currentUser?.crew_type)
+  const homeScreen = stockFirst ? 'mystock' : 'projects'
+
+  const [screen, setScreen] = useState(homeScreen)
   // Wide-layout main-panel view. 'projects' (default) shows the project
   // tree → TaskList/TaskWorkspace flow. 'mystock' replaces the right panel
   // with MyStockView. Narrow layout uses `screen` instead for the same
   // distinction (screen='mystock' is a peer of 'projects'/'phases'/etc.).
-  const [view, setView] = useState('projects')
+  const [view, setView] = useState(homeScreen)
   // We track selections by ID, not by snapshot — so they always pick up the
   // latest data from `projects` (which AppContext keeps in sync via realtime
   // and createTask/approval flows).
@@ -310,12 +329,17 @@ export default function CrewApp() {
   // in both layouts as a simple top-of-stack overlay.
   //
   // Narrow layout: a single `screen` stack.
-  const screenDepth = { projects: 0, mystock: 1, phases: 1, tasks: 2, workspace: 3 }[screen] || 0
+  // Stock-first crews invert the root: My Stock is depth 0 and the project
+  // list is one step in, so the whole project descent shifts by one.
+  const screenDepth = (stockFirst
+    ? { mystock: 0, projects: 1, phases: 2, tasks: 3, workspace: 4 }
+    : { projects: 0, mystock: 1, phases: 1, tasks: 2, workspace: 3 })[screen] || 0
   useBackClose(isWide ? 0 : screenDepth, () => {
     if (screen === 'workspace') navTo('tasks')
     else if (screen === 'tasks') navTo('phases')
     else if (screen === 'phases') navTo('projects')
     else if (screen === 'mystock') navTo('projects')
+    else if (screen === 'projects' && stockFirst) navTo('mystock')
   })
   // Wide layout: sidebar-driven selection. Back steps task → phase → (picker).
   // selTask always implies selPhase, so the depth is 2/1/0.
@@ -324,8 +348,9 @@ export default function CrewApp() {
     if (selTaskId) setSelTaskId(null)
     else if (selPhaseId) setSelPhaseId(null)
   })
-  // Wide layout: My Stock is a peer toggle over the current selection.
-  useBackClose(isWide && view === 'mystock' ? 1 : 0, () => setView('projects'))
+  // Wide layout: the non-home view is a peer toggle over the current
+  // selection (My Stock for project crews; Projects for stock-first crews).
+  useBackClose(isWide && view !== homeScreen ? 1 : 0, () => setView(homeScreen))
   useBackClose(showSignOut ? 1 : 0, () => setShowSignOut(false))
 
   if (loading) return (
@@ -354,6 +379,8 @@ export default function CrewApp() {
           selTask={selTask}
           view={view}
           onSelectMyStock={() => setView('mystock')}
+          onSelectProjects={() => setView('projects')}
+          stockFirst={stockFirst}
           onSelectTask={handleSidebarTaskSelect}
           onSelectPhase={(project, phase) => {
             setSelProjectId(project.id); setSelPhaseId(phase.id); setSelTaskId(null)
@@ -368,7 +395,10 @@ export default function CrewApp() {
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {view === 'mystock' ? (
-            <MyStockView onUserTap={() => setShowSignOut(true)} />
+            <MyStockView
+              onUserTap={() => setShowSignOut(true)}
+              onOpenProjects={stockFirst ? () => setView('projects') : undefined}
+            />
           ) : !selTask ? (
             selProject && selPhase ? (
               // key= forces a remount when the phase changes. TaskList caches
@@ -482,13 +512,15 @@ export default function CrewApp() {
       {screen === 'projects' && (
         <ProjectList
           onSelect={p => { setSelProjectId(p.id); navTo('phases') }}
-          onOpenMyStock={() => navTo('mystock')}
+          onOpenMyStock={stockFirst ? undefined : () => navTo('mystock')}
+          onBack={stockFirst ? () => navTo('mystock') : undefined}
           onUserTap={() => setShowSignOut(true)}
         />
       )}
       {screen === 'mystock' && (
         <MyStockView
-          onBack={() => navTo('projects')}
+          onBack={stockFirst ? undefined : () => navTo('projects')}
+          onOpenProjects={stockFirst ? () => navTo('projects') : undefined}
           onUserTap={() => setShowSignOut(true)}
         />
       )}

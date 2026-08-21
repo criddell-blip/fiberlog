@@ -20,9 +20,12 @@ import Icon from '../shared/Icon'
 //   myStock    array of {quantity, parts_catalog} rows at the truck (for return)
 //   onClose()  user dismissed the sheet
 //   onComplete() movement saved successfully — parent should refetch
-//   prefillPartId  (return only) a truck part tapped from My Stock — pre-selects
+//   prefillPartId  return: a truck part tapped from My Stock — pre-selects
 //                  it + defaults qty to the full on-truck amount, so the crew
 //                  skips the part picker and just confirms where it goes.
+//                  load: a Common-items part (installers' My Stock) — seeds
+//                  the by-part search with the SKU and auto-picks it when
+//                  it's stocked at a single loadable source.
 export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onComplete, prefillPartId = null }) {
   const { showToast, lang, currentUser } = useApp()
 
@@ -36,16 +39,20 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   const [loadingOtherStock, setLoadingOtherStock] = useState(false)
 
   // The part the crew is moving + how much.
-  const [selectedPartId, setSelectedPartId] = useState(prefillPartId || null)
+  // RETURN prefill selects the part outright (source = the truck, known).
+  // LOAD prefill can't — a load needs a source location too — so it seeds
+  // the by-part search with the SKU instead and auto-picks below once the
+  // stock index resolves (see the prefill effect after partGroups loads).
+  const [selectedPartId, setSelectedPartId] = useState(mode === 'return' && prefillPartId ? prefillPartId : null)
   // Prefill the qty to the full on-truck amount — "I'm done with this, send it
   // all back" is the common case; the crew can still edit it down.
   const [quantity, setQuantity] = useState(() => {
-    if (!prefillPartId) return ''
+    if (mode !== 'return' || !prefillPartId) return ''
     const row = (myStock || []).find(r => r.parts_catalog?.id === prefillPartId)
     return row ? String(row.quantity) : ''
   })
   const [notes, setNotes] = useState('')
-  const [partSearch, setPartSearch] = useState('')
+  const [partSearch, setPartSearch] = useState(mode === 'load' && prefillPartId ? prefillPartId : '')
   // Multi-part cart. Each line snapshots one recordCrewMovement call so the
   // picker can move on without the queued lines drifting. For LOAD,
   // otherLocationId is the per-line source; for RETURN it's the shared
@@ -326,6 +333,22 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
       },
     }])
   }
+
+  // LOAD prefill (Common items strip on My Stock): once the stock index is
+  // in, auto-pick the part when it's stocked at exactly ONE loadable source
+  // — the crew then only types a qty. With several sources the seeded
+  // search already narrows the list to that part's location rows, so the
+  // crew taps the right one; with none, the "no parts matching" empty state
+  // shows the SKU (no dead end). Runs once per sheet mount.
+  const [prefillApplied, setPrefillApplied] = useState(false)
+  useEffect(() => {
+    if (!isLoad || !prefillPartId || prefillApplied || !partGroups) return
+    setPrefillApplied(true)
+    const group = partGroups.find(g => g.partId === prefillPartId)
+    if (!group || isRestrictedDept(group.department)) return
+    if (group.locations.length === 1) pickPartAtLocation(group, group.locations[0])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoad, prefillPartId, prefillApplied, partGroups])
 
   // Available quantity for the picked part (so we can show a max + validate).
   const selectedPart = useMemo(() => {
