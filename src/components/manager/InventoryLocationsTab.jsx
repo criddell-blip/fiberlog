@@ -6,6 +6,7 @@ import {
   getGroupMembers, getMemberCountsByLocation, removeUserFromGroup, bulkAssignPullLocation,
 } from '../../lib/inventory'
 import { crewTypeLabel } from '../../lib/crewTypes'
+import { LOCATION_TYPE_LABELS as TYPE_LABELS, LOCATION_TYPE_ICONS as TYPE_ICONS, locationTypeLabel } from '../../lib/locationTypes'
 import BinLabelSheet from '../cycleCount/BinLabelSheet'
 import AisleSignSheet from './AisleSignSheet'
 import LocationDetailPanel from './LocationDetailPanel'
@@ -33,26 +34,6 @@ function locActionChip() {
     background: 'var(--surface)', border: '1px solid var(--border2)',
     borderRadius: 8, padding: '5px 10px', cursor: 'pointer', whiteSpace: 'nowrap',
   }
-}
-
-const TYPE_LABELS = {
-  warehouse: 'Warehouse',
-  truck:     'Truck',
-  group:     'Group',
-  job_site:  'Job site',
-  vendor:    'Vendor',
-  scrap:     'Scrap',
-  bin:       'Bin',
-}
-
-const TYPE_ICONS = {
-  warehouse: '🏭',
-  truck:     '🚚',
-  group:     '👥',
-  job_site:  '📍',
-  vendor:    '🏢',
-  scrap:     '🗑️',
-  bin:       '📥',
 }
 
 export default function InventoryLocationsTab({ locations, loading, onChanged, onJumpToStock, onJumpToCount, onJumpToPart, focusJump, refreshKey }) {
@@ -470,7 +451,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                     transform: isSectionExpanded ? 'rotate(90deg)' : 'none',
                     transition: 'transform .15s', width: 10, textAlign: 'center',
                   }}>›</span>
-                  <span>{TYPE_LABELS[type]}{list.length > 1 ? 's' : ''} ({list.length})</span>
+                  <span>{locationTypeLabel(type, { plural: list.length !== 1 })} ({list.length})</span>
                   {sectionRollup.distinctParts > 0 && (
                     <span style={{ marginLeft: 'auto', textTransform: 'none', letterSpacing: 0, fontWeight: 600, color: 'var(--muted)' }}>
                       {sectionRollup.distinctParts.toLocaleString()} part{sectionRollup.distinctParts === 1 ? '' : 's'}
@@ -855,7 +836,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                   Retire <strong>{retiring.name}</strong>?
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                  {TYPE_LABELS[retiring.type] || retiring.type} · {retireStock.length || 0} part type{retireStock.length === 1 ? '' : 's'} with stock
+                  {locationTypeLabel(retiring.type)} · {retireStock.length || 0} part type{retireStock.length === 1 ? '' : 's'} with stock
                 </div>
               </div>
             </div>

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { useBackClose } from '../../lib/backStack'
 import { crewTypeLabel, VALID_FIELD_CREW_TYPES } from '../../lib/crewTypes'
+import { locationTypeLabel } from '../../lib/locationTypes'
 import { ACCESS_TYPES, accessTypeForUser, accessTypeToFields } from '../../lib/access'
 import {
   createUser, updateUserMetadata, deactivateUser, reactivateUser,
@@ -1485,7 +1486,7 @@ function LoadDestinationsSection({ userId }) {
         >
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 700 }}>{labelFor(loc)}</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase' }}>{loc.type}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase' }}>{locationTypeLabel(loc.type)}</div>
           </div>
           <button
             type="button"
@@ -1520,7 +1521,7 @@ function LoadDestinationsSection({ userId }) {
               {addOptions.length === 0 ? '— no locations available —' : '＋ Add a destination'}
             </option>
             {addOptions.map(l => (
-              <option key={l.id} value={l.id}>{labelFor(l)} ({l.type})</option>
+              <option key={l.id} value={l.id}>{labelFor(l)} ({locationTypeLabel(l.type)})</option>
             ))}
           </select>
           <button

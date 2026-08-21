@@ -9,6 +9,7 @@ import {
   getLastUnitCost, getRecentVendors, getBinsForWarehouse,
   buildPurchaseRequestCsv, buildPurchaseRequestEmail,
 } from '../../lib/inventory'
+import { locationTypeLabel } from '../../lib/locationTypes'
 import { searchPartsCatalog } from '../../lib/supabase'
 import { downloadTextAsFile } from '../../lib/csvImport'
 import { isoLocalDate } from '../../lib/format'
@@ -554,7 +555,7 @@ export default function PurchaseRequestSheet({
             >
               <option value="">— pick a location —</option>
               {locationOptions.map(l => (
-                <option key={l.id} value={l.id}>{l.name} ({l.type})</option>
+                <option key={l.id} value={l.id}>{l.name} ({locationTypeLabel(l.type)})</option>
               ))}
             </select>
           </div>

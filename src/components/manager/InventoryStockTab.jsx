@@ -376,7 +376,7 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
           { id: 'all',       label: 'All',             icon: null,  count: locations.length },
           { id: 'warehouse', label: 'Warehouses',      icon: '🏭', count: counts.warehouse || 0 },
           { id: 'truck',     label: 'Trucks',          icon: '🚚', count: counts.truck     || 0 },
-          { id: 'job_site',  label: 'Project buckets', icon: '📍', count: counts.job_site  || 0 },
+          { id: 'job_site',  label: 'Region/Projects', icon: '📍', count: counts.job_site  || 0 },
         ].filter(t => t.id === 'all' || t.count > 0)
         return (
           <>

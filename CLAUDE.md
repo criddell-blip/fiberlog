@@ -96,6 +96,7 @@ src/
     admin.js              ← user management ops (create/update/deactivate/reset password/set email)
     access.js             ← staff_scope / named-access-type single source of truth (staffScope, visibleManagerTabs, canActAsCrew, inventoryIsLimited)
     crewTypes.js          ← crewTypeLabel() display map + VALID_FIELD_CREW_TYPES
+    locationTypes.js      ← locationTypeLabel() + LOCATION_TYPE_{LABELS,PLURALS,ICONS} — the ONE label map for inventory_locations.type (job_site renders "Region/Project"; the DB value never changes)
     cycleCount.js         ← cycle-count RPC wrappers + BIN:<uuid> barcode helpers
     backStack.js          ← Back-button coordinator + useBackClose hook
     i18n.js               ← en/es strings for the crew shells (~290 keys; crew lang toggle reads/writes localStorage.fiberlog_lang)
@@ -197,7 +198,7 @@ supabase/
 - A trigger updates `inventory_stock` automatically when a movement is inserted
 - **CHECK constraint `movement_endpoints_valid`** enforces correct from/to per type (e.g., `receive` requires `to NOT NULL, from NULL`; `transfer`/`return` require both and different). The JS `validateMovement()` in `lib/inventory.js` mirrors this so we fail fast.
 
-### Accounting destinations (`type='job_site'`)
+### Accounting destinations (`type='job_site'`, labelled **Region/Projects** in the UI)
 - **Project destinations** — one per active project, `project_id` set, auto-created by trigger `trg_ensure_project_job_site` on project insert/activation. Names match the project name. Receive auto-deduct transfers from approval AND `region`-routed Sonar imports.
 - **Gigwave + Fixed Wireless destinations** — these are now first-class projects (created in migration `sites_table_and_wireless_projects`) with their own auto-created project buckets. The pre-existing standalone `Gigwave` bucket from the Sonar work was reconciled to point at the new Gigwave project, so existing Sonar `gigwave` routing keeps working. Same consumption-ledger semantics as fiber regions.
 - **None destination** — RETIRED June 2026 (`is_active=false`). Fixed Wireless took over: Sonar `none`-routing now resolves the **Fixed Wireless** project bucket (the `none` token is kept internally to avoid a `sonar_routing` CHECK change; the routing option is labeled "Always Fixed Wireless"). None's residual stock was transferred to Fixed Wireless. The empty `Region None` / `Region Gigwave` buckets were retired at the same time.

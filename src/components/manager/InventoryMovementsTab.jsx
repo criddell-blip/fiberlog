@@ -4,6 +4,7 @@ import { getRecentMovements, getMovementsForActivityExport, movementEffectiveDat
 import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
 import { fmtWhen } from '../../lib/format'
 import { TYPE_COLORS, TYPE_LABELS, RECEIPT_KIND_LABEL, movementDisplay, signedQty, resolveReceiveMeta } from '../../lib/movementDisplay'
+import { locationTypeLabel } from '../../lib/locationTypes'
 import { chipStyle, cardSurface, LoadingBlock, EmptyState } from './chrome'
 import Icon from '../shared/Icon'
 
@@ -156,7 +157,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
         <option value="all">All locations</option>
         {locations.map(loc => (
           <option key={loc.id} value={loc.id}>
-            {loc.assigned_user?.name || loc.name} ({loc.type})
+            {loc.assigned_user?.name || loc.name} ({locationTypeLabel(loc.type)})
           </option>
         ))}
       </select>

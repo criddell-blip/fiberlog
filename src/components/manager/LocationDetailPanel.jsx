@@ -7,6 +7,7 @@ import {
   getMyActiveRun, startCountRun, startOrResumeCountSession,
 } from '../../lib/cycleCount'
 import BinLabelSheet from '../cycleCount/BinLabelSheet'
+import { locationTypeLabel } from '../../lib/locationTypes'
 import AisleSignSheet from './AisleSignSheet'
 import SkuLabelSheet from './SkuLabelSheet'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
@@ -145,7 +146,7 @@ export default function LocationDetailPanel({
                   {location.assigned_user?.name || location.name}
                 </div>
                 <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', marginTop: 2 }}>
-                  {TYPE_LABELS[location.type] || location.type}
+                  {locationTypeLabel(location.type)}
                   {location.assigned_user && location.assigned_user.name !== location.name && (
                     <> · {location.name}</>
                   )}
@@ -381,15 +382,6 @@ export default function LocationDetailPanel({
       )}
     </>
   )
-}
-
-const TYPE_LABELS = {
-  warehouse: 'Warehouse',
-  truck:     'Truck / trailer',
-  job_site:  'Project bucket',
-  vendor:    'Vendor',
-  scrap:     'Scrap',
-  bin:       'Bin',
 }
 
 const TYPE_ICON_NAMES = {

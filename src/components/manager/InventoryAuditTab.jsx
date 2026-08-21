@@ -8,6 +8,7 @@ import {
   compareNamesNatural,
 } from '../../lib/inventory'
 import { chipStyle, CARD_SHADOW, EmptyState } from './chrome'
+import { LOCATION_TYPE_ICONS as TYPE_ICONS, locationTypeLabel } from '../../lib/locationTypes'
 
 // Audit / cycle-count export tab.
 //
@@ -17,15 +18,6 @@ import { chipStyle, CARD_SHADOW, EmptyState } from './chrome'
 // Sheets / Numbers makes the discrepancy show up automatically as the
 // counter fills in actual quantities.
 
-const TYPE_ICONS = {
-  warehouse: '🏭',
-  truck:     '🚚',
-  group:     '👥',
-  job_site:  '📍',
-  vendor:    '🏢',
-  scrap:     '🗑️',
-  bin:       '📥',
-}
 
 // Scope is encoded as a string with prefix:
 //   'all'                       → every location
@@ -122,7 +114,7 @@ export default function InventoryAuditTab({ locations, refreshKey }) {
     }
     if (scope.startsWith('type:')) {
       const t = scope.slice(5)
-      return `All ${t}s`
+      return `All ${locationTypeLabel(t, { plural: true })}`
     }
     return scope
   }
@@ -266,8 +258,8 @@ export default function InventoryAuditTab({ locations, refreshKey }) {
             const list = locations.filter(l => l.type === t)
             if (list.length === 0) return null
             return (
-              <optgroup key={`type:${t}`} label={`All ${t}s`}>
-                <option value={`type:${t}`}>All {t}s</option>
+              <optgroup key={`type:${t}`} label={`All ${locationTypeLabel(t, { plural: true })}`}>
+                <option value={`type:${t}`}>All {locationTypeLabel(t, { plural: true })}</option>
                 {list.map(l => (
                   <option key={`loc:${l.id}`} value={`loc:${l.id}`}>
                     {TYPE_ICONS[t]} {l.assigned_user?.name || l.name}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
+import { LOCATION_TYPE_ICONS, locationTypeLabel } from '../../lib/locationTypes'
 import {
   parseCsv,
   readFileAsText,
@@ -623,13 +624,6 @@ function PickStage({ parseError, onPick }) {
   )
 }
 
-const TYPE_LABEL = {
-  warehouse: '🏭 Warehouse',
-  truck:     '🚚 Truck',
-  job_site:  '📍 Job site',
-  vendor:    '🏢 Vendor',
-  scrap:     '🗑️ Scrap',
-}
 const CAT_BADGE = {
   warehouse:    { color: 'var(--orange)',  text: 'WAREHOUSE' },
   crew:         { color: 'var(--teal)',    text: 'CREW POOL' },
@@ -694,7 +688,7 @@ function MappingStage({
                   <option value="skip">— Skip —</option>
                   {locations.map(l => (
                     <option key={l.id} value={l.id}>
-                      {l.assigned_user?.name || l.name} ({l.type})
+                      {l.assigned_user?.name || l.name} ({locationTypeLabel(l.type)})
                     </option>
                   ))}
                 </select>
@@ -723,7 +717,7 @@ function MappingStage({
                   style={{ padding: '6px 8px', borderRadius: 'var(--r-sm)', border: '1.5px solid var(--border2)', fontSize: 12, background: 'var(--bg)' }}
                 >
                   {['warehouse','truck','job_site','vendor','scrap'].map(t => (
-                    <option key={t} value={t}>{TYPE_LABEL[t]}</option>
+                    <option key={t} value={t}>{LOCATION_TYPE_ICONS[t]} {locationTypeLabel(t)}</option>
                   ))}
                 </select>
                 <input

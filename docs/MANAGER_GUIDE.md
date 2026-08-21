@@ -151,7 +151,7 @@ Look different: an **INFRA** treatment appears (a project with sites and no phas
 - **Bulk-move** when in a specific location: select rows + hit "Move N parts". Disabled in a warehouse's rollup view (the source bin is ambiguous — drill into "Unbinned" or a specific bin first)
 
 #### Locations
-- Top-level sections (Warehouses / Trucks / Groups / Job sites / Vendors / Scrap) are collapsible — the header shows the count + rollup so you can see what's inside without opening it
+- Top-level sections (Warehouses / Trucks / Groups / Region/Projects / Vendors / Scrap) are collapsible — the header shows the count + rollup so you can see what's inside without opening it
 - **Groups** are shared/multi-member buckets (Contractor - RNS, Crew - Construction, etc.) — distinct from personal trucks, with their own **Members** editor. Adding a member consolidates their personal-truck stock into the group and retires that truck; removing restores a personal truck
 - Warehouses with bins are collapsible; inside, bins **group by aisle** (parsed from the bin name), each aisle its own collapsible header — keeps 165+ bins navigable
 - Add/edit any location via "+ Add location" or the **Edit** button on a row; add bins via **+ Bin** on the warehouse row (single-level nesting only)
@@ -255,7 +255,7 @@ When you retire a site, you have an integrated option to recover physical equipm
 
 ## Retiring locations
 
-Same flow as site decommission but for inventory locations (warehouses, trucks, groups, job_sites, bins). Locations tab → row → **Retire**. **Available to owners and managers** (staff-guarded as of July 2026).
+Same flow as site decommission but for inventory locations (warehouses, trucks, groups, Region/Projects, bins). Locations tab → row → **Retire**. **Available to owners and managers** (staff-guarded as of July 2026).
 
 The modal loads the location's current stock, offers per-part recovery with a destination picker. Amber warning if you try to retire with stock still on hand and didn't pick to move it — won't block, just nudges. Same atomic guarantee: transfers + retire in one transaction.
 

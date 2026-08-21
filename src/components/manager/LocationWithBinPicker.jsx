@@ -16,6 +16,8 @@
 // surfaces before its bins have lazy-loaded; byId keeps warehouse-own
 // ("unbinned") stock separate for the bin sub-select's annotations. Absent
 // `stock` → renders exactly as before (location-only callers unaffected).
+import { locationTypeLabel } from '../../lib/locationTypes'
+
 export default function LocationWithBinPicker({
   topLevelId, setTopLevelId, binId, setBinId,
   options, binsByWarehouse, locations, excludeId,
@@ -33,7 +35,7 @@ export default function LocationWithBinPicker({
   const exactQty = id => Number(stock?.byId?.get(id) || 0)
   const hasStock = stock ? topOptions.filter(l => topQty(l.id) > 0) : []
   const others = stock ? topOptions.filter(l => topQty(l.id) <= 0) : topOptions
-  const optionText = loc => `${loc.assigned_user?.name || loc.name} (${loc.type})`
+  const optionText = loc => `${loc.assigned_user?.name || loc.name} (${locationTypeLabel(loc.type)})`
 
   // Stocked bins first (qty desc); unstocked keep their existing name order.
   const sortedBins = stock

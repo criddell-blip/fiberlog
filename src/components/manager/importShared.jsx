@@ -1,4 +1,5 @@
 import Icon from '../shared/Icon'
+import { LOCATION_TYPE_ICONS, LOCATION_TYPE_PLURALS } from '../../lib/locationTypes'
 
 // Shared presentational layer for the CSV importer sheets (Sonar asset
 // consumption, fiber jobs, BoxHero seed, bulk Sonar projects). Extracted
@@ -101,12 +102,8 @@ export const selectStyle = () => ({
 // Every location a Sonar-imported movement could plausibly have sourced
 // from, grouped for the <select>. job_site buckets + scrap are excluded
 // upstream (they're destinations, not sources).
-export const SOURCE_LOCATION_GROUPS = [
-  ['warehouse', '🏭 Warehouses'],
-  ['group',     '👥 Shared trailers'],
-  ['truck',     '🚚 Crew trucks'],
-  ['bin',       '🗄️ Bins'],
-]
+export const SOURCE_LOCATION_GROUPS = ['warehouse', 'group', 'truck', 'bin']
+  .map(t => [t, `${LOCATION_TYPE_ICONS[t]} ${LOCATION_TYPE_PLURALS[t]}`])
 
 // The warehouse/group/truck/bin optgroup picker that appeared 4× across
 // the Sonar sheets. `onChange` receives the raw option value ('' for the

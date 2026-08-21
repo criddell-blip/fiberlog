@@ -46,7 +46,7 @@ Every movement automatically triggers an update to `inventory_stock` (via `updat
 | `warehouse` | Physical storage; can have child `bin` rows for sub-locations | Main Warehouse |
 | `bin` | Shelf-level sub-location under a warehouse | "Aisle 2, Shelf B-3" |
 | `truck` | Personal vehicle assigned to a crew member, OR a shared trailer | "Joseph's Truck", "Aerial/UG Shared Trailer" |
-| `job_site` | The **consumption sink** — one per FiberLog region project | Heber, Park City, Wasatch Front, Ogden Valley, West Mountain |
+| `job_site` | The **consumption sink** — one per FiberLog region project; shown in the UI as **Region/Project** | Heber, Park City, Wasatch Front, Ogden Valley, West Mountain |
 
 `job_site` rows are the regional cost-center buckets. They're auto-created by a DB trigger (`trg_ensure_project_job_site`) whenever a new active project appears, so you never have to set one up by hand.
 

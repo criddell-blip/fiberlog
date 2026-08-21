@@ -8,6 +8,7 @@ import {
   buildLocationQtyMaps,
   confirmNegativeStock,
 } from '../../lib/inventory'
+import { locationTypeLabel } from '../../lib/locationTypes'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 import LocationWithBinPicker from './LocationWithBinPicker'
@@ -894,7 +895,7 @@ function SmartFromPicker({ options, totalLines, value, onChange }) {
                 )}
               </div>
               <div style={{ fontSize: 10, color: 'var(--hint)', textTransform: 'uppercase' }}>
-                {opt.type}
+                {locationTypeLabel(opt.type)}
               </div>
             </div>
             <span style={{
