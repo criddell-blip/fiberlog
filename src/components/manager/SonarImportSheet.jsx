@@ -896,7 +896,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                 const isDraft = pickedPart && pickedPart.is_active === false
                 const status = !partId ? { tag: 'unmatched', color: 'var(--amber)' }
                   : routing === 'ask' ? { tag: `asks per row${isDraft ? ' (draft)' : ''}`, color: 'var(--amber)' }
-                  : { tag: `${routing}${isDraft ? ' (draft)' : ''}`, color: 'var(--orange-dk)' }
+                  : { tag: `${SONAR_ROUTING_OPTIONS.find(o => o.id === routing)?.label || routing}${isDraft ? ' (draft)' : ''}`, color: 'var(--orange-dk)' }
                 const isOpen = creatingForModel === model
                 return (
                   <div key={model} style={{

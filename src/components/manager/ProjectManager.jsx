@@ -11,6 +11,10 @@ import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 import LocationWithBinPicker from './LocationWithBinPicker'
 
+// tasks.status is a display mirror (lifecycle is is_closed); these are the
+// words both the phase-task and site-task views use for it.
+const TASK_STATUS_LABELS = { approved: 'Approved', pending: 'Pending', done: 'Done', open: 'Open' }
+
 const SITE_TYPES = [
   { id: 'wireless', label: 'Wireless', iconName: 'pin' },
   { id: 'fiber',    label: 'Fiber',    iconName: 'warehouse' },
@@ -891,9 +895,10 @@ export default function ProjectManager() {
             // Latest-passdown badge on an open task (display only).
             const StatusBadge = ({ status }) => {
               const cfg =
-                status === 'approved' ? { bg: 'var(--teal-lt)', color: 'var(--teal-mid)', label: 'Approved' } :
-                status === 'pending'  ? { bg: 'var(--amber-lt)', color: 'var(--amber)',    label: 'Pending'  } :
-                                        { bg: 'var(--gray-lt)', color: 'var(--muted)',     label: 'Open'     }
+                status === 'approved' ? { bg: 'var(--teal-lt)', color: 'var(--teal-mid)' } :
+                status === 'pending'  ? { bg: 'var(--amber-lt)', color: 'var(--amber)'   } :
+                                        { bg: 'var(--gray-lt)', color: 'var(--muted)'    }
+              cfg.label = TASK_STATUS_LABELS[status] || TASK_STATUS_LABELS.open
               return (
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: cfg.bg, color: cfg.color }}>
                   {cfg.label}
@@ -1226,7 +1231,7 @@ export default function ProjectManager() {
                         background: s.type === 'wireless' ? 'var(--blue-lt)' : 'var(--teal-lt)',
                         color: s.type === 'wireless' ? 'var(--blue)' : 'var(--teal-mid)',
                       }}>
-                        {s.type}
+                        {SITE_TYPES.find(x => x.id === s.type)?.label || s.type}
                       </span>
                       <span style={{ fontSize: 14, color: 'var(--hint)' }}>›</span>
                     </div>
@@ -1539,7 +1544,7 @@ export default function ProjectManager() {
                       t.status === 'done'     ? 'var(--muted)'    :
                                                 'var(--orange)',
                   }}>
-                    {t.status}
+                    {TASK_STATUS_LABELS[t.status] || t.status}
                   </span>
                   {/* Delete a site task created in error — same cascade + confirm
                       as the fiber phase view (previously infra had no delete). */}

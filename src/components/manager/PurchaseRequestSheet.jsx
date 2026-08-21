@@ -9,6 +9,7 @@ import {
   getLastUnitCost, getRecentVendors, getBinsForWarehouse,
   buildPurchaseRequestCsv, buildPurchaseRequestEmail,
 } from '../../lib/inventory'
+import { PR_STATUS_COLORS, prStatusLabel } from '../../lib/purchaseStatus'
 import { locationTypeLabel } from '../../lib/locationTypes'
 import { searchPartsCatalog } from '../../lib/supabase'
 import { downloadTextAsFile } from '../../lib/csvImport'
@@ -493,7 +494,7 @@ export default function PurchaseRequestSheet({
             {pr?.pr_number && <span style={{ marginLeft: 8, color: 'var(--orange)' }}>{pr.pr_number}</span>}
           </div>
           {mode === 'detail' && (
-            <span style={statusPill(status)}>{status}</span>
+            <span style={statusPill(status)}>{prStatusLabel(status)}</span>
           )}
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
@@ -767,7 +768,7 @@ export default function PurchaseRequestSheet({
             border: '1px solid var(--border)',
           }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 8 }}>
-              Status: {status}
+              Status: {prStatusLabel(status)}
             </div>
             {status === 'pending' && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, alignItems: 'end' }}>
@@ -1684,14 +1685,7 @@ function lineInputStyle() {
 }
 
 function statusPill(status) {
-  const colors = {
-    pending: { fg: 'var(--amber)', bg: 'var(--amber-lt)', border: 'var(--amber)' },
-    ordered: { fg: 'var(--teal-dk)', bg: 'var(--teal-lt)', border: 'var(--teal)' },
-    partial: { fg: 'var(--blue)', bg: 'var(--blue-lt)', border: 'var(--blue)' },
-    received: { fg: 'var(--muted)', bg: 'var(--gray-lt)', border: 'var(--border)' },
-    cancelled: { fg: 'var(--red)', bg: 'var(--red-lt)', border: 'var(--red)' },
-  }
-  const c = colors[status] || colors.pending
+  const c = PR_STATUS_COLORS[status] || PR_STATUS_COLORS.pending
   return {
     padding: '3px 10px', borderRadius: 999,
     fontSize: 11, fontWeight: 700, textTransform: 'uppercase',

@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { useBackClose } from '../../lib/backStack'
-import { crewTypeLabel, VALID_FIELD_CREW_TYPES } from '../../lib/crewTypes'
+import { crewTypeLabel, CREW_TYPE_ICONS, VALID_FIELD_CREW_TYPES } from '../../lib/crewTypes'
 import { locationTypeLabel } from '../../lib/locationTypes'
-import { ACCESS_TYPES, accessTypeForUser, accessTypeToFields } from '../../lib/access'
+import { ACCESS_TYPES, accessTypeForUser, accessTypeToFields, roleLabel } from '../../lib/access'
 import {
   createUser, updateUserMetadata, deactivateUser, reactivateUser,
   resetUserPassword, setUserEmail, getAllUsers,
@@ -18,17 +18,11 @@ import {
 import Icon from '../shared/Icon'
 
 // Assignable field crew types, derived from VALID_FIELD_CREW_TYPES so this
-// list can never drift from the one App.jsx actually routes on. The explicit
-// labels (rather than plain crewTypeLabel) only exist to carry the emoji and
-// the "(tower/site)" hint.
-const CREW_TYPE_LABELS = {
-  fiber_construction: '🏗️ Fiber construction',
-  field_service:      '🛠️ Field service',
-  install:            '🏠 Install',
-  infrastructure:     '📡 Infrastructure (tower/site)',
-}
+// list can never drift from the one App.jsx actually routes on. Labels +
+// icons come from crewTypes.js so the picker, the permissions matrix and
+// every read-only render say the same thing.
 const CREW_TYPE_OPTIONS = VALID_FIELD_CREW_TYPES.map(id => ({
-  id, label: CREW_TYPE_LABELS[id] || crewTypeLabel(id),
+  id, label: `${CREW_TYPE_ICONS[id] || ''} ${crewTypeLabel(id)}`.trim(),
 }))
 
 // 'contractor' is a legal users.crew_type but is NOT a field crew type —
@@ -545,7 +539,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
     // and then saving the demotion without realizing. Make it explicit.
     if (!isNew && user?.role && accessFields.role !== user.role) {
       const ok = window.confirm(
-        `This changes ${user.name}'s role from ${user.role.toUpperCase()} to ${accessFields.role.toUpperCase()}.\n\n` +
+        `This changes ${user.name}'s role from ${roleLabel(user.role)} to ${roleLabel(accessFields.role)}.\n\n` +
         (user.role !== 'crew' && accessFields.role === 'crew'
           ? 'They will LOSE access to the manager portal.\n\n'
           : '') +
@@ -888,7 +882,7 @@ function UserFormSheet({ mode, user, isOwner, existingUsers, truckLocations = []
                 .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
                 .map(u => (
                   <option key={u.id} value={u.id}>
-                    {u.name} ({u.role})
+                    {u.name} ({roleLabel(u.role)})
                   </option>
                 ))}
             </select>
@@ -1121,7 +1115,7 @@ function DirectReportsPicker({ user, existingUsers, search, setSearch, selectedI
                     into these names, making them hard to read on the light theme. */}
                 <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{u.name}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>
-                  {u.role}{u.crew_type ? ` · ${crewTypeLabel(u.crew_type)}` : ''}
+                  {roleLabel(u.role)}{u.crew_type ? ` · ${crewTypeLabel(u.crew_type)}` : ''}
                   {isMovingFromAnother && <span style={{ color: 'var(--amber)', marginLeft: 6 }}>· will move from current manager</span>}
                 </div>
               </div>
@@ -1678,7 +1672,7 @@ function BulkAssignPullLocationSheet({ users, truckLocations, onCancel, onComple
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 13 }}>{u.name}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  {u.role}{u.crew_type ? ` · ${crewTypeLabel(u.crew_type)}` : ''}
+                  {roleLabel(u.role)}{u.crew_type ? ` · ${crewTypeLabel(u.crew_type)}` : ''}
                   {u.default_pull_location_id && <> · currently assigned</>}
                 </div>
               </div>

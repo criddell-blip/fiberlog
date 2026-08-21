@@ -94,8 +94,9 @@ src/
     supabase.js           ← Supabase client + DB helpers (projects, users, tasks, sites, etc.)
     inventory.js          ← all inventory operations (locations, stock, movements, parts, audit, consumption ledger, Sage export, purchase requests, intake requests)
     admin.js              ← user management ops (create/update/deactivate/reset password/set email)
-    access.js             ← staff_scope / named-access-type single source of truth (staffScope, visibleManagerTabs, canActAsCrew, inventoryIsLimited)
-    crewTypes.js          ← crewTypeLabel() display map + VALID_FIELD_CREW_TYPES
+    access.js             ← staff_scope / named-access-type single source of truth (staffScope, visibleManagerTabs, canActAsCrew, inventoryIsLimited, roleLabel)
+    purchaseStatus.js     ← PR_STATUS_LABELS / PR_STATUS_COLORS / prStatusLabel() for purchase_requests.status
+    crewTypes.js          ← crewTypeLabel() + CREW_TYPE_ICONS display map + VALID_FIELD_CREW_TYPES
     locationTypes.js      ← locationTypeLabel() + LOCATION_TYPE_{LABELS,PLURALS,ICONS} — the ONE label map for inventory_locations.type (job_site renders "Region/Project"; the DB value never changes)
     cycleCount.js         ← cycle-count RPC wrappers + BIN:<uuid> barcode helpers
     backStack.js          ← Back-button coordinator + useBackClose hook
@@ -296,6 +297,7 @@ The suites live in `src/lib/*.test.js` — every tested module sits on a money p
 - Functional components with hooks. No class components.
 - Heavy inline styles using CSS variables. No Tailwind, no CSS-in-JS libraries.
 - Theme tokens: ALL colors/sizes/radii come from the CSS variables defined in `src/styles/global.css` (light `:root` + dormant `[data-theme="dark"]`) — read that file for the palette. Two non-obvious facts: the legacy `--orange*` / `--teal*` tokens are kept as live **aliases** of `--accent*` (post-Console emerald redesign), so old code still renders correctly and new code may use either; and every new color must be a token, never a hex literal, or the dormant dark theme breaks the day it ships.
+- **Never render a DB enum token raw.** Every enum has one label map: `locationTypeLabel` (location type), `crewTypeLabel` / `roleLabel` (users), `movementDisplay.TYPE_LABELS` + `RECEIPT_KIND_LABEL` (movements), `prStatusLabel` (PRs), `SONAR_ROUTING_OPTIONS` (routing). An Aug 2026 sweep removed ~20 `{x.type}` / `{u.role}` / `All ${t}s` leaks and four duplicate maps that had drifted — add to the shared map, don't start a local one.
 - Comments explain **why**, not what. Dense at decision points, sparse for obvious code.
 - Helper components/functions go at the bottom of the file (e.g., `pillStyle`, `BinFormSheet` at end of `InventoryLocationsTab.jsx`).
 - Section dividers: `// ─── SECTION NAME ────────────────...`

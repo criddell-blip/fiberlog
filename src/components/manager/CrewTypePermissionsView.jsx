@@ -7,6 +7,7 @@ import {
   getActivePartDepartments,
 } from '../../lib/admin'
 import Icon from '../shared/Icon'
+import { crewTypeLabel, CREW_TYPE_ICONS } from '../../lib/crewTypes'
 
 // Crew-type × department whitelist editor. Each cell represents whether
 // a given crew_type can move parts from a given department.
@@ -21,13 +22,6 @@ import Icon from '../shared/Icon'
 // Saves are live per-toggle. Optimistic UI: the cell flips immediately,
 // the RPC fires async, and on failure we revert + show an error.
 
-const CREW_TYPE_LABELS = {
-  fiber_construction: { icon: '🏗️', label: 'Fiber construction' },
-  field_service:  { icon: '🛠️', label: 'Field service' },
-  install:        { icon: '🏠', label: 'Install' },
-  infrastructure: { icon: '📡', label: 'Infrastructure' },
-  contractor:     { icon: '🧰', label: 'Contractor' },
-}
 
 // "crew_type|department" key for membership lookups.
 function k(crewType, department) {
@@ -183,7 +177,7 @@ export default function CrewTypePermissionsView({ onBack }) {
               </thead>
               <tbody>
                 {CREW_TYPES.map(ct => {
-                  const meta = CREW_TYPE_LABELS[ct]
+                  const meta = { icon: CREW_TYPE_ICONS[ct] || '', label: crewTypeLabel(ct) }
                   const { count, unrestricted } = crewTypeRowState(ct)
                   return (
                     <tr key={ct}>

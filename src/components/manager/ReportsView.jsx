@@ -4,6 +4,7 @@ import { db, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabase'
 import { getConsumptionLedger, movementEffectiveDate, consumptionSource, fetchAllRows } from '../../lib/inventory'
 import { useIsWide } from '../../lib/useIsWide'
 import { isoLocalDate } from '../../lib/format'
+import { crewTypeLabel } from '../../lib/crewTypes'
 import Icon from '../shared/Icon'
 import SageExportSheet from './SageExportSheet'
 
@@ -783,7 +784,7 @@ export default function ReportsView() {
   function exportCSV() {
     const headers = ['Date', 'Crew Member', 'Crew Type', 'Project', 'Phase / Site', 'Task', 'Part SKU', 'BoxHero ID', 'Barcode', 'Department', 'Type', 'Material Group', 'Part Name', 'Qty', 'Unit']
     const csvRows = [headers, ...rows.map(r => [
-      r.date, r.userName, r.crewType, r.projectName, r.phaseName, r.taskName,
+      r.date, r.userName, crewTypeLabel(r.crewType), r.projectName, r.phaseName, r.taskName,
       r.partId, r.barcode, barcodeMap[r.partId] || '', r.department, r.itemType, r.materialGroup, r.partName, r.qty, r.unit
     ])]
     const csv = csvRows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')

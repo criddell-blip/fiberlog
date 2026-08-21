@@ -39,6 +39,16 @@ const CREW_TYPE_DISPLAY = {
   fiber_tech:         'Fiber tech',
 }
 
+// Emoji used beside the label in pickers / matrices (Users admin, crew-type
+// permissions). Kept here so the two screens can't drift apart again.
+export const CREW_TYPE_ICONS = {
+  fiber_construction: '🏗️',
+  field_service:      '🛠️',
+  install:            '🏠',
+  infrastructure:     '📡',
+  contractor:         '🧰',
+}
+
 export function crewTypeLabel(ct) {
   if (!ct) return ''
   if (CREW_TYPE_DISPLAY[ct]) return CREW_TYPE_DISPLAY[ct]

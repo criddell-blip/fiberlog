@@ -81,6 +81,16 @@ export const ACCESS_TYPES = [
     desc: 'External worker, limited access.' },
 ]
 
+// Display label for a bare users.role value (owner / manager / crew /
+// contractor). For a full user row prefer the access-type label via
+// accessTypeForUser() — it distinguishes Warehouse manager from Full
+// manager. This is for the places that only have the role string.
+const ROLE_LABELS = { owner: 'Owner', manager: 'Manager', crew: 'Crew', contractor: 'Contractor' }
+export function roleLabel(role) {
+  if (!role) return ''
+  return ROLE_LABELS[role] || role.charAt(0).toUpperCase() + role.slice(1)
+}
+
 // Pick the access-type id that best matches an existing user row (for edit).
 export function accessTypeForUser(user) {
   if (!user) return 'crew'

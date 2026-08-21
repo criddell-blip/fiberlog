@@ -1111,7 +1111,7 @@ export async function recordMovementsBatch(movements, { chunk = false, chunkSize
     occurred_at: m.occurred_at || null,
     // Why stock arrived — receive rows only (Receive PO sets purchase /
     // field_return; the DB trigger defaults a bare receive to purchase and
-    // blanks it on every other type). See RECEIPT_KINDS.
+    // blanks it on every other type). See RECEIPT_KIND_LABEL in movementDisplay.js.
     receipt_kind: m.receipt_kind || null,
     created_by: m.created_by,
   })
@@ -3247,20 +3247,10 @@ export async function createIntakeRequest({
   return data
 }
 
-// ─── RECEIPT KINDS + REFURB TWINS ────────────────────────────────────────────
-// Why stock arrived. Lives on `receive` rows only (DB CHECK). `purchase` is
-// the trigger default so every legacy writer is covered; the others are set
-// explicitly by their one flow. Keep in sync with the DB CHECK constraint.
-export const RECEIPT_KINDS = {
-  purchase:     { label: 'Purchase',      short: 'PO',      hint: 'Vendor delivery / purchase order' },
-  field_return: { label: 'Field return',  short: 'RETURN',  hint: 'Pulled from a customer or site — booked onto the refurbished twin' },
-  found:        { label: 'Found',         short: 'FOUND',   hint: 'Crew-reported found inventory' },
-  decommission: { label: 'Decommission',  short: 'DECOM',   hint: 'Site teardown recovery' },
-  seed:         { label: 'Seed',          short: 'SEED',    hint: 'One-time BoxHero baseline' },
-}
-export function receiptKindLabel(kind) {
-  return RECEIPT_KINDS[kind]?.label || (kind ? String(kind) : '')
-}
+// ─── REFURB TWINS ────────────────────────────────────────────────────────────
+// (Receipt-kind labels live in lib/movementDisplay.js — RECEIPT_KIND_LABEL /
+// RECEIPT_KIND_SOURCE — the only map the UI reads. Keep those in sync with
+// the DB CHECK on inventory_movements.receipt_kind.)
 
 // The refurbished twin of a part, if the catalog has one. A twin is a real
 // part with `refurb_of = parent.id` and `sage_id = <parent sage_id>_R`;

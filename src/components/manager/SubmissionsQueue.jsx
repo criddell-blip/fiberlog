@@ -15,13 +15,13 @@ import Icon from '../shared/Icon'
 // stat pills, close-task (backlog #2), and archive.
 
 const STATUS_COLORS = {
-  pending: { bg: 'var(--amber-lt)', text: 'var(--amber)', label: 'Pending' },
+  pending: { bg: 'var(--amber-lt)', text: 'var(--amber)', label: 'Pending review' },
   approved: { bg: 'var(--teal-lt)', text: 'var(--teal-dk)', label: 'Approved' },
   flagged: { bg: 'var(--red-lt)', text: 'var(--red)', label: 'Flagged' },
 }
 
 const STATUS_OPTIONS = [
-  { id: 'pending',  label: 'Pending' },
+  { id: 'pending',  label: 'Pending review' },
   { id: 'approved', label: 'Approved' },
   { id: 'flagged',  label: 'Flagged' },
   { id: 'all',      label: 'All statuses' },

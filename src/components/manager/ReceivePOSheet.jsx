@@ -5,6 +5,7 @@ import {
   getRefurbTwin, createRefurbTwin,
   getDefaultReceivingLocation, RECEIVING_BIN_NAME, RETURNS_BIN_NAME,
 } from '../../lib/inventory'
+import { prStatusLabel } from '../../lib/purchaseStatus'
 import { searchPartsCatalog } from '../../lib/supabase'
 import SkuLabelSheet from './SkuLabelSheet'
 import { useBackClose } from '../../lib/backStack'
@@ -399,7 +400,7 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
                       color: pr.status === 'partial' ? 'var(--blue)' : 'var(--accent-dk)',
                       background: pr.status === 'partial' ? 'var(--blue-lt)' : 'var(--accent-lt)',
                       border: `1px solid ${pr.status === 'partial' ? 'var(--blue)' : 'var(--accent)'}`,
-                    }}>{pr.status}</span>
+                    }}>{prStatusLabel(pr.status)}</span>
                     <Icon name="chevron-right" size={15} />
                   </div>
                 ))}

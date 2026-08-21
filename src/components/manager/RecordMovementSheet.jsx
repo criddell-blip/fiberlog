@@ -12,17 +12,18 @@ import { locationTypeLabel } from '../../lib/locationTypes'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 import LocationWithBinPicker from './LocationWithBinPicker'
+import { TYPE_LABELS as MOVEMENT_TYPE_LABELS } from '../../lib/movementDisplay'
 
 // No `receive` here — vendor deliveries go through the Receive PO sheet
 // (PO ref, unit costs, inline part creation). Keeping receive out of the
 // free-form sheet means every receipt carries proper vendor metadata.
 const TYPES = [
-  { id: 'transfer', label: 'Transfer', iconName: 'move',     hint: 'Warehouse → truck or vice versa' },
-  { id: 'return',   label: 'Return',   iconName: 'rotate',   hint: 'Truck → warehouse' },
-  { id: 'issue',    label: 'Issue',    iconName: 'upload',   hint: 'Used in field' },
-  { id: 'scrap',    label: 'Scrap',    iconName: 'trash',    hint: 'Damaged or written off' },
-  { id: 'adjust',   label: 'Adjust',   iconName: 'sliders',  hint: 'Count correction' },
-]
+  { id: 'transfer', iconName: 'move',     hint: 'Warehouse → truck or vice versa' },
+  { id: 'return',   iconName: 'rotate',   hint: 'Truck → warehouse' },
+  { id: 'issue',    iconName: 'upload',   hint: 'Used in field' },
+  { id: 'scrap',    iconName: 'trash',    hint: 'Damaged or written off' },
+  { id: 'adjust',   iconName: 'sliders',  hint: 'Count correction' },
+].map(t => ({ ...t, label: MOVEMENT_TYPE_LABELS[t.id] }))
 
 const ENDPOINTS = {
   transfer: { from: true,  to: true                  },

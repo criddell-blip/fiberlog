@@ -6,6 +6,7 @@ import {
   getGroupMembers, getMemberCountsByLocation, removeUserFromGroup, bulkAssignPullLocation,
 } from '../../lib/inventory'
 import { crewTypeLabel } from '../../lib/crewTypes'
+import { roleLabel } from '../../lib/access'
 import { LOCATION_TYPE_LABELS as TYPE_LABELS, LOCATION_TYPE_ICONS as TYPE_ICONS, locationTypeLabel } from '../../lib/locationTypes'
 import BinLabelSheet from '../cycleCount/BinLabelSheet'
 import AisleSignSheet from './AisleSignSheet'
@@ -1051,7 +1052,7 @@ function LocationFormSheet({ location, usersWithoutTruck, saving, onCancel, onSa
             >
               <option value="">— No one (yet) —</option>
               {usersWithoutTruck.map(u => (
-                <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
+                <option key={u.id} value={u.id}>{u.name} ({roleLabel(u.role)})</option>
               ))}
             </select>
           </div>

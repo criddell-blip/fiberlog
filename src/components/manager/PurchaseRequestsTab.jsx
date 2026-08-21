@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { useIsWide } from '../../lib/useIsWide'
 import { getPurchaseRequests } from '../../lib/inventory'
+import { PR_STATUS_COLORS, prStatusLabel } from '../../lib/purchaseStatus'
 import PurchaseRequestSheet from './PurchaseRequestSheet'
 import { chipStyle, CARD_SHADOW, LoadingBlock, EmptyState } from './chrome'
 import Icon from '../shared/Icon'
@@ -152,7 +153,7 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
                   <div className="mono" style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>PO {pr.po_number}</div>
                 )}
               </div>
-              <div><span style={statusPill(pr.status)}>{pr.status}</span></div>
+              <div><span style={statusPill(pr.status)}>{prStatusLabel(pr.status)}</span></div>
               <div style={{ color: pr.vendors.length === 0 ? 'var(--hint)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {vendorSummary(pr)}
               </div>
@@ -193,7 +194,7 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
                     <span className="mono" style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted)' }}>PO {pr.po_number}</span>
                   )}
                 </span>
-                <span style={statusPill(pr.status)}>{pr.status}</span>
+                <span style={statusPill(pr.status)}>{prStatusLabel(pr.status)}</span>
               </div>
               <div style={{ fontSize: 13, marginBottom: 6, color: pr.vendors.length === 0 ? 'var(--hint)' : 'var(--text)' }}>
                 {vendorSummary(pr)}
@@ -229,14 +230,7 @@ export default function PurchaseRequestsTab({ locations, refreshKey }) {
 // Status pill — semantic colors kept (pending amber, ordered emerald,
 // received grey, cancelled red).
 function statusPill(status) {
-  const colors = {
-    pending:   { fg: 'var(--amber)',     bg: 'var(--amber-lt)', border: 'var(--amber)' },
-    ordered:   { fg: 'var(--accent-dk)', bg: 'var(--accent-lt)', border: 'var(--accent)' },
-    partial:   { fg: 'var(--blue)',      bg: 'var(--blue-lt)',  border: 'var(--blue)' },
-    received:  { fg: 'var(--muted)',     bg: 'var(--gray-lt)',  border: 'var(--border2)' },
-    cancelled: { fg: 'var(--red)',       bg: 'var(--red-lt)',   border: 'var(--red)' },
-  }
-  const c = colors[status] || colors.pending
+  const c = PR_STATUS_COLORS[status] || PR_STATUS_COLORS.pending
   return {
     padding: '2px 9px', borderRadius: 999,
     fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.03em',

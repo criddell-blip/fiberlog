@@ -13,6 +13,7 @@ import { downloadTextAsFile } from '../../lib/csvImport'
 import { isoLocalDate } from '../../lib/format'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
+import { TYPE_LABELS as MOVEMENT_TYPE_LABELS } from '../../lib/movementDisplay'
 
 // Prototype Sage Intacct export. Pick a date range, preview what would
 // export, download the CSV, and stamp every included row's exported_at
@@ -250,7 +251,7 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
               </span>
             )}
             {Object.entries(typeCounts).map(([type, count]) => (
-              <span key={type}><strong style={{ color: 'var(--text)' }}>{count}</strong> {type}</span>
+              <span key={type}><strong style={{ color: 'var(--text)' }}>{count}</strong> {(MOVEMENT_TYPE_LABELS[type] || type).toLowerCase()}</span>
             ))}
           </div>
         )}
@@ -287,7 +288,7 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
                         created_at here made the screen disagree with the
                         delivered file for imported/backfilled rows. */}
                     <td style={tdStyle}>{String(movementEffectiveDate(m) || '').slice(0, 10)}</td>
-                    <td style={tdStyle}>{m.movement_type}</td>
+                    <td style={tdStyle}>{MOVEMENT_TYPE_LABELS[m.movement_type] || m.movement_type}</td>
                     <td style={tdStyle}>
                       <div style={{ fontWeight: 600 }}>{m.part?.name || m.part?.id || '—'}</div>
                       {/* Same value the CSV's ITEMID writes (sageItemId): Sage ID
