@@ -357,6 +357,23 @@ describe('isExportableMovement', () => {
 // ─── buildSageCsv ────────────────────────────────────────────────────────────
 
 describe('buildSageCsv', () => {
+  const MEMO_COL = HEADERS.indexOf('MEMO')
+
+  it('appends [no-value] to MEMO for depreciated parts, preserving existing notes', () => {
+    const csv = buildSageCsv([mv({ part: { ...PART, is_depreciated: true }, notes: 'field pull' })])
+    expect(parseCsvLine(csv.split('\n')[1])[MEMO_COL]).toBe('field pull [no-value]')
+  })
+
+  it('emits [no-value] even when notes is null (the marker must never be dropped)', () => {
+    const csv = buildSageCsv([mv({ part: { ...PART, is_depreciated: true }, notes: null })])
+    expect(parseCsvLine(csv.split('\n')[1])[MEMO_COL]).toBe('[no-value]')
+  })
+
+  it('leaves MEMO untouched for non-depreciated parts (back-compat, incl. vendor-prefixed notes)', () => {
+    const csv = buildSageCsv([mv({ notes: 'Vendor: Graybar' })])
+    expect(parseCsvLine(csv.split('\n')[1])[MEMO_COL]).toBe('Vendor: Graybar')
+  })
+
   it('emits the 18 Sage columns in the documented order', () => {
     const csv = buildSageCsv([mv()])
     expect(csv.split('\n')[0]).toBe(HEADERS.join(','))

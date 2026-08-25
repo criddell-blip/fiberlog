@@ -252,6 +252,14 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
             {Object.entries(typeCounts).map(([type, count]) => (
               <span key={type}><strong style={{ color: 'var(--text)' }}>{count}</strong> {type}</span>
             ))}
+            {/* Depreciated-part lines stay in the file with a [no-value] MEMO
+                marker (#37) — count them so accounting knows to expect them. */}
+            {(() => {
+              const noValue = exportable.filter(m => m.part?.is_depreciated).length
+              return noValue > 0
+                ? <span style={{ color: 'var(--amber)' }}><strong>{noValue}</strong> [no-value] (depreciated parts)</span>
+                : null
+            })()}
           </div>
         )}
 

@@ -1753,7 +1753,7 @@ export async function updatePartsBatch(ids, updates) {
 // attributes.created_via so a draft sitting in the Parts tab months later
 // still says which flow minted it and who was driving. created_at (DB
 // default) covers the when.
-export async function createPart({ id, name, unit, department, material_group, barcode, sage_id, refurb_of = null, is_active = true, created_via = null }) {
+export async function createPart({ id, name, unit, department, material_group, barcode, sage_id, refurb_of = null, is_depreciated = false, is_active = true, created_via = null }) {
   if (!id || !String(id).trim()) throw new Error('Part SKU is required')
   if (!name || !String(name).trim()) throw new Error('Part name is required')
   const cleanId = String(id).trim()
@@ -1772,6 +1772,9 @@ export async function createPart({ id, name, unit, department, material_group, b
     // Sage Intacct Item ID — an extra cross-reference, never a substitute for the SKU.
     sage_id: sage_id && String(sage_id).trim() ? String(sage_id).trim().toUpperCase() : null,
     refurb_of: refurb_of || null,
+    // No-value flag (backlog #37) — recovered/used gear the Sage export
+    // marks [no-value] so accounting doesn't book it as new inventory value.
+    is_depreciated: !!is_depreciated,
     is_active,
   }
   if (created_via) payload.attributes = { created_via }
@@ -2298,7 +2301,7 @@ export async function getMovementsForSageExport({ since, until, includeExported 
       .select(`
         id, movement_type, receipt_kind, quantity, unit, unit_cost, notes, created_at, occurred_at,
         exported_at, export_batch_id, submission_id, task_id, vendor_invoice,
-        part:parts_catalog(id, name, unit, department, material_group, category, sage_id),
+        part:parts_catalog(id, name, unit, department, material_group, category, sage_id, is_depreciated),
         from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type, parent_location_id, project_id),
         to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type, parent_location_id, project_id),
         phase:phases!inventory_movements_phase_id_fkey(id, name, project_id, project:projects(id, name))
@@ -2612,7 +2615,12 @@ export function buildSageCsv(movements, opts = {}) {
       classId,
       m.part?.department || '',
       vendorId,
-      m.notes || '',
+      // Depreciated ("no-value") parts stay in the file but carry a MEMO
+      // marker accounting filters on in Sage (backlog #37). Emitted even
+      // when notes is null — the marker must never be silently dropped.
+      m.part?.is_depreciated
+        ? (m.notes ? `${m.notes} [no-value]` : '[no-value]')
+        : (m.notes || ''),
       m.id,
     ]
     lines.push(row.map(escapeSageCsvField).join(','))

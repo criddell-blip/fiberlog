@@ -170,6 +170,7 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
             material_group: l.part.material_group,
             barcode: l.part.barcode,
             sage_id: l.part.sage_id,
+            is_depreciated: l.part.is_depreciated || false,
             is_active: true,
             created_via: {
               source: 'Receive PO',
@@ -573,6 +574,7 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
   const [fDept, setFDept]     = useState('')
   const [fMatGrp, setFMatGrp] = useState('')
   const [fSageId, setFSageId] = useState('')   // create-only: Sage Intacct item, if accounting already minted one
+  const [fDepreciated, setFDepreciated] = useState(false)  // create-only: no-value flag (backlog #37)
 
   // Search active only when no part picked AND we're not in a form mode
   useEffect(() => {
@@ -584,7 +586,7 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
       try {
         // Full attrs so a field return can mint the refurb twin from the
         // picked parent without a second round-trip.
-        const data = await searchPartsCatalog(query, { limit: 8, cols: 'id, name, nickname, unit, department, material_group, sage_id, refurb_of, is_active' })
+        const data = await searchPartsCatalog(query, { limit: 8, cols: 'id, name, nickname, unit, department, material_group, sage_id, refurb_of, is_depreciated, is_active' })
         setResults(data)
       } catch (e) {
         console.warn('Part search failed:', e)
@@ -600,6 +602,7 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
     id: p.id, name: p.name, unit: p.unit, isNew: false,
     department: p.department, material_group: p.material_group,
     sage_id: p.sage_id || null, refurb_of: p.refurb_of || null,
+    is_depreciated: !!p.is_depreciated,  // no-value flag drives the unit-cost hint (backlog #37)
   })
 
   async function pickPart(p) {
@@ -652,6 +655,7 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
     setFDept('')
     setFMatGrp('')
     setFSageId('')
+    setFDepreciated(false)
     setMode('creating')
   }
 
@@ -674,6 +678,7 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
         department: fDept.trim() || null,
         material_group: fMatGrp.trim() || null,
         sage_id: fSageId.trim().toUpperCase() || null,
+        is_depreciated: fDepreciated,
         isNew: true,
       },
       pendingAttrs: null,
@@ -785,6 +790,17 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
             style={{ ...inputStyle(), marginBottom: 8, fontFamily: 'monospace' }}
           />
         )}
+        {isCreate && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--muted)', marginBottom: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={fDepreciated}
+              onChange={e => setFDepreciated(e.target.checked)}
+              style={{ margin: 0 }}
+            />
+            Depreciated (no value) — used/recovered gear; Sage export marks its lines [no-value]
+          </label>
+        )}
 
         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
           <button onClick={cancelForm}
@@ -839,8 +855,17 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
               <div style={{ fontSize: 10, color: 'var(--hint)' }}>
                 {line.part.id}
                 {line.part.sage_id && <span> · Sage {line.part.sage_id}</span>}
+                {line.part.is_depreciated && <span style={{ color: 'var(--amber)', fontWeight: 700 }}> · no-value</span>}
                 {line.part.swappedFrom && <span> · picked as {line.part.swappedFrom.name}</span>}
               </div>
+              {/* Warn-not-block (#37): pricing a no-value part is usually a
+                  mistake — its Sage lines carry [no-value] and accounting
+                  won't book the cost. A deliberate cost still goes through. */}
+              {line.part.is_depreciated && String(line.unit_cost).trim() !== '' && (
+                <div style={{ marginTop: 4, fontSize: 10, color: 'var(--amber)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Icon name="alert" size={11} /> Depreciated (no-value) part with a unit cost — Sage lines will still say [no-value].
+                </div>
+              )}
               {/* Field return onto a part with no refurbished twin: the
                   honest booking is the _R item, so offer to mint it here
                   rather than silently receiving a used unit as new. */}

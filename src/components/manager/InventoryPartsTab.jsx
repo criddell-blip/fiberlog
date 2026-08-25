@@ -228,7 +228,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   function handleExportCsv() {
     const headers = [
       'SKU', 'Sage ID', 'Name', 'Nickname', 'Unit', 'Department', 'Item Type',
-      'Material Group', 'Category', 'Status', 'Barcode', 'BoxHero ID', 'On Hand',
+      'Material Group', 'Category', 'Status', 'Depreciated', 'Barcode', 'BoxHero ID', 'On Hand',
     ]
     const lines = [headers.map(escapeCsvField).join(',')]
     for (const p of filtered) {
@@ -236,6 +236,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
         p.id, p.sage_id || '', p.name || '', p.nickname || '', p.unit || 'ea',
         p.department || '', p.item_type || '', p.material_group || '',
         p.category || '', p.is_active ? 'active' : 'draft',
+        p.is_depreciated ? 'yes' : '',
         p.barcode || '', p.boxhero_id || '',
         Number(stockTotals.get(p.id) || 0),
       ].map(escapeCsvField).join(','))
@@ -483,6 +484,9 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                   )}
                   {/^UB_9/i.test(p.sage_id || '') && (
                     <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 4, background: 'var(--gray-lt)', color: 'var(--muted)', verticalAlign: '1px' }} title="Non-inventory: expensed on receipt, not cycle counted">EXPENSED</span>
+                  )}
+                  {p.is_depreciated && (
+                    <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 4, background: 'var(--gray-lt)', color: 'var(--muted)', verticalAlign: '1px' }} title="Depreciated: used/recovered gear — Sage export marks its lines [no-value] so accounting doesn't book new inventory value">NO-VALUE</span>
                   )}
                 </div>
                 <div className="mono" style={{ fontSize: 12, color: 'var(--hint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -972,6 +976,9 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
 
   const [isActive, setIsActive] = useState(part.is_active !== false)
   const [sonarRouting, setSonarRouting] = useState(part.sonar_routing || 'ask')
+  // No-value flag (backlog #37): Sage export keeps the lines but marks the
+  // MEMO [no-value] so accounting doesn't book new inventory value.
+  const [isDepreciated, setIsDepreciated] = useState(!!part.is_depreciated)
   const [saving, setSaving] = useState(false)
 
   const previewCategory = useMemo(() => {
@@ -1007,6 +1014,7 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
         material_group: materialGroup.trim() || null,
         is_active: isActive,
         sonar_routing: sonarRouting,
+        is_depreciated: isDepreciated,
       })
     } finally {
       setSaving(false)
@@ -1191,6 +1199,29 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
                 {isActive
                   ? 'Visible in all pickers and stock views'
                   : 'Stock is tracked but the part is hidden from regular pickers until activated'}
+              </div>
+            </div>
+          </label>
+
+          {/* No-value flag (#37) — tracked normally, but the Sage export
+              marks every line [no-value] so accounting filters it out of
+              inventory value. Same-part-both-conditions → separate "(Used)"
+              SKU, never a shared flag. */}
+          <label style={{
+            display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6,
+            padding: '10px 12px', borderRadius: 'var(--r-sm)',
+            border: `1.5px solid ${isDepreciated ? 'var(--amber)' : 'var(--border2)'}`,
+            background: isDepreciated ? 'var(--amber-lt)' : 'var(--bg)',
+            cursor: 'pointer',
+          }}>
+            <input type="checkbox" checked={isDepreciated} onChange={e => setIsDepreciated(e.target.checked)} style={{ marginTop: 2, cursor: 'pointer' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: isDepreciated ? 'var(--amber)' : 'var(--muted)' }}>
+                Depreciated (no value)
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                Used/recovered gear. Tracked like any part, but Sage export lines carry a [no-value]
+                MEMO marker so accounting doesn't book it as new inventory value.
               </div>
             </div>
           </label>
