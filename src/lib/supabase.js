@@ -528,16 +528,6 @@ export async function searchParts(query, { activeOnly = false } = {}) {
   })
 }
 
-export async function getPartsByCategory(materialGroup) {
-  const { data, error } = await db
-    .from('parts_catalog')
-    .select('id, name, unit, category, material_group')
-    .eq('material_group', materialGroup)
-    .order('name')
-  if (error) throw error
-  return data
-}
-
 // ─── USERS ────────────────────────────────────────────────────────────────────
 export async function getUsers() {
   const { data, error } = await db
@@ -616,16 +606,6 @@ export async function saveEntry(sessionId, userId, taskId, entry) {
 }
 
 // ─── SUBMISSIONS ──────────────────────────────────────────────────────────────
-export async function getPendingSubmissions() {
-  const { data, error } = await db
-    .from('submissions')
-    .select(`*, users!submissions_user_id_fkey(name, initials, crew_type)`)
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return data || []
-}
-
 // Approve a submission: increments phase actuals, marks the submission
 // approved, and flips the task to approved — atomically, in one transaction.
 //

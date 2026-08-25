@@ -93,7 +93,6 @@ export default function ProjectManager() {
   // Add project form
   const [projName, setProjName] = useState('')
   const [projRegion, setProjRegion] = useState('')
-  const [projFiber, setProjFiber] = useState('')
   const [projTargets, setProjTargets] = useState({})
   const [projSaving, setProjSaving] = useState(false)
 
