@@ -866,6 +866,51 @@ export function validateMovement({ movement_type, from_location_id, to_location_
   }
 }
 
+// "Counted total" adjust mode (backlog #38): the manager at the shelf enters
+// the ABSOLUTE count they see; we book the ±delta as one-sided adjusts.
+// Pure so the payload math (which decides real stock corrections) is testable.
+//
+//   lines            [{ part_id, unit, counted }] — counted is the absolute number seen
+//   systemQtyByPartId map/object of part_id → system qty AT the counted location.
+//                    MUST come from a read that keeps negative rows (e.g.
+//                    getStockRowsForParts filtered to the location) — a part
+//                    absent from the map reads as system 0, which is also how
+//                    zero-qty rows arrive (the stock readers drop them).
+//   locationId       the counted location (warehouse-level or bin)
+//   opts.noteBase    prefix for the self-documenting note ("Spot count 2026-08-25")
+//   opts.createdBy   stamped on every payload (RLS requires it)
+//
+// Returns { payloads, skipped }: delta>0 → to-only adjust, delta<0 → from-only
+// with abs qty (validateMovement's one-sided rules), delta=0 → skipped++.
+export function buildCountedAdjustPayloads(lines, systemQtyByPartId, locationId, { noteBase = 'Spot count', createdBy = null } = {}) {
+  if (!locationId) throw new Error('Counted-total adjust needs the counted location')
+  const sysOf = partId => {
+    const v = systemQtyByPartId instanceof Map ? systemQtyByPartId.get(partId) : systemQtyByPartId?.[partId]
+    return Number(v ?? 0)
+  }
+  const payloads = []
+  let skipped = 0
+  for (const line of lines || []) {
+    const counted = Number(line.counted)
+    if (isNaN(counted) || counted < 0) throw new Error(`${line.part_id}: counted quantity must be zero or more`)
+    const sys = sysOf(line.part_id)
+    const delta = counted - sys
+    if (delta === 0) { skipped++; continue }
+    const payload = {
+      movement_type: 'adjust',
+      part_id: line.part_id,
+      quantity: Math.abs(delta),
+      unit: line.unit || 'ea',
+      notes: `${noteBase} — counted ${counted}, system had ${sys}`,
+      created_by: createdBy,
+    }
+    if (delta > 0) payload.to_location_id = locationId
+    else payload.from_location_id = locationId
+    payloads.push(payload)
+  }
+  return { payloads, skipped }
+}
+
 export async function getRecentMovements({ limit = 100, locationId = null, type = null, partId = null, receiptKind = null } = {}) {
   let q = db
     .from('inventory_movements')

@@ -4,10 +4,13 @@ import {
   searchInventoryParts,
   getBinsForWarehouse,
   getPartLocations,
+  getStockRowsForParts,
   compareNamesNatural,
   buildLocationQtyMaps,
+  buildCountedAdjustPayloads,
   confirmNegativeStock,
 } from '../../lib/inventory'
+import { isoLocalDate } from '../../lib/format'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 import LocationWithBinPicker from './LocationWithBinPicker'
@@ -80,6 +83,15 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   const [binsByWarehouse, setBinsByWarehouse] = useState({})
 
   const [adjustDir, setAdjustDir] = useState('add')
+  // "Counted total" adjust mode (backlog #38): the counted location's picker
+  // state + the system qtys the ±delta preview is computed against.
+  const [countedTopId, setCountedTopId] = useState('')
+  const [countedBinId, setCountedBinId] = useState('')
+  // part_id → system qty AT the counted location. From getStockRowsForParts
+  // (keeps NEGATIVE rows — getPartLocations drops qty ≤ 0 and would read an
+  // over-drawn location as 0, corrupting the delta). Missing key = system 0.
+  const [sysQtyByPart, setSysQtyByPart] = useState({})
+  const [sysQtyLoading, setSysQtyLoading] = useState(false)
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -113,6 +125,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     setFromLocationId('')
     setFromTopId(''); setFromBinId('')
     setToTopId(''); setToBinId('')
+    setCountedTopId(''); setCountedBinId('')
     setLines(prev => prev.map(l => (l.from_override_id ? { ...l, from_override_id: null } : l)))
     setError(null)
     setShowMissingFrom(false)
@@ -122,6 +135,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   // show-all From), fetch its bins if it's a warehouse. Cached.
   useEffect(() => { ensureBinsLoaded(fromTopId) }, [fromTopId])
   useEffect(() => { ensureBinsLoaded(toTopId) }, [toTopId])
+  useEffect(() => { ensureBinsLoaded(countedTopId) }, [countedTopId])
   async function ensureBinsLoaded(locId) {
     if (!locId) return
     const loc = locations.find(l => l.id === locId)
@@ -138,6 +152,38 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   // Clear stale bin selection when top-level changes.
   useEffect(() => { setFromBinId('') }, [fromTopId])
   useEffect(() => { setToBinId('') }, [toTopId])
+  useEffect(() => { setCountedBinId('') }, [countedTopId])
+
+  const countedMode = type === 'adjust' && adjustDir === 'counted'
+  const countedLocId = countedBinId || countedTopId
+
+  // System qtys at the counted location, refetched when the location or the
+  // line set changes. Uses getStockRowsForParts (see sysQtyByPart comment).
+  const linePartKey = lines.map(l => l.part_id).join('|')
+  useEffect(() => {
+    if (!countedMode || !countedLocId || lines.length === 0) {
+      setSysQtyByPart({})
+      return
+    }
+    let cancelled = false
+    setSysQtyLoading(true)
+    getStockRowsForParts(lines.map(l => l.part_id))
+      .then(rows => {
+        if (cancelled) return
+        const map = {}
+        for (const r of rows) {
+          if (r.location_id === countedLocId) map[r.part_id] = Number(r.quantity) || 0
+        }
+        setSysQtyByPart(map)
+      })
+      .catch(e => {
+        console.warn('System qty fetch failed:', e)
+        if (!cancelled) setSysQtyByPart({})
+      })
+      .finally(() => { if (!cancelled) setSysQtyLoading(false) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countedMode, countedLocId, linePartKey])
 
   // Debounced part search.
   useEffect(() => {
@@ -398,7 +444,17 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     if (lines.length === 0) return 'Add at least one part'
     for (const l of lines) {
       const q = Number(l.qty)
-      if (!q || q <= 0) return `${l.name}: quantity must be greater than zero`
+      // Counted-total mode: 0 is a legitimate count ("shelf is empty");
+      // every other mode moves stock, so qty must be positive.
+      if (countedMode) {
+        if (l.qty === '' || isNaN(q) || q < 0) return `${l.name}: counted quantity must be zero or more`
+      } else if (!q || q <= 0) {
+        return `${l.name}: quantity must be greater than zero`
+      }
+    }
+    if (countedMode) {
+      if (!countedLocId) return 'Pick the counted location'
+      return null
     }
     if (type === 'adjust') {
       if (adjustDir === 'add' && !effectiveToId) return 'Pick a location to add to'
@@ -428,6 +484,25 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     setShowMissingFrom(false)
     setSubmitting(true)
     try {
+      // Counted-total mode books per-line one-sided adjusts from the
+      // absolute counts (backlog #38); the payload math lives in the lib
+      // helper so it's tested against validateMovement's rules.
+      if (countedMode) {
+        const date = isoLocalDate()
+        const noteBase = notes.trim() ? `Spot count ${date} · ${notes.trim()}` : `Spot count ${date}`
+        const { payloads } = buildCountedAdjustPayloads(
+          lines.map(l => ({ part_id: l.part_id, unit: l.unit, counted: Number(l.qty) })),
+          sysQtyByPart, countedLocId,
+          { noteBase, createdBy: currentUser?.id })
+        if (payloads.length === 0) {
+          setError('Counts match the system — nothing to book')
+          setSubmitting(false)
+          return
+        }
+        await recordMovementsBatch(payloads)
+        onRecorded(payloads.length)
+        return
+      }
       // Build one movement payload per line. Shared to/type/notes; From is
       // per-line (line override, else the shared picker).
       const payloads = lines.map(line => {
@@ -494,14 +569,40 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
           </div>
         </div>
 
-        {/* Adjust direction */}
+        {/* Adjust direction. "Counted total" (backlog #38) is the spot-check
+            mode: enter the ABSOLUTE number on the shelf and the sheet books
+            the ±delta per line — the manager never does delta math. */}
         {type === 'adjust' && (
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 6 }}>Direction</div>
             <div style={{ display: 'flex', gap: 6 }}>
               <button onClick={() => setAdjustDir('add')} style={dirBtn(adjustDir === 'add')}>＋ Found extra</button>
               <button onClick={() => setAdjustDir('remove')} style={dirBtn(adjustDir === 'remove')}>− Found missing</button>
+              <button onClick={() => setAdjustDir('counted')} style={dirBtn(adjustDir === 'counted')}>
+                <Icon name="clipboard" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 4 }} />Counted total
+              </button>
             </div>
+            {countedMode && (
+              <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 6 }}>
+                Enter what you actually count at one location — the difference books automatically.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Counted location (counted-total mode only). Bin-level works. */}
+        {countedMode && (
+          <div className="field">
+            <label>Counted location</label>
+            <LocationWithBinPicker
+              topLevelId={countedTopId} setTopLevelId={setCountedTopId}
+              binId={countedBinId} setBinId={setCountedBinId}
+              options={allFromOptions}
+              binsByWarehouse={binsByWarehouse}
+              locations={locations}
+              stock={lines.length > 0 ? combinedStock : undefined}
+              stockGroupLabel={stockGroupLabel}
+            />
           </div>
         )}
 
@@ -526,6 +627,16 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                 const stockedIds = new Set(lineSources.map(s => s.locationId))
                 const otherSources = lineFallbackOptions.filter(o => !stockedIds.has(o.locationId))
                 const flagged = showMissingFrom && showFrom && !lineEffectiveFromId(l)
+                // Counted-total delta preview: counted − system at the picked
+                // location (missing/zero rows read as system 0).
+                const sysQty = Number(sysQtyByPart[l.part_id] ?? 0)
+                const countedNum = Number(l.qty)
+                const delta = (countedMode && countedLocId && l.qty !== '' && !isNaN(countedNum))
+                  ? countedNum - sysQty : null
+                // On-hand context (#38): the data was already fetched for the
+                // smart-From picker; surface it instead of burying it in a
+                // collapsed dropdown. Top 3 by qty (pre-sorted desc).
+                const pl = partLocationsByPart[l.part_id]
                 return (
                   <div
                     key={l.part_id}
@@ -542,6 +653,11 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                         </div>
                         <div style={{ fontSize: 10, color: 'var(--hint)' }}>{l.part_id}</div>
                       </div>
+                      {countedMode && countedLocId && (
+                        <span className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                          {sysQtyLoading ? 'sys …' : `sys ${sysQty.toLocaleString()}`}
+                        </span>
+                      )}
                       <input
                         type="number"
                         min="0"
@@ -556,7 +672,17 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                         }}
                       />
                       <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 22 }}>{l.unit}</span>
-                      {warn && (
+                      {delta !== null && !sysQtyLoading && (
+                        <span className="mono" style={{
+                          fontSize: 10.5, fontWeight: 700, whiteSpace: 'nowrap',
+                          padding: '2px 7px', borderRadius: 10,
+                          color: delta === 0 ? 'var(--muted)' : delta > 0 ? 'var(--teal-dk)' : 'var(--red)',
+                          background: delta === 0 ? 'var(--surface2)' : delta > 0 ? 'var(--teal-lt)' : 'var(--red-lt)',
+                        }}>
+                          {delta === 0 ? 'match' : delta > 0 ? `+${delta.toLocaleString()}` : `−${Math.abs(delta).toLocaleString()}`}
+                        </span>
+                      )}
+                      {warn && !countedMode && (
                         <span title="No logged stock at this line's From location" style={{
                           color: 'var(--amber)', display: 'inline-flex',
                         }}>
@@ -575,6 +701,19 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                         ×
                       </button>
                     </div>
+                    {/* On-hand context (#38) — where this SKU actually sits,
+                        for every movement type. Amber when nowhere. */}
+                    {pl && (pl.locations.length > 0 ? (
+                      <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 4 }}>
+                        On hand: {pl.locations.slice(0, 3).map(x => `${x.displayLabel} ${Number(x.qty).toLocaleString()}`).join(' · ')}
+                        {pl.locations.length > 3 ? ` · +${pl.locations.length - 3} more` : ''}
+                        {' '}(total {Number(pl.totalQty).toLocaleString()})
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 10.5, color: 'var(--amber)', marginTop: 4 }}>
+                        No logged stock at any location
+                      </div>
+                    ))}
                     {/* Per-line source override (see setLineFrom). */}
                     {showFrom && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>

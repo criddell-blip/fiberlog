@@ -100,7 +100,7 @@ The top of the tab has two rows:
 
 | Button | What it does |
 |---|---|
-| ＋ **Record movement** | Manual one-off entry — transfer (default) / return / issue / scrap / adjust. Receiving is deliberately NOT offered here; vendor deliveries go through **Receive PO** so every receipt carries vendor + cost metadata. The primary button. |
+| ＋ **Record movement** | Manual one-off entry — transfer (default) / return / issue / scrap / adjust. Receiving is deliberately NOT offered here; vendor deliveries go through **Receive PO** so every receipt carries vendor + cost metadata. Every part line shows a muted **On hand** summary (top 3 locations + total; amber when nowhere). Adjust has a third direction, **Counted total** (Aug 2026): pick the counted location, enter the *absolute* number you see per part (`sys N` + a ±delta chip preview beside each line), and submit books one-sided adjusts for the differences — the lightweight spot-check path with the same `adjust` semantics as Reconcile/Cycle Count (never exports to Sage). All counts matching → "Counts match the system — nothing to book". The primary button. |
 | ⇪ **Import CSV** | Bulk import from BoxHero (catalog seed or top-up) |
 | 📥 **Receive PO** | Vendor delivery — multi-line, creates `receive` movements |
 | 🔄 **Reconcile** | Upload a filled audit CSV — turns variances into adjust movements |

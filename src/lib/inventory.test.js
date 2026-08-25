@@ -14,10 +14,90 @@ import {
   sageItemId,
   movementEffectiveDate,
   buildLocationQtyMaps,
+  buildCountedAdjustPayloads,
   aggregateDeductions,
   isFiberCustomerColumn,
   pickFiberCustomerColumn,
 } from './inventory'
+
+// ─── buildCountedAdjustPayloads ──────────────────────────────────────────────
+// "Counted total" adjust mode (backlog #38) — absolute count → ±delta adjusts.
+// These payloads book real stock corrections, so every shape must satisfy
+// validateMovement's one-sided adjust rules.
+
+describe('buildCountedAdjustPayloads', () => {
+  const LOC = 'loc-1'
+
+  it('books a positive delta as a to-only adjust that passes validateMovement', () => {
+    const { payloads, skipped } = buildCountedAdjustPayloads(
+      [{ part_id: 'P1', unit: 'ea', counted: 10 }], { P1: 7 }, LOC, { createdBy: 'u1' })
+    expect(skipped).toBe(0)
+    expect(payloads).toHaveLength(1)
+    const p = payloads[0]
+    expect(p.movement_type).toBe('adjust')
+    expect(p.quantity).toBe(3)
+    expect(p.to_location_id).toBe(LOC)
+    expect(p.from_location_id).toBeUndefined()
+    expect(p.created_by).toBe('u1')
+    expect(() => validateMovement(p)).not.toThrow()
+  })
+
+  it('books a negative delta as a from-only adjust with abs quantity', () => {
+    const { payloads } = buildCountedAdjustPayloads(
+      [{ part_id: 'P1', unit: 'ft', counted: 2 }], { P1: 9 }, LOC)
+    const p = payloads[0]
+    expect(p.quantity).toBe(7)
+    expect(p.from_location_id).toBe(LOC)
+    expect(p.to_location_id).toBeUndefined()
+    expect(p.unit).toBe('ft')
+    expect(() => validateMovement(p)).not.toThrow()
+  })
+
+  it('treats a part missing from the system map as system 0 (zero rows are dropped upstream)', () => {
+    const { payloads } = buildCountedAdjustPayloads(
+      [{ part_id: 'P-absent', counted: 4 }], {}, LOC)
+    expect(payloads[0].quantity).toBe(4)
+    expect(payloads[0].to_location_id).toBe(LOC)
+  })
+
+  it('handles a NEGATIVE system qty (over-drawn location): counted 2 vs sys -3 books +5', () => {
+    const { payloads } = buildCountedAdjustPayloads(
+      [{ part_id: 'P1', counted: 2 }], { P1: -3 }, LOC)
+    expect(payloads[0].quantity).toBe(5)
+    expect(payloads[0].to_location_id).toBe(LOC)
+    expect(payloads[0].notes).toContain('system had -3')
+  })
+
+  it('skips matching counts and reports them (all-match → empty payloads)', () => {
+    const { payloads, skipped } = buildCountedAdjustPayloads(
+      [{ part_id: 'P1', counted: 5 }, { part_id: 'P2', counted: 0 }],
+      { P1: 5 }, LOC)  // P2 absent = 0, counted 0 → match
+    expect(payloads).toHaveLength(0)
+    expect(skipped).toBe(2)
+  })
+
+  it('accepts a Map for systemQtyByPartId', () => {
+    const { payloads } = buildCountedAdjustPayloads(
+      [{ part_id: 'P1', counted: 1 }], new Map([['P1', 6]]), LOC)
+    expect(payloads[0].quantity).toBe(5)
+    expect(payloads[0].from_location_id).toBe(LOC)
+  })
+
+  it('writes the self-documenting Reconcile-style note with the noteBase prefix', () => {
+    const { payloads } = buildCountedAdjustPayloads(
+      [{ part_id: 'P1', counted: 8 }], { P1: 3 }, LOC, { noteBase: 'Spot count 2026-08-25' })
+    expect(payloads[0].notes).toBe('Spot count 2026-08-25 — counted 8, system had 3')
+  })
+
+  it('rejects a negative or non-numeric counted value', () => {
+    expect(() => buildCountedAdjustPayloads([{ part_id: 'P1', counted: -1 }], {}, LOC)).toThrow(/zero or more/)
+    expect(() => buildCountedAdjustPayloads([{ part_id: 'P1', counted: 'x' }], {}, LOC)).toThrow(/zero or more/)
+  })
+
+  it('rejects a missing counted location', () => {
+    expect(() => buildCountedAdjustPayloads([{ part_id: 'P1', counted: 1 }], {}, null)).toThrow(/counted location/)
+  })
+})
 
 // ─── buildLocationQtyMaps ────────────────────────────────────────────────────
 // Feeds the part-aware location pickers ("has this part · N on hand").
