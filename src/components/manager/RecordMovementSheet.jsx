@@ -92,6 +92,10 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   // over-drawn location as 0, corrupting the delta). Missing key = system 0.
   const [sysQtyByPart, setSysQtyByPart] = useState({})
   const [sysQtyLoading, setSysQtyLoading] = useState(false)
+  // A failed sys-qty fetch must BLOCK submit, not warn — the whole point of
+  // counted mode is that the manager doesn't know the system numbers, so
+  // "sys 0" chips from an empty map aren't self-evidently wrong.
+  const [sysQtyError, setSysQtyError] = useState(null)
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -163,10 +167,12 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   useEffect(() => {
     if (!countedMode || !countedLocId || lines.length === 0) {
       setSysQtyByPart({})
+      setSysQtyError(null)
       return
     }
     let cancelled = false
     setSysQtyLoading(true)
+    setSysQtyError(null)
     getStockRowsForParts(lines.map(l => l.part_id))
       .then(rows => {
         if (cancelled) return
@@ -178,7 +184,10 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
       })
       .catch(e => {
         console.warn('System qty fetch failed:', e)
-        if (!cancelled) setSysQtyByPart({})
+        if (!cancelled) {
+          setSysQtyByPart({})
+          setSysQtyError('Could not load system quantities — check the connection and re-pick the counted location')
+        }
       })
       .finally(() => { if (!cancelled) setSysQtyLoading(false) })
     return () => { cancelled = true }
@@ -454,6 +463,10 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     }
     if (countedMode) {
       if (!countedLocId) return 'Pick the counted location'
+      // Never book deltas off a loading/failed system map (the submit path
+      // ALSO refetches authoritatively — this just fails earlier + louder).
+      if (sysQtyLoading) return 'System quantities still loading — one moment'
+      if (sysQtyError) return sysQtyError
       return null
     }
     if (type === 'adjust') {
@@ -490,9 +503,18 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
       if (countedMode) {
         const date = isoLocalDate()
         const noteBase = notes.trim() ? `Spot count ${date} · ${notes.trim()}` : `Spot count ${date}`
+        // Refetch system qtys HERE, not from render state — the on-screen map
+        // can be stale (location switched mid-fetch) or empty (fetch failed),
+        // and these deltas book real adjust movements. The preview chips are
+        // advisory; this read is the authority.
+        const freshRows = await getStockRowsForParts(lines.map(l => l.part_id))
+        const freshSys = {}
+        for (const r of freshRows) {
+          if (r.location_id === countedLocId) freshSys[r.part_id] = Number(r.quantity) || 0
+        }
         const { payloads } = buildCountedAdjustPayloads(
           lines.map(l => ({ part_id: l.part_id, unit: l.unit, counted: Number(l.qty) })),
-          sysQtyByPart, countedLocId,
+          freshSys, countedLocId,
           { noteBase, createdBy: currentUser?.id })
         if (payloads.length === 0) {
           setError('Counts match the system — nothing to book')
@@ -978,7 +1000,9 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
           >
             {submitting
               ? 'Saving…'
-              : `Record ${lines.length || ''} movement${lines.length === 1 ? '' : 's'}`.trim()}
+              : countedMode
+                ? 'Book differences'  // matches are skipped, so "N movements" would over-promise
+                : `Record ${lines.length || ''} movement${lines.length === 1 ? '' : 's'}`.trim()}
           </button>
         </div>
       </div>
@@ -1058,10 +1082,12 @@ function SmartFromPicker({ options, totalLines, value, onChange }) {
 // is picked, otherwise the top-level (which means "warehouse-level / unbinned").
 function dirBtn(selected) {
   return {
-    flex: 1, padding: '8px 12px', borderRadius: 'var(--r-sm)',
+    // fontSize 12 + slimmer padding: three pills now share the row
+    // ("Counted total" joined) and 13px wrapped unevenly at 390px.
+    flex: 1, padding: '8px 8px', borderRadius: 'var(--r-sm)',
     border: `1.5px solid ${selected ? 'var(--orange)' : 'var(--border2)'}`,
     background: selected ? 'var(--orange-lt)' : 'var(--bg)',
     color: selected ? 'var(--orange)' : 'var(--muted)',
-    fontSize: 13, fontWeight: 700, cursor: 'pointer'
+    fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
   }
 }

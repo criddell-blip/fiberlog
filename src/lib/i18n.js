@@ -106,7 +106,8 @@ const strings = {
   addFromTruckTitle:  { en: 'Add parts used',             es: 'Añadir partes usadas' },
   addFromTruckSub:    { en: "Pick from what's actually on a truck — lines are tagged automatically",
                         es: 'Elige de lo que hay en un camión — las líneas se etiquetan automáticamente' },
-  fromWord:           { en: 'From:',                      es: 'De:' },
+  // (a duplicate `fromWord: 'From:'` used to sit here — the later lowercase
+  // 'from' definition always won; the dead copy was removed Aug 2026)
   filterTruckStock:   { en: "Filter this truck's stock…", es: 'Filtrar el inventario de este camión…' },
   noStockOnTruck:     { en: 'No matching stock on this truck', es: 'No hay inventario que coincida en este camión' },
   notOnTruckCatalog:  { en: 'Not on a truck? Search the full catalog', es: '¿No está en un camión? Busca en el catálogo completo' },
@@ -276,6 +277,7 @@ const strings = {
   odReturnPost:       { en: '. It will go negative.',     es: '. Quedará en negativo.' },
   addAnotherPart:     { en: 'Add another part',           es: 'Añadir otra parte' },
   clearSelection:     { en: 'Clear',                      es: 'Quitar' },
+  tickedPendingPost:  { en: 'still ticked above — tap "＋ Add" or Clear first', es: 'aún marcadas arriba — toca "＋ Añadir" o Quitar primero' },
   tapToPickSingle:    { en: 'Tap to pick — only one location', es: 'Toca para elegir — una sola ubicación' },
   movementNotePh:     { en: 'Anything worth recording…',  es: 'Algo que valga la pena anotar…' },
   loadTo:             { en: 'Load to',                    es: 'Cargar a' },

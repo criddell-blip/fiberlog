@@ -326,6 +326,15 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   // with the full location list in the background (no flicker since the
   // selected part is already present in the pre-seed).
   function pickPartAtLocation(group, loc) {
+    // Selecting a row supersedes its tick — otherwise "＋ Add" (qty 1) plus
+    // the in-progress selection would MERGE at submit and double-count.
+    setTicked(prev => {
+      const key = `${group.partId}|${loc.locationId}`
+      if (!prev.has(key)) return prev
+      const next = new Map(prev)
+      next.delete(key)
+      return next
+    })
     setOtherLocationId(loc.locationId)
     setSelectedPartId(group.partId)
     setOtherStock([{
@@ -466,6 +475,13 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   // ── Multi-select (by-part view, #40) ──────────────────────────────────────
   function toggleTick(group, loc) {
     const key = `${group.partId}|${loc.locationId}`
+    // Mirror of pickPartAtLocation's guard: ticking the row that's actively
+    // selected hands it over to the tick (clears the selection) so the two
+    // states can never both hold the same (part, location) and double-count.
+    if (group.partId === selectedPartId && loc.locationId === otherLocationId && !ticked.has(key)) {
+      setSelectedPartId(null)
+      setQuantity('')
+    }
     setTicked(prev => {
       const next = new Map(prev)
       if (next.has(key)) next.delete(key)
@@ -513,6 +529,13 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
 
   // Primary action. Decides whether the move needs the review step first.
   function handlePrimary() {
+    // Ticked-but-not-Added rows must never be silently dropped by a submit —
+    // the crew believes they're coming. Block rather than auto-fold: their
+    // quantities were never set (Add defaults them to 1 for editing).
+    if (ticked.size > 0) {
+      setError(`${ticked.size} ${ticked.size === 1 ? t('partOne', lang) : t('partMany', lang)} ${t('tickedPendingPost', lang)}`)
+      return
+    }
     const all = buildEffectiveLines()
     if (all.length === 0) { setError(isLoad ? t('addPartToLoad', lang) : t('addPartToReturn', lang)); return }
     // Inline cart edits can zero a line — never let a 0-qty movement submit.
