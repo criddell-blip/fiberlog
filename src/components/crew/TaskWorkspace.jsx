@@ -384,16 +384,6 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     saveTimeoutRef.current = setTimeout(async () => {
       const draft = {
         counts, partQtyOverrides, extraParts, partSources, footageLines, note, hoursWorked, projectIdOverride,
-        // Legacy mirror, ONE RELEASE ONLY. Deploys go straight to ~20 live
-        // users; a rollback to the previous bundle would read footageLines it
-        // doesn't understand and blank every crew's type pick mid-day. Old
-        // code reading these gets the first type + the full counts total —
-        // exactly its old behavior. Delete once this has been live a week.
-        fiberCount: (footageLines['fiber-ft'] || [])[0]?.type || '',
-        conduitSizes: {
-          'bore-ft': (footageLines['bore-ft'] || [])[0]?.type || '',
-          'plow-ft': (footageLines['plow-ft'] || [])[0]?.type || '',
-        },
       }
       try {
         const { error } = await db.from('tasks').update({
