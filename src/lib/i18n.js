@@ -275,6 +275,8 @@ const strings = {
   odReturnMid:        { en: ' — your truck only shows ',  es: ' — tu camión solo muestra ' },
   odReturnPost:       { en: '. It will go negative.',     es: '. Quedará en negativo.' },
   addAnotherPart:     { en: 'Add another part',           es: 'Añadir otra parte' },
+  clearSelection:     { en: 'Clear',                      es: 'Quitar' },
+  tapToPickSingle:    { en: 'Tap to pick — only one location', es: 'Toca para elegir — una sola ubicación' },
   movementNotePh:     { en: 'Anything worth recording…',  es: 'Algo que valga la pena anotar…' },
   loadTo:             { en: 'Load to',                    es: 'Cargar a' },
   myTruckWord:        { en: 'My truck',                   es: 'Mi camión' },

@@ -65,6 +65,13 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   // tracks which aisle groups are open.
   const [locSearch, setLocSearch] = useState('')
   const [expandedAisles, setExpandedAisles] = useState(() => new Set())
+  // Multi-select in by-part view (backlog #40): tick several (part, location)
+  // rows across searches, then "＋ Add N" pushes them all into the cart at
+  // qty 1 (edited inline there). Ticks deliberately SURVIVE search changes —
+  // that's what kills the serial search→pick→qty→Add loop for big loadouts;
+  // the sticky add-bar keeps the pending count visible so nothing is hidden.
+  // Keyed `${partId}|${locationId}` → { group, loc } snapshot.
+  const [ticked, setTicked] = useState(() => new Map())
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -129,7 +136,7 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   }, {
     confirm: () => {
       if (confirming) return true   // stepping back out of the review — never prompt
-      const dirty = !!selectedPartId || quantity.trim() !== '' || notes.trim() !== '' || lines.length > 0
+      const dirty = !!selectedPartId || quantity.trim() !== '' || notes.trim() !== '' || lines.length > 0 || ticked.size > 0
       return !dirty || window.confirm(t('discardEntry', lang))
     },
   })
@@ -444,6 +451,53 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
     setLines(prev => prev.filter((_, idx) => idx !== i))
   }
 
+  // Inline cart-qty edit (#40 — a typo used to mean × remove + full redo).
+  // Over-draw recomputes live so the amber flag + forced review stay honest.
+  function setCartLineQty(i, v) {
+    setLines(prev => prev.map((l, idx) => {
+      if (idx !== i) return l
+      const q = Number(v)
+      const qty = isNaN(q) || q < 0 ? 0 : q
+      const avail = l.availableQty != null ? l.availableQty : Infinity
+      return { ...l, qty, overDraw: qty > avail }
+    }))
+  }
+
+  // ── Multi-select (by-part view, #40) ──────────────────────────────────────
+  function toggleTick(group, loc) {
+    const key = `${group.partId}|${loc.locationId}`
+    setTicked(prev => {
+      const next = new Map(prev)
+      if (next.has(key)) next.delete(key)
+      else next.set(key, { group, loc })
+      return next
+    })
+  }
+
+  // Push every ticked (part, location) into the cart at qty 1; quantities are
+  // edited inline in the cart. Merges with existing lines by (part, location).
+  function addTickedToCart() {
+    setLines(prev => {
+      let next = prev
+      for (const { group, loc } of ticked.values()) {
+        next = mergeLine(next, {
+          partId: group.partId,
+          partName: group.name || group.partId,
+          unit: group.unit || null,
+          qty: 1,
+          otherLocationId: loc.locationId,
+          otherLabel: loc.displayLabel || loc.name || '',
+          availableQty: Number(loc.qty) || 0,
+          overDraw: 1 > (Number(loc.qty) || 0),
+        })
+      }
+      return next
+    })
+    setTicked(new Map())
+    setPartSearch('')
+    setError(null)
+  }
+
   // Cart + the in-progress selection (if valid), merged. This is what Submit
   // sends — so a single-part move never needs an explicit Add tap.
   function buildEffectiveLines() {
@@ -461,6 +515,8 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
   function handlePrimary() {
     const all = buildEffectiveLines()
     if (all.length === 0) { setError(isLoad ? t('addPartToLoad', lang) : t('addPartToReturn', lang)); return }
+    // Inline cart edits can zero a line — never let a 0-qty movement submit.
+    if (all.some(l => !l.qty || l.qty <= 0)) { setError(t('qtyGtZero', lang)); return }
     // Confirm everything except the safe fast path (single part → own
     // truck) — and ALWAYS confirm over-draw, so going negative is a
     // reviewed decision, never a fat-finger.
@@ -489,11 +545,11 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
           operation: mode,
           partId: line.partId,
           quantity: line.qty,
-          // Each line goes exactly where it was snapshotted — load: its source;
-          // return: the destination chosen when it was added. The shared
-          // source/destination picker is locked once the cart is non-empty
-          // (see the by-location "Change" guard), so every line's snapshot
-          // matches what's on screen — no silent misroute.
+          // Each line goes exactly where it was snapshotted — load: its source
+          // (cross-bin carts are fine, every line carries its own); return:
+          // the destination chosen when it was added — the shared destination
+          // picker is locked once the return cart is non-empty (by-location
+          // "Change" guard) so every line's snapshot matches the screen.
           otherLocationId: line.otherLocationId,
           unit: line.unit || null,
           notes: notes.trim() || null,
@@ -686,13 +742,20 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                 // commit. Keep it visible (so parts don't mysteriously vanish
                 // from search) but greyed, badged, and unpickable.
                 const restricted = isRestrictedDept(group.department)
+                const singleLoc = group.locations.length === 1
                 return (
                 <div key={group.partId} style={{ borderBottom: '1px solid var(--border)', opacity: restricted ? 0.55 : 1 }}>
-                  {/* Part header */}
-                  <div style={{
-                    padding: '6px 12px', background: 'var(--surface2)',
-                    borderBottom: '1px solid var(--border)',
-                  }}>
+                  {/* Part header. Single-location parts pick on header tap
+                      (#40) — no bin decision when there's nothing to decide;
+                      the location row below stays tappable as the override. */}
+                  <div
+                    onClick={() => { if (!restricted && singleLoc) pickPartAtLocation(group, group.locations[0]) }}
+                    title={!restricted && singleLoc ? t('tapToPickSingle', lang) : undefined}
+                    style={{
+                      padding: '6px 12px', background: 'var(--surface2)',
+                      borderBottom: '1px solid var(--border)',
+                      cursor: !restricted && singleLoc ? 'pointer' : 'default',
+                    }}>
                     <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {group.name}
                       {group.nickname && (
@@ -720,9 +783,13 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                       )}
                     </div>
                   </div>
-                  {/* Per-location rows */}
+                  {/* Per-location rows. Row tap = the classic single-pick
+                      (fast path untouched); the checkbox queues the row for
+                      a multi-add instead (#40) — tick across searches, then
+                      "＋ Add N" below pushes them all into the cart. */}
                   {group.locations.map(loc => {
                     const isSel = group.partId === selectedPartId && loc.locationId === otherLocationId
+                    const isTicked = ticked.has(`${group.partId}|${loc.locationId}`)
                     return (
                       <div
                         key={loc.locationId}
@@ -731,12 +798,20 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10,
                           padding: '8px 12px',
-                          background: isSel ? 'var(--orange-lt)' : 'transparent',
+                          background: isSel || isTicked ? 'var(--orange-lt)' : 'transparent',
                           borderLeft: isSel ? '3px solid var(--orange)' : '3px solid transparent',
                           cursor: restricted ? 'not-allowed' : 'pointer',
                           fontSize: 12,
                         }}
                       >
+                        <input
+                          type="checkbox"
+                          checked={isTicked}
+                          disabled={restricted}
+                          onChange={() => {}}
+                          onClick={e => { e.stopPropagation(); if (!restricted) toggleTick(group, loc) }}
+                          style={{ margin: 0, width: 18, height: 18, flexShrink: 0, cursor: restricted ? 'not-allowed' : 'pointer' }}
+                        />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           {locationIcon(loc.type, loc.hasOwner)} {loc.displayLabel}
                         </div>
@@ -750,6 +825,34 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                 )
               })}
             </div>
+            {/* Sticky add-bar — appears once anything is ticked. Quantities
+                default to 1 and are edited inline in the cart below. */}
+            {ticked.size > 0 && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '8px 10px', marginTop: 6,
+                background: 'var(--orange-lt)', border: '1px solid var(--orange)',
+                borderRadius: 'var(--r-sm)',
+              }}>
+                <div style={{ flex: 1, fontSize: 12, fontWeight: 700, color: 'var(--orange-dk)' }}>
+                  {ticked.size} {ticked.size === 1 ? t('partOne', lang) : t('partMany', lang)}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTicked(new Map())}
+                  style={{ padding: '6px 10px', borderRadius: 'var(--r-xs)', fontSize: 11, fontWeight: 600, background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', cursor: 'pointer' }}
+                >
+                  {t('clearSelection', lang)}
+                </button>
+                <button
+                  type="button"
+                  onClick={addTickedToCart}
+                  style={{ padding: '6px 14px', borderRadius: 'var(--r-xs)', fontSize: 12, fontWeight: 700, background: 'var(--orange)', color: 'white', border: 'none', cursor: 'pointer' }}
+                >
+                  ＋ {t('addWord', lang)} {ticked.size}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -798,13 +901,24 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                   <span style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--orange-dk)' }}>
                     {sel?.name || '—'}
                   </span>
-                  <button type="button"
-                    onClick={() => { if (lines.length === 0) { setOtherLocationId(''); setLocSearch('') } }}
-                    disabled={lines.length > 0}
-                    title={lines.length > 0 ? t('changeLockedTitle', lang) : ''}
-                    style={{ background: 'none', border: 'none', color: 'var(--orange-dk)', fontWeight: 700, fontSize: 12, cursor: lines.length > 0 ? 'not-allowed' : 'pointer', opacity: lines.length > 0 ? 0.45 : 1, flexShrink: 0 }}>
-                    {t('change', lang)}
-                  </button>
+                  {/* Cross-bin carts are allowed for LOAD (#40): each cart line
+                      snapshots its own source, so changing the shared picker
+                      can't misroute queued lines. RETURN keeps the lock — its
+                      lines snapshot the shared DESTINATION, and changing it
+                      mid-cart would silently split the return across two
+                      warehouses. */}
+                  {(() => {
+                    const locked = isReturn && lines.length > 0
+                    return (
+                      <button type="button"
+                        onClick={() => { if (!locked) { setOtherLocationId(''); setLocSearch('') } }}
+                        disabled={locked}
+                        title={locked ? t('changeLockedTitle', lang) : ''}
+                        style={{ background: 'none', border: 'none', color: 'var(--orange-dk)', fontWeight: 700, fontSize: 12, cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.45 : 1, flexShrink: 0 }}>
+                        {t('change', lang)}
+                      </button>
+                    )
+                  })()}
                 </div>
               )
             })() : loadingLocations ? (
@@ -1037,14 +1151,43 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
                 <div key={i} style={{
                   display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
                   borderBottom: i < lines.length - 1 ? '1px solid var(--border)' : 'none',
+                  background: l.overDraw ? 'var(--amber-lt)' : 'transparent',
                 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.partName}</div>
                     <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                      <span className="mono">{l.qty.toLocaleString()}</span> {l.unit || 'ea'}
-                      {isLoad && l.otherLabel ? ` · ${t('fromWord', lang)} ${l.otherLabel}` : ''}
+                      {isLoad && l.otherLabel ? `${t('fromWord', lang)} ${l.otherLabel}` : ''}
                     </div>
+                    {/* Same warn-but-allow language as the review step (#17) —
+                        an inline edit that crosses on-hand must warn HERE too. */}
+                    {l.overDraw && (
+                      <div style={{ fontSize: 11, color: 'var(--amber)', fontWeight: 700 }}>
+                        {t('onlyWord', lang)} {Number(l.availableQty || 0).toLocaleString()} {t('onHandGoNegative', lang)}
+                      </div>
+                    )}
+                    {(!l.qty || l.qty <= 0) && (
+                      <div style={{ fontSize: 11, color: 'var(--red)', fontWeight: 600 }}>
+                        {t('qtyGtZero', lang)}
+                      </div>
+                    )}
                   </div>
+                  {/* Inline qty (#40) — a typo no longer means remove + redo. */}
+                  <input
+                    type="number"
+                    value={l.qty === 0 ? '' : l.qty}
+                    onChange={e => setCartLineQty(i, e.target.value)}
+                    min="0"
+                    step="any"
+                    autoComplete="off"
+                    name={`crew-cart-qty-${i}`}
+                    style={{
+                      width: 74, padding: '6px 8px', fontSize: 14, textAlign: 'right',
+                      border: `1.5px solid ${l.overDraw ? 'var(--amber)' : 'var(--border2)'}`,
+                      borderRadius: 'var(--r-xs)', background: 'var(--bg)', color: 'var(--text)',
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0, minWidth: 20 }}>{l.unit || 'ea'}</span>
                   <button
                     type="button" onClick={() => removeLine(i)} aria-label="Remove"
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 20, lineHeight: 1, padding: '0 4px', flexShrink: 0 }}
