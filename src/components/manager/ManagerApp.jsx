@@ -30,13 +30,6 @@ const NAV_ITEMS = [
 // confused with the disabled "Crew mode" pill beside it. Label shows the mode
 // you'll switch TO; emoji flips sun/moon.
 function ThemeToggle({ darkMode, onToggle }) {
-  // HIDDEN: the dark-mode toggle is a confirmed no-op (real bug — clicking it
-  // never visibly switches the theme, even in clean incognito with the dark
-  // CSS verified live). Hidden so users don't see a dead control. The dark
-  // palette stays dormant (default light). Restore by deleting this return
-  // once the toggle bug is fixed. See backlog.
-  return null
-  // eslint-disable-next-line no-unreachable
   return (
     <button
       onClick={onToggle}

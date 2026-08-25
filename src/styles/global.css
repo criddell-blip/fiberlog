@@ -116,8 +116,8 @@
    Same token NAMES, dark values — so every inline style + class flips with no
    component changes. Surfaces layer bg < sidebar < surface < surface2 so cards
    and inputs read above the base. The emerald accent is kept (brightened a
-   touch to pop on dark); the legacy --orange*/--teal* aliases and the semantic
-   --*-bg/--*-fg roles reference var(--accent*) / var(--*-lt) and so re-resolve
+   touch to pop on dark); the legacy --orange / --teal alias families and the
+   semantic --*-bg / --*-fg roles reference var(--accent…) / var(--…-lt) and re-resolve
    to these dark values automatically. -lt tints become dark washes; -mid stays
    readable on them. Opt-in via the theme toggle; light remains the default. */
 [data-theme="dark"] {
