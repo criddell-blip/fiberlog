@@ -41,9 +41,43 @@ export function groupLocationsByAisle(locations) {
   return groups.sort((a, b) => a.sortKey - b.sortKey)
 }
 
+// ─── LOCATION TYPES ──────────────────────────────────────────────────────────
+
+// The ONE display map for inventory_locations.type. The DB value for a
+// project's consumption bucket is still `job_site` (CHECK-constrained,
+// trigger-created by trg_ensure_project_job_site, referenced by RPCs) — the
+// owner renamed it "Region" in the UI Aug 2026 because that's what each
+// bucket is: one per BEAD region project. Render through here; four
+// components used to carry their own disagreeing copies ("Job site",
+// "Project bucket", "📍 Job site", "Project buckets").
+export const LOCATION_TYPE_LABELS = {
+  warehouse: 'Warehouse',
+  truck:     'Truck',
+  group:     'Group',
+  job_site:  'Region',
+  vendor:    'Vendor',
+  scrap:     'Scrap',
+  bin:       'Bin',
+}
+
+export function locationTypeLabel(type, { plural = false } = {}) {
+  const base = LOCATION_TYPE_LABELS[type] || type || ''
+  return plural && base ? `${base}s` : base
+}
+
+// Region buckets hold CONSUMED material — the permanent ledger of what each
+// project used (fed by auto-deduct + the Sonar importers, read by the Sage
+// export). Stock that landed there has left the shelf for good, so no
+// "on hand" / usable rollup may count it. Every cross-location total in this
+// module splits on this predicate; surfaces that show one part's footprint
+// render region qty separately as "consumed" rather than hiding it.
+export function isConsumedLocationType(type) {
+  return type === 'job_site'
+}
+
 // ─── LOCATIONS ───────────────────────────────────────────────────────────────
 
-// Get top-level locations (warehouses, trucks, job sites, etc.). By default
+// Get top-level locations (warehouses, trucks, regions, etc.). By default
 // excludes bins — bins are queried separately via getBinsForWarehouse so
 // the flat location list (used by pickers and pill rows) doesn't get
 // flooded once warehouses start having sub-locations.
@@ -307,8 +341,12 @@ export async function getAllStockGrouped({ excludeLocationId = null, excludeType
 // Used by the Parts tab "📍 Locations" drill-in. Cheap enough to
 // re-fetch on every overlay open — bypasses caching to keep the
 // payload fresh after recent movements.
+//
+// `totalQty` is USABLE on hand only. Region rows stay in `locations`
+// (flagged `isConsumed`) so a reader can still see where a part went, but
+// their qty rolls into `consumedQty` instead — see isConsumedLocationType.
 export async function getPartLocations(partId) {
-  if (!partId) return { totalQty: 0, locations: [] }
+  if (!partId) return { totalQty: 0, consumedQty: 0, locations: [] }
   const [stockRes, locsRes] = await Promise.all([
     db.from('inventory_stock')
       .select('location_id, quantity, last_movement_at')
@@ -325,6 +363,7 @@ export async function getPartLocations(partId) {
   )
 
   let totalQty = 0
+  let consumedQty = 0
   const locations = []
   for (const r of stockRes.data || []) {
     const qty = Number(r.quantity || 0)
@@ -332,10 +371,12 @@ export async function getPartLocations(partId) {
     const loc = locById.get(r.location_id)
     if (!loc) continue
     const parentName = loc.parent_location_id ? parentNameById.get(loc.parent_location_id) : null
+    const isConsumed = isConsumedLocationType(loc.type)
     locations.push({
       locationId: loc.id,
       name: loc.name,
       type: loc.type,
+      isConsumed,
       hasOwner: !!loc.assigned_to,
       isActive: !!loc.is_active,
       parentLocationId: loc.parent_location_id || null,
@@ -345,10 +386,48 @@ export async function getPartLocations(partId) {
       qty,
       lastMovementAt: r.last_movement_at || null,
     })
-    totalQty += qty
+    if (isConsumed) consumedQty += qty
+    else totalQty += qty
   }
-  locations.sort((a, b) => b.qty - a.qty)
-  return { totalQty, locations }
+  // Usable locations first (qty desc), consumed regions after — so a
+  // `.slice(0, 3)` summary reads the shelf, not the ledger.
+  locations.sort((a, b) => (a.isConsumed - b.isConsumed) || (b.qty - a.qty))
+  return { totalQty, consumedQty, locations }
+}
+
+// Pure fold behind getStockSummary — one row per part, USABLE on hand in
+// `total` and region-consumed qty in `consumed`, never blended. A part with
+// nothing left on the shelf but a consumption history still gets a row
+// (total 0, consumed > 0): "we used 1,200 and have none" is the honest
+// stock picture, and it was listed before too — with the consumed qty
+// wrongly shown as on hand. `locationCount` counts usable spots only.
+export function foldStockSummary(rows) {
+  const byPart = new Map()
+  for (const row of rows || []) {
+    const qty = Number(row.quantity) || 0
+    if (qty === 0) continue
+    let cur = byPart.get(row.part_id)
+    if (!cur) {
+      cur = {
+        part_id: row.part_id,
+        name: row.parts_catalog?.name || row.part_id,
+        unit: row.parts_catalog?.unit || 'ea',
+        category: row.parts_catalog?.category || null,
+        is_active: row.parts_catalog?.is_active !== false,
+        total: 0,
+        consumed: 0,
+        locationCount: 0,
+      }
+      byPart.set(row.part_id, cur)
+    }
+    if (isConsumedLocationType(row.location?.type)) {
+      cur.consumed += qty
+    } else {
+      cur.total += qty
+      cur.locationCount++
+    }
+  }
+  return [...byPart.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export async function getStockSummary() {
@@ -357,29 +436,13 @@ export async function getStockSummary() {
   // (root cause of the July 2026 audit's 80-vs-480 mismatch, backlog #29).
   const data = await fetchAllRows(() => db
     .from('inventory_stock')
-    .select('part_id, quantity, parts_catalog(id, name, unit, category, material_group, is_active)')
+    .select(`
+      part_id, quantity,
+      parts_catalog(id, name, unit, category, material_group, is_active),
+      location:inventory_locations(type)
+    `)
     .order('part_id').order('location_id'))
-  const byPart = new Map()
-  for (const row of data) {
-    const qty = Number(row.quantity) || 0
-    if (qty === 0) continue
-    const cur = byPart.get(row.part_id)
-    if (cur) {
-      cur.total += qty
-      cur.locationCount++
-    } else {
-      byPart.set(row.part_id, {
-        part_id: row.part_id,
-        name: row.parts_catalog?.name || row.part_id,
-        unit: row.parts_catalog?.unit || 'ea',
-        category: row.parts_catalog?.category || null,
-        is_active: row.parts_catalog?.is_active !== false,
-        total: qty,
-        locationCount: 1,
-      })
-    }
-  }
-  return [...byPart.values()].sort((a, b) => a.name.localeCompare(b.name))
+  return foldStockSummary(data)
 }
 
 // ─── SONAR ROUTING ───────────────────────────────────────────────────────────
@@ -726,20 +789,28 @@ export async function getStockCountsByLocation() {
   return m
 }
 
-// Get total stock per part across all locations. Used by the Parts admin
-// to sort drafts by stock volume (so high-volume drafts surface first).
-// Returns Map<part_id, totalQty>.
+// Pure fold behind getStockTotalsByPart. Region-consumed rows are skipped
+// (isConsumedLocationType) — this feeds the Parts tab's "On Hand" column
+// and its CSV, both of which mean "what's on a shelf or truck".
+export function foldStockTotalsByPart(rows) {
+  const totals = new Map()
+  for (const row of rows || []) {
+    if (isConsumedLocationType(row.location?.type)) continue
+    totals.set(row.part_id, (totals.get(row.part_id) || 0) + Number(row.quantity || 0))
+  }
+  return totals
+}
+
+// Get USABLE stock per part across all locations (regions excluded). Used by
+// the Parts admin's On Hand column + CSV and to sort drafts by stock volume
+// (so high-volume drafts surface first). Returns Map<part_id, totalQty>.
 export async function getStockTotalsByPart() {
   // Full-table read — must page past the 1,000-row PostgREST cap.
   const data = await fetchAllRows(() => db
     .from('inventory_stock')
-    .select('part_id, quantity')
+    .select('part_id, quantity, location:inventory_locations(type)')
     .order('part_id').order('location_id'))
-  const totals = new Map()
-  for (const row of data) {
-    totals.set(row.part_id, (totals.get(row.part_id) || 0) + Number(row.quantity || 0))
-  }
-  return totals
+  return foldStockTotalsByPart(data)
 }
 
 // Get stock at a warehouse including all its bins. Returns flat rows with

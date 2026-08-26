@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import {
   createLocation, updateLocation, deactivateLocation, deactivateLocationWithRecovery,
   getBinsForWarehouse, getStockCountsByLocation, getStockByLocation,
+  LOCATION_TYPE_LABELS, isConsumedLocationType,
   getGroupMembers, getMemberCountsByLocation, removeUserFromGroup, bulkAssignPullLocation,
 } from '../../lib/inventory'
 import { crewTypeLabel } from '../../lib/crewTypes'
@@ -35,15 +36,9 @@ function locActionChip() {
   }
 }
 
-const TYPE_LABELS = {
-  warehouse: 'Warehouse',
-  truck:     'Truck',
-  group:     'Group',
-  job_site:  'Job site',
-  vendor:    'Vendor',
-  scrap:     'Scrap',
-  bin:       'Bin',
-}
+// Display names live in lib/inventory.js (LOCATION_TYPE_LABELS) — one map
+// for every surface, so "Region" can't drift back to "Job site" here.
+const TYPE_LABELS = LOCATION_TYPE_LABELS
 
 const TYPE_ICONS = {
   warehouse: '🏭',
@@ -475,7 +470,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                     <span style={{ marginLeft: 'auto', textTransform: 'none', letterSpacing: 0, fontWeight: 600, color: 'var(--muted)' }}>
                       {sectionRollup.distinctParts.toLocaleString()} part{sectionRollup.distinctParts === 1 ? '' : 's'}
                       {!isQtyPaused && (
-                        <> · {sectionRollup.totalUnits.toLocaleString()} units</>
+                        <> · {sectionRollup.totalUnits.toLocaleString()} units{isConsumedLocationType(type) ? ' consumed' : ''}</>
                       )}
                     </span>
                   )}
@@ -587,7 +582,7 @@ export default function InventoryLocationsTab({ locations, loading, onChanged, o
                                   <>
                                     <span style={{ color: 'var(--hint)' }}>·</span>
                                     <span title="Total units across all parts">
-                                      <strong style={{ color: 'var(--text)' }}>{rollup.totalUnits.toLocaleString()}</strong> unit{rollup.totalUnits === 1 ? '' : 's'}
+                                      <strong style={{ color: 'var(--text)' }}>{rollup.totalUnits.toLocaleString()}</strong> unit{rollup.totalUnits === 1 ? '' : 's'}{isConsumedLocationType(type) ? ' consumed' : ''}
                                     </span>
                                   </>
                                 )}

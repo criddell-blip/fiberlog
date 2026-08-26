@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useApp } from '../../AppContext'
 import {
   getStockByLocation, exportLocationStockCSV,
+  LOCATION_TYPE_LABELS, isConsumedLocationType,
 } from '../../lib/inventory'
 import {
   getMyActiveRun, startCountRun, startOrResumeCountSession,
@@ -145,7 +146,7 @@ export default function LocationDetailPanel({
                   {location.assigned_user?.name || location.name}
                 </div>
                 <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', marginTop: 2 }}>
-                  {TYPE_LABELS[location.type] || location.type}
+                  {LOCATION_TYPE_LABELS[location.type] || location.type}
                   {location.assigned_user && location.assigned_user.name !== location.name && (
                     <> · {location.name}</>
                   )}
@@ -237,6 +238,13 @@ export default function LocationDetailPanel({
             )}
           </div>
 
+          {isConsumedLocationType(location.type) && (
+            <div className="banner banner-warning" style={{ marginBottom: 10, fontSize: 12.5, flexShrink: 0 }}>
+              <strong>Region bucket — consumption ledger, not usable stock.</strong> Quantities here are
+              materials already used on this project; they feed the Sage export and aren't on any shelf or truck.
+            </div>
+          )}
+
           {/* Stock list */}
           <div style={{
             flex: 1, overflowY: 'auto', minHeight: 100,
@@ -251,12 +259,12 @@ export default function LocationDetailPanel({
               position: 'sticky', top: 0, zIndex: 1,
             }}>
               <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)', fontWeight: 'var(--fw-bold)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
-                Parts here
+                {isConsumedLocationType(location.type) ? 'Consumed here' : 'Parts here'}
               </div>
               {!loading && stock.length > 0 && (
                 <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--muted)' }}>
                   · {stock.length} type{stock.length === 1 ? '' : 's'}
-                  {!isQtyPaused && <> · {totalUnits.toLocaleString()} units</>}
+                  {!isQtyPaused && <> · {totalUnits.toLocaleString()} units{isConsumedLocationType(location.type) ? ' consumed' : ''}</>}
                 </div>
               )}
               {stock.length > 4 && (
@@ -381,15 +389,6 @@ export default function LocationDetailPanel({
       )}
     </>
   )
-}
-
-const TYPE_LABELS = {
-  warehouse: 'Warehouse',
-  truck:     'Truck / trailer',
-  job_site:  'Project bucket',
-  vendor:    'Vendor',
-  scrap:     'Scrap',
-  bin:       'Bin',
 }
 
 const TYPE_ICON_NAMES = {

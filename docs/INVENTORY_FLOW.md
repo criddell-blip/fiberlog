@@ -48,7 +48,7 @@ Every movement automatically triggers an update to `inventory_stock` (via `updat
 | `truck` | Personal vehicle assigned to a crew member, OR a shared trailer | "Joseph's Truck", "Aerial/UG Shared Trailer" |
 | `job_site` | The **consumption sink** — one per FiberLog region project | Heber, Park City, Wasatch Front, Ogden Valley, West Mountain |
 
-`job_site` rows are the regional cost-center buckets. They're auto-created by a DB trigger (`trg_ensure_project_job_site`) whenever a new active project appears, so you never have to set one up by hand.
+`job_site` rows are the regional cost-center buckets — labeled **Region** everywhere in the UI (Aug 2026; the DB type name is unchanged). They're auto-created by a DB trigger (`trg_ensure_project_job_site`) whenever a new active project appears, so you never have to set one up by hand. **Their quantities are consumed material, never usable stock:** every on-hand rollup (Stock tab "All locations", Parts tab On Hand + CSV, the per-part Locations drill-in, Record movement's per-line On-hand note) excludes them via `isConsumedLocationType()` in `lib/inventory.js` and shows them separately as "consumed into regions". Opening a Region in the Stock tab or Location detail shows a warning banner and a CONSUMED status instead of IN STOCK / LOW.
 
 **Phases under each region** (Center Creek, Snyderville, etc.) are NOT separate buckets — they're tags on the movement (`inventory_movements.phase_id`) for Sage cost-center grouping. This keeps the location picker from getting overrun with 100+ sub-buckets while still giving accounting per-cost-center rollup.
 

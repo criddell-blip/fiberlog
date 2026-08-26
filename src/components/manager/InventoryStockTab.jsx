@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../AppContext'
 import {
   getStockByLocation, getStockSummary, getStockForWarehouseTree,
+  locationTypeLabel, isConsumedLocationType,
   getBinsForWarehouse,
 } from '../../lib/inventory'
 import BulkMoveSheet from './BulkMoveSheet'
@@ -34,8 +35,11 @@ const TYPE_ICON_NAME = {
 // Console row status from the existing data. No reorder threshold exists in the
 // schema yet, so "low" stands in for zero/negative (the actionable state);
 // a real LOW threshold would refine this (flagged for a later data change).
-function stockStatus(r) {
+function stockStatus(r, { consumedScope = false } = {}) {
   if (r.is_active === false) return { label: 'DRAFT', cls: 'status-draft' }
+  // Inside a Region bucket the number is a consumption total, not a shelf
+  // level — IN STOCK / LOW would both be lies.
+  if (consumedScope)         return { label: 'CONSUMED', cls: 'status-draft' }
   if (Number(r.total) <= 0)  return { label: 'LOW', cls: 'status-low' }
   return { label: 'IN STOCK', cls: 'status-instock' }
 }
@@ -229,11 +233,19 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
   // parts", an unfiltered grand total read as "656,015 units across 26
   // parts" (Aug 2026 smoke audit). Unfiltered, filtered === rows anyway.
   const totalUnits = filtered.reduce((a, r) => a + (Number(r.total) || 0), 0)
+  // Region-consumed qty rides alongside (getStockSummary keeps it apart from
+  // `total`); only the "All locations" scope carries it.
+  const consumedUnits = filtered.reduce((a, r) => a + (Number(r.consumed) || 0), 0)
 
   const scopedLoc = scope !== 'all' ? locations.find(l => l.id === scope) : null
   const isWarehouseScope = scopedLoc?.type === 'warehouse'
+  // Scoped to one Region bucket: every number on screen is consumption, not
+  // usable stock — the header, column label and status pill all say so.
+  const isConsumedScope = isConsumedLocationType(scopedLoc?.type)
   const inRollupMode = isWarehouseScope && binScope === SUBMODE_ROLLUP
-  const canBulkSelect = scope !== 'all' && !inRollupMode
+  // Pulling consumption back OUT of a Region is an owner-only correction —
+  // same gate as Record movement's from-pickers and the Parts drill-in.
+  const canBulkSelect = scope !== 'all' && !inRollupMode && (!isConsumedScope || currentUser?.role === 'owner')
 
   // The location to use as the source for bulk-move
   const bulkSourceLocation = useMemo(() => {
@@ -328,7 +340,9 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
   const isWide = useIsWide()
   const [showFilters, setShowFilters] = useState(() => isWide)
   const slimScopeText = useMemo(() => {
-    if (scope === 'all') return typeFilter === 'all' ? 'All locations' : `${typeFilter} locations`
+    // typeFilter only narrows the scope chips — the rows are still every
+    // location's summary — so don't say "only".
+    if (scope === 'all') return typeFilter === 'all' ? 'All locations' : `All locations · ${locationTypeLabel(typeFilter, { plural: true })} filter`
     if (!scopedLoc) return 'All locations'
     const baseName = scopedLoc.assigned_user?.name || scopedLoc.name
     const icon = TYPE_ICONS[scopedLoc.type] || '📦'
@@ -376,7 +390,7 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
           { id: 'all',       label: 'All',             icon: null,  count: locations.length },
           { id: 'warehouse', label: 'Warehouses',      icon: '🏭', count: counts.warehouse || 0 },
           { id: 'truck',     label: 'Trucks',          icon: '🚚', count: counts.truck     || 0 },
-          { id: 'job_site',  label: 'Project buckets', icon: '📍', count: counts.job_site  || 0 },
+          { id: 'job_site',  label: 'Regions',         icon: '📍', count: counts.job_site  || 0 },
         ].filter(t => t.id === 'all' || t.count > 0)
         return (
           <>
@@ -472,7 +486,10 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
         <div className="mono" style={{ fontSize: 12, color: 'var(--hint)' }}>
-          {loading ? 'Loading…' : `${filtered.length} of ${totalLines} parts · ${totalUnits.toLocaleString()} units`}
+          {loading ? 'Loading…' : `${filtered.length} of ${totalLines} parts · ${totalUnits.toLocaleString()} units${isConsumedScope ? ' consumed' : scope === 'all' ? ' on hand' : ''}`}
+          {!loading && scope === 'all' && consumedUnits > 0 && (
+            <span style={{ marginLeft: 6 }}>· {consumedUnits.toLocaleString()} consumed into regions</span>
+          )}
           {canBulkSelect && filtered.length > 0 && (
             <span style={{ marginLeft: 6 }}>· shift-click for range</span>
           )}
@@ -494,10 +511,20 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
         </div>
       </div>
 
+      {isConsumedScope && (
+        <div className="banner banner-warning" style={{ marginBottom: 10, fontSize: 12.5 }}>
+          <strong>Region bucket — consumption ledger, not usable stock.</strong> These quantities are
+          materials already used on this project (auto-deduct + Sonar imports) and feed the Sage export.
+          Nothing here is on a shelf or truck; crews can't load from it.
+        </div>
+      )}
+
       {!loading && filtered.length === 0 && (
         <EmptyState>
           {totalLines === 0
-            ? 'No stock here yet — record a receive movement to get started.'
+            ? isConsumedScope
+              ? 'Nothing consumed into this region yet.'
+              : 'No stock here yet — record a receive movement to get started.'
             : 'No parts match your search.'}
         </EmptyState>
       )}
@@ -505,8 +532,8 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
       {/* Desktop: Console data table */}
       {filtered.length > 0 && isWide && (() => {
         const gridCols = canBulkSelect
-          ? '28px minmax(0,1fr) 132px 130px 104px 92px'
-          : 'minmax(0,1fr) 132px 130px 104px 92px'
+          ? '28px minmax(0,1fr) 132px 130px 124px 92px'
+          : 'minmax(0,1fr) 132px 130px 124px 92px'
         return (
           <div style={{ ...cardSurface, overflow: 'hidden' }}>
             {/* Header row */}
@@ -517,16 +544,17 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
               <span className="eyebrow">Part</span>
               <span className="eyebrow">SKU</span>
               <span className="eyebrow">Category</span>
-              <span className="eyebrow" style={{ textAlign: 'right' }}>On hand</span>
+              <span className="eyebrow" style={{ textAlign: 'right' }}>{isConsumedScope ? 'Consumed' : 'On hand'}</span>
               <span className="eyebrow" style={{ textAlign: 'right' }}>Status</span>
             </div>
             {filtered.map((r, i) => {
               const isSelected = selectedIds.has(r.part_id)
               const isHighlighted = highlightedPartId === r.part_id
               const total = Number(r.total)
+              const consumed = Number(r.consumed) || 0
               const canSelect = canBulkSelect && total > 0
               const isDraft = r.is_active === false
-              const st = stockStatus(r)
+              const st = stockStatus(r, { consumedScope: isConsumedScope })
               return (
                 <div key={r.part_id} ref={el => { stockRowRefs.current[r.part_id] = el }}
                   style={{
@@ -559,9 +587,16 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
                     {isQtyPaused ? (
                       <span style={recencyPillStyle(r.last_movement_at)}>{recencyOf(r.last_movement_at).label}</span>
                     ) : (
-                      <span className="mono" style={{ fontSize: 14, fontWeight: 600, color: total < 0 ? 'var(--red)' : total <= 0 ? 'var(--amber)' : 'var(--text)' }}>
-                        {total.toLocaleString()}<span style={{ color: 'var(--hint)', fontWeight: 500, marginLeft: 3 }}>{r.unit}</span>
-                      </span>
+                      <>
+                        <span className="mono" style={{ fontSize: 14, fontWeight: 600, color: isConsumedScope ? 'var(--muted)' : total < 0 ? 'var(--red)' : total <= 0 ? 'var(--amber)' : 'var(--text)' }}>
+                          {total.toLocaleString()}<span style={{ color: 'var(--hint)', fontWeight: 500, marginLeft: 3 }}>{r.unit}</span>
+                        </span>
+                        {consumed > 0 && (
+                          <div className="mono" style={{ fontSize: 10.5, color: 'var(--hint)', whiteSpace: 'nowrap' }} title="Already used on projects — not usable stock">
+                            +{consumed.toLocaleString()} in regions
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                   <div style={{ textAlign: 'right' }}>
@@ -581,9 +616,10 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
             const isSelected = selectedIds.has(r.part_id)
             const isHighlighted = highlightedPartId === r.part_id
             const total = Number(r.total)
+            const consumed = Number(r.consumed) || 0
             const canSelect = canBulkSelect && total > 0
             const isDraft = r.is_active === false
-            const st = stockStatus(r)
+            const st = stockStatus(r, { consumedScope: isConsumedScope })
             return (
               <div key={r.part_id} ref={el => { stockRowRefs.current[r.part_id] = el }}
                 style={{
@@ -614,9 +650,14 @@ export default function InventoryStockTab({ locations, locationsLoading, refresh
                     <span style={recencyPillStyle(r.last_movement_at)}>{recencyOf(r.last_movement_at).label}</span>
                   ) : (
                     <>
-                      <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: total < 0 ? 'var(--red)' : total <= 0 ? 'var(--amber)' : 'var(--text)' }}>
+                      <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: isConsumedScope ? 'var(--muted)' : total < 0 ? 'var(--red)' : total <= 0 ? 'var(--amber)' : 'var(--text)' }}>
                         {total.toLocaleString()}<span style={{ fontSize: 11, color: 'var(--hint)', fontWeight: 500, marginLeft: 3 }}>{r.unit}</span>
                       </div>
+                      {consumed > 0 && (
+                        <div className="mono" style={{ fontSize: 10.5, color: 'var(--hint)', whiteSpace: 'nowrap' }}>
+                          +{consumed.toLocaleString()} in regions
+                        </div>
+                      )}
                       <span className={`status ${st.cls}`} style={{ justifyContent: 'flex-end', marginTop: 2 }}>{st.label}</span>
                     </>
                   )}

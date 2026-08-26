@@ -6,6 +6,7 @@ import {
   getPartsCatalogTaxonomy,
   getBinsForWarehouse,
   compareNamesNatural,
+  locationTypeLabel,
 } from '../../lib/inventory'
 import { chipStyle, CARD_SHADOW, EmptyState } from './chrome'
 
@@ -266,8 +267,8 @@ export default function InventoryAuditTab({ locations, refreshKey }) {
             const list = locations.filter(l => l.type === t)
             if (list.length === 0) return null
             return (
-              <optgroup key={`type:${t}`} label={`All ${t}s`}>
-                <option value={`type:${t}`}>All {t}s</option>
+              <optgroup key={`type:${t}`} label={`All ${locationTypeLabel(t, { plural: true }).toLowerCase()}`}>
+                <option value={`type:${t}`}>All {locationTypeLabel(t, { plural: true }).toLowerCase()}</option>
                 {list.map(l => (
                   <option key={`loc:${l.id}`} value={`loc:${l.id}`}>
                     {TYPE_ICONS[t]} {l.assigned_user?.name || l.name}

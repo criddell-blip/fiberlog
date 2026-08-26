@@ -18,7 +18,75 @@ import {
   aggregateDeductions,
   isFiberCustomerColumn,
   pickFiberCustomerColumn,
+  isConsumedLocationType,
+  locationTypeLabel,
+  foldStockSummary,
+  foldStockTotalsByPart,
 } from './inventory'
+
+// ─── Region buckets are consumed, not on hand ────────────────────────────────
+// job_site rows are the per-project consumption ledger. If any rollup ever
+// blends them back into "on hand", the Stock/Parts tabs overstate what's on
+// the shelf by everything the crews have ever used (Aug 2026).
+
+describe('isConsumedLocationType / locationTypeLabel', () => {
+  it('only job_site is consumed', () => {
+    expect(isConsumedLocationType('job_site')).toBe(true)
+    for (const t of ['warehouse', 'bin', 'truck', 'group', 'vendor', 'scrap', undefined, null]) {
+      expect(isConsumedLocationType(t), String(t)).toBe(false)
+    }
+  })
+
+  it('renders job_site as "Region" and falls back to the raw token', () => {
+    expect(locationTypeLabel('job_site')).toBe('Region')
+    expect(locationTypeLabel('job_site', { plural: true })).toBe('Regions')
+    expect(locationTypeLabel('truck')).toBe('Truck')
+    expect(locationTypeLabel('mystery')).toBe('mystery')
+    expect(locationTypeLabel(undefined)).toBe('')
+  })
+})
+
+describe('foldStockSummary', () => {
+  const pc = { id: 'SKU-1', name: 'Lag bolt', unit: 'ea', category: 'Hardware', is_active: true }
+  const row = (loc, quantity, part = 'SKU-1') => ({ part_id: part, quantity, parts_catalog: { ...pc, id: part, name: part === 'SKU-1' ? 'Lag bolt' : 'Zip tie' }, location: { type: loc } })
+
+  it('keeps region qty out of total and reports it as consumed', () => {
+    const [r] = foldStockSummary([row('warehouse', 40), row('truck', 10), row('job_site', 1200)])
+    expect(r.total).toBe(50)
+    expect(r.consumed).toBe(1200)
+    expect(r.locationCount).toBe(2)  // usable spots only
+  })
+
+  it('still lists a part that only has consumption history (total 0)', () => {
+    const [r] = foldStockSummary([row('job_site', 300)])
+    expect(r).toMatchObject({ total: 0, consumed: 300, locationCount: 0 })
+  })
+
+  it('treats a missing location join as usable (never silently drops stock)', () => {
+    const [r] = foldStockSummary([{ part_id: 'SKU-1', quantity: 7, parts_catalog: pc }])
+    expect(r.total).toBe(7)
+    expect(r.consumed).toBe(0)
+  })
+
+  it('drops zero rows, keeps negatives in total, sorts by name', () => {
+    const out = foldStockSummary([row('warehouse', 0), row('truck', -3), row('warehouse', 5, 'SKU-2')])
+    expect(out.map(r => r.part_id)).toEqual(['SKU-1', 'SKU-2'])
+    expect(out[0].total).toBe(-3)
+  })
+})
+
+describe('foldStockTotalsByPart', () => {
+  it('sums usable locations only', () => {
+    const m = foldStockTotalsByPart([
+      { part_id: 'A', quantity: 5, location: { type: 'warehouse' } },
+      { part_id: 'A', quantity: 2, location: { type: 'bin' } },
+      { part_id: 'A', quantity: 900, location: { type: 'job_site' } },
+      { part_id: 'B', quantity: 1, location: { type: 'job_site' } },
+    ])
+    expect(m.get('A')).toBe(7)
+    expect(m.has('B')).toBe(false)
+  })
+})
 
 // ─── buildCountedAdjustPayloads ──────────────────────────────────────────────
 // "Counted total" adjust mode (backlog #38) — absolute count → ±delta adjusts.

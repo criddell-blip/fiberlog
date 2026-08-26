@@ -13,6 +13,7 @@ import {
 import {
   getLocations, bulkAssignPullLocation,
   getCrewLoadDestinations, setCrewLoadDestinations,
+  locationTypeLabel,
 } from '../../lib/inventory'
 import Icon from '../shared/Icon'
 
@@ -1520,7 +1521,7 @@ function LoadDestinationsSection({ userId }) {
               {addOptions.length === 0 ? '— no locations available —' : '＋ Add a destination'}
             </option>
             {addOptions.map(l => (
-              <option key={l.id} value={l.id}>{labelFor(l)} ({l.type})</option>
+              <option key={l.id} value={l.id}>{labelFor(l)} ({locationTypeLabel(l.type).toLowerCase()})</option>
             ))}
           </select>
           <button

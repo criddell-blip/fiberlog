@@ -17,6 +17,7 @@ import {
   getAllParts,
   getStockRowsForParts,
   updatePartsBatch,
+  LOCATION_TYPE_LABELS,
 } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
 import { isoLocalDate } from '../../lib/format'
@@ -623,13 +624,11 @@ function PickStage({ parseError, onPick }) {
   )
 }
 
-const TYPE_LABEL = {
-  warehouse: '🏭 Warehouse',
-  truck:     '🚚 Truck',
-  job_site:  '📍 Job site',
-  vendor:    '🏢 Vendor',
-  scrap:     '🗑️ Scrap',
-}
+const TYPE_ICON = { warehouse: '🏭', truck: '🚚', job_site: '📍', vendor: '🏢', scrap: '🗑️' }
+// Names from the shared map (job_site → "Region"); only the icon is local.
+const TYPE_LABEL = Object.fromEntries(
+  Object.entries(TYPE_ICON).map(([t, icon]) => [t, `${icon} ${LOCATION_TYPE_LABELS[t]}`])
+)
 const CAT_BADGE = {
   warehouse:    { color: 'var(--orange)',  text: 'WAREHOUSE' },
   crew:         { color: 'var(--teal)',    text: 'CREW POOL' },

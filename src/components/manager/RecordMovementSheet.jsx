@@ -9,6 +9,7 @@ import {
   buildLocationQtyMaps,
   buildCountedAdjustPayloads,
   confirmNegativeStock,
+  isConsumedLocationType,
 } from '../../lib/inventory'
 import { isoLocalDate } from '../../lib/format'
 import { useBackClose } from '../../lib/backStack'
@@ -315,7 +316,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
       for (const loc of pl.locations) {
         // Project (job_site) buckets are accumulate-only; only the owner can
         // pull from one (to correct a mis-routed consumption).
-        if (loc.type === 'job_site' && currentUser?.role !== 'owner') continue
+        if (isConsumedLocationType(loc.type) && currentUser?.role !== 'owner') continue
         counter.set(loc.locationId, (counter.get(loc.locationId) || 0) + 1)
         labelById.set(loc.locationId, loc)
       }
@@ -355,11 +356,14 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     for (const line of lines) {
       const pl = partLocationsByPart[line.part_id]
       for (const loc of pl?.locations || []) {
+        // Same gate as smartFromOptions: region qty isn't "has this part"
+        // unless the owner is pulling a mis-routed consumption back out.
+        if (isConsumedLocationType(loc.type) && currentUser?.role !== 'owner') continue
         entries.push({ locationId: loc.locationId, parentLocationId: loc.parentLocationId, qty: loc.qty })
       }
     }
     return buildLocationQtyMaps(entries)
-  }, [lines, partLocationsByPart])
+  }, [lines, partLocationsByPart, currentUser?.role])
   // "any of" — byTop is a union across lines; a location holding 1 of 5
   // picked parts still lands in the group (the SmartFromPicker's N/M badge
   // carries per-location coverage, the optgroup can't).
@@ -402,7 +406,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   // that's the Receive PO sheet). Project (job_site) buckets are accumulate-only and only
   // pullable by the owner (mis-routed-consumption correction).
   const allFromOptions = useMemo(
-    () => locations.filter(l => l.type !== 'vendor' && (currentUser?.role === 'owner' || l.type !== 'job_site')),
+    () => locations.filter(l => l.type !== 'vendor' && (currentUser?.role === 'owner' || !isConsumedLocationType(l.type))),
     [locations, currentUser?.role]
   )
 
@@ -643,7 +647,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                 // residual stock) don't get offered.
                 const lineSources = (partLocationsByPart[l.part_id]?.locations || [])
                   .filter(loc => loc.isActive !== false)
-                  .filter(loc => loc.type !== 'job_site' || currentUser?.role === 'owner')
+                  .filter(loc => !isConsumedLocationType(loc.type) || currentUser?.role === 'owner')
                 // Everything else, so a part with no logged stock is still
                 // sourceable on its own row. Stocked ids are already above.
                 const stockedIds = new Set(lineSources.map(s => s.locationId))
@@ -725,17 +729,29 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                     </div>
                     {/* On-hand context (#38) — where this SKU actually sits,
                         for every movement type. Amber when nowhere. */}
-                    {pl && (pl.locations.length > 0 ? (
-                      <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 4 }}>
-                        On hand: {pl.locations.slice(0, 3).map(x => `${x.displayLabel} ${Number(x.qty).toLocaleString()}`).join(' · ')}
-                        {pl.locations.length > 3 ? ` · +${pl.locations.length - 3} more` : ''}
-                        {' '}(total {Number(pl.totalQty).toLocaleString()})
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: 10.5, color: 'var(--amber)', marginTop: 4 }}>
-                        No logged stock at any location
-                      </div>
-                    ))}
+                    {pl && (() => {
+                      // Usable spots only — region-consumed qty is not on hand.
+                      // It trails as a muted note so a mis-routed consumption
+                      // is still discoverable from here (owners can pull it back).
+                      const usable = pl.locations.filter(x => !x.isConsumed)
+                      const consumed = Number(pl.consumedQty) || 0
+                      if (usable.length === 0) {
+                        return (
+                          <div style={{ fontSize: 10.5, color: 'var(--amber)', marginTop: 4 }}>
+                            No usable stock at any location
+                            {consumed > 0 && <span style={{ color: 'var(--hint)' }}> · {consumed.toLocaleString()} consumed into regions</span>}
+                          </div>
+                        )
+                      }
+                      return (
+                        <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 4 }}>
+                          On hand: {usable.slice(0, 3).map(x => `${x.displayLabel} ${Number(x.qty).toLocaleString()}`).join(' · ')}
+                          {usable.length > 3 ? ` · +${usable.length - 3} more` : ''}
+                          {' '}(total {Number(pl.totalQty).toLocaleString()})
+                          {consumed > 0 && <span style={{ color: 'var(--hint)' }}> · {consumed.toLocaleString()} consumed into regions</span>}
+                        </div>
+                      )
+                    })()}
                     {/* Per-line source override (see setLineFrom). */}
                     {showFrom && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>

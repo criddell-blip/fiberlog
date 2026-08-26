@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../AppContext'
-import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, getPartLocations, deleteDraftPart, SONAR_ROUTING_OPTIONS } from '../../lib/inventory'
+import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, getPartLocations, deleteDraftPart, SONAR_ROUTING_OPTIONS, locationTypeLabel } from '../../lib/inventory'
 import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
 import { isoLocalDate } from '../../lib/format'
 import SkuLabelSheet from './SkuLabelSheet'
@@ -728,6 +728,10 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
     setMoveContext({ sourceLocation, selectedRows })
   }
 
+  // getPartLocations sorts usable rows before consumed regions; the header
+  // counts only the former (regions aren't places the part is "at").
+  const usableCount = data.locations.filter(l => !l.isConsumed).length
+
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="overlay-sheet" style={{ maxWidth: 560 }}>
@@ -754,9 +758,12 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
         {!loading && !err && (
           <>
             <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 8 }}>
-              Logged at <strong>{data.locations.length}</strong> location{data.locations.length === 1 ? '' : 's'}
+              On hand at <strong>{usableCount}</strong> location{usableCount === 1 ? '' : 's'}
               {!isQtyPaused && (
-                <> · <strong>{data.totalQty.toLocaleString()}</strong> {part.unit || 'ea'} total</>
+                <> · <strong>{data.totalQty.toLocaleString()}</strong> {part.unit || 'ea'} usable</>
+              )}
+              {!isQtyPaused && data.consumedQty > 0 && (
+                <> · {data.consumedQty.toLocaleString()} consumed into regions</>
               )}
             </div>
 
@@ -777,12 +784,27 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
                 border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
                 marginBottom: 12,
               }}>
-                {data.locations.map(l => (
-                  <div key={l.locationId} style={{
+                {data.locations.map((l, i) => (
+                  <Fragment key={l.locationId}>
+                  {/* getPartLocations sorts usable rows first; the divider
+                      marks where the shelf ends and the consumption ledger
+                      begins, so region qty never reads as stock. */}
+                  {l.isConsumed && !data.locations[i - 1]?.isConsumed && (
+                    <div style={{
+                      padding: '5px 12px', fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-bold)',
+                      textTransform: 'uppercase', letterSpacing: '.04em',
+                      color: 'var(--warning-fg)', background: 'var(--warning-bg)',
+                      borderBottom: '1px solid var(--border)',
+                    }}>
+                      Consumed into regions — not usable stock
+                    </div>
+                  )}
+                  <div style={{
                     display: 'flex', alignItems: 'center', gap: 8,
                     padding: '8px 12px',
                     borderBottom: '1px solid var(--border)',
                     fontSize: 'var(--fs-sm)',
+                    opacity: l.isConsumed ? 0.75 : 1,
                   }}>
                     <div style={{
                       fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-bold)',
@@ -791,7 +813,7 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
                       background: 'var(--surface2)',
                       textTransform: 'uppercase',
                     }}>
-                      {l.type === 'bin' ? 'bin' : l.type}
+                      {locationTypeLabel(l.type)}
                     </div>
                     <div style={{ flex: 1, fontWeight: 'var(--fw-semibold)', minWidth: 0 }}>
                       {l.displayLabel}
@@ -804,7 +826,7 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
                       <div style={{
                         minWidth: 50, textAlign: 'right',
                         fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-md)',
-                        color: 'var(--orange)',
+                        color: l.isConsumed ? 'var(--muted)' : 'var(--orange)',
                       }}>
                         {l.qty.toLocaleString()}
                       </div>
@@ -829,7 +851,7 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
                         Project (job_site) buckets are accumulate-only ledgers —
                         you can SEE a part sitting in one, but not pull it back
                         out from here. (vendor/scrap likewise aren't pull sources.) */}
-                    {!readOnly && l.qty > 0 && !['job_site', 'vendor', 'scrap'].includes(l.type) && (
+                    {!readOnly && l.qty > 0 && !l.isConsumed && !['vendor', 'scrap'].includes(l.type) && (
                       <button
                         type="button"
                         onClick={() => handleMoveFromHere(l)}
@@ -846,6 +868,7 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
                       </button>
                     )}
                   </div>
+                  </Fragment>
                 ))}
               </div>
             )}

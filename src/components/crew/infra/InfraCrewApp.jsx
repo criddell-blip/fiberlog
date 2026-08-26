@@ -536,7 +536,7 @@ export default function InfraCrewApp() {
                     <div style={{ display: 'flex', gap: 10 }}>
                       <span style={{ fontWeight: 800, color: 'var(--orange)' }}>3.</span>
                       <span>
-                        ✅ <strong>Submit passdown</strong> when the task is done. Your manager reviews it; auto-deduct moves the materials off your truck to the project bucket.
+                        ✅ <strong>Submit passdown</strong> when the task is done. Your manager reviews it; auto-deduct moves the materials off your truck into the project's region.
                       </span>
                     </div>
                   </div>
