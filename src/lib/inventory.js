@@ -345,7 +345,11 @@ export async function getAllStockGrouped({ excludeLocationId = null, excludeType
 // `totalQty` is USABLE on hand only. Region rows stay in `locations`
 // (flagged `isConsumed`) so a reader can still see where a part went, but
 // their qty rolls into `consumedQty` instead — see isConsumedLocationType.
-export async function getPartLocations(partId) {
+//
+// `includeZero` keeps the qty ≤ 0 rows too (still excluded from both totals).
+// The part-history Balance picker needs them: a bin that's empty TODAY but
+// moved this part last month is exactly the place a manager wants to replay.
+export async function getPartLocations(partId, { includeZero = false } = {}) {
   if (!partId) return { totalQty: 0, consumedQty: 0, locations: [] }
   const [stockRes, locsRes] = await Promise.all([
     db.from('inventory_stock')
@@ -367,7 +371,7 @@ export async function getPartLocations(partId) {
   const locations = []
   for (const r of stockRes.data || []) {
     const qty = Number(r.quantity || 0)
-    if (qty <= 0) continue  // Surface only places it's actually located
+    if (qty <= 0 && !includeZero) continue  // Surface only places it's actually located
     const loc = locById.get(r.location_id)
     if (!loc) continue
     const parentName = loc.parent_location_id ? parentNameById.get(loc.parent_location_id) : null
@@ -386,6 +390,7 @@ export async function getPartLocations(partId) {
       qty,
       lastMovementAt: r.last_movement_at || null,
     })
+    if (qty <= 0) continue  // includeZero rows are listed, never summed
     if (isConsumed) consumedQty += qty
     else totalQty += qty
   }
