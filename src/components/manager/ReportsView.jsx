@@ -974,7 +974,7 @@ export default function ReportsView() {
             {/* Attribution honesty note for consumption mode. */}
             {mode === 'consumption' && (
               <div style={{ fontSize: 10.5, color: 'var(--hint)', marginTop: 8, lineHeight: 1.4 }}>
-                Consumption = material moved into a project. Dated by real work date.
+                Consumption = material moved into a project. Dated by work date — the passdown’s submit date for crew work, the job date for Sonar imports — not by when it was approved.
                 “Installer” is recorded for crew work; Sonar/field-tech imports may show “(unknown installer)”.
               </div>
             )}
