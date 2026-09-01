@@ -14,6 +14,7 @@ import {
 import {
   useCsvFile, useSonarPendingQueue, useEffectiveMap, useAlreadyImportedMarkers,
 } from '../../lib/useCsvImport'
+import { denverNaiveToIso } from '../../lib/sonarDates'
 import {
   Section, MappingRow, StatusBadge, StatusTag, selectStyle,
   SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
@@ -513,9 +514,6 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             r.phaseOverridden && `dest: manual → ${r.phaseProjectName} / ${r.phaseName}`,
             `[sonar_jobs:${r.dedupKey}]`,
           ].filter(Boolean)
-          // Real job date (completion) so reports/Sage date by when the work
-          // happened, not the import day. r.date is 'YYYY-MM-DD'. See occurred_at.
-          const occ = r.date ? new Date(r.date + 'T00:00:00') : null
           movements.push({
             movement_type: 'transfer',
             part_id: line.sku,
@@ -525,7 +523,11 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             to_location_id: r.destBucketId,
             notes: notePieces.join(' · '),
             created_by: currentUser?.id,
-            occurred_at: (occ && !isNaN(occ.getTime())) ? occ.toISOString() : null,
+            // Real job date (completion) so reports/Sage date by when the
+            // work happened, not the import day. r.date is 'YYYY-MM-DD' —
+            // interpreted as Denver midnight, never the importing browser's
+            // timezone.
+            occurred_at: denverNaiveToIso(r.date),
             phase_id: r.phaseId || null,
             // A mapped/overridden source means the completer wasn't the
             // carrier — don't attribute consumption to them.

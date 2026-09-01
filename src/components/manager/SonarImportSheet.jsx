@@ -15,6 +15,7 @@ import {
 import {
   useCsvFile, useSonarPendingQueue, useEffectiveMap, useAlreadyImportedMarkers,
 } from '../../lib/useCsvImport'
+import { denverNaiveToIso } from '../../lib/sonarDates'
 import {
   Section, MappingRow, StatusTag, StatusBadge, selectStyle,
   SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
@@ -486,7 +487,11 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       const itemFromValueList = entry.sonarItemId  // already extracted during dedup
       const accountId = (row['Account | ID'] || '').trim()
       const sonarItemId = itemFromValueList || (accountId && row['Date Time'] ? `${accountId}-${row['Date Time']}` : '')
-      const isAlreadyImported = itemFromValueList && alreadyImportedItemIds.has(itemFromValueList)
+      // Check the full marker key, not just the numeric item ID — composite
+      // fallback keys (<acct>-<Date Time>) are written into [sonar:] markers
+      // too, and skipping them here let ID-less rows re-import across
+      // overlapping deliveries.
+      const isAlreadyImported = !!sonarItemId && alreadyImportedItemIds.has(sonarItemId)
 
       // Determine destination
       let destId = null
@@ -709,9 +714,6 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             r.destReason,
             r.sonarItemId && `[sonar:${r.sonarItemId}]`,
           ].filter(Boolean)
-          // Real work date (job completion) so reports/Sage date by when the
-          // install happened, not when we imported the CSV. See occurred_at.
-          const occ = r.date ? new Date(r.date) : null
           return {
             movement_type: 'transfer',
             part_id: r.partId,
@@ -721,7 +723,11 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             to_location_id: r.destId,
             notes: noteParts.join(' · '),
             created_by: currentUser?.id,
-            occurred_at: (occ && !isNaN(occ.getTime())) ? occ.toISOString() : null,
+            // Real work date (job completion) so reports/Sage date by when
+            // the install happened, not when we imported the CSV. Sonar's
+            // timestamp is naive Utah wall time — interpret it as Denver
+            // explicitly, never via the importing browser's timezone.
+            occurred_at: denverNaiveToIso(r.date),
             phase_id: r.phaseTagId || null,
             // NULL for warehouse-source rows — no crew to attribute the pull to.
             consumed_by_user_id: r.userId || null,
