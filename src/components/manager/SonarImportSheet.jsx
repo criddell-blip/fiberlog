@@ -705,12 +705,20 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         .filter(r => !excluded.has(r.idx) && r.status === 'ready' && r.destId && r.fromLocationId)
         .map(r => {
           const dateStr = String(r.date).slice(0, 16)
+          // Machine-readable bypass mark: the FiberLog location the stock
+          // actually came from when it wasn't the tech's own truck (the
+          // `source:` prose above it keeps Sonar's raw string for diagnosis).
+          // Parsed by movementSourceOverride / movementBypassedTruck.
+          const srcName = r.sourceIsWarehouse
+            ? sourceLocations.find(l => l.id === r.fromLocationId)?.name
+            : null
           const noteParts = [
             'Sonar install',
             dateStr,
             r.customer,
             r.city,
             r.sourceIsWarehouse && `source: ${r.sonarLoc}`,
+            srcName && `[src:${srcName}]`,
             r.destReason,
             r.sonarItemId && `[sonar:${r.sonarItemId}]`,
           ].filter(Boolean)
@@ -731,6 +739,8 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             phase_id: r.phaseTagId || null,
             // NULL for warehouse-source rows — no crew to attribute the pull to.
             consumed_by_user_id: r.userId || null,
+            // Account join key for the combined per-account report.
+            sonar_account_id: r.accountId || null,
           }
         })
       if (movements.length === 0) {

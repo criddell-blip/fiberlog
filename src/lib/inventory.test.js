@@ -22,6 +22,11 @@ import {
   locationTypeLabel,
   foldStockSummary,
   foldStockTotalsByPart,
+  consumptionSource,
+  movementAccountId,
+  movementSourceOverride,
+  movementBypassedTruck,
+  consumptionCustomer,
 } from './inventory'
 
 // ─── Region buckets are consumed, not on hand ────────────────────────────────
@@ -730,5 +735,122 @@ describe('isFiberCustomerColumn', () => {
     for (const h of ['Account | ID', 'Project', 'User | Username', '', '   ', null, undefined]) {
       expect(isFiberCustomerColumn(h), String(h)).toBe(false)
     }
+  })
+})
+
+// ─── Sonar consumption classifiers ───────────────────────────────────────────
+// These decide how the combined per-account report joins the two Sonar import
+// families and which rows count as "bypassed the truck" — parse bugs here
+// misattribute real consumption, so pin the exact note recipes both importers
+// write (SonarImportSheet / FiberJobsImportSheet apply paths).
+
+describe('movementAccountId', () => {
+  it('prefers the stamped column over any marker', () => {
+    expect(movementAccountId({
+      sonar_account_id: '141658',
+      notes: 'Sonar fiber-jobs: Fiber Install · 1 MAIN ST · [sonar_jobs:999999_2026-08-27_fiber_install]',
+    })).toBe('141658')
+  })
+
+  it('parses the account out of a fiber-jobs marker', () => {
+    expect(movementAccountId({
+      notes: 'Sonar fiber-jobs: Fiber Install · 1 MAIN ST · Drop type/length: 100 · [sonar_jobs:140932_2026-04-29_fiber_install]',
+    })).toBe('140932')
+  })
+
+  it('parses the account out of a composite asset fallback marker', () => {
+    expect(movementAccountId({
+      notes: 'Sonar install · 2026-06-24 08:00 · Jane Doe · HEBER · [sonar:9981-2026-06-24 08:00]',
+    })).toBe('9981')
+  })
+
+  it('returns null for a pure item-id asset marker (no account there)', () => {
+    expect(movementAccountId({
+      notes: 'Sonar install · 2026-08-27 14:23 · Noah Garland · PARK CITY · [sonar:93178]',
+    })).toBeNull()
+  })
+
+  it('returns null for crew rows / missing notes', () => {
+    expect(movementAccountId({ notes: 'Auto-deduct on approval' })).toBeNull()
+    expect(movementAccountId({})).toBeNull()
+    expect(movementAccountId(null)).toBeNull()
+  })
+})
+
+describe('movementSourceOverride / movementBypassedTruck', () => {
+  it('reads the [src:] token (both families write it since Sep 2026)', () => {
+    const m = { notes: 'Sonar install · 2026-08-27 08:54 · Rhys Louis · PARK CITY · source: Warehouse · [src:Main Warehouse] · Sonar project: Pinebrook → Park City / Pinebrook · [sonar:103179]' }
+    expect(movementSourceOverride(m)).toBe('Main Warehouse')
+    expect(movementBypassedTruck(m)).toBe(true)
+  })
+
+  it('falls back to the asset sheet\'s legacy `source:` prose, stopping at the separator', () => {
+    const m = { notes: 'Sonar install · 2026-08-27 08:54 · Rhys Louis · PARK CITY · source: Warehouse · Sonar project: Pinebrook → Park City / Pinebrook · [sonar:103179]' }
+    expect(movementSourceOverride(m)).toBe('Warehouse')
+    expect(movementBypassedTruck(m)).toBe(true)
+  })
+
+  it('legacy fiber-jobs rows: consumed_by NULL means a mapped source', () => {
+    const m = {
+      notes: 'Sonar fiber-jobs: Fiber Install · 1 MAIN ST · [sonar_jobs:140932_2026-04-29_fiber_install]',
+      consumed_by_user_id: null,
+    }
+    expect(movementSourceOverride(m)).toBeNull()
+    expect(movementBypassedTruck(m)).toBe(true)
+  })
+
+  it('fiber-jobs rows with an attributed consumer came off their own truck', () => {
+    expect(movementBypassedTruck({
+      notes: 'Sonar fiber-jobs: Fiber Install · 1 MAIN ST · [sonar_jobs:140932_2026-04-29_fiber_install]',
+      consumed_by_user_id: 'user-1',
+    })).toBe(false)
+  })
+
+  it('crew/other rows with NULL consumed_by are NOT bypasses', () => {
+    expect(movementBypassedTruck({ notes: 'Auto-deduct on approval', consumed_by_user_id: null })).toBe(false)
+    expect(movementBypassedTruck({})).toBe(false)
+  })
+
+  it('asset rows sourced from the tech\'s own truck are not bypasses', () => {
+    const m = {
+      notes: 'Sonar install · 2026-08-27 14:23 · Noah Garland · PARK CITY · Sonar project: Snyderville → Park City / Snyderville · [sonar:93178]',
+      consumed_by_user_id: 'user-1',
+    }
+    expect(movementSourceOverride(m)).toBeNull()
+    expect(movementBypassedTruck(m)).toBe(false)
+  })
+})
+
+describe('consumptionCustomer', () => {
+  it('asset family: customer is the segment after the date', () => {
+    expect(consumptionCustomer({
+      notes: 'Sonar install · 2026-08-27 14:23 · Noah Garland · PARK CITY · [sonar:93178]',
+    })).toBe('Noah Garland')
+  })
+
+  it('asset family: tolerates a missing date segment', () => {
+    expect(consumptionCustomer({
+      notes: 'Sonar install · Noah Garland · PARK CITY · [sonar:93178]',
+    })).toBe('Noah Garland')
+  })
+
+  it('fiber family: the job address stands in for the customer', () => {
+    expect(consumptionCustomer({
+      notes: 'Sonar fiber-jobs: Fiber Install · 932 CUTTER LN, PARK CITY, UT 84098 · Drop type/length: 150 · [sonar_jobs:141658_2026-08-27_fiber_install]',
+    })).toBe('932 CUTTER LN, PARK CITY, UT 84098')
+  })
+
+  it('crew rows have no customer', () => {
+    expect(consumptionCustomer({ notes: 'Auto-deduct on approval' })).toBeNull()
+    expect(consumptionCustomer({})).toBeNull()
+  })
+})
+
+describe('consumptionSource (regression pin)', () => {
+  it('classifies the three families', () => {
+    expect(consumptionSource({ notes: 'x [sonar_jobs:1_2026-01-01_t]' })).toBe('fiber-sonar')
+    expect(consumptionSource({ notes: 'x [sonar:123]' })).toBe('field-tech-sonar')
+    expect(consumptionSource({ notes: 'Auto-deduct' })).toBe('crew/other')
+    expect(consumptionSource({})).toBe('crew/other')
   })
 })

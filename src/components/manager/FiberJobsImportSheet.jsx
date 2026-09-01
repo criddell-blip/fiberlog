@@ -502,12 +502,20 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       for (const r of resolved) {
         if (excluded.has(r.idx)) continue
         if (r.rowStatus !== 'ready') continue
+        // Machine-readable bypass mark: the location the material actually
+        // came from when it wasn't the completer's own truck. Same token the
+        // asset importer writes; parsed by movementSourceOverride /
+        // movementBypassedTruck.
+        const srcName = r.sourceIsMapped
+          ? sourceLocations.find(l => l.id === r.sourceLocId)?.name
+          : null
         for (const line of r.lines) {
           if (line.status !== 'ready' || !line.sku || line.qty <= 0) continue
           const notePieces = [
             `Sonar fiber-jobs: ${r.jobTypeRaw}`,
             r.address,
             line.columnName + ': ' + line.valueText,
+            srcName && `[src:${srcName}]`,
             // Once applied, a human-chosen destination is indistinguishable
             // from a mapped one — it's just stock sitting in a bucket. This is
             // the only durable record that someone picked it by hand.
@@ -532,6 +540,10 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             // A mapped/overridden source means the completer wasn't the
             // carrier — don't attribute consumption to them.
             consumed_by_user_id: r.sourceIsMapped ? null : (r.userId || null),
+            // Account join key for the combined per-account report (also in
+            // the [sonar_jobs:] marker; the column keeps both families
+            // symmetric).
+            sonar_account_id: r.account || null,
           })
         }
       }

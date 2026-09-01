@@ -1035,6 +1035,7 @@ export async function recordMovement({
   vendor_invoice, unit_cost, notes,
   task_id, submission_id, created_by,
   receipt_kind = null,   // receive rows only; DB trigger defaults to 'purchase'
+  sonar_account_id = null,  // Sonar-import rows only (Account | ID)
 }) {
   if (!created_by) throw new Error('recordMovement requires created_by')
   if (!part_id) throw new Error('recordMovement requires part_id')
@@ -1053,6 +1054,7 @@ export async function recordMovement({
       task_id: task_id || null,
       submission_id: submission_id || null,
       receipt_kind: receipt_kind || null,
+      sonar_account_id: sonar_account_id || null,
       created_by,
     })
     .select(`
@@ -1234,6 +1236,9 @@ export async function recordMovementsBatch(movements, { chunk = false, chunkSize
     // field_return; the DB trigger defaults a bare receive to purchase and
     // blanks it on every other type). See RECEIPT_KINDS.
     receipt_kind: m.receipt_kind || null,
+    // Sonar Account | ID — both Sonar importers stamp it so Reports can
+    // join the asset + fiber-jobs families per account.
+    sonar_account_id: m.sonar_account_id || null,
     created_by: m.created_by,
   })
 
@@ -2474,7 +2479,7 @@ export async function getConsumptionLedger({ sinceCreated = null } = {}) {
     let q = db.from('inventory_movements')
       .select(`
         id, movement_type, quantity, unit, notes, created_at, occurred_at,
-        part_id, consumed_by_user_id, phase_id, task_id,
+        part_id, consumed_by_user_id, phase_id, task_id, sonar_account_id,
         part:parts_catalog(id, name, unit, department, material_group, item_type, boxhero_id),
         to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type, project_id, project:projects(id, name)),
         phase:phases!inventory_movements_phase_id_fkey(id, name, project:projects(id, name)),
@@ -2505,6 +2510,60 @@ export function consumptionSource(m) {
   if (n.includes('[sonar_jobs:')) return 'fiber-sonar'
   if (n.includes('[sonar:')) return 'field-tech-sonar'
   return 'crew/other'
+}
+
+// Sonar Account | ID for a movement. Column first (both importers stamp it
+// since Sep 2026); legacy rows fall back to the markers they already carry:
+// fiber-jobs embeds the account in its dedup key, and asset rows that used
+// the composite fallback key are <acct>-<Date Time>. Pure item-id asset
+// markers ([sonar:12345]) have no account — those are covered by the
+// raw-CSV backfill script, not this parser.
+export function movementAccountId(m) {
+  if (m?.sonar_account_id) return m.sonar_account_id
+  const n = m?.notes || ''
+  let match = /\[sonar_jobs:(\d+)_/.exec(n)
+  if (match) return match[1]
+  match = /\[sonar:(\d+)-/.exec(n)
+  if (match) return match[1]
+  return null
+}
+
+// The location a Sonar-imported row was sourced from when it did NOT come
+// off the completing tech's own truck: the [src:<FiberLog location>] token
+// (written by both importers since Sep 2026), or the asset sheet's legacy
+// `source: <sonar string>` prose. Null = sourced from the tech's truck.
+export function movementSourceOverride(m) {
+  const n = m?.notes || ''
+  let match = /\[src:([^\]]+)\]/.exec(n)
+  if (match) return match[1].trim()
+  match = /(?:^|· )source:\s*([^|·\n]+)/.exec(n)
+  if (match) return match[1].trim()
+  return null
+}
+
+// Did this consumption bypass the load-to-truck flow? True when the source
+// was a mapped/overridden location rather than the tech's own truck. Legacy
+// fiber-jobs rows wrote no source token — for applied import rows there,
+// consumed_by_user_id NULL ⇔ mapped source (both apply paths null it exactly
+// then), so that heuristic covers the pre-token history. Crew/other rows
+// with NULL consumed_by are NOT bypasses (auto-deduct attributes them).
+export function movementBypassedTruck(m) {
+  if (movementSourceOverride(m)) return true
+  return consumptionSource(m) === 'fiber-sonar' && !m?.consumed_by_user_id
+}
+
+// Human label for a Sonar consumption row's account: the customer name the
+// asset importer writes (3rd note segment, after the date), or the job
+// address the fiber-jobs importer writes (2nd segment). Null for crew rows.
+export function consumptionCustomer(m) {
+  const n = m?.notes || ''
+  const segs = n.split(' · ')
+  if (n.startsWith('Sonar install')) {
+    // Normally [label, date, customer, …]; tolerate a missing date segment.
+    return (/^\d{4}-\d{2}-\d{2}/.test(segs[1] || '') ? segs[2] : segs[1]) || null
+  }
+  if (n.startsWith('Sonar fiber-jobs')) return segs[1] || null
+  return null
 }
 
 // Decide whether a movement should be included in the export.
