@@ -486,7 +486,11 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       // pipe-separated Value List, falling back to Account|ID + Date.
       const itemFromValueList = entry.sonarItemId  // already extracted during dedup
       const accountId = (row['Account | ID'] || '').trim()
-      const sonarItemId = itemFromValueList || (accountId && row['Date Time'] ? `${accountId}-${row['Date Time']}` : '')
+      // Trimmed to match extractMarkerKeys, which trims the keys it recovers
+      // from notes — an untrimmed key here would never .has()-match its own
+      // marker and the row would re-import on every overlapping delivery.
+      const dateTimeKey = (row['Date Time'] || '').trim()
+      const sonarItemId = itemFromValueList || (accountId && dateTimeKey ? `${accountId}-${dateTimeKey}` : '')
       // Check the full marker key, not just the numeric item ID — composite
       // fallback keys (<acct>-<Date Time>) are written into [sonar:] markers
       // too, and skipping them here let ID-less rows re-import across
