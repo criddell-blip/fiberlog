@@ -1,7 +1,11 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { db, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabase'
-import { getConsumptionLedger, movementEffectiveDate, consumptionSource, fetchAllRows } from '../../lib/inventory'
+import {
+  getConsumptionLedger, movementEffectiveDate, consumptionSource, fetchAllRows,
+  movementAccountId, movementBypassedTruck, movementSourceOverride, consumptionCustomer,
+} from '../../lib/inventory'
+import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
 import { useIsWide } from '../../lib/useIsWide'
 import { isoLocalDate } from '../../lib/format'
 import Icon from '../shared/Icon'
@@ -99,6 +103,10 @@ export default function ReportsView() {
   const [partQuery, setPartQuery] = useState('')
   const [selDept, setSelDept] = useState('all')
   const [selMatGroup, setSelMatGroup] = useState('all')
+  // Which flow produced the row (crew auto-deduct vs the two Sonar import
+  // families) + the bypassed-truck lens (material that never rode a truck).
+  const [selSource, setSelSource] = useState('all')
+  const [onlyBypassed, setOnlyBypassed] = useState(false)
   const [deptOptions, setDeptOptions] = useState([])
   const [mgOptions, setMgOptions] = useState([])
   const [showSage, setShowSage] = useState(false)
@@ -126,7 +134,7 @@ export default function ReportsView() {
   useEffect(() => {
     if (mode === 'consumption') loadConsumption()
     else load()
-  }, [mode, dateFrom, dateTo, selProject, selUser, partQuery, selDept, selMatGroup])
+  }, [mode, dateFrom, dateTo, selProject, selUser, partQuery, selDept, selMatGroup, selSource, onlyBypassed])
 
   async function loadStock() {
     setStockLoading(true)
@@ -328,6 +336,11 @@ export default function ReportsView() {
         if (selMatGroup !== 'all' && mg !== selMatGroup) continue
         if (q && !`${m.part?.name || ''} ${m.part_id || ''}`.toLowerCase().includes(q)) continue
 
+        const source = consumptionSource(m)
+        const bypassed = movementBypassedTruck(m)
+        if (selSource !== 'all' && source !== selSource) continue
+        if (onlyBypassed && !bypassed) continue
+
         // "Phase / Site" column: infra site if present, else phase, else bucket.
         const locationName = m.task?.site?.name || m.phase?.name || m.to_location?.name || '—'
         reportRows.push({
@@ -349,7 +362,14 @@ export default function ReportsView() {
           projectName: projName,
           phaseName: locationName,
           taskName: m.task?.name || '—',
-          source: consumptionSource(m),
+          source,
+          // Per-account join across the two Sonar families (column, with
+          // marker fallbacks for pre-column rows). Null for crew rows.
+          accountId: movementAccountId(m),
+          customer: consumptionCustomer(m),
+          // Never rode the tech's truck (mapped/overridden source).
+          bypassed,
+          sourceOverride: bypassed ? movementSourceOverride(m) : null,
           submissionId: null,
         })
       }
@@ -781,19 +801,16 @@ export default function ReportsView() {
   }
 
   function exportCSV() {
-    const headers = ['Date', 'Crew Member', 'Crew Type', 'Project', 'Phase / Site', 'Task', 'Part SKU', 'BoxHero ID', 'Barcode', 'Department', 'Type', 'Material Group', 'Part Name', 'Qty', 'Unit']
+    const headers = ['Date', 'Crew Member', 'Crew Type', 'Project', 'Phase / Site', 'Task', 'Part SKU', 'BoxHero ID', 'Barcode', 'Department', 'Type', 'Material Group', 'Part Name', 'Qty', 'Unit',
+      'Account', 'Customer / Address', 'Source', 'Bypassed Truck']
     const csvRows = [headers, ...rows.map(r => [
       r.date, r.userName, r.crewType, r.projectName, r.phaseName, r.taskName,
-      r.partId, r.barcode, barcodeMap[r.partId] || '', r.department, r.itemType, r.materialGroup, r.partName, r.qty, r.unit
+      r.partId, r.barcode, barcodeMap[r.partId] || '', r.department, r.itemType, r.materialGroup, r.partName, r.qty, r.unit,
+      // Consumption-only enrichment; blank on passdown rows.
+      r.accountId || '', r.customer || '', r.source || '', r.bypassed ? 'yes' : '',
     ])]
-    const csv = csvRows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `fiberlog-${mode === 'consumption' ? 'consumption' : 'parts'}-${dateFrom}-to-${dateTo}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    const csv = csvRows.map(row => row.map(escapeCsvField).join(',')).join('\n')
+    downloadTextAsFile(`fiberlog-${mode === 'consumption' ? 'consumption' : 'parts'}-${dateFrom}-to-${dateTo}.csv`, csv)
   }
 
   // Filter summary line used when the filters panel is collapsed —
@@ -804,7 +821,7 @@ export default function ReportsView() {
     : `${dateFrom} → ${dateTo}`
   const projectLabel = selProject === 'all' ? 'All projects' : (projects.find(p => p.id === selProject)?.name || 'Project')
   const userLabel = selUser === 'all' ? 'All crew' : (users.find(u => u.id === selUser)?.name || 'Crew')
-  const groupLabel = groupBy === 'part' ? 'parts' : groupBy === 'person' ? 'people' : 'projects'
+  const groupLabel = groupBy === 'part' ? 'parts' : groupBy === 'person' ? 'people' : groupBy === 'account' ? 'accounts' : 'projects'
   const selProj = selProject !== 'all' ? projects.find(p => p.id === selProject) : null
 
   return (
@@ -824,7 +841,12 @@ export default function ReportsView() {
               incl. Sonar/field-tech, dated by real work date). */}
           <div style={{ display: 'inline-flex', gap: 4, background: 'var(--surface2)', padding: 3, borderRadius: 20, border: '1px solid var(--border)' }}>
             {[{ id: 'passdowns', label: 'Passdowns' }, { id: 'consumption', label: 'Consumption' }].map(x => (
-              <button key={x.id} onClick={() => setMode(x.id)} style={{
+              <button key={x.id} onClick={() => {
+                setMode(x.id)
+                // Account grouping only exists on the ledger (passdown rows
+                // carry no account) — fall back rather than render nothing.
+                if (x.id !== 'consumption' && groupBy === 'account') setGroupBy('part')
+              }} style={{
                 padding: '3px 12px', borderRadius: 16, fontSize: 11, fontWeight: 700,
                 background: mode === x.id ? 'var(--orange)' : 'transparent',
                 color: mode === x.id ? 'white' : 'var(--muted)',
@@ -851,7 +873,12 @@ export default function ReportsView() {
         {/* Group-by stays one tap away — it changes what you're seeing,
             not what you're filtering. Compact pill row. */}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {[{ id: 'part', label: 'By part' }, { id: 'person', label: 'By person' }, { id: 'project', label: 'By project' }].map(g => (
+          {[
+            { id: 'part', label: 'By part' }, { id: 'person', label: 'By person' }, { id: 'project', label: 'By project' },
+            // The combined Sonar picture: one account's equipment (asset
+            // report) + drop materials (fiber jobs) together. Ledger-only.
+            ...(mode === 'consumption' ? [{ id: 'account', label: 'By account' }] : []),
+          ].map(g => (
             <button key={g.id} onClick={() => setGroupBy(g.id)} style={{
               padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 600,
               background: groupBy === g.id ? 'var(--orange)' : 'transparent',
@@ -943,6 +970,36 @@ export default function ReportsView() {
                   <option value="all">All material groups</option>
                   {mgOptions.map(g => <option key={g} value={g}>{g}</option>)}
                 </select>
+              </div>
+            )}
+
+            {/* Consumption-only: which flow booked the row, plus the
+                bypassed-truck lens (material with a mapped/overridden source
+                that never rode the tech's own truck — the load-flow pain
+                points the owner is hunting). */}
+            {mode === 'consumption' && (
+              <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                {[
+                  { id: 'all', label: 'All sources' },
+                  { id: 'crew/other', label: 'Crew' },
+                  { id: 'field-tech-sonar', label: 'Field tech' },
+                  { id: 'fiber-sonar', label: 'Fiber jobs' },
+                ].map(s => (
+                  <button key={s.id} onClick={() => setSelSource(s.id)} style={{
+                    padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                    background: selSource === s.id ? 'var(--orange)' : 'transparent',
+                    color: selSource === s.id ? 'white' : 'var(--muted)',
+                    border: `1.5px solid ${selSource === s.id ? 'var(--orange)' : 'var(--border)'}`,
+                    cursor: 'pointer'
+                  }}>{s.label}</button>
+                ))}
+                <button onClick={() => setOnlyBypassed(v => !v)} style={{
+                  padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                  background: onlyBypassed ? 'var(--amber-lt)' : 'transparent',
+                  color: onlyBypassed ? 'var(--amber)' : 'var(--muted)',
+                  border: `1.5px solid ${onlyBypassed ? 'var(--amber)' : 'var(--border)'}`,
+                  cursor: 'pointer'
+                }}>⚠ Bypassed truck</button>
               </div>
             )}
 
@@ -1044,6 +1101,26 @@ export default function ReportsView() {
           return Object.values(byProject).sort((a,b) => a.name.localeCompare(b.name)).map(proj => (
             <ProjectGroup key={proj.name} proj={proj} />
           ))
+        })()}
+
+        {/* By Account view (consumption only) — the combined Sonar picture:
+            one account's equipment + drop materials on one card. Crew rows
+            have no account and fold into a single trailing group. */}
+        {!loading && groupBy === 'account' && (() => {
+          const byAccount = {}
+          rows.forEach(r => {
+            const key = r.accountId || '(none)'
+            if (!byAccount[key]) byAccount[key] = { accountId: r.accountId, rows: [] }
+            byAccount[key].rows.push(r)
+          })
+          return Object.values(byAccount)
+            .sort((a, b) => {
+              if (!a.accountId) return 1        // no-account bucket last
+              if (!b.accountId) return -1
+              // Newest activity first — the morning's installs at the top.
+              return new Date(b.rows[0].dateRaw) - new Date(a.rows[0].dateRaw)
+            })
+            .map(acct => <AccountGroup key={acct.accountId || '(none)'} acct={acct} />)
         })()}
       </div>
 
@@ -1148,6 +1225,8 @@ function PersonGroup({ person }) {
   const [expanded, setExpanded] = useState(false)
   const total = person.rows.reduce((a, r) => a + r.qty, 0)
   const skus = new Set(person.rows.map(r => r.partId)).size
+  // Consumption rows only; passdown rows carry no `bypassed` flag.
+  const bypassed = person.rows.filter(r => r.bypassed).length
   return (
     <div style={{ marginBottom: 8 }}>
       <div onClick={() => setExpanded(p => !p)}
@@ -1158,7 +1237,10 @@ function PersonGroup({ person }) {
           <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--orange-lt)', border: '1px solid var(--orange-dk)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--orange)', flexShrink: 0 }}>{person.initials}</div>
           <div>
             <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{person.name}</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>{skus} SKUs · {total.toLocaleString()} total parts</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              {skus} SKUs · {total.toLocaleString()} total parts
+              {bypassed > 0 && <span style={{ color: 'var(--amber)', fontWeight: 700 }}> · ⚠ {bypassed} bypassed truck</span>}
+            </div>
           </div>
         </div>
         <span style={{ color: 'var(--muted)', transform: expanded ? 'rotate(90deg)' : 'none', display: 'inline-flex', transition: 'transform .2s' }}><Icon name="chevron-right" size={15} /></span>
@@ -1219,6 +1301,95 @@ function ProjectGroup({ proj }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
                 <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'monospace' }}>{id}</div>
+              </div>
+              <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--orange)', flexShrink: 0, marginLeft: 8 }}>
+                {p.qty.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>{p.unit}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Family badge for the account view — which Sonar report (or crew flow)
+// booked the line. Keyed off the row's `source` classification.
+const SOURCE_BADGES = {
+  'field-tech-sonar': { label: 'Equipment' },
+  'fiber-sonar': { label: 'Drop materials' },
+  'crew/other': { label: 'Crew' },
+}
+
+function SourceBadge({ source }) {
+  const b = SOURCE_BADGES[source]
+  if (!b) return null
+  return (
+    <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)',
+      border: '1px solid var(--border2)', borderRadius: 8, padding: '1px 6px',
+      whiteSpace: 'nowrap' }}>{b.label}</span>
+  )
+}
+
+// One Sonar account's full picture: equipment (asset report) + drop
+// materials (fiber-jobs) on a single card. `acct.accountId` null = the
+// trailing bucket for crew rows / rows whose account couldn't be recovered.
+function AccountGroup({ acct }) {
+  const [expanded, setExpanded] = useState(false)
+  const rows = acct.rows
+  const total = rows.reduce((a, r) => a + r.qty, 0)
+  const bypassed = rows.filter(r => r.bypassed).length
+  // Prefer the asset family's customer NAME over the fiber family's address
+  // when both exist for the account; fall back to whatever we have.
+  const customer =
+    rows.find(r => r.source === 'field-tech-sonar' && r.customer)?.customer ||
+    rows.find(r => r.customer)?.customer || null
+  const projects = [...new Set(rows.map(r => r.projectName).filter(Boolean))]
+  const hasEquipment = rows.some(r => r.source === 'field-tech-sonar')
+  const hasDropMaterials = rows.some(r => r.source === 'fiber-sonar')
+  const title = acct.accountId ? `Acct ${acct.accountId}` : 'No account'
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div onClick={() => setExpanded(p => !p)}
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: expanded ? '8px 8px 0 0' : 8, padding: '10px 14px',
+          cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span className="mono" style={{ fontWeight: 800, fontSize: 13, color: 'var(--text)' }}>{title}</span>
+            {customer && <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer}</span>}
+            {hasEquipment && <SourceBadge source="field-tech-sonar" />}
+            {hasDropMaterials && <SourceBadge source="fiber-sonar" />}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
+            {rows[0].date}{projects.length > 0 && <> · {projects.join(', ')}</>} · {total.toLocaleString()} parts
+            {bypassed > 0 && <span style={{ color: 'var(--amber)', fontWeight: 700 }}> · ⚠ {bypassed} bypassed truck</span>}
+          </div>
+        </div>
+        <span style={{ color: 'var(--muted)', transform: expanded ? 'rotate(90deg)' : 'none', display: 'inline-flex', transition: 'transform .2s' }}><Icon name="chevron-right" size={15} /></span>
+      </div>
+      {expanded && (
+        <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 8px 8px' }}>
+          {/* Aggregate by (part, family) — the same SKU booked by both
+              reports stays two lines, each with its own badge. */}
+          {Object.entries(rows.reduce((acc, r) => {
+            const key = `${r.partId}|${r.source}`
+            if (!acc[key]) acc[key] = { name: r.partName, unit: r.unit, qty: 0, source: r.source, bypassed: false, sourceOverride: null }
+            acc[key].qty += r.qty
+            if (r.bypassed) { acc[key].bypassed = true; acc[key].sourceOverride = acc[key].sourceOverride || r.sourceOverride }
+            return acc
+          }, {})).sort(([,a],[,b]) => b.qty - a.qty).map(([key, p], i, arr) => (
+            <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '8px 14px', borderBottom: i < arr.length - 1 ? '1px solid var(--border)' : 'none' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+                  <SourceBadge source={p.source} />
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'monospace' }}>
+                  {key.split('|')[0]}
+                  {p.bypassed && <span style={{ color: 'var(--amber)', fontFamily: 'inherit', fontWeight: 700 }}> · ⚠ {p.sourceOverride ? `from ${p.sourceOverride}` : 'bypassed truck'}</span>}
+                </div>
               </div>
               <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--orange)', flexShrink: 0, marginLeft: 8 }}>
                 {p.qty.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>{p.unit}</span>
