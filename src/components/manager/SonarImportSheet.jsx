@@ -181,9 +181,12 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             .not('assigned_to', 'is', null),
           // Paged (#44): the model→SKU auto-match walks this whole list — a
           // truncated tail would silently stop matching those parts.
+          // Drafts (is_active=false) are INCLUDED on purpose: there's no
+          // persisted model→SKU map, so a draft created via "+ Create draft"
+          // last week must be visible here or the same model shows up
+          // unmatched every import and the manager mints a duplicate.
           fetchAllRows(() => db.from('parts_catalog')
-            .select('id, name, unit, sonar_routing')
-            .eq('is_active', true)
+            .select('id, name, unit, sonar_routing, is_active')
             .order('name').order('id')),
           db.from('inventory_locations')
             .select('id, name, project_id')
@@ -315,12 +318,20 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   useEffect(() => {
     if (!csvRows || parts.length === 0) return
     const auto = {}
+    // Active parts outrank drafts at each tier (exact, then substring):
+    // a real SKU should always win over an unfinished draft with the same
+    // name, but a draft still beats "unmatched" — it's the draft the
+    // manager already made for this model.
+    const ordered = [
+      ...parts.filter(p => p.is_active !== false),
+      ...parts.filter(p => p.is_active === false),
+    ]
     for (const model of uniqueSonarModels) {
       const ml = model.toLowerCase().trim()
       if (!ml) continue
-      const exact = parts.find(p => (p.name || '').toLowerCase() === ml)
+      const exact = ordered.find(p => (p.name || '').toLowerCase() === ml)
       if (exact) { auto[model] = exact.id; continue }
-      const sub = parts.find(p => {
+      const sub = ordered.find(p => {
         const pn = (p.name || '').toLowerCase()
         return pn.includes(ml) || ml.includes(pn)
       })
@@ -972,6 +983,11 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                     {isOpen && (
                       <CreatePartPanel
                         sonarModel={model}
+                        existingParts={parts}
+                        onPickExisting={p => {
+                          setPartMap(prev => ({ ...prev, [model]: p.id }))
+                          setCreatingForModel(null)
+                        }}
                         onCancel={() => setCreatingForModel(null)}
                         onCreated={(newPart) => {
                           // Append + auto-pick. Local-only; the next sheet
@@ -990,11 +1006,12 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             </Section>
           )}
 
-          {/* Searchable part picker for the model→SKU mapping above. Active
-              parts only (drafts are curated separately; use "+ Create draft"). */}
+          {/* Searchable part picker for the model→SKU mapping above. Drafts
+              are searchable here (badged DRAFT) so a draft made on an earlier
+              import gets reused instead of duplicated — the row's status pill
+              carries the "(draft)" reminder to finish it in Parts admin. */}
           {pickingModel && (
             <PartSearch
-              activeOnly
               onSelect={p => { setPartMap(prev => ({ ...prev, [pickingModel]: p.id })); setPickingModel(null) }}
               onClose={() => setPickingModel(null)}
             />
@@ -1309,7 +1326,7 @@ const tdStyle = (extra = {}) => ({
 // SKU + name pre-fill with the Sonar model string verbatim — manager can
 // override SKU if there's a real internal SKU known, or just accept it
 // and clean up later in Parts admin (same workflow as BoxHero drafts).
-function CreatePartPanel({ sonarModel, onCancel, onCreated }) {
+function CreatePartPanel({ sonarModel, existingParts = [], onPickExisting, onCancel, onCreated }) {
   const { currentUser } = useApp()
   const [sku, setSku] = useState(sonarModel)
   const [name, setName] = useState(sonarModel)
@@ -1317,6 +1334,29 @@ function CreatePartPanel({ sonarModel, onCancel, onCreated }) {
   const [department, setDepartment] = useState('')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
+
+  // Duplicate guard: catalog rows (drafts included — existingParts is the
+  // sheet's full list) whose SKU or name overlaps what's being typed. The
+  // pre-fill is the Sonar model verbatim, so a draft minted for this same
+  // model on an earlier import surfaces here before a second one is made.
+  // Exact SKU hits sort first; capped so the panel stays a hint, not a list.
+  const similar = useMemo(() => {
+    const s = sku.trim().toLowerCase()
+    const n = name.trim().toLowerCase()
+    if (s.length < 2 && n.length < 2) return []
+    const hits = existingParts.filter(p => {
+      const pid = (p.id || '').toLowerCase()
+      const pn = (p.name || '').toLowerCase()
+      return (s.length >= 2 && (pid.includes(s) || pn.includes(s)))
+          || (n.length >= 2 && (pn.includes(n) || pid.includes(n)))
+    })
+    hits.sort((a, b) => {
+      const ae = (a.id || '').toLowerCase() === s ? 0 : 1
+      const be = (b.id || '').toLowerCase() === s ? 0 : 1
+      return ae - be
+    })
+    return hits.slice(0, 5)
+  }, [sku, name, existingParts])
 
   async function handleSave() {
     const trimmedSku = sku.trim()
@@ -1349,7 +1389,7 @@ function CreatePartPanel({ sonarModel, onCancel, onCreated }) {
       // exists in the catalog. Common when the manager types a real SKU
       // that's hidden as a draft (BoxHero imports auto-create drafts).
       if (e?.code === '23505' || /duplicate key|already exists/i.test(e?.message || '')) {
-        setErr(`SKU "${sku.trim()}" already exists in the catalog. Pick it from the dropdown — it may be marked as a draft.`)
+        setErr(`SKU "${sku.trim()}" already exists in the catalog (possibly as a draft). Use it from the matches above, or find it via "pick part…".`)
       } else {
         setErr(e.message || String(e))
       }
@@ -1367,8 +1407,39 @@ function CreatePartPanel({ sonarModel, onCancel, onCreated }) {
     }}>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
         Creating a draft for Sonar model <strong style={{ color: 'var(--orange)' }}>{sonarModel}</strong>.
-        The draft is hidden from regular pickers (<code>is_active=false</code>) until you activate it in Parts admin.
+        The draft stays hidden from crew pickers (<code>is_active=false</code>) until you activate it in Parts admin;
+        it still shows here and in "pick part…" (badged DRAFT) so the next import reuses it.
       </div>
+      {similar.length > 0 && (
+        <div style={{
+          fontSize: 11, marginBottom: 6, padding: '6px 8px',
+          background: 'var(--amber-lt)', border: '1px solid var(--amber)', borderRadius: 4,
+        }}>
+          <div style={{ fontWeight: 700, color: 'var(--amber)', marginBottom: 4 }}>
+            Already in the catalog — use one of these instead of creating a duplicate?
+          </div>
+          {similar.map(p => (
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, minWidth: 0 }}>
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>
+                {p.name} <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--hint)' }}>({p.id})</span>
+                {p.is_active === false && <span style={{ color: 'var(--amber)', fontWeight: 700 }}> · draft</span>}
+              </span>
+              <button
+                type="button"
+                onClick={() => onPickExisting?.(p)}
+                disabled={saving}
+                style={{
+                  fontSize: 10, padding: '2px 8px', background: 'transparent',
+                  color: 'var(--amber)', border: '1px solid var(--amber)',
+                  borderRadius: 4, cursor: 'pointer', whiteSpace: 'nowrap',
+                }}
+              >
+                Use this
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{
         display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6,
       }}>

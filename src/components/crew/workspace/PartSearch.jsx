@@ -78,7 +78,22 @@ export default function PartSearch({ onSelect, onClose, filter, activeOnly = fal
             }}
           >
             <div>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{p.name}</div>
+              <div style={{ fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span>{p.name}</span>
+                {/* Drafts (is_active=false) are unfinished catalog rows — auto-
+                    created by imports or "+ Create draft". Flag them so a
+                    manager mapping a Sonar model reuses one instead of
+                    creating a duplicate, and crew know the row isn't final. */}
+                {p.is_active === false && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: 0.4,
+                    color: 'var(--amber)', background: 'var(--amber-lt)',
+                    padding: '1px 6px', borderRadius: 20,
+                  }}>
+                    DRAFT
+                  </span>
+                )}
+              </div>
               <div style={{ fontSize: 11, color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
                 {p.id}
               </div>
