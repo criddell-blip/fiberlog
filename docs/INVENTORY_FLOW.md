@@ -249,8 +249,7 @@ The next export skips already-exported rows automatically via the partial index 
 - Sage transaction type names are Sage Intacct defaults — config customizable per company
 - Warehouse + project codes use FiberLog names directly (no code mapping table yet)
 - VENDORID kept for column-layout stability but always blank — vendors only attach to receives, which aren't exported (Sage has the vendor from the PO)
-- Receives and adjusts are always filtered; trucks are filtered when both endpoints are trucks; truck→bucket consumption + warehouse→truck loadouts kept
-- Known gap: strict-consumption mode tests only `type='truck'`, so loadouts/handoffs through **group** locations (Contractor - RNS, Crew - Construction …) still export in strict mode — 24 rows today. Pre-existing; fixing it changes what accounting receives, so it needs its own sign-off
+- Receives and adjusts are always filtered; so are staging↔staging handoffs and, since Sep 2026, crew loads + returns (warehouse/bin ↔ truck **or group** — a group is a truck for consumption purposes). Truck/group→region consumption, issue/scrap and inter-warehouse transfers are kept. The "Include crew loads & returns" checkbox opts staging back in (the pre-Sep-2026 default, which was sending warehouse→group loads to accounting as consumption)
 
 ---
 

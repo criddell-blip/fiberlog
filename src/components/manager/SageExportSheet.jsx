@@ -43,11 +43,12 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
   const [since, setSince] = useState(defaultSince)
   const [until, setUntil] = useState(defaultUntil)
   const [includeExported, setIncludeExported] = useState(false)
-  // Strict-consumption mode: when on, the filter additionally strips out
-  // truck staging (crew loadouts + returns). Result is a "pure
-  // consumption + purchases" export. Default off so today's behavior is
-  // preserved unless the accountant flips it.
-  const [strictConsumption, setStrictConsumption] = useState(false)
+  // Staging traffic (warehouse ↔ truck/group loads + returns) is OFF by
+  // default — the export is a consumption record, and until Sep 2026 the
+  // default was shipping every load into a shared group to accounting as if
+  // it were consumed. The opt-in is an escape hatch, not a mode anyone uses
+  // routinely.
+  const [includeStaging, setIncludeStaging] = useState(false)
   // Field returns (receipt_kind='field_return') are the one receive class
   // Sage can't learn about from the AP side — no PO, no invoice. OFF until
   // accounting says how they want UB…_R receipts booked (Aug 2026).
@@ -84,7 +85,7 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
   // Filter to exportable + count by type. Pass strict-consumption flag
   // so the same filter decision drives both the on-screen preview and
   // the CSV builder (buildSageCsv runs the same filter at write time).
-  const filterOpts = useMemo(() => ({ strictConsumption, includeFieldReturns }), [strictConsumption, includeFieldReturns])
+  const filterOpts = useMemo(() => ({ includeStaging, includeFieldReturns }), [includeStaging, includeFieldReturns])
   const exportable = useMemo(
     () => movements.filter(m => isExportableMovement(m, filterOpts)),
     [movements, filterOpts]
@@ -154,9 +155,10 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
           Builds a Sage Inventory Transactions CSV of what FiberLog <em>consumed</em> in the picked range.
           Always filtered: <strong>receipts</strong> (POs are received straight into Sage, so sending them
           again would double-count the purchase — FiberLog keeps them for tracking), count corrections
-          (adjusts, since Sage runs its own reconciliation), and internal staging (truck → truck and
-          warehouse↔bin within the same warehouse). Toggle <em>Strict consumption</em> to also drop
-          crew loadouts + returns. <strong>Preview CSV</strong> downloads the file to inspect with no side
+          (adjusts, since Sage runs its own reconciliation), truck / group handoffs, warehouse↔bin moves
+          within the same warehouse, and crew loads + returns (warehouse ↔ truck or group — staging, not
+          consumption; <em>Include crew loads &amp; returns</em> opts them back in).
+          <strong>Preview CSV</strong> downloads the file to inspect with no side
           effects; <strong>Download + mark exported</strong> also stamps the rows so the next batch skips them.
           To re-view an already-exported batch (e.g. Grady's earlier export), turn on <em>Include already exported</em>.
         </div>
@@ -187,15 +189,15 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
           </label>
           <label
             style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}
-            title="Drop crew loadouts + returns (truck staging) from the export. Keeps truck→project consumption, issue and scrap."
+            title="Also export crew loads + returns (warehouse ↔ truck / group). These are staging, not consumption — leave OFF unless accounting asks for them. Truck/group → region consumption, issue and scrap always export."
           >
             <input
               type="checkbox"
-              checked={strictConsumption}
-              onChange={e => setStrictConsumption(e.target.checked)}
+              checked={includeStaging}
+              onChange={e => setIncludeStaging(e.target.checked)}
               disabled={submitting}
             />
-            Strict consumption only
+            Include crew loads & returns <span style={{ color: 'var(--muted)' }}>(not consumption)</span>
           </label>
           <label
             style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}
@@ -246,7 +248,7 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
             <span><strong style={{ color: 'var(--text)' }}>{exportable.length}</strong> ready to export</span>
             {skippedInternal > 0 && (
               <span style={{ color: 'var(--hint)' }}>
-                {skippedInternal} skipped ({includeFieldReturns ? 'purchase receipts' : 'receipts'} + adjusts + internal staging{strictConsumption ? ' + crew loads/returns' : ''})
+                {skippedInternal} skipped ({includeFieldReturns ? 'purchase receipts' : 'receipts'} + adjusts + internal moves{includeStaging ? '' : ' + crew loads/returns'})
               </span>
             )}
             {Object.entries(typeCounts).map(([type, count]) => (

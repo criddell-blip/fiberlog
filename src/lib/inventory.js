@@ -2572,24 +2572,32 @@ export function consumptionCustomer(m) {
 // the accounting book; FiberLog is the provenance system ("how it got here and
 // where it went"). Where Sage already owns an event, we don't send it.
 //
+// "Staging" below means a truck-class location: a personal `truck` OR a
+// shared `group` (Contractor - RNS, Crew - Construction …, Drop Trailer).
+// A group IS a truck for every consumption purpose — it's the pull location
+// crews load from and auto-deduct draws from — so the two types are treated
+// identically here. (Sep 2026: the filter only knew `truck`, so every
+// warehouse → group load — 24k units in Aug alone — exported as if it were
+// consumption.)
+//
 // Always-excluded:
 //   • `adjust` — Sage runs its own physical-inventory reconciliation
 //   • `receive` — Sage books the purchase from the PO/AP side
-//   • truck → truck (internal crew handoffs)
+//   • staging → staging (internal crew handoffs, truck ↔ group)
 //   • warehouse/bin ↔ warehouse/bin under the SAME parent warehouse
 //     (internal binning / unbinning / bin rearrangement — these are
 //      noise in an accounting export and were the user's flag for the
 //      "transfers within the warehouse" bug).
+//   • warehouse/bin ↔ staging (crew loads + returns) — staging, not
+//     consumption. The follow-up auto-deduct (staging → project bucket)
+//     IS consumption and stays. Opt back in with {includeStaging: true}
+//     (the old default; flipped Sep 2026 because loads were reaching
+//     accounting as consumption).
 //
-// Opt-in via {strictConsumption: true}:
-//   • Additionally exclude warehouse/bin ↔ truck (crew loadouts +
-//     returns) — these are staging, not consumption. The follow-up
-//     auto-deduct (truck → project bucket) IS consumption and stays.
-//
-// What always stays in the export (default mode AND strict):
+// What always stays in the export:
 //   transfer to job_site (consumption), issue/scrap, inter-warehouse
 //   transfers (warehouse → warehouse under different parents).
-export function isExportableMovement(m, { strictConsumption = false, includeFieldReturns = false } = {}) {
+export function isExportableMovement(m, { includeStaging = false, includeFieldReturns = false } = {}) {
   // (0a) Always exclude `adjust` — count corrections are FiberLog-internal
   // bookkeeping (cycle-count reconciliations, audit-CSV variances, manual
   // fixes). They don't represent purchases, consumption, transfers, or
@@ -2619,9 +2627,10 @@ export function isExportableMovement(m, { strictConsumption = false, includeFiel
 
   const fromType = m.from_location?.type
   const toType = m.to_location?.type
+  const isStaging = t => t === 'truck' || t === 'group'
 
-  // (1) Always exclude truck → truck.
-  if (fromType === 'truck' && toType === 'truck') return false
+  // (1) Always exclude staging → staging (truck/group handoffs).
+  if (isStaging(fromType) && isStaging(toType)) return false
 
   // (2) Always exclude warehouse-internal movements. For a warehouse,
   //     its "hierarchy id" is itself; for a bin it's its parent. When
@@ -2638,10 +2647,15 @@ export function isExportableMovement(m, { strictConsumption = false, includeFiel
     if (fromWh && toWh && fromWh === toWh) return false
   }
 
-  // (3) Strict consumption: also exclude truck staging.
-  if (strictConsumption) {
-    if (fromType === 'truck' && toType !== 'job_site') return false
-    if (toType === 'truck' && fromType !== 'job_site') return false
+  // (3) Exclude staging traffic: loads (warehouse/bin → truck/group) and
+  //     returns/unloads (truck/group → warehouse/bin). Scoped to the two
+  //     endpoint-to-endpoint types — an `issue` or `scrap` off a truck has
+  //     no destination at all and must stay (the old strict branch dropped
+  //     them by testing `toType !== 'job_site'` unconditionally). A
+  //     job_site → staging row (a consumption reversal) also stays.
+  if (!includeStaging && (m.movement_type === 'transfer' || m.movement_type === 'return')) {
+    if (isStaging(fromType) && toType !== 'job_site') return false
+    if (isStaging(toType) && fromType !== 'job_site') return false
   }
 
   return true

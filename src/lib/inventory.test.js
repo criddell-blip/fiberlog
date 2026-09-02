@@ -290,6 +290,9 @@ const BIN_B = { id: 'binB', name: 'B-02', type: 'bin', parent_location_id: 'wh1'
 const BIN_OTHER = { id: 'binC', name: 'C-01', type: 'bin', parent_location_id: 'wh2' }
 const TRUCK1 = { id: 'tr1', name: 'Francisco Molina', type: 'truck', parent_location_id: null }
 const TRUCK2 = { id: 'tr2', name: 'Edgar Molina', type: 'truck', parent_location_id: null }
+// A shared group is a truck for every consumption purpose (crews load from it,
+// auto-deduct draws from it) — the export filter must treat it identically.
+const GROUP = { id: 'grp1', name: 'Contractor - RNS', type: 'group', parent_location_id: null }
 const BUCKET = { id: 'js1', name: 'Heber', type: 'job_site', parent_location_id: null, project_id: 'p1' }
 
 const PART = { id: 'SKU-1', name: 'Lag Bolt', unit: 'ea', department: 'Hardware' }
@@ -354,8 +357,12 @@ describe('isExportableMovement', () => {
     expect(isExportableMovement(mv({ movement_type: 'adjust', from_location: WAREHOUSE, to_location: null }))).toBe(false)
   })
 
-  it('always excludes truck → truck handoffs', () => {
+  it('always excludes staging → staging handoffs (truck ↔ truck, truck ↔ group)', () => {
     expect(isExportableMovement(mv({ from_location: TRUCK1, to_location: TRUCK2 }))).toBe(false)
+    expect(isExportableMovement(mv({ from_location: TRUCK1, to_location: GROUP }))).toBe(false)
+    expect(isExportableMovement(mv({ from_location: GROUP, to_location: TRUCK1 }))).toBe(false)
+    // Even when staging traffic is opted back in — a handoff is never Sage's business.
+    expect(isExportableMovement(mv({ from_location: GROUP, to_location: TRUCK1 }), { includeStaging: true })).toBe(false)
   })
 
   it('excludes movements that never leave a warehouse (bin↔bin, bin↔parent)', () => {
@@ -374,7 +381,7 @@ describe('isExportableMovement', () => {
   it('always excludes receives (Sage books purchases from the PO)', () => {
     const recv = mv({ movement_type: 'receive', from_location: null, to_location: WAREHOUSE })
     expect(isExportableMovement(recv)).toBe(false)
-    expect(isExportableMovement(recv, { strictConsumption: true })).toBe(false)
+    expect(isExportableMovement(recv, { includeStaging: true })).toBe(false)
     // Into a bin rather than warehouse level — same answer.
     expect(isExportableMovement(mv({ movement_type: 'receive', from_location: null, to_location: BIN_A }))).toBe(false)
   })
@@ -398,7 +405,7 @@ describe('isExportableMovement', () => {
     const fr = mv({ movement_type: 'receive', receipt_kind: 'field_return', from_location: null, to_location: BIN_A })
     expect(isExportableMovement(fr)).toBe(false)
     expect(isExportableMovement(fr, { includeFieldReturns: true })).toBe(true)
-    expect(isExportableMovement(fr, { includeFieldReturns: true, strictConsumption: true })).toBe(true)
+    expect(isExportableMovement(fr, { includeFieldReturns: true, includeStaging: true })).toBe(true)
     for (const kind of ['purchase', 'found', 'seed', null]) {
       const r = mv({ movement_type: 'receive', receipt_kind: kind, from_location: null, to_location: WAREHOUSE })
       expect(isExportableMovement(r, { includeFieldReturns: true })).toBe(false)
@@ -409,21 +416,42 @@ describe('isExportableMovement', () => {
     expect(rows[0][col('VENDORID')]).toBe('')
   })
 
-  it('keeps consumption transfers, issues, and scraps', () => {
+  it('keeps consumption transfers, issues, and scraps — from trucks AND groups', () => {
     expect(isExportableMovement(mv({ from_location: TRUCK1, to_location: BUCKET }))).toBe(true)
+    expect(isExportableMovement(mv({ from_location: GROUP, to_location: BUCKET }))).toBe(true)
+    // issue/scrap have no destination — the old strict branch's unconditional
+    // `toType !== 'job_site'` test used to drop these. Regression guard.
     expect(isExportableMovement(mv({ movement_type: 'issue', from_location: TRUCK1, to_location: null }))).toBe(true)
     expect(isExportableMovement(mv({ movement_type: 'scrap', from_location: TRUCK1, to_location: null }))).toBe(true)
+    expect(isExportableMovement(mv({ movement_type: 'scrap', from_location: GROUP, to_location: null }))).toBe(true)
   })
 
-  it('strictConsumption additionally drops crew loadouts and returns, keeps auto-deduct', () => {
-    const loadout = mv({ from_location: WAREHOUSE, to_location: TRUCK1 })
+  // The Sep 2026 owner report: "consumption is showing any transaction from a
+  // location to a group". Loads and returns are staging, never consumption —
+  // and a group is staging exactly like a truck.
+  it('drops crew loads and returns by default — truck and group alike — keeps auto-deduct', () => {
+    const cases = [
+      mv({ from_location: WAREHOUSE, to_location: TRUCK1 }),                      // load
+      mv({ from_location: BIN_A, to_location: TRUCK1 }),                          // load from bin
+      mv({ from_location: BIN_A, to_location: GROUP }),                           // load into a group (the reported leak)
+      mv({ from_location: WAREHOUSE, to_location: GROUP }),
+      mv({ movement_type: 'return', from_location: TRUCK1, to_location: WAREHOUSE }),
+      mv({ movement_type: 'return', from_location: GROUP, to_location: BIN_A }),
+      mv({ from_location: GROUP, to_location: WAREHOUSE }),                       // unload booked as transfer
+      mv({ from_location: TRUCK1, to_location: BIN_A }),
+    ]
+    for (const c of cases) expect(isExportableMovement(c), JSON.stringify(c)).toBe(false)
+    expect(isExportableMovement(mv({ from_location: TRUCK1, to_location: BUCKET }))).toBe(true)
+    expect(isExportableMovement(mv({ from_location: GROUP, to_location: BUCKET }))).toBe(true)
+    // A consumption reversal (bucket → truck) stays visible to accounting.
+    expect(isExportableMovement(mv({ from_location: BUCKET, to_location: GROUP }))).toBe(true)
+  })
+
+  it('includeStaging opts loads and returns back in (the pre-Sep-2026 default)', () => {
+    const loadout = mv({ from_location: BIN_A, to_location: GROUP })
     const ret = mv({ movement_type: 'return', from_location: TRUCK1, to_location: WAREHOUSE })
-    const autoDeduct = mv({ from_location: TRUCK1, to_location: BUCKET })
-    expect(isExportableMovement(loadout)).toBe(true)
-    expect(isExportableMovement(loadout, { strictConsumption: true })).toBe(false)
-    expect(isExportableMovement(ret)).toBe(true)
-    expect(isExportableMovement(ret, { strictConsumption: true })).toBe(false)
-    expect(isExportableMovement(autoDeduct, { strictConsumption: true })).toBe(true)
+    expect(isExportableMovement(loadout, { includeStaging: true })).toBe(true)
+    expect(isExportableMovement(ret, { includeStaging: true })).toBe(true)
   })
 })
 
@@ -455,13 +483,15 @@ describe('buildSageCsv', () => {
 
   it('maps movement types to Sage transaction types', () => {
     // No receive row here — receives are filtered before the type map is
-    // consulted, so 'Inventory Receipt' is unreachable by design.
+    // consulted, so 'Inventory Receipt' is unreachable by design. The
+    // truck → warehouse return is staging, so it only reaches the type map
+    // with includeStaging on.
     const rows = csvRows(buildSageCsv([
       mv({ movement_type: 'transfer', from_location: TRUCK1, to_location: BUCKET }),
       mv({ movement_type: 'return', from_location: TRUCK1, to_location: WAREHOUSE }),
       mv({ movement_type: 'issue', from_location: TRUCK1, to_location: null }),
       mv({ movement_type: 'scrap', from_location: TRUCK1, to_location: null }),
-    ]))
+    ], { includeStaging: true }))
     expect(rows.map(r => r[col('TRANSACTIONTYPE')])).toEqual([
       'Inventory Transfer',
       'Inventory Transfer', // return also exports as a transfer
@@ -606,10 +636,10 @@ describe('buildSageCsv', () => {
     expect(buildSageCsv([])).toBe(HEADERS.join(','))
   })
 
-  it('forwards opts to the exclusion filter (strictConsumption)', () => {
+  it('forwards opts to the exclusion filter (includeStaging)', () => {
     const loadout = mv({ from_location: WAREHOUSE, to_location: TRUCK1 })
-    expect(csvRows(buildSageCsv([loadout]))).toHaveLength(1)
-    expect(csvRows(buildSageCsv([loadout], { strictConsumption: true }))).toHaveLength(0)
+    expect(csvRows(buildSageCsv([loadout]))).toHaveLength(0)
+    expect(csvRows(buildSageCsv([loadout], { includeStaging: true }))).toHaveLength(1)
   })
 })
 

@@ -331,8 +331,8 @@ that must simply appear or vanish at one location.
 
 **Sage export** → date range → review the preview (what exports, what's skipped, why) →
 **Download CSV + mark X exported**. Exported movements are stamped so future exports skip them;
-a toggle re-issues a rejected batch. Strict-consumption mode additionally drops crew loadouts and
-returns.
+a toggle re-issues a rejected batch. Crew loads and returns (warehouse ↔ truck or group) are
+skipped by default — they're staging, not consumption; a checkbox opts them back in.
 
 | Cadence | What to do |
 |---|---|

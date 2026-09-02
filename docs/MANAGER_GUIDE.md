@@ -281,7 +281,7 @@ Generates a fiber-progress report PDF for the selected project. Only meaningful 
 The Consumption view has an **Export to Sage** button (also reachable as the Inventory → Sage export action) that opens the export sheet with the current date range pre-filled:
 
 1. Pick the date range (default: last 7 days)
-2. Optionally turn on **strict-consumption mode** — the default already excludes receipts (Sage books those from the PO), all `adjust` rows, and internal truck-to-truck / warehouse-internal moves; strict mode *additionally* drops crew loadouts + returns, keeping only true consumption
+2. The default is consumption only — receipts (Sage books those from the PO), all `adjust` rows, truck/group handoffs, warehouse-internal moves, and crew loads + returns (warehouse ↔ truck or group) are all skipped. **Include crew loads & returns** opts the staging traffic back in; leave it off unless accounting asks
 3. Preview shows what will export and what's skipped (with reasons)
 4. **Download CSV + mark X exported** — stamps every included movement with `exported_at` + a batch ID; future exports skip them automatically. A toggle re-issues an already-exported batch if Sage rejected one
 
