@@ -92,6 +92,11 @@ const strings = {
                         es: 'Una vez enviado, este reporte es definitivo — no se puede editar después.' },
   addPartNotInList:   { en: '＋ Add part not in list',    es: '＋ Añadir parte que no está en la lista' },
 
+  // ── Per-line asset tags (Sep 2026, infra crew) ────────────────────────────
+  assetTagLabel:      { en: 'Asset tag / serial',         es: 'Etiqueta de activo / serie' },
+  assetTagPlaceholder:{ en: 'e.g. AT-1042, AT-1043',      es: 'ej. AT-1042, AT-1043' },
+  assetTagCountHint:  { en: '{n} tags for qty {q}',       es: '{n} etiquetas para cantidad {q}' },
+
   // ── Per-line source truck (Aug 2026) ──────────────────────────────────────
   addPartsUsed:       { en: '＋ Add parts used',          es: '＋ Añadir partes usadas' },
   pulledFromWhich:    { en: '{part} — pulled from which truck?', es: '{part} — ¿de qué camión salió?' },

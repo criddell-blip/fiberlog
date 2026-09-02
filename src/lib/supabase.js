@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { isoLocalDate } from './format'
+import { joinLineNotes } from './shared'
 
 // Read from Vite env vars (.env / .env.local). Hardcoded fallbacks are kept
 // so a build still works if .env goes missing — the anon key is public
@@ -358,7 +359,7 @@ export async function getMaterialsAtSite(siteId) {
 
   const { data: moves, error: mErr } = await db
     .from('inventory_movements')
-    .select('part_id, quantity, movement_type, created_at, parts_catalog ( id, name, unit )')
+    .select('part_id, quantity, movement_type, created_at, line_note, parts_catalog ( id, name, unit )')
     .in('task_id', taskIds)
   if (mErr) throw mErr
 
@@ -373,9 +374,13 @@ export async function getMaterialsAtSite(siteId) {
         unit: m.parts_catalog?.unit || 'ea',
         qty: 0,
         lastMovedAt: null,
+        // Asset tags / serials from every auto-deduct that landed here — the
+        // per-site "which units are installed" list infra needs.
+        assetTags: [],
       }
     }
     totals[id].qty += m.quantity || 0
+    if (m.line_note) totals[id].assetTags.push(m.line_note)
     if (!totals[id].lastMovedAt || m.created_at > totals[id].lastMovedAt) {
       totals[id].lastMovedAt = m.created_at
     }
@@ -588,6 +593,8 @@ export async function saveEntry(sessionId, userId, taskId, entry) {
       // Per-line source truck (null = submitter's truck, the default).
       // save_log_entry validates non-null values are active truck/group.
       source_location_id: p.sourceLocationId || null,
+      // Per-line asset tags (infra crew). Blank → null; the RPC trims too.
+      line_note: String(p.lineNote || '').trim() || null,
     }))
 
   const { data, error } = await db.rpc('save_log_entry', {
@@ -635,7 +642,14 @@ export async function saveSubmissionParts(id, parts, hours) {
       .filter(p => p.part_id && p.qty > 0)
       // source_location_id must round-trip through manager edits — dropping
       // it would silently re-point a tagged line at the submitter's truck.
-      .map(p => ({ part_id: p.part_id, quantity: p.qty, source_location_id: p.source_location_id || null })),
+      // line_note (asset tags) likewise — the RPC concatenates notes when two
+      // same-identity lines collapse, so nothing the crew typed is lost.
+      .map(p => ({
+        part_id: p.part_id,
+        quantity: p.qty,
+        source_location_id: p.source_location_id || null,
+        line_note: String(p.line_note || '').trim() || null,
+      })),
     p_hours: typeof hours === 'number' ? hours : null,
   })
   if (error) throw error
@@ -714,7 +728,7 @@ export async function getTaskSummary(taskId) {
   if (allEntryIds.length > 0) {
     const { data: parts, error: pErr } = await db
       .from('entry_parts')
-      .select(`quantity, part_id, entry_id, source_location_id,
+      .select(`quantity, part_id, entry_id, source_location_id, line_note,
         parts_catalog ( id, name, unit ),
         source:inventory_locations ( id, name, assigned_user:users!inventory_locations_assigned_to_fkey ( name ) )`)
       .in('entry_id', allEntryIds)
@@ -750,9 +764,13 @@ export async function getTaskSummary(taskId) {
             sourceName: p.source_location_id
               ? (p.source?.assigned_user?.name || p.source?.name || null)
               : null,
+            lineNote: undefined,
           }
         }
         totals[key].qty += p.quantity || 0
+        // Asset tags concatenate across the rows that fold into one line
+        // (same rule as mergePartsById / the RPCs — never drop a tag).
+        totals[key].lineNote = joinLineNotes(totals[key].lineNote, p.line_note)
       }
     }
     return {

@@ -1529,6 +1529,14 @@ export default function ProjectManager() {
                           {p.name}
                         </div>
                         <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'monospace' }}>{p.partId}</div>
+                        {/* Asset tags / serials installed at this site (infra
+                            auto-deducts carry them). Wraps — never truncate a
+                            serial list. */}
+                        {p.assetTags?.length > 0 && (
+                          <div style={{ fontSize: 10.5, color: 'var(--muted)', fontFamily: 'var(--font-mono)', marginTop: 2, wordBreak: 'break-word' }}>
+                            <Icon name="tag" size={10} style={{ display: 'inline-block', verticalAlign: '-1px', marginRight: 3 }} />{p.assetTags.join(', ')}
+                          </div>
+                        )}
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--orange)', flexShrink: 0, marginLeft: 8 }}>
                         {p.qty.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>{p.unit}</span>

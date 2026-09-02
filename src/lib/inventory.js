@@ -2421,7 +2421,7 @@ export async function getMovementsForActivityExport({ since, until, type = null,
   const makeQuery = () => {
     let q = db.from('inventory_movements')
       .select(`
-        id, movement_type, receipt_kind, quantity, unit, unit_cost, notes, created_at, occurred_at,
+        id, movement_type, receipt_kind, quantity, unit, unit_cost, notes, line_note, created_at, occurred_at,
         submission_id, task_id, vendor_invoice, purchase_request_line_id,
         from_location_id, to_location_id,
         part:parts_catalog(id, name, unit),

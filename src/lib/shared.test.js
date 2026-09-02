@@ -3,7 +3,7 @@
 // parts list on TaskWorkspace submit (what actually gets logged + deducted),
 // matchesAllTokens is the part-picker filter in CrewMovementSheet load/return.
 import { describe, it, expect } from 'vitest'
-import { mergePartsById, matchesAllTokens } from './shared'
+import { mergePartsById, joinLineNotes, matchesAllTokens } from './shared'
 
 describe('mergePartsById', () => {
   it('returns [] for an empty list', () => {
@@ -110,6 +110,54 @@ describe('mergePartsById', () => {
     expect(out).toHaveLength(1)
     expect(out[0].qty).toBe(5)
     expect(out[0].sourceLocationId).toBeUndefined()
+  })
+
+  // ── per-line asset tags (Sep 2026, infra crew) ────────────────────────────
+  it('does NOT split a line on lineNote — the note is not part of the identity', () => {
+    const out = mergePartsById([
+      { id: 'A', qty: 1, lineNote: 'AT-1042' },
+      { id: 'A', qty: 1, lineNote: 'AT-1043' },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0].qty).toBe(2)
+  })
+
+  it('concatenates notes from collapsing lines so no asset tag is lost', () => {
+    const out = mergePartsById([
+      { id: 'A', qty: 1, lineNote: 'AT-1042' },
+      { id: 'A', qty: 1 },                       // un-noted line in between
+      { id: 'A', qty: 1, lineNote: '  AT-1043 ' },
+    ])
+    expect(out[0].lineNote).toBe('AT-1042, AT-1043')
+  })
+
+  it('leaves lineNote undefined when no merged line carried one', () => {
+    const out = mergePartsById([
+      { id: 'A', qty: 1 },
+      { id: 'A', qty: 1, lineNote: '' },
+    ])
+    expect(out[0].lineNote).toBeUndefined()
+  })
+
+  it('keeps notes on separate source-truck lines separate', () => {
+    const out = mergePartsById([
+      { id: 'A', qty: 1, lineNote: 'AT-1' },
+      { id: 'A', qty: 1, lineNote: 'AT-2', sourceLocationId: 'truck-f' },
+    ])
+    expect(out).toHaveLength(2)
+    expect(out.find(p => !p.sourceLocationId).lineNote).toBe('AT-1')
+    expect(out.find(p => p.sourceLocationId === 'truck-f').lineNote).toBe('AT-2')
+  })
+})
+
+describe('joinLineNotes', () => {
+  it('joins two notes with a comma, trimming each', () => {
+    expect(joinLineNotes(' a ', 'b')).toBe('a, b')
+  })
+  it('drops blank halves and returns undefined when both are empty', () => {
+    expect(joinLineNotes('a', '')).toBe('a')
+    expect(joinLineNotes(undefined, ' b')).toBe('b')
+    expect(joinLineNotes('', null)).toBeUndefined()
   })
 })
 

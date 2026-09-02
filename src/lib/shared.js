@@ -7,15 +7,27 @@
 // identity: the same SKU pulled from two different trucks must stay two
 // lines, because each becomes its own truck→bucket movement at approval.
 // Lines without a source (undefined/null — "my truck") merge as before.
+//
+// `lineNote` (asset tags, infra crew) is NOT part of the identity — a note
+// never splits a line into a second movement — but it must never be lost by
+// a merge either, so notes on collapsing lines concatenate with ', '.
 export function mergePartsById(list) {
   const m = {}
   for (const p of list) {
     if (!p || !p.id) continue
     const key = p.id + '|' + (p.sourceLocationId || '')
     if (!m[key]) m[key] = { ...p }
-    else m[key] = { ...m[key], qty: (m[key].qty || 0) + (p.qty || 0) }
+    else m[key] = { ...m[key], qty: (m[key].qty || 0) + (p.qty || 0), lineNote: joinLineNotes(m[key].lineNote, p.lineNote) }
   }
   return Object.values(m).filter(p => p.qty > 0)
+}
+
+// Concatenate two optional per-line notes; blank/undefined halves drop out
+// and the result is undefined (not '') when both are empty so a merged line
+// looks exactly like an un-noted one.
+export function joinLineNotes(a, b) {
+  const parts = [a, b].map(s => String(s || '').trim()).filter(Boolean)
+  return parts.length ? parts.join(', ') : undefined
 }
 
 // Multi-word search: every whitespace token must appear somewhere in the

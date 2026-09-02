@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { approveSubmission, saveSubmissionParts, setTaskClosed, db, must } from '../../lib/supabase'
 import { getLocations } from '../../lib/inventory'
+import { joinLineNotes } from '../../lib/shared'
 import { useApp } from '../../AppContext'
 import useRealtimeQueue from '../../lib/useRealtimeQueue'
 import { useBackClose } from '../../lib/backStack'
@@ -134,7 +135,7 @@ export default function SubmissionsQueue() {
       // (part, source) is the line identity — a source change alone is dirty.
       const o = selectedParts.find(s =>
         s.part_id === ep.part_id && (s.source_location_id || null) === (ep.source_location_id || null))
-      return !o || o.qty !== ep.qty
+      return !o || o.qty !== ep.qty || String(o.line_note || '').trim() !== String(ep.line_note || '').trim()
     })
   )
 
@@ -217,7 +218,7 @@ export default function SubmissionsQueue() {
       if (!filteredEntries || filteredEntries.length === 0) { setSelectedParts([]); setPartsLoading(false); return }
       const entryIds = filteredEntries.map(e => e.id)
       const { data: parts } = await db
-        .from('entry_parts').select(`quantity, part_id, source_location_id,
+        .from('entry_parts').select(`quantity, part_id, source_location_id, line_note,
           parts_catalog ( id, name, unit ),
           source:inventory_locations ( id, name, assigned_user:users!inventory_locations_assigned_to_fkey ( name ) )`)
         .in('entry_id', entryIds)
@@ -240,8 +241,12 @@ export default function SubmissionsQueue() {
           sourceName: p.source_location_id
             ? (p.source?.assigned_user?.name || p.source?.name || null)
             : null,
+          line_note: undefined,
         }
         totals[key].qty += p.quantity || 0
+        // Asset tags concatenate across rows folding into one line — same
+        // rule as the RPCs, so what the manager sees is what approval books.
+        totals[key].line_note = joinLineNotes(totals[key].line_note, p.line_note)
       })
       setSelectedParts(Object.values(totals).filter(p => p.qty > 0))
     } catch(e) { console.warn('Parts load failed:', e) }
@@ -623,6 +628,22 @@ export default function SubmissionsQueue() {
                       <button onClick={() => setEditSourceIdx(i)} style={{ padding: 0, marginTop: 2, cursor: 'pointer' }}>
                         <SourcePill name={p.sourceName || `${sel.users?.name || 'Submitter'} (own truck)`} muted={!p.source_location_id} editable />
                       </button>
+                      {/* Asset tags (infra). Shown for every line in edit mode
+                          so a manager can add a tag the crew forgot, not just
+                          fix one; blank stays blank (null on save). */}
+                      <input
+                        value={p.line_note || ''}
+                        onChange={e => setEditParts(prev => prev.map((x, j) => j === i ? { ...x, line_note: e.target.value } : x))}
+                        placeholder="Asset tag / serial"
+                        aria-label="Asset tag / serial"
+                        autoComplete="off" name="asset-tag" spellCheck={false}
+                        style={{
+                          display: 'block', width: '100%', boxSizing: 'border-box', marginTop: 4,
+                          fontSize: 11, padding: '4px 7px', borderRadius: 'var(--r-xs)',
+                          border: '1px solid var(--border2)', background: 'var(--surface2)',
+                          color: 'var(--text)', fontFamily: 'var(--font-mono)',
+                        }}
+                      />
                     </div>
                     <button className="tally-btn tally-sm tally-minus" onClick={() => setEditParts(prev => prev.map((x, j) => j === i ? { ...x, qty: Math.max(1, x.qty - 1) } : x))}>−</button>
                     <span className="mono" style={{ minWidth: 30, textAlign: 'center', fontSize: 13, fontWeight: 700 }}>{p.qty.toLocaleString()}</span>
@@ -645,6 +666,7 @@ export default function SubmissionsQueue() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
                     {p.sourceName && <SourcePill name={p.sourceName} />}
+                    {p.line_note && <AssetTagLine note={p.line_note} />}
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--teal-dk)', flexShrink: 0, marginLeft: 8 }}>
                     {p.qty.toLocaleString()} <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>{p.unit}</span>
@@ -842,6 +864,16 @@ export default function SubmissionsQueue() {
 // ─── SOURCE PILL ─────────────────────────────────────────────────────────────
 // Which truck a part line deducts from. Teal = tagged to a specific truck /
 // group; muted = the submitter's own truck (the default, nothing stored).
+// Asset tags / serials the crew typed on a part line (infra). Mono + wrap:
+// a qty-4 switch line is four tags and must not ellipsize away.
+function AssetTagLine({ note }) {
+  return (
+    <div style={{ fontSize: 10.5, color: 'var(--muted)', fontFamily: 'var(--font-mono)', marginTop: 2, wordBreak: 'break-word' }}>
+      <Icon name="tag" size={10} style={{ display: 'inline-block', verticalAlign: '-1px', marginRight: 3 }} />{note}
+    </div>
+  )
+}
+
 function SourcePill({ name, muted = false, editable = false }) {
   return (
     <span style={{

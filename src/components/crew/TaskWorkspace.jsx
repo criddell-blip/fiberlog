@@ -3,7 +3,7 @@ import { useApp } from '../../AppContext'
 import { startSession, saveEntry, getTaskSummary, db } from '../../lib/supabase'
 import { getFootageTypePartMap, getLocations, getMyTruck, getStockForLocations } from '../../lib/inventory'
 import { FOOTAGE_TYPE_VALUES, FOOTAGE_HEADING_KEYS } from '../../lib/footageTypes'
-import { mergePartsById } from '../../lib/shared'
+import { mergePartsById, joinLineNotes } from '../../lib/shared'
 import {
   sumLines, toggleLine, setLineFt as setLineFtIn, removalLosesWork,
   linesToParts, typeLabel, hasFootageLines, migrateLegacyFootage,
@@ -86,6 +86,13 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
   // the same SKU from different trucks must stay two lines. Absent/null =
   // submitter's own truck (nothing stored; approval behavior unchanged).
   const [partSources, setPartSources] = useState({})
+  // Per-line asset tags / serials (Sep 2026, infra crew). Same shape as
+  // partSources: computed rows key into this map ('asm:<partId>' /
+  // 'fp:<srcKey>'), extra parts carry `lineNote` inline. Free text, comma-
+  // separated for qty > 1. Only rendered for crew_type='infrastructure' —
+  // fiber crews don't install serialized gear and the sheet stays as it was.
+  const [partNotes, setPartNotes] = useState({})
+  const showAssetTags = currentUser?.crew_type === 'infrastructure'
   // { key, part:{id,name,unit}, current } while the picker sheet is open.
   const [sourceSheet, setSourceSheet] = useState(null)
   // Truck-stock-first add browser (Phase 2b) — the primary add path.
@@ -207,7 +214,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       .filter(p => (p.partId || p.id) && Number(p.qty) > 0)
       // Carry the source truck through the flag→fix→resubmit loop — dropping
       // it would silently re-point a crewmate's line at the submitter's truck.
-      .map(p => ({ id: p.partId || p.id, name: p.name, unit: p.unit || 'ea', qty: Number(p.qty), sourceLocationId: p.sourceLocationId || null }))
+      .map(p => ({ id: p.partId || p.id, name: p.name, unit: p.unit || 'ea', qty: Number(p.qty), sourceLocationId: p.sourceLocationId || null, lineNote: p.lineNote || undefined }))
     if (restored.length > 0) setExtraParts(restored)
     if (typeof flaggedSub.hours_worked === 'number') setHoursWorked(flaggedSub.hours_worked)
     const firstNote = (flaggedSub.notes || []).find(n => String(n || '').trim())
@@ -317,6 +324,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
         if (wc.partQtyOverrides) setPartQtyOverrides(wc.partQtyOverrides)
         if (wc.extraParts) setExtraParts(wc.extraParts)
         if (wc.partSources) setPartSources(wc.partSources)
+        if (wc.partNotes) setPartNotes(wc.partNotes)
         // Draft-shape migration (multi-type footage, July 2026). Drafts written
         // before this shipped carry a scalar `fiberCount` + a one-size-per-slot
         // `conduitSizes`, with the feet living only in `counts`. Crews have open
@@ -383,7 +391,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     saveTimeoutRef.current = setTimeout(async () => {
       const draft = {
-        counts, partQtyOverrides, extraParts, partSources, footageLines, note, hoursWorked, projectIdOverride,
+        counts, partQtyOverrides, extraParts, partSources, partNotes, footageLines, note, hoursWorked, projectIdOverride,
       }
       try {
         const { error } = await db.from('tasks').update({
@@ -399,7 +407,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       }
     }, 800)
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current) }
-  }, [counts, partQtyOverrides, extraParts, partSources, footageLines, note, hoursWorked, projectIdOverride, task.id, currentUser?.id, draftLoaded])
+  }, [counts, partQtyOverrides, extraParts, partSources, partNotes, footageLines, note, hoursWorked, projectIdOverride, task.id, currentUser?.id, draftLoaded])
 
   // Trucks + own pull location, fetched once when the submit sheet first
   // opens (the source chips only render there, so nobody pays for this on
@@ -495,6 +503,46 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
     )
   }
 
+  // Asset-tag / serial input under a part row (infra only). Free text; tags
+  // are per UNIT so a qty-3 radio line wants three comma-separated tags — the
+  // amber hint flags a count mismatch but never blocks (a crew may only have
+  // one tag to hand, or the part may be untagged gear like a mount).
+  function assetTagField(value, qty, onChange) {
+    if (!showAssetTags) return null
+    const n = String(value || '').split(',').map(s => s.trim()).filter(Boolean).length
+    const mismatch = n > 0 && qty > 0 && n !== qty
+    return (
+      <div style={{ marginTop: 5 }}>
+        <input
+          value={value || ''}
+          onChange={e => onChange(e.target.value)}
+          placeholder={t('assetTagPlaceholder', lang)}
+          aria-label={t('assetTagLabel', lang)}
+          autoComplete="off" name="asset-tag" autoCapitalize="characters" spellCheck={false}
+          style={{
+            width: '100%', boxSizing: 'border-box', fontSize: 12, padding: '5px 8px',
+            borderRadius: 'var(--r-xs)', border: '1px solid var(--border2)',
+            background: 'var(--surface2)', color: 'var(--text)', fontFamily: 'var(--font-mono)',
+          }}
+        />
+        {mismatch && (
+          <div style={{ fontSize: 10.5, color: 'var(--amber)', fontWeight: 600, marginTop: 2 }}>
+            ⚠️ {t('assetTagCountHint', lang).replace('{n}', n).replace('{q}', qty)}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function setPartNote(key, value) {
+    setPartNotes(prev => {
+      const next = { ...prev }
+      if (value) next[key] = value
+      else delete next[key]
+      return next
+    })
+  }
+
   function pickSource(locId) {
     if (!sourceSheet) return
     const { key } = sourceSheet
@@ -510,7 +558,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
           i !== idx && ep.id === line.id && (ep.sourceLocationId || null) === (locId || null))
         if (dup === -1) return prev.map((ep, i) => i === idx ? { ...ep, sourceLocationId: locId } : ep)
         return prev
-          .map((ep, i) => i === dup ? { ...ep, qty: ep.qty + line.qty } : ep)
+          .map((ep, i) => i === dup ? { ...ep, qty: ep.qty + line.qty, lineNote: joinLineNotes(ep.lineNote, line.lineNote) } : ep)
           .filter((_, i) => i !== idx)
       })
     } else {
@@ -677,8 +725,8 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
       // (id, source), so the same SKU from two trucks stays two entry_parts
       // rows and approval books one movement per source truck.
       const submitParts = mergePartsById([
-        ...allParts.map(p => ({ ...p, sourceLocationId: partSources['asm:' + p.id] || null })),
-        ...footageParts.map(p => ({ ...p, sourceLocationId: partSources['fp:' + p.srcKey] || null })),
+        ...allParts.map(p => ({ ...p, sourceLocationId: partSources['asm:' + p.id] || null, lineNote: partNotes['asm:' + p.id] })),
+        ...footageParts.map(p => ({ ...p, sourceLocationId: partSources['fp:' + p.srcKey] || null, lineNote: partNotes['fp:' + p.srcKey] })),
         ...extraParts,
       ])
       let newEntryId = null
@@ -1157,6 +1205,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                       const w = overWarn(p.id, p.unit, partSources['asm:' + p.id], p.qty)
                       return w ? <div style={{ fontSize: 10.5, color: 'var(--amber)', fontWeight: 600, marginTop: 3 }}>⚠️ {w}</div> : null
                     })()}
+                    {assetTagField(partNotes['asm:' + p.id], p.qty, v => setPartNote('asm:' + p.id, v))}
                   </div>
                   <button
                     className="tally-btn tally-sm tally-minus"
@@ -1196,6 +1245,8 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                       const w = overWarn(p.id, p.unit, partSources['fp:' + p.srcKey], p.qty)
                       return w ? <div style={{ fontSize: 10.5, color: 'var(--amber)', fontWeight: 600, marginTop: 3 }}>⚠️ {w}</div> : null
                     })()}
+                    {/* Footage is cable, never serialized — qty 0 mutes the count hint. */}
+                    {assetTagField(partNotes['fp:' + p.srcKey], 0, v => setPartNote('fp:' + p.srcKey, v))}
                   </div>
                   <span className="part-qty" style={{ minWidth: 28, textAlign: 'center' }}>{p.qty.toLocaleString()}</span>
                   <span className="part-unit">{p.unit}</span>
@@ -1221,6 +1272,7 @@ export default function TaskWorkspace({ project, phase, task, onBack, onSubmitDo
                       const w = overWarn(p.id, p.unit, p.sourceLocationId, p.qty)
                       return w ? <div style={{ fontSize: 10.5, color: 'var(--amber)', fontWeight: 600, marginTop: 3 }}>⚠️ {w}</div> : null
                     })()}
+                    {assetTagField(p.lineNote, p.qty, v => setExtraParts(prev => prev.map((ep, i) => i === idx ? { ...ep, lineNote: v || undefined } : ep)))}
                   </div>
                   <button
                     className="tally-btn tally-sm tally-minus"

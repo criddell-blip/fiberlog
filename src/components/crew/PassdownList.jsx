@@ -118,6 +118,13 @@ export default function PassdownList({ submissions }) {
                       <Icon name="truck" size={10} /> {p.sourceName}
                     </span>
                   )}
+                  {/* Asset tags / serials (infra) — mono + wrap so a multi-tag
+                      line stays fully readable in history. */}
+                  {p.lineNote && (
+                    <div style={{ fontSize: 10.5, color: 'var(--muted)', fontFamily: 'var(--font-mono)', marginTop: 2, wordBreak: 'break-word' }}>
+                      <Icon name="tag" size={10} style={{ display: 'inline-block', verticalAlign: '-1px', marginRight: 3 }} />{p.lineNote}
+                    </div>
+                  )}
                 </div>
                 <div className="part-qty" style={{ flexShrink: 0, marginLeft: 10 }}>
                   {p.qty.toLocaleString()} <span className="part-unit" style={{ fontWeight: 400 }}>{p.unit}</span>

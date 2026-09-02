@@ -56,7 +56,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
       if (rows.length === 0) { showToast('No movements in that range'); return }
       const headers = [
         'Date', 'Recorded', 'Type', 'Receipt kind', 'SKU', 'Part', 'Qty', 'Unit',
-        'From', 'To', 'By', 'Vendor/Invoice', 'Notes', 'Movement ID',
+        'From', 'To', 'By', 'Vendor/Invoice', 'Notes', 'Asset tags', 'Movement ID',
       ]
       const lines = [headers.map(escapeCsvField).join(',')]
       for (const m of rows) {
@@ -91,6 +91,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
           m.created_by_user?.name || '',
           m.vendor_invoice || '',
           m.notes || '',
+          m.line_note || '',
           m.id,
         ].map(escapeCsvField).join(','))
       }
@@ -251,6 +252,14 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
                       if (m.notes && !meta.notesConsumed) bits.push(m.notes)
                       return bits.join(' · ')
                     })()}
+                  </div>
+                )}
+                {/* Asset tags / serials carried from the passdown line (infra
+                    auto-deducts). Own row, mono — this is the "which unit went
+                    to that site" record, not prose. */}
+                {m.line_note && (
+                  <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--font-mono)', marginTop: 3, wordBreak: 'break-word' }}>
+                    <Icon name="tag" size={10} style={{ display: 'inline-block', verticalAlign: '-1px', marginRight: 4 }} />{m.line_note}
                   </div>
                 )}
               </div>
