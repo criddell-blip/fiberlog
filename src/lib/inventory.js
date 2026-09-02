@@ -1239,6 +1239,10 @@ export async function recordMovementsBatch(movements, { chunk = false, chunkSize
     // Sonar Account | ID — both Sonar importers stamp it so Reports can
     // join the asset + fiber-jobs families per account.
     sonar_account_id: m.sonar_account_id || null,
+    // Per-unit asset tag / serial (Sonar asset importer). Same column the
+    // approve_submission RPC fills for infra passdown tags; nullable and
+    // outside the immutable guard.
+    line_note: m.line_note || null,
     created_by: m.created_by,
   })
 
@@ -2478,7 +2482,7 @@ export async function getConsumptionLedger({ sinceCreated = null } = {}) {
   const makeQuery = () => {
     let q = db.from('inventory_movements')
       .select(`
-        id, movement_type, quantity, unit, notes, created_at, occurred_at,
+        id, movement_type, quantity, unit, notes, line_note, created_at, occurred_at,
         part_id, consumed_by_user_id, phase_id, task_id, sonar_account_id,
         part:parts_catalog(id, name, unit, department, material_group, item_type, boxhero_id),
         to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type, project_id, project:projects(id, name)),

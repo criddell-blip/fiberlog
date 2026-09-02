@@ -367,6 +367,9 @@ export default function ReportsView() {
           // marker fallbacks for pre-column rows). Null for crew rows.
           accountId: movementAccountId(m),
           customer: consumptionCustomer(m),
+          // Asset tag / serial / MAC of the unit (Sonar asset rows + infra
+          // passdown tags). Null for everything else.
+          lineNote: m.line_note || null,
           // Never rode the tech's truck (mapped/overridden source).
           bypassed,
           sourceOverride: bypassed ? movementSourceOverride(m) : null,
@@ -802,12 +805,13 @@ export default function ReportsView() {
 
   function exportCSV() {
     const headers = ['Date', 'Crew Member', 'Crew Type', 'Project', 'Phase / Site', 'Task', 'Part SKU', 'BoxHero ID', 'Barcode', 'Department', 'Type', 'Material Group', 'Part Name', 'Qty', 'Unit',
-      'Account', 'Customer / Address', 'Source', 'Bypassed Truck']
+      'Account', 'Customer / Address', 'Source', 'Bypassed Truck', 'Asset Tag / Serial']
     const csvRows = [headers, ...rows.map(r => [
       r.date, r.userName, r.crewType, r.projectName, r.phaseName, r.taskName,
       r.partId, r.barcode, barcodeMap[r.partId] || '', r.department, r.itemType, r.materialGroup, r.partName, r.qty, r.unit,
       // Consumption-only enrichment; blank on passdown rows.
       r.accountId || '', r.customer || '', r.source || '', r.bypassed ? 'yes' : '',
+      r.lineNote || '',
     ])]
     const csv = csvRows.map(row => row.map(escapeCsvField).join(',')).join('\n')
     downloadTextAsFile(`fiberlog-${mode === 'consumption' ? 'consumption' : 'parts'}-${dateFrom}-to-${dateTo}.csv`, csv)
@@ -1374,9 +1378,11 @@ function AccountGroup({ acct }) {
               reports stays two lines, each with its own badge. */}
           {Object.entries(rows.reduce((acc, r) => {
             const key = `${r.partId}|${r.source}`
-            if (!acc[key]) acc[key] = { name: r.partName, unit: r.unit, qty: 0, source: r.source, bypassed: false, sourceOverride: null }
+            if (!acc[key]) acc[key] = { name: r.partName, unit: r.unit, qty: 0, source: r.source, bypassed: false, sourceOverride: null, tags: [] }
             acc[key].qty += r.qty
             if (r.bypassed) { acc[key].bypassed = true; acc[key].sourceOverride = acc[key].sourceOverride || r.sourceOverride }
+            // One unit per Sonar asset row → one tag line per unit under the SKU.
+            if (r.lineNote) acc[key].tags.push(r.lineNote)
             return acc
           }, {})).sort(([,a],[,b]) => b.qty - a.qty).map(([key, p], i, arr) => (
             <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -1390,6 +1396,11 @@ function AccountGroup({ acct }) {
                   {key.split('|')[0]}
                   {p.bypassed && <span style={{ color: 'var(--amber)', fontFamily: 'inherit', fontWeight: 700 }}> · ⚠ {p.sourceOverride ? `from ${p.sourceOverride}` : 'bypassed truck'}</span>}
                 </div>
+                {p.tags.map((t, ti) => (
+                  <div key={ti} style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginTop: 1 }}>
+                    <Icon name="tag" size={9} style={{ display: 'inline-block', verticalAlign: '-1px', marginRight: 3 }} />{t}
+                  </div>
+                ))}
               </div>
               <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--orange)', flexShrink: 0, marginLeft: 8 }}>
                 {p.qty.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>{p.unit}</span>

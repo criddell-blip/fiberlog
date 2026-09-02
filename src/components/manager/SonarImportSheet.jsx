@@ -16,6 +16,7 @@ import {
   useCsvFile, useSonarPendingQueue, useEffectiveMap, useAlreadyImportedMarkers,
 } from '../../lib/useCsvImport'
 import { denverNaiveToIso } from '../../lib/sonarDates'
+import { extractItemIdFromValueList, sonarLineNoteFromValueList } from '../../lib/sonarAssetIds'
 import {
   Section, MappingRow, StatusTag, StatusBadge, selectStyle,
   SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
@@ -83,18 +84,9 @@ function parseCityFromFullAddress(full) {
   return ''
 }
 
-// Extract a stable item identifier from `Model Field Data | Value List`.
-// Values are pipe-separated and often duplicated. We take the first
-// numeric-looking value (which Sonar uses as the inventory item ID).
-// Falls back to an empty string if nothing usable is present.
-function extractItemIdFromValueList(valueList) {
-  if (!valueList || typeof valueList !== 'string') return ''
-  const tokens = valueList.split('|').map(s => s.trim()).filter(Boolean)
-  for (const t of tokens) {
-    if (/^\d{3,}$/.test(t)) return t  // 3+ digit number = item ID
-  }
-  return tokens[0] || ''
-}
+// The item key (= the asset tag, first number) and the per-unit identifiers
+// (serial / MAC / alt tag) both come out of `Model Field Data | Value List`
+// — one parse rule in lib/sonarAssetIds.js, shared with the backfill script.
 
 export default function SonarImportSheet({ onClose, onApplied }) {
   const { showToast, currentUser } = useApp()
@@ -254,7 +246,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       const valueListLen = (row['Model Field Data | Value List'] || '').length
       const prevLoc = (row['Previous Inventory Location'] || '').toUpperCase()
       const isWarehouse = prevLoc === 'WAREHOUSE'
-      const entry = { row, originalIdx, valueListLen, isWarehouse, sonarItemId: itemId }
+      const entry = { row, originalIdx, valueListLen, isWarehouse, sonarItemId: itemId, valueList: row['Model Field Data | Value List'] || '' }
       const existing = groups.get(key)
       if (!existing) {
         groups.set(key, { canonical: entry, dupCount: 1 })
@@ -272,6 +264,10 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       row: g.canonical.row,
       originalIdx: g.canonical.originalIdx,
       sonarItemId: g.canonical.sonarItemId,
+      // Per-unit identifiers (asset tag / serial / MAC / alt tag) from the
+      // canonical row — the longest Value List wins the dedup above, so
+      // this is the most complete copy Sonar sent.
+      lineNote: sonarLineNoteFromValueList(g.canonical.valueList),
       dupCount: g.dupCount,
     }))
   }, [csvRows])
@@ -616,6 +612,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         sonarProject,
         sonarLoc, sonarModel,
         sonarItemId,
+        lineNote: entry.lineNote || null,
         userId, truckId, userName,
         sourceLocationId,
         sourceIsWarehouse,
@@ -756,6 +753,10 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             consumed_by_user_id: r.userId || null,
             // Account join key for the combined per-account report.
             sonar_account_id: r.accountId || null,
+            // Asset tag / serial / MAC of the unit that went in — same
+            // column the infra passdown tags use, so Activity and the
+            // CSVs show it the same way. Never folded into `notes`.
+            line_note: r.lineNote || null,
           }
         })
       if (movements.length === 0) {
@@ -1177,6 +1178,11 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                             {r.partId && (
                               <div style={{ fontSize: 10, color: 'var(--hint)' }}>
                                 {r.partId}{r.routing ? ` · ${r.routing}` : ''}
+                              </div>
+                            )}
+                            {r.lineNote && (
+                              <div style={{ fontSize: 10, color: 'var(--hint)', fontFamily: 'var(--font-mono)', marginTop: 2 }} title="Written to the movement as its asset tag / serial">
+                                <Icon name="tag" size={9} style={{ display: 'inline-block', verticalAlign: '-1px', marginRight: 3 }} />{r.lineNote}
                               </div>
                             )}
                           </td>
