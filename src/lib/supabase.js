@@ -24,6 +24,38 @@ export const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 //   const rows = must(await db.from('tasks').delete().in('id', ids))
 export const must = res => { if (res.error) throw res.error; return res.data || [] }
 
+// Pre-flight for the task / phase / project delete chains (ProjectManager,
+// AdminPanel). Those chains delete entry_parts → log_entries → submissions →
+// work_sessions → tasks in that order, and an APPROVED passdown's submission
+// is FK-blocked by the inventory movement it booked — so without this check
+// the chain wipes the logged materials for every passdown on the task and
+// only THEN fails, leaving closed tasks with part-less passdowns that can
+// neither be deleted nor explained (Sep 3 2026, Gigwave › Ninigret). Throw
+// BEFORE anything is destroyed. Movements are checked by task_id AND by the
+// submissions' ids (auto-deduct stamps both; older rows may carry only one).
+export async function assertNoBookedInventory(taskIds, label = 'this task') {
+  const ids = (taskIds || []).filter(Boolean)
+  if (ids.length === 0) return
+  // head:true → data is null and the answer is in .count, so no must() here.
+  const r1 = await db.from('inventory_movements').select('id', { count: 'exact', head: true }).in('task_id', ids)
+  if (r1.error) throw r1.error
+  const byTask = r1.count || 0
+  const sessions = must(await db.from('work_sessions').select('id').in('task_id', ids))
+  let bySub = 0
+  if (sessions.length > 0) {
+    const subs = must(await db.from('submissions').select('id').in('session_id', sessions.map(s => s.id)))
+    if (subs.length > 0) {
+      const r = await db.from('inventory_movements').select('id', { count: 'exact', head: true }).in('submission_id', subs.map(s => s.id))
+      if (r.error) throw r.error
+      bySub = r.count || 0
+    }
+  }
+  const n = Math.max(byTask, bySub)
+  if (n > 0) {
+    throw new Error(`${label} has ${n} inventory movement${n === 1 ? '' : 's'} booked from approved passdowns — deleting it would erase the passdown history but leave the ledger behind, so it's blocked. Close the task instead.`)
+  }
+}
+
 // Supabase/PostgREST silently caps ANY un-paginated select at 1,000 rows
 // (server-side db-max-rows; a client .limit() above that is clamped, not
 // honored) — and which rows survive follows physical heap order, so the most

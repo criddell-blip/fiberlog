@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import {
-  db, must, addTask, addInfraTask, setTaskClosed,
+  db, must, assertNoBookedInventory, addTask, addInfraTask, setTaskClosed,
   getSitesByProject, addSite, updateSite,
   decommissionSite,
   getTaskCountsBySite, getTasksBySite, getMaterialsAtSite,
@@ -358,6 +358,10 @@ export default function ProjectManager() {
       // instead of throwing, and an approved task's submissions are FK-blocked
       // by inventory_movements.submission_id, so an unchecked chain would
       // half-complete and still toast "Task deleted" (backlog #42).
+      // Pre-flight BEFORE any delete: must() only makes the failure honest,
+      // it can't undo the entry_parts/log_entries already wiped by the time
+      // the FK-blocked submissions step throws (Sep 3 2026 incident).
+      await assertNoBookedInventory([task.id], `"${task.name}"`)
       const sessions = must(await db.from('work_sessions').select('id').eq('task_id', task.id))
       const sessionIds = sessions.map(s => s.id)
       if (sessionIds.length > 0) {

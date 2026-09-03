@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
-import { db, must } from '../../lib/supabase'
+import { db, must, assertNoBookedInventory } from '../../lib/supabase'
 import AdminUsersView from './AdminUsersView'
 import CrewTypePermissionsView from './CrewTypePermissionsView'
 import { useBackClose } from '../../lib/backStack'
@@ -72,6 +72,8 @@ export default function AdminPanel() {
     try {
       const tasks = must(await db.from('tasks').select('id').eq('phase_id', phase.id))
       const taskIds = tasks.map(t => t.id)
+      // Pre-flight before anything is destroyed — see assertNoBookedInventory.
+      await assertNoBookedInventory(taskIds, `Phase "${phase.name}"`)
       if (taskIds.length > 0) {
         const sessions = must(await db.from('work_sessions').select('id').in('task_id', taskIds))
         const sessionIds = sessions.map(s => s.id)
@@ -103,6 +105,11 @@ export default function AdminPanel() {
     setLoading(true)
     try {
       const phases = must(await db.from('phases').select('id').eq('project_id', project.id))
+      // Pre-flight across EVERY phase before the loop deletes anything.
+      if (phases.length > 0) {
+        const allTasks = must(await db.from('tasks').select('id').in('phase_id', phases.map(p => p.id)))
+        await assertNoBookedInventory(allTasks.map(t => t.id), `Project "${project.name}"`)
+      }
       for (const phase of phases) {
         const tasks = must(await db.from('tasks').select('id').eq('phase_id', phase.id))
         const taskIds = tasks.map(t => t.id)
@@ -136,6 +143,9 @@ export default function AdminPanel() {
     try {
       const tasks = must(await db.from('tasks').select('id').eq('phase_id', phase.id))
       const taskIds = tasks.map(t => t.id)
+      // Same pre-flight: clearing deletes submissions too, and an approved
+      // one is FK-blocked by its movement.
+      await assertNoBookedInventory(taskIds, `Phase "${phase.name}"`)
       if (taskIds.length > 0) {
         const sessions = must(await db.from('work_sessions').select('id').in('task_id', taskIds))
         const sessionIds = sessions.map(s => s.id)
