@@ -11,7 +11,10 @@ import {
   setPartSonarRouting, SONAR_ROUTING_OPTIONS,
   createPart,
   confirmNegativeStock,
+  getSonarRawCsvs,
 } from '../../lib/inventory'
+import { resolveServiceRedirect } from '../../lib/serviceRouting'
+import { buildSonarJobIndex, nearestSonarJob } from '../../lib/sonarJobIndex'
 import {
   useCsvFile, useSonarPendingQueue, useEffectiveMap, useAlreadyImportedMarkers,
 } from '../../lib/useCsvImport'
@@ -276,6 +279,37 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   // used to skip re-imports. Covers the "Looker daily report uses a rolling
   // window" case. Refetches whenever a new CSV is loaded.
   const alreadyImportedItemIds = useAlreadyImportedMarkers('sonar', dedupedRows)
+
+  // Per-account job index from the fiber-jobs deliveries (pending + already
+  // applied) around this CSV's dates. The asset report has no job type; this
+  // is how an ONT learns it went out on a Drop Fix / Fiber Fix and belongs in
+  // the project's Service ledger, not the grant one. Assets precede job
+  // completion by 0–3 days, so a fix job may not be reported yet — those rows
+  // book to the grant project and the later fiber-jobs import proposes the
+  // reclass (two-way check). Failure = no index = every row treated as
+  // "job not reported yet"; warn-only, never blocks the import.
+  const [jobIndex, setJobIndex] = useState(null)
+  useEffect(() => {
+    if (!dedupedRows || dedupedRows.length === 0) { setJobIndex(null); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const dates = dedupedRows.map(d => String(d.row['Date Time'] || '').slice(0, 10)).filter(s => /^\d{4}-\d{2}-\d{2}$/.test(s)).sort()
+        if (dates.length === 0) { setJobIndex(new Map()); return }
+        // A job completed on day D is delivered on/after D, so "received since
+        // the earliest asset date − 2" covers the whole lookup window.
+        const since = new Date(`${dates[0]}T00:00:00Z`)
+        since.setUTCDate(since.getUTCDate() - 2)
+        const deliveries = await getSonarRawCsvs({ reportType: 'fiber_jobs', sinceReceived: since.toISOString() })
+        if (cancelled) return
+        setJobIndex(buildSonarJobIndex(deliveries.map(d => d.raw_csv)))
+      } catch (e) {
+        console.warn('Fiber-jobs index load failed (fix-job routing off for this import):', e)
+        if (!cancelled) setJobIndex(new Map())
+      }
+    })()
+    return () => { cancelled = true }
+  }, [dedupedRows])
 
   // ── Unique values extracted from the CSV (over deduped rows) ───────────
   const uniqueSonarLocs = useMemo(() => {
@@ -603,7 +637,36 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       if (sonarProject && !policyOverrodeProject) {
         phaseTagId = effectiveProjectMap.get(sonarProject.toUpperCase()) || null
       }
+
+      // Fix-job redirect. Only rows the rules resolved (never a manual pick,
+      // never a wireless-policy row) and only when the nearest fiber-jobs row
+      // for this account is a *Fix and the project has a Service sibling.
+      // Bucket AND phase tag move together so Sage's PROJECTID follows.
+      let serviceRedirect = false
+      let matchedJob = null
+      let jobHint = null
+      if (status === 'ready' && destId && !rowDest[idx] && !policyOverrodeProject
+          && routing !== 'gigwave' && routing !== 'none' && jobIndex) {
+        matchedJob = nearestSonarJob(jobIndex, accountId, row['Date Time'] || '')
+        const destProjectId = buckets.find(b => b.id === destId)?.project_id || null
+        const svc = resolveServiceRedirect({
+          projectId: destProjectId, jobTypeRaw: matchedJob?.jobTypeRaw, manual: false, phases,
+        })
+        if (svc.redirected && svc.bucketId) {
+          destId = svc.bucketId
+          phaseTagId = svc.phaseId
+          serviceRedirect = true
+          destReason = `fix job: ${matchedJob.jobTypeRaw} ${matchedJob.date} → ${svc.projectName}`
+        } else if (svc.redirected) {
+          status = 'no-project-bucket'   // sibling exists but its bucket is missing/inactive
+        } else if (matchedJob) {
+          jobHint = `job: ${matchedJob.jobTypeRaw} ${matchedJob.date}`
+        } else {
+          jobHint = 'no Sonar job reported yet — booking as install'
+        }
+      }
       return {
+        serviceRedirect, matchedJob, jobHint,
         idx,
         accountId,
         date: row['Date Time'] || '',
@@ -632,19 +695,19 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     // destination their same-account siblings resolved to — see
     // lib/accountInheritance.js for the rules.
     return applyAccountInheritance(rows)
-  }, [dedupedRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, phases, effectiveCityMap, effectiveProjectMap, effectiveSourceMap, rowDest, rowSource, pendingPartRouting, alreadyImportedItemIds])
+  }, [dedupedRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, phases, effectiveCityMap, effectiveProjectMap, effectiveSourceMap, rowDest, rowSource, pendingPartRouting, alreadyImportedItemIds, jobIndex])
 
   // Preview-table order only — apply/stats keep working off `resolved`.
   const displayRows = useMemo(() => groupRowsByAccount(resolved), [resolved])
 
   const stats = useMemo(() => {
     if (resolved.length === 0) return null
-    let ready = 0, blocked = 0, excludedCount = 0, alreadyImported = 0
+    let ready = 0, blocked = 0, excludedCount = 0, alreadyImported = 0, toService = 0
     const blockReasons = {}
     for (const r of resolved) {
       if (excluded.has(r.idx)) { excludedCount++; continue }
       if (r.status === 'already-imported') { alreadyImported++; continue }
-      if (r.status === 'ready') ready++
+      if (r.status === 'ready') { ready++; if (r.serviceRedirect) toService++ }
       else {
         blocked++
         blockReasons[r.status] = (blockReasons[r.status] || 0) + 1
@@ -652,7 +715,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     }
     const csvRowCount = csvRows?.length || 0
     const dedupCollapsed = csvRowCount - resolved.length
-    return { total: resolved.length, ready, blocked, blockReasons, excludedCount, alreadyImported, csvRowCount, dedupCollapsed }
+    return { total: resolved.length, ready, blocked, blockReasons, excludedCount, alreadyImported, csvRowCount, dedupCollapsed, toService }
   }, [resolved, excluded, csvRows])
 
   // Which cities surface in the City mapping section: any city that:
@@ -1101,6 +1164,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                       <>{stats.csvRowCount} CSV rows → {stats.total} unique installs · </>
                     )}
                     {stats.ready} ready · {stats.blocked} blocked
+                    {stats.toService > 0 && <> · <span style={{ color: 'var(--amber)', fontWeight: 700 }}>{stats.toService} fix-job unit{stats.toService === 1 ? '' : 's'} → Service</span></>}
                     {stats.alreadyImported > 0 && <> · {stats.alreadyImported} already imported</>}
                     {stats.excludedCount > 0 && <> · {stats.excludedCount} excluded</>}
                   </span>
@@ -1223,8 +1287,12 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                               </>
                             ) : r.destName ? (
                               <div>
-                                <div style={{ fontWeight: 600 }}>{r.destName}</div>
-                                {r.destReason && <div style={{ fontSize: 10, color: 'var(--hint)' }}>{r.destReason}</div>}
+                                <div style={{ fontWeight: 600, color: r.serviceRedirect ? 'var(--amber)' : undefined }}>{r.destName}</div>
+                                {r.destReason && <div style={{ fontSize: 10, color: r.serviceRedirect ? 'var(--amber)' : 'var(--hint)', fontWeight: r.serviceRedirect ? 700 : undefined }}>{r.destReason}</div>}
+                                {/* Which fiber-jobs row this unit matched (or that none has
+                                    been reported yet — the fix-job import will propose the
+                                    reclass if one turns up). */}
+                                {r.jobHint && <div style={{ fontSize: 10, color: 'var(--hint)' }}>{r.jobHint}</div>}
                               </div>
                             ) : (
                               <span style={{ color: 'var(--hint)' }}>—</span>

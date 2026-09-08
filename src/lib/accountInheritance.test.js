@@ -75,6 +75,16 @@ describe('applyAccountInheritance', () => {
     expect(out[2].destId).toBe('gw')
     expect(out[1].destReason).toBe('same account → follows Wave LR')
   })
+
+  it('a fix-job ONT redirected to the Service ledger donates that bucket + phase to its adapter', () => {
+    const ont = row({ idx: 0, accountId: 'A1', partId: 'GP1100X', partName: 'ONT', status: 'ready',
+      destId: 'wm-svc', destName: 'West Mountain - Service', phaseTagId: 'ph-service', serviceRedirect: true })
+    const adapter = row({ idx: 1, accountId: 'A1', partId: 'ADPT', partName: 'Adapter', status: 'ask' })
+    const out = applyAccountInheritance([ont, adapter])
+    expect(out[1].destId).toBe('wm-svc')
+    expect(out[1].phaseTagId).toBe('ph-service')
+    expect(out[1].status).toBe('ready')
+  })
 })
 
 describe('groupRowsByAccount', () => {

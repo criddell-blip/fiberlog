@@ -15,6 +15,7 @@ import {
   useCsvFile, useSonarPendingQueue, useEffectiveMap, useAlreadyImportedMarkers,
 } from '../../lib/useCsvImport'
 import { denverNaiveToIso } from '../../lib/sonarDates'
+import { resolveServiceRedirect, isServiceJobType } from '../../lib/serviceRouting'
 import {
   Section, MappingRow, StatusBadge, StatusTag, selectStyle,
   SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
@@ -322,7 +323,20 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       const mappedPhase = mappedPhaseId ? phases.find(p => p.id === mappedPhaseId) : null
       const phase = overridePhase || mappedPhase
       const phaseOverridden = !!overridePhase
-      const destBucketId = phase?.bucket_id || null
+      const grantBucketId = phase?.bucket_id || null
+      // Fix jobs (Drop Fix / Fiber Fix / any *Fix) are grant-ineligible:
+      // when the project has a Service sibling, the row books there — bucket
+      // AND phase tag, so Sage's PROJECTID follows. A manual phase pick is a
+      // human decision and is never redirected. See lib/serviceRouting.
+      const jobTypeRaw = row['Job Type | Name'] || ''
+      const svc = resolveServiceRedirect({
+        projectId: phase?.project_id || null, jobTypeRaw, manual: phaseOverridden, phases,
+      })
+      const serviceRedirect = svc.redirected
+      // Fix job on a project with NO sibling (non-grant projects are fine;
+      // a BEAD project without one is a setup gap) — surfaced, not blocked.
+      const fixWithoutService = !serviceRedirect && !phaseOverridden && !!phase && isServiceJobType(jobTypeRaw)
+      const destBucketId = serviceRedirect ? svc.bucketId : grantBucketId
       const customer = customerColumn ? (row[customerColumn] || '').trim() : ''
       const account = (row['Account | ID'] || '').trim()
       const dateStr = (row['Job | Completion Date time'] || '').slice(0, 10)
@@ -381,11 +395,17 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         username, userId, userName,
         sourceLocId, sourceIsMapped,
         sonarProject,
-        phaseId: phase?.id || null, phaseName: phase?.name || '', phaseProjectName: phase?.project_name || '',
+        phaseId: serviceRedirect ? svc.phaseId : (phase?.id || null),
+        phaseName: serviceRedirect ? svc.phaseName : (phase?.name || ''),
+        phaseProjectName: serviceRedirect ? svc.projectName : (phase?.project_name || ''),
         phaseOverridden,
         destBucketId,
+        // Grant-side resolution kept for the preview + the backward reclass
+        // check (assets already booked to the grant bucket for this account).
+        grantBucketId, grantProjectName: phase?.project_name || '',
+        serviceRedirect, fixWithoutService,
         customer,
-        account, jobType, jobTypeRaw: row['Job Type | Name'] || '',
+        account, jobType, jobTypeRaw,
         notes: row['Job | Completion Notes'] || '',
         dedupKey,
         isAlreadyImported,
@@ -479,19 +499,19 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   const stats = useMemo(() => {
     if (resolved.length === 0) return null
     let ready = 0, blocked = 0, alreadyImported = 0, excludedCount = 0
-    let totalReadyMovements = 0
+    let totalReadyMovements = 0, toService = 0
     for (const r of resolved) {
       if (excluded.has(r.idx)) { excludedCount++; continue }
       if (r.rowStatus === 'already-imported') { alreadyImported++; continue }
       if (r.rowStatus === 'ready') {
         const lineCount = r.lines.filter(l => l.status === 'ready' && l.sku && l.qty > 0).length
-        if (lineCount > 0) { ready++; totalReadyMovements += lineCount }
+        if (lineCount > 0) { ready++; totalReadyMovements += lineCount; if (r.serviceRedirect) toService++ }
         else blocked++
       } else {
         blocked++
       }
     }
-    return { total: resolved.length, ready, blocked, excludedCount, alreadyImported, totalReadyMovements }
+    return { total: resolved.length, ready, blocked, excludedCount, alreadyImported, totalReadyMovements, toService }
   }, [resolved, excluded])
 
   async function handleApply() {
@@ -520,6 +540,9 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             // from a mapped one — it's just stock sitting in a bucket. This is
             // the only durable record that someone picked it by hand.
             r.phaseOverridden && `dest: manual → ${r.phaseProjectName} / ${r.phaseName}`,
+            // Why this fix-job material sits in the Service ledger and not
+            // the grant one it was tagged for.
+            r.serviceRedirect && `dest: service (${r.jobTypeRaw}) → ${r.phaseProjectName} / ${r.phaseName}`,
             `[sonar_jobs:${r.dedupKey}]`,
           ].filter(Boolean)
           movements.push({
@@ -785,6 +808,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
                 {stats && (
                   <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: 'var(--hint)' }}>
                     {stats.ready} ready ({stats.totalReadyMovements} movements) · {stats.blocked} blocked
+                    {stats.toService > 0 && <> · <span style={{ color: 'var(--amber)', fontWeight: 700 }}>{stats.toService} fix job{stats.toService === 1 ? '' : 's'} → Service</span></>}
                     {stats.alreadyImported > 0 && <> · {stats.alreadyImported} already imported</>}
                     {stats.excludedCount > 0 && <> · {stats.excludedCount} excluded</>}
                   </span>
@@ -988,12 +1012,19 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
             {' · '}
             {job.phaseOverridden
               ? <span style={{ color: 'var(--purple)' }}>→ {job.phaseProjectName} / {job.phaseName} (manual)</span>
+              : job.serviceRedirect
+                ? <span style={{ color: 'var(--amber)', fontWeight: 700 }}>{job.sonarProject} → {job.phaseProjectName} / {job.phaseName} (fix job → Service)</span>
               : job.phaseName
                 ? <>{job.sonarProject} → {job.phaseProjectName} / {job.phaseName}</>
                 : job.sonarProject
                   ? <>{job.sonarProject} <em>— unmapped</em></>
                   : <em>no project tag</em>}
           </div>
+          {job.fixWithoutService && (
+            <div style={{ fontSize: 10, color: 'var(--amber)', marginTop: 2 }}>
+              ⚠ Fix job booking to the {job.grantProjectName} ledger — that project has no Service sibling (Projects → Create Service sibling).
+            </div>
+          )}
           {/* Customer name — only present when the Sonar export carries the
               column (see pickFiberCustomerColumn). Full text colour so it
               reads as identity, not metadata. */}

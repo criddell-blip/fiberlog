@@ -727,6 +727,24 @@ export async function getProcessedSonarImports({ limit = 30, reportType = null }
   return data || []
 }
 
+// Raw CSVs of one report family received since a date — pending AND already
+// processed. The asset-consumption importer builds its per-account job index
+// from the fiber-jobs deliveries this returns (lib/sonarJobIndex), so an ONT
+// can be matched to the Drop Fix / Fiber Fix job it was assigned on. Daily
+// deliveries are a few KB each; raw_csv is blanked by the retention migration
+// after 60 days, which is far wider than the import window this serves.
+export async function getSonarRawCsvs({ reportType, sinceReceived }) {
+  let q = db.from('sonar_pending_imports')
+    .select('id, received_at, filename, raw_csv')
+    .eq('report_type', reportType)
+    .not('raw_csv', 'is', null)
+    .order('received_at', { ascending: true })
+  if (sinceReceived) q = q.gte('received_at', sinceReceived)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
 // Fetch a single pending import's full raw_csv. Separate from the list
 // query so we don't ship the CSV blob for every row in the queue.
 export async function getPendingSonarImport(id) {
