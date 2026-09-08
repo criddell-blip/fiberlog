@@ -7,6 +7,7 @@ import {
   getTaskCountsBySite, getTasksBySite, getMaterialsAtSite,
 } from '../../lib/supabase'
 import { useBackClose } from '../../lib/backStack'
+import { serviceProjectFor, isServiceProject } from '../../lib/serviceRouting'
 import Icon from '../shared/Icon'
 
 const SITE_TYPES = [
@@ -83,6 +84,11 @@ export default function ProjectManager() {
   }, [])
   const [showAddPhase, setShowAddPhase] = useState(false)
   const [showAddProject, setShowAddProject] = useState(false)
+  // "Grant-funded" on the New Project form → also create the non-grant
+  // Service sibling (see lib/serviceRouting). siblingSaving guards the
+  // detail-view button for existing projects.
+  const [projGrant, setProjGrant] = useState(false)
+  const [siblingSaving, setSiblingSaving] = useState(false)
 
   // Add phase form state
   const [phaseName, setPhaseName] = useState('')
@@ -542,13 +548,48 @@ export default function ProjectManager() {
       if (error) throw error
 
       setProjects(prev => [...prev, { ...data, fiber: data.total_fiber_ft, conduit: data.total_conduit_ft, phases: [] }])
-      setProjName(''); setProjRegion(''); setProjFiber(''); setProjTargets({})
+      // (setProjFiber used to be called here — that state no longer exists
+      // and the stray call threw AFTER the insert, so every new project
+      // toasted "Failed" while actually being created.)
+      setProjName(''); setProjRegion(''); setProjTargets({})
       setShowAddProject(false)
       showToast(`Project created: ${data.name}`)
+      if (projGrant) await createServiceSibling(data)
+      setProjGrant(false)
     } catch (e) {
       showToast('Failed: ' + e.message)
     } finally {
       setProjSaving(false)
+    }
+  }
+
+  // Create "<name> - Service": the non-grant sibling that absorbs fix-job
+  // material for a BEAD project. The DB trigger creates its Region bucket on
+  // insert; the single "Service" phase is what the importers route to and what
+  // crews log repair days against. Two inserts, each error-checked
+  // (supabase-js returns {error}, it doesn't throw) — a project without its
+  // phase would leave fix rows unroutable.
+  async function createServiceSibling(parent) {
+    if (!parent?.id) return
+    setSiblingSaving(true)
+    try {
+      const { data: svc, error } = await db.from('projects').insert({
+        name: `${parent.name} - Service`,
+        region: parent.region || parent.name,
+        status: 'active',
+        service_for_project_id: parent.id,
+      }).select().single()
+      if (error) throw error
+      const { data: ph, error: phErr } = await db.from('phases')
+        .insert({ project_id: svc.id, name: 'Service', sequence_order: 1 })
+        .select().single()
+      if (phErr) throw phErr
+      setProjects(prev => [...prev, { ...svc, fiber: 0, conduit: 0, phases: [{ ...ph, tasks: [] }] }])
+      showToast(`Service project created: ${svc.name}`)
+    } catch (e) {
+      showToast('Service project failed: ' + e.message)
+    } finally {
+      setSiblingSaving(false)
     }
   }
 
@@ -944,10 +985,43 @@ export default function ProjectManager() {
                     fontSize: 10, fontWeight: 700, verticalAlign: 'middle',
                   }}>INFRA</span>
                 )}
+                {isServiceProject(selProject) && (
+                  <span style={{
+                    marginLeft: 8, padding: '2px 8px', borderRadius: 20,
+                    background: 'var(--amber-lt)', color: 'var(--amber-mid)',
+                    fontSize: 10, fontWeight: 700, verticalAlign: 'middle',
+                  }}>SERVICE · NON-GRANT</span>
+                )}
               </div>
               <div style={{ fontSize: 12, color: 'var(--muted)' }}>{selProject.region}</div>
             </div>
           </div>
+          {/* Grant / Service link. A project WITH a sibling is grant-restricted:
+              the importers send its fix-job material to the sibling. */}
+          {(() => {
+            if (isServiceProject(selProject)) {
+              const parent = projects.find(p => p.id === selProject.service_for_project_id)
+              return (
+                <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+                  Fix-job material for <b>{parent?.name || 'its grant project'}</b> books here, not in the grant ledger.
+                </div>
+              )
+            }
+            const sibling = serviceProjectFor(selProject.id, projects)
+            if (sibling) {
+              return (
+                <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+                  Grant-restricted · Fix jobs route to <b>{sibling.name}</b>
+                </div>
+              )
+            }
+            return (
+              <button onClick={() => createServiceSibling(selProject)} disabled={siblingSaving}
+                style={{ marginTop: 8, fontSize: 12, color: 'var(--orange)', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                {siblingSaving ? 'Creating…' : '+ Create Service sibling (keep fix-job material out of this grant ledger)'}
+              </button>
+            )
+          })()}
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
@@ -1726,6 +1800,16 @@ export default function ProjectManager() {
                 </div>
               ))}
             </div>
+
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginTop: 4, cursor: 'pointer' }}>
+              <input type="checkbox" checked={projGrant} onChange={e => setProjGrant(e.target.checked)} style={{ marginTop: 3 }} />
+              <span>
+                <b>Grant-funded (BEAD)</b>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  Also create “{(projName.trim() || 'Project')} - Service” so fix-job material stays out of the grant ledger.
+                </div>
+              </span>
+            </label>
 
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowAddProject(false)}>Cancel</button>

@@ -667,11 +667,13 @@ export async function getPhasesWithBuckets() {
   const { data, error } = await db
     .from('phases')
     .select(`
-      id, name, project_id, status,
-      project:projects(id, name)
+      id, name, project_id, status, sequence_order,
+      project:projects(id, name, service_for_project_id)
     `)
     .order('name')
   if (error) throw error
+  // sequence_order + project.service_for_project_id feed lib/serviceRouting
+  // (fix-job redirect to a project's Service sibling) — keep them selected.
   // Fetch buckets per project in one shot
   const { data: buckets, error: bErr } = await db
     .from('inventory_locations')
