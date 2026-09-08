@@ -72,10 +72,17 @@ export function movementDisplay(m) {
   // was a PO correction rather than a count fix.
   const isReceiptReversal = isAdjustDown && !!m?.purchase_request_line_id
 
+  // A Region→Region transfer carrying reclass_of moved consumption between
+  // two project ledgers after the fact (grant ↔ Service). Same arithmetic as
+  // any transfer; the label says why it exists.
+  const isReclass = type === 'transfer' && !!m?.reclass_of
+
   const colors = isAdjustUp
     ? { bg: 'var(--teal-lt)', text: 'var(--accent-dk)', icon: 'plus' }
     : isAdjustDown
     ? { bg: 'var(--red-lt)',  text: 'var(--red)',       icon: isReceiptReversal ? 'rotate' : 'x' }
+    : isReclass
+    ? { ...base, icon: 'rotate' }
     : base
 
   return {
@@ -83,9 +90,11 @@ export function movementDisplay(m) {
     isAdjustUp,
     isAdjustDown,
     isReceiptReversal,
+    isReclass,
     label: isAdjustUp ? 'Adjust up'
       : isReceiptReversal ? 'Receipt reversal'
       : isAdjustDown ? 'Adjust down'
+      : isReclass ? 'Reclass'
       : (TYPE_LABELS[type] || type || 'Movement'),
     sign: isAdjustDown ? -1 : 1,
     qtyPrefix: isAdjustUp ? '+' : isAdjustDown ? '−' : '',

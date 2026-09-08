@@ -8,6 +8,7 @@ import {
   movementEffectiveDate,
   sageProjectId,
   sageItemId,
+  countUnexportedBefore,
 } from '../../lib/inventory'
 import { downloadTextAsFile } from '../../lib/csvImport'
 import { isoLocalDate } from '../../lib/format'
@@ -59,17 +60,29 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
   const [submitting, setSubmitting] = useState(false)
   const [lastBatch, setLastBatch] = useState(null)
 
+  // Unexported rows dated BEFORE this window but created inside it — a
+  // reclass carries its original's work date, so a September correction of
+  // an August row never shows in a September export. Surfaced, not fixed:
+  // the accountant widens the range (or the period is closed and they book
+  // it by hand).
+  const [unexportedBefore, setUnexportedBefore] = useState(0)
+
   async function load() {
     setLoading(true)
     setError('')
     try {
-      const ms = await getMovementsForSageExport({
-        // Convert local dates to UTC ISO bounds. Inclusive of both endpoints.
-        since: since ? new Date(since + 'T00:00:00').toISOString() : null,
-        until: until ? new Date(until + 'T23:59:59.999').toISOString() : null,
-        includeExported,
-      })
+      const sinceIso = since ? new Date(since + 'T00:00:00').toISOString() : null
+      const [ms, before] = await Promise.all([
+        getMovementsForSageExport({
+          // Convert local dates to UTC ISO bounds. Inclusive of both endpoints.
+          since: sinceIso,
+          until: until ? new Date(until + 'T23:59:59.999').toISOString() : null,
+          includeExported,
+        }),
+        countUnexportedBefore({ since: sinceIso }).catch(e => { console.warn('unexported-before count failed:', e); return 0 }),
+      ])
       setMovements(ms)
+      setUnexportedBefore(before)
     } catch (e) {
       console.error('Sage export load failed:', e)
       setError(e.message || String(e))
@@ -249,6 +262,11 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
             {skippedInternal > 0 && (
               <span style={{ color: 'var(--hint)' }}>
                 {skippedInternal} skipped ({includeFieldReturns ? 'purchase receipts' : 'receipts'} + adjusts + internal moves{includeStaging ? '' : ' + crew loads/returns'})
+              </span>
+            )}
+            {unexportedBefore > 0 && (
+              <span style={{ color: 'var(--amber)', fontWeight: 600 }} title="Back-dated corrections (e.g. a grant ↔ Service reclass keeps the original work date). Widen the range to include them.">
+                ⚠ {unexportedBefore} unexported movement{unexportedBefore === 1 ? '' : 's'} dated before {since}
               </span>
             )}
             {Object.entries(typeCounts).map(([type, count]) => (

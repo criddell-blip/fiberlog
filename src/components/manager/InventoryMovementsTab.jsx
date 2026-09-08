@@ -6,6 +6,7 @@ import { fmtWhen } from '../../lib/format'
 import { TYPE_COLORS, TYPE_LABELS, RECEIPT_KIND_LABEL, movementDisplay, signedQty, resolveReceiveMeta } from '../../lib/movementDisplay'
 import { chipStyle, cardSurface, LoadingBlock, EmptyState } from './chrome'
 import Icon from '../shared/Icon'
+import ReclassMovementSheet from './ReclassMovementSheet'
 
 // Local calendar date as YYYY-MM-DD (toISOString would shift the day in
 // negative-offset timezones — same trap SageExportSheet documents).
@@ -17,9 +18,13 @@ function isoLocalDate(d) {
 }
 
 export default function InventoryMovementsTab({ locations, refreshKey }) {
-  const { showToast } = useApp()
+  const { showToast, currentUser } = useApp()
   const [movements, setMovements] = useState([])
   const [loading, setLoading] = useState(true)
+  // Owner-only "Reclassify…" on consumption rows (grant ↔ Service ledgers).
+  // Pulling stock out of a Region is owner-only everywhere else too.
+  const canReclass = currentUser?.role === 'owner'
+  const [reclassTarget, setReclassTarget] = useState(null)
   const [filterType, setFilterType] = useState('all')
   // Receipt-kind sub-filter, meaningful only while the Receive chip is
   // active: purchases vs field returns vs found. This is the separation the
@@ -194,10 +199,14 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
             // Type accent, adjust direction and endpoint fallbacks all come
             // from lib/movementDisplay so this feed, its CSV export and the
             // part-history panel can't drift apart.
-            const { colors, label, qtyColor, qtyPrefix, fromName, toName, receiptKind } = movementDisplay(m)
+            const { colors, label, qtyColor, qtyPrefix, fromName, toName, receiptKind, isReclass } = movementDisplay(m)
             // Non-purchase receipts get a second pill so a field return is
             // never read as a PO delivery at a glance.
             const kindPill = receiptKind && receiptKind !== 'purchase' ? (RECEIPT_KIND_LABEL[receiptKind] || receiptKind) : null
+            // Consumption row (transfer into a Region) the owner may move to
+            // another project's ledger. Reclass rows qualify too — that's how
+            // one is reversed.
+            const reclassable = canReclass && m.movement_type === 'transfer' && m.to_location?.type === 'job_site'
             return (
               <div key={m.id} style={{
                 ...cardSurface,
@@ -232,6 +241,18 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
                     {fmtWhen(m.created_at)}
                     {m.created_by_user && ` · ${m.created_by_user.initials}`}
                   </span>
+                  {isReclass && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 999, whiteSpace: 'nowrap',
+                      background: 'var(--amber-lt)', color: 'var(--amber)',
+                    }}>RECLASS</span>
+                  )}
+                  {reclassable && (
+                    <button onClick={() => setReclassTarget(m)}
+                      style={{ fontSize: 11, fontWeight: 700, color: 'var(--orange)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, whiteSpace: 'nowrap' }}>
+                      Reclassify…
+                    </button>
+                  )}
                 </div>
                 {(m.vendor_invoice || m.notes) && (
                   <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4, wordBreak: 'break-word' }}>
@@ -266,6 +287,13 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
             )
           })}
         </div>
+      )}
+      {reclassTarget && (
+        <ReclassMovementSheet
+          movement={reclassTarget}
+          onClose={() => setReclassTarget(null)}
+          onDone={() => load()}
+        />
       )}
     </div>
   )

@@ -1263,6 +1263,9 @@ export async function recordMovementsBatch(movements, { chunk = false, chunkSize
     // approve_submission RPC fills for infra passdown tags; nullable and
     // outside the immutable guard.
     line_note: m.line_note || null,
+    // Region→Region reclass provenance (buildReclassPayload). Nullable,
+    // outside the immutable guard.
+    reclass_of: m.reclass_of || null,
     created_by: m.created_by,
   })
 
@@ -2503,8 +2506,9 @@ export async function getConsumptionLedger({ sinceCreated = null } = {}) {
     let q = db.from('inventory_movements')
       .select(`
         id, movement_type, quantity, unit, notes, line_note, created_at, occurred_at,
-        part_id, consumed_by_user_id, phase_id, task_id, sonar_account_id,
+        part_id, consumed_by_user_id, phase_id, task_id, sonar_account_id, reclass_of, to_location_id, from_location_id,
         part:parts_catalog(id, name, unit, department, material_group, item_type, boxhero_id),
+        from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type, project_id, project:projects(id, name)),
         to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type, project_id, project:projects(id, name)),
         phase:phases!inventory_movements_phase_id_fkey(id, name, project:projects(id, name)),
         consumer:users!inventory_movements_consumed_by_user_id_fkey(id, name, initials, crew_type),
@@ -2518,8 +2522,128 @@ export async function getConsumptionLedger({ sinceCreated = null } = {}) {
   }
   const data = await fetchAllPaged(makeQuery)
   // Consumption only = landed in a project bucket. movement_type is already
-  // transfer; this drops truck↔truck / warehouse↔warehouse staging.
-  return (data || []).filter(m => m.to_location?.type === 'job_site')
+  // transfer; this drops truck↔truck / warehouse↔warehouse staging. Rows that
+  // LEFT a bucket (reclass to another Region, or a reversal back to a truck)
+  // are kept too — expandConsumptionRow turns them into the negative side.
+  return (data || []).filter(m => m.to_location?.type === 'job_site' || m.from_location?.type === 'job_site')
+}
+
+// A ledger row as the Consumption report sees it. Material INTO a Region is
+// +qty for that project; material OUT of a Region (a reclass to another
+// Region, or a reversal back to a truck) is −qty for the project it left.
+// A Region→Region reclass therefore yields two rows and the overall total
+// is unchanged — only the split between projects moves. `ledgerProject` is
+// the project the row counts against (null when the bucket is a legacy
+// project-less "Region X").
+export function expandConsumptionRow(m) {
+  const out = []
+  if (m?.to_location?.type === 'job_site') {
+    out.push({ ...m, ledgerQty: Number(m.quantity) || 0, ledgerLocation: m.to_location, ledgerProject: m.to_location.project || null, ledgerSide: 'in' })
+  }
+  if (m?.from_location?.type === 'job_site') {
+    out.push({ ...m, ledgerQty: -(Number(m.quantity) || 0), ledgerLocation: m.from_location, ledgerProject: m.from_location.project || null, ledgerSide: 'out' })
+  }
+  return out
+}
+
+// ─── Reclass: move consumption between two Regions after the fact ───────────
+// Movements are immutable (prevent_movement_modification), so a reclass is a
+// counter-movement: a Region→Region transfer that copies the original's
+// identity (part, work date, account, installer, asset tag) and points back
+// at it via reclass_of. The stock trigger moves the Region quantities; the
+// Consumption report shows −qty / +qty; Sage gets one transfer line whose
+// PROJECTID follows the destination phase. Reclassing back is just another
+// reclass whose original is the reclass row.
+export function buildReclassPayload(original, { toBucketId, toBucketType = 'job_site', phaseId = null, quantity, reason, userId, alreadyReclassed = 0 }) {
+  if (!original?.id) throw new Error('Reclass needs the original movement')
+  if (original.movement_type !== 'transfer') throw new Error('Only consumption transfers can be reclassed')
+  const fromId = original.to_location_id || original.to_location?.id
+  if (!fromId || (original.to_location?.type && original.to_location.type !== 'job_site')) {
+    throw new Error('Only material sitting in a Region can be reclassed')
+  }
+  if (!toBucketId) throw new Error('Pick a destination Region')
+  if (toBucketId === fromId) throw new Error('Destination is the same Region')
+  if (toBucketType !== 'job_site') throw new Error('Reclass destination must be a Region')
+  if (!userId) throw new Error('Not signed in')
+  const qty = Number(quantity)
+  const remaining = (Number(original.quantity) || 0) - (Number(alreadyReclassed) || 0)
+  if (!Number.isFinite(qty) || qty <= 0) throw new Error('Quantity must be positive')
+  if (qty > remaining) throw new Error(`Only ${remaining} left to reclass on this movement`)
+  const why = String(reason || '').trim()
+  if (!why) throw new Error('A reason is required')
+  return {
+    movement_type: 'transfer',
+    part_id: original.part_id || original.part?.id,
+    quantity: qty,
+    unit: original.unit || original.part?.unit || 'ea',
+    from_location_id: fromId,
+    to_location_id: toBucketId,
+    notes: `Reclass: ${why} [reclass:${original.id}]`,
+    created_by: userId,
+    // Same work date as the original so the correction lands in the month
+    // the consumption was reported in (Reports + Sage window by this).
+    occurred_at: original.occurred_at || original.created_at || null,
+    phase_id: phaseId || null,
+    consumed_by_user_id: original.consumed_by_user_id || null,
+    sonar_account_id: original.sonar_account_id || null,
+    line_note: original.line_note || null,
+    reclass_of: original.id,
+  }
+}
+
+// Already-reclassed quantity per original movement id: Map<id, qty>.
+export async function getReclassChildren(movementIds) {
+  const ids = [...new Set((movementIds || []).filter(Boolean))]
+  const out = new Map()
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data, error } = await db.from('inventory_movements')
+      .select('reclass_of, quantity')
+      .in('reclass_of', ids.slice(i, i + 100))
+    if (error) throw error
+    for (const r of data || []) out.set(r.reclass_of, (out.get(r.reclass_of) || 0) + (Number(r.quantity) || 0))
+  }
+  return out
+}
+
+// Asset-report units already booked to a grant bucket for a Sonar account
+// around a job date — the fiber-jobs importer offers to reclass these when
+// the job turns out to be a *Fix (the ONT went out days before the job
+// closed, so the asset import couldn't know). Excludes rows already fully
+// reclassed.
+export async function getGrantAssetsForReclass({ accountId, bucketId, jobDate, daysBefore = 4, daysAfter = 1 }) {
+  if (!accountId || !bucketId || !jobDate) return []
+  const base = new Date(`${String(jobDate).slice(0, 10)}T12:00:00Z`)
+  const from = new Date(base); from.setUTCDate(from.getUTCDate() - daysBefore - 1)
+  const to = new Date(base); to.setUTCDate(to.getUTCDate() + daysAfter + 1)
+  const { data, error } = await db.from('inventory_movements')
+    .select('id, part_id, quantity, unit, occurred_at, created_at, consumed_by_user_id, sonar_account_id, line_note, notes, to_location_id, movement_type, part:parts_catalog(id, name, unit)')
+    .eq('movement_type', 'transfer')
+    .eq('sonar_account_id', String(accountId))
+    .eq('to_location_id', bucketId)
+    .like('notes', '%[sonar:%')
+    .gte('occurred_at', from.toISOString())
+    .lte('occurred_at', to.toISOString())
+  if (error) throw error
+  const rows = data || []
+  if (rows.length === 0) return []
+  const done = await getReclassChildren(rows.map(r => r.id))
+  return rows
+    .map(r => ({ ...r, alreadyReclassed: done.get(r.id) || 0 }))
+    .filter(r => (Number(r.quantity) || 0) - r.alreadyReclassed > 0)
+}
+
+// How many unexported movements are dated BEFORE a Sage window but were
+// created inside/after it — back-dated rows (a reclass carries its original's
+// work date) that an effective-date export would otherwise never pick up.
+export async function countUnexportedBefore({ since }) {
+  if (!since) return 0
+  const { count, error } = await db.from('inventory_movements')
+    .select('id', { count: 'exact', head: true })
+    .is('exported_at', null)
+    .gte('created_at', since)
+    .lt('occurred_at', since)
+  if (error) throw error
+  return count || 0
 }
 
 // Effective work date for a movement: the stamped/backfilled job date if we
@@ -2530,6 +2654,7 @@ export function movementEffectiveDate(m) {
 
 // Which flow produced a consumption row — for the Source column / filter.
 export function consumptionSource(m) {
+  if (m?.reclass_of) return 'reclass'
   const n = m?.notes || ''
   if (n.includes('[sonar_jobs:')) return 'fiber-sonar'
   if (n.includes('[sonar:')) return 'field-tech-sonar'

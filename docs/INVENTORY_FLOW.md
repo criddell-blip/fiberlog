@@ -214,6 +214,17 @@ For ad-hoc adjustments: stock moved between bins, scrap, manual issues, etc. Rec
 
 On the Manager Submissions queue (and in TaskWorkspace pre-submit), you can set `submissions.project_id_override` to redirect a submission's auto-deduct to a different project than the task's natural phase project. Useful when a crew worked across regions on a single ticket.
 
+### Service projects — keeping fix-job material out of the grant ledger (Sep 2026)
+
+The BEAD grant reimburses material on installs, not on repairs. A grant project can therefore have a **Service sibling** (`West Mountain - Service`, `projects.service_for_project_id` → the parent) with its own Region and one `Service` phase. A project with a sibling is grant-restricted; nothing else marks it.
+
+- **Rule:** any Sonar job type containing the word *Fix* (Drop Fix, Fiber Fix, …) — `SERVICE_JOB_TYPE_WORDS` in `src/lib/serviceRouting.js`. Adding a word is a one-line change plus its test; per-row pickers in both importers still outrank the rule.
+- **Fiber-jobs import:** a Fix job on a restricted project books to the sibling (bucket + phase), shown amber in the preview ("fix job → Service"). A Fix on a project with no sibling books to the project with an amber hint.
+- **Asset import:** the report has no job type, so each unit is matched to the nearest fiber-jobs row for its account (2 days before → 7 days after the assignment). Matched to a Fix → sibling. No job yet → books as install with a "no Sonar job reported yet" hint.
+- **Two-way check:** when the Fix job arrives days later, the fiber-jobs importer lists that account's units already booked to the grant Region and reclasses them in the same apply (ticked by default).
+- **Crew repair days:** log the task under the Service phase; approval deducts into the Service Region like any other project.
+- **Reclassify (owner):** Activity feed or Reports → Consumption → *Reclassify…* books a Region→Region transfer that points at the original (`reclass_of`), dated like the original. Reports show −qty on the old project and +qty on the new one; the Sage export carries one transfer line (FROM/TO = the two Regions, PROJECTID = the destination project) and warns when unexported rows are dated before the chosen window. Reclassing back is just another reclass.
+
 ---
 
 ## End of the line: Sage Intacct export

@@ -16,6 +16,7 @@ import {
 } from '../../lib/useCsvImport'
 import { denverNaiveToIso } from '../../lib/sonarDates'
 import { resolveServiceRedirect, isServiceJobType } from '../../lib/serviceRouting'
+import { getGrantAssetsForReclass, buildReclassPayload } from '../../lib/inventory'
 import {
   Section, MappingRow, StatusBadge, StatusTag, selectStyle,
   SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
@@ -75,6 +76,12 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   const [rowMaterialOverride, setRowMaterialOverride] = useState({})
   const [rowSource, setRowSource] = useState({})        // row idx → source location id (per-row override)
   const [rowExtraMaterials, setRowExtraMaterials] = useState({})  // job idx → [{sku, qty}] materials added by hand (Sonar job had none/missing)
+  // Backward half of the fix-job check. The asset report books an ONT days
+  // before dispatch closes the job, so it lands in the grant ledger as an
+  // install; when the job arrives here as a *Fix, offer to reclass those
+  // units to the Service sibling in the same apply. Keyed by dedupKey (job).
+  const [backAssets, setBackAssets] = useState({})           // dedupKey → [movement + alreadyReclassed]
+  const [backOptOut, setBackOptOut] = useState(() => new Set())  // dedupKeys the manager unticked
   // Per-row destination override for jobs Sonar left unroutable (blank Project
   // column — happens when the job's address isn't tied to a project record) or
   // tagged with a value not worth a permanent mapping. Holds a PHASE id: the
@@ -496,10 +503,35 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   }
 
   // Stats
+  // Look up grant-booked assets for every redirected fix job. One query per
+  // job; a delivery has a handful of fix jobs at most. Warn-only on failure
+  // (the import still applies; the owner can reclass from Activity later).
+  useEffect(() => {
+    const jobs = resolved.filter(r => r.serviceRedirect && r.account && r.grantBucketId && r.date)
+    if (jobs.length === 0) { setBackAssets({}); return }
+    let cancelled = false
+    ;(async () => {
+      const next = {}
+      for (const r of jobs) {
+        try {
+          const found = await getGrantAssetsForReclass({ accountId: r.account, bucketId: r.grantBucketId, jobDate: r.date })
+          if (found.length) next[r.dedupKey] = found
+        } catch (e) {
+          console.warn('Grant-asset lookup failed for', r.dedupKey, e)
+        }
+        if (cancelled) return
+      }
+      setBackAssets(next)
+    })()
+    return () => { cancelled = true }
+    // Keyed on the redirected jobs' identities, not `resolved` itself — a
+    // per-row material edit must not refetch every fix job.
+  }, [resolved.filter(r => r.serviceRedirect).map(r => `${r.dedupKey}|${r.grantBucketId}|${r.rowStatus}`).join(',')])  // eslint-disable-line react-hooks/exhaustive-deps
+
   const stats = useMemo(() => {
     if (resolved.length === 0) return null
     let ready = 0, blocked = 0, alreadyImported = 0, excludedCount = 0
-    let totalReadyMovements = 0, toService = 0
+    let totalReadyMovements = 0, toService = 0, assetReclasses = 0
     for (const r of resolved) {
       if (excluded.has(r.idx)) { excludedCount++; continue }
       if (r.rowStatus === 'already-imported') { alreadyImported++; continue }
@@ -510,9 +542,12 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       } else {
         blocked++
       }
+      if (r.rowStatus === 'ready' && r.serviceRedirect && !backOptOut.has(r.dedupKey)) {
+        assetReclasses += (backAssets[r.dedupKey] || []).length
+      }
     }
-    return { total: resolved.length, ready, blocked, excludedCount, alreadyImported, totalReadyMovements, toService }
-  }, [resolved, excluded])
+    return { total: resolved.length, ready, blocked, excludedCount, alreadyImported, totalReadyMovements, toService, assetReclasses }
+  }, [resolved, excluded, backAssets, backOptOut])
 
   async function handleApply() {
     setError('')
@@ -522,6 +557,19 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       for (const r of resolved) {
         if (excluded.has(r.idx)) continue
         if (r.rowStatus !== 'ready') continue
+        // Backward fix-job check: assets the asset report already booked to
+        // the grant bucket for this job's account → reclass to Service in
+        // the same atomic batch (all-or-nothing with the job's own lines).
+        if (r.serviceRedirect && r.destBucketId && !backOptOut.has(r.dedupKey)) {
+          for (const a of backAssets[r.dedupKey] || []) {
+            movements.push(buildReclassPayload(a, {
+              toBucketId: r.destBucketId, phaseId: r.phaseId || null,
+              quantity: (Number(a.quantity) || 0) - (a.alreadyReclassed || 0),
+              reason: `fix job (${r.jobTypeRaw} ${r.date}) — asset booked as install before the job was reported`,
+              userId: currentUser?.id, alreadyReclassed: a.alreadyReclassed || 0,
+            }))
+          }
+        }
         // Machine-readable bypass mark: the location the material actually
         // came from when it wasn't the completer's own truck. Same token the
         // asset importer writes; parsed by movementSourceOverride /
@@ -809,6 +857,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
                   <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: 'var(--hint)' }}>
                     {stats.ready} ready ({stats.totalReadyMovements} movements) · {stats.blocked} blocked
                     {stats.toService > 0 && <> · <span style={{ color: 'var(--amber)', fontWeight: 700 }}>{stats.toService} fix job{stats.toService === 1 ? '' : 's'} → Service</span></>}
+                    {stats.assetReclasses > 0 && <> · <span style={{ color: 'var(--amber)', fontWeight: 700 }}>+{stats.assetReclasses} asset reclass{stats.assetReclasses === 1 ? '' : 'es'}</span></>}
                     {stats.alreadyImported > 0 && <> · {stats.alreadyImported} already imported</>}
                     {stats.excludedCount > 0 && <> · {stats.excludedCount} excluded</>}
                   </span>
@@ -828,6 +877,13 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
                     phases={phases}
                     rowPhaseId={rowPhase[r.idx] || ''}
                     onSetPhase={pid => setRowPhaseOverride(r.idx, pid)}
+                    backAssets={backAssets[r.dedupKey] || []}
+                    backOptedOut={backOptOut.has(r.dedupKey)}
+                    onToggleBack={() => setBackOptOut(prev => {
+                      const next = new Set(prev)
+                      if (next.has(r.dedupKey)) next.delete(r.dedupKey); else next.add(r.dedupKey)
+                      return next
+                    })}
                     // Gate on the CONDITION, not the status string. The
                     // `|| rowPhase[...]` clause keeps the select mounted after
                     // a successful pick so it stays editable and clearable —
@@ -967,7 +1023,7 @@ function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, 
 }
 
 // ─── Job preview row ────────────────────────────────────────────────────
-function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, sourceLocations = [], rowSourceId = '', onSetSource, phases = [], rowPhaseId = '', onSetPhase, showPhasePicker = false, onAddMaterial, onSetMaterial, onRemoveMaterial }) {
+function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, sourceLocations = [], rowSourceId = '', onSetSource, phases = [], rowPhaseId = '', onSetPhase, showPhasePicker = false, onAddMaterial, onSetMaterial, onRemoveMaterial, backAssets = [], backOptedOut = false, onToggleBack }) {
   const isReady = job.rowStatus === 'ready'
   const isAlreadyImported = job.rowStatus === 'already-imported'
   // Which line's SKU is being picked via the search overlay:
@@ -1024,6 +1080,18 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
             <div style={{ fontSize: 10, color: 'var(--amber)', marginTop: 2 }}>
               ⚠ Fix job booking to the {job.grantProjectName} ledger — that project has no Service sibling (Projects → Create Service sibling).
             </div>
+          )}
+          {/* Backward fix-job check: the asset report already booked these
+              units to the grant ledger for this account (it ran before the
+              job closed). Ticked by default — untick to leave them. */}
+          {job.serviceRedirect && backAssets.length > 0 && (
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 10, color: 'var(--amber)', marginTop: 3, cursor: 'pointer' }}>
+              <input type="checkbox" checked={!backOptedOut} onChange={onToggleBack} style={{ marginTop: 1 }} />
+              <span>
+                Also reclassify {backAssets.length} unit{backAssets.length === 1 ? '' : 's'} already booked to {job.grantProjectName} for this account → Service:
+                {' '}{backAssets.map(a => `${a.part?.name || a.part_id}${a.line_note ? ` (${a.line_note.split(' · ')[0]})` : ''} ${String(a.occurred_at || '').slice(0, 10)}`).join('; ')}
+              </span>
+            </label>
           )}
           {/* Customer name — only present when the Sonar export carries the
               column (see pickFiberCustomerColumn). Full text colour so it

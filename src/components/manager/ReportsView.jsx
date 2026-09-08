@@ -4,7 +4,9 @@ import { db, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabase'
 import {
   getConsumptionLedger, movementEffectiveDate, consumptionSource, fetchAllRows,
   movementAccountId, movementBypassedTruck, movementSourceOverride, consumptionCustomer,
+  expandConsumptionRow,
 } from '../../lib/inventory'
+import ReclassMovementSheet from './ReclassMovementSheet'
 import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
 import { useIsWide } from '../../lib/useIsWide'
 import { isoLocalDate } from '../../lib/format'
@@ -82,7 +84,11 @@ const PRESETS = [
 ]
 
 export default function ReportsView() {
-  const { projects, showToast } = useApp()
+  const { projects, showToast, currentUser } = useApp()
+  // Owner-only "Reclassify" on consumption rows (grant ↔ Service ledgers) —
+  // same gate as the Activity tab and RecordMovementSheet's Region source.
+  const canReclass = currentUser?.role === 'owner'
+  const [reclassTarget, setReclassTarget] = useState(null)
   const [loading, setLoading] = useState(false)
   const [rows, setRows] = useState([])
   const [preset, setPreset] = useState('this_week')
@@ -314,7 +320,10 @@ export default function ReportsView() {
       const toT = new Date(toISO).getTime()
       const q = partQuery.trim().toLowerCase()
       const reportRows = []
-      for (const m of ledger) {
+      // A Region→Region reclass (or a reversal out of a Region) expands to
+      // its negative side too, attributed to the project it LEFT — so the
+      // per-project split moves and the overall total does not.
+      for (const raw of ledger) for (const m of expandConsumptionRow(raw)) {
         const effRaw = movementEffectiveDate(m)
         const effT = new Date(effRaw).getTime()
         if (effT < fromT || effT > toT) continue   // exact effective-date window
@@ -322,10 +331,14 @@ export default function ReportsView() {
         // Resolve project: the bucket's project, then phase, then infra site.
         // Legacy "Region X" buckets carry no project_id — strip the prefix so
         // they fold into the real project name instead of splitting the total.
-        const proj = m.to_location?.project || m.phase?.project || m.task?.site?.project || null
+        // The negative side of a reclass is always the FROM bucket's project —
+        // the phase tag belongs to the destination.
+        const proj = m.ledgerProject
+          || (m.ledgerSide === 'in' ? (m.phase?.project || m.task?.site?.project) : null)
+          || null
         const projId = proj?.id || null
         const projName = proj?.name
-          || (m.to_location?.name || '').replace(/^(\(.*\)\s*)?Region\s+/i, '').trim()
+          || (m.ledgerLocation?.name || '').replace(/^(\(.*\)\s*)?Region\s+/i, '').trim()
           || '—'
         if (selProject !== 'all' && projId !== selProject) continue
         if (selUser !== 'all' && m.consumed_by_user_id !== selUser) continue
@@ -342,14 +355,21 @@ export default function ReportsView() {
         if (onlyBypassed && !bypassed) continue
 
         // "Phase / Site" column: infra site if present, else phase, else bucket.
-        const locationName = m.task?.site?.name || m.phase?.name || m.to_location?.name || '—'
+        const locationName = m.ledgerSide === 'out'
+          ? m.ledgerLocation?.name || '—'
+          : m.task?.site?.name || m.phase?.name || m.to_location?.name || '—'
         reportRows.push({
           date: new Date(effRaw).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
           dateRaw: effRaw,
           partId: m.part?.id || m.part_id,
           partName: m.part?.name || m.part_id,
           unit: m.unit || m.part?.unit || 'ea',
-          qty: m.quantity || 0,
+          qty: m.ledgerQty,
+          // Reclass hooks: the underlying movement (for the owner's
+          // Reclassify action) and which side of a reclass this row is.
+          movement: raw,
+          ledgerSide: m.ledgerSide,
+          reclassOf: m.reclass_of || null,
           barcode: m.part?.boxhero_id || '',
           department: dept,
           itemType: m.part?.item_type || '',
@@ -988,6 +1008,7 @@ export default function ReportsView() {
                   { id: 'crew/other', label: 'Crew' },
                   { id: 'field-tech-sonar', label: 'Field tech' },
                   { id: 'fiber-sonar', label: 'Fiber jobs' },
+                  { id: 'reclass', label: 'Reclass' },
                 ].map(s => (
                   <button key={s.id} onClick={() => setSelSource(s.id)} style={{
                     padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 600,
@@ -1080,7 +1101,8 @@ export default function ReportsView() {
 
         {/* By Part view */}
         {!loading && groupBy === 'part' && partSummary.map((p, i) => (
-          <PartRow key={p.partId} part={p} rows={rows.filter(r => r.partId === p.partId)} stock={stockMap[p.partId]} barcode={barcodeMap[p.partId]} />
+          <PartRow key={p.partId} part={p} rows={rows.filter(r => r.partId === p.partId)} stock={stockMap[p.partId]} barcode={barcodeMap[p.partId]}
+            onReclass={canReclass && mode === 'consumption' ? setReclassTarget : null} />
         ))}
 
         {/* By Person view */}
@@ -1135,6 +1157,13 @@ export default function ReportsView() {
           onClose={() => setShowSage(false)}
         />
       )}
+      {reclassTarget && (
+        <ReclassMovementSheet
+          movement={reclassTarget}
+          onClose={() => setReclassTarget(null)}
+          onDone={() => loadConsumption()}
+        />
+      )}
     </div>
   )
 }
@@ -1178,7 +1207,7 @@ function isLinearStrand(name) {
   return /^strand[,\s]/i.test(name) && !/splice|vise|grip|clamp/i.test(name)
 }
 
-function PartRow({ part, rows, stock, barcode }) {
+function PartRow({ part, rows, stock, barcode, onReclass = null }) {
   const [expanded, setExpanded] = useState(false)
   return (
     <div style={{ marginBottom: 6 }}>
@@ -1212,10 +1241,23 @@ function PartRow({ part, rows, stock, barcode }) {
               padding: '8px 14px', borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : 'none' }}>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{r.userName}</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.date} · {r.projectName} › {r.taskName}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  {r.date} · {r.projectName} › {r.taskName}
+                  {r.source === 'reclass' && <span style={{ color: 'var(--amber)', fontWeight: 700 }}> · reclass {r.ledgerSide === 'out' ? 'out' : 'in'}</span>}
+                </div>
               </div>
-              <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--orange)', flexShrink: 0, marginLeft: 8 }}>
-                {r.qty.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>{r.unit}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 8 }}>
+                {/* Owner-only, consumption mode only: rows that landed in a
+                    Region (the positive side) can be moved to another ledger. */}
+                {onReclass && r.movement && r.ledgerSide === 'in' && (
+                  <button onClick={() => onReclass(r.movement)}
+                    style={{ fontSize: 10, fontWeight: 700, color: 'var(--orange)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                    Reclassify…
+                  </button>
+                )}
+                <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: r.qty < 0 ? 'var(--amber)' : 'var(--orange)' }}>
+                  {r.qty.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>{r.unit}</span>
+                </div>
               </div>
             </div>
           ))}
@@ -1323,6 +1365,7 @@ const SOURCE_BADGES = {
   'field-tech-sonar': { label: 'Equipment' },
   'fiber-sonar': { label: 'Drop materials' },
   'crew/other': { label: 'Crew' },
+  'reclass': { label: 'Reclass' },
 }
 
 function SourceBadge({ source }) {
