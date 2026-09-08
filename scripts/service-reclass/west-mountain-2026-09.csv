@@ -1,0 +1,19 @@
+movement_id,reason
+# West Mountain fix-job consumption booked to the grant Region, Jun–Aug 2026.
+# Discovered Sep 3–8 2026 by joining Sonar account IDs across the fiber-jobs
+# and asset-consumption reports. June/July ASSET rows can't be classified
+# until the Sonar re-export with account IDs lands — only fiber-jobs rows
+# are listed for those months.
+# fiber-jobs import rows ([sonar_jobs:<acct>_<date>_drop_fix|fiber_fix])
+63f06a56-db1a-453f-a170-47f980cdd4c5,"fix job (Drop Fix 2026-06-10, acct 141195)"
+6c101d8c-e97d-4825-9b63-9de1bf2d6165,"fix job (Drop Fix 2026-06-10, acct 141195)"
+36af54c6-81ec-43cd-98c7-c9bf2f605756,"fix job (Drop Fix 2026-07-08, acct 141219)"
+dbc3e08d-a959-4ba1-9403-01a027025246,"fix job (Drop Fix 2026-07-14, acct 140787)"
+4e24fb43-71bd-4f09-82ea-1539492fa4b9,"fix job (Drop Fix 2026-07-22, acct 141195)"
+685ac354-7cfa-456e-8b42-2efeb9069d33,"fix job (Drop Fix 2026-08-31, acct 141418)"
+0b34a8f5-1def-4806-977d-3b21ee90873b,"fix job (Fiber Fix 2026-08-31, acct 140494)"
+# asset-report ONTs assigned on fix jobs in August ([sonar:<tag>])
+07655b83-3441-4cc9-8b37-6e3aebb37fd0,"fix job (Drop Fix 2026-08-03, acct 140697) — ONT tag 93380"
+aa2935da-2df2-4dc6-a517-18ee742ee01e,"fix job (Fiber Fix 2026-08-03, acct 140647) — replacement ONT tag 93336"
+8aa9ec66-5d35-47bd-8e46-0a3dd3547df0,"fix job (Fiber Fix 2026-08-04, acct 138163) — replacement ONT tag 101596"
+60a65ced-f11c-4035-b29c-e250bdbe865b,"fix job (Drop Fix 2026-08-21, acct 139587) — second ONT tag 93220"
