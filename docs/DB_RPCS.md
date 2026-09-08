@@ -30,6 +30,7 @@ All `SECURITY DEFINER`, all with `SET search_path = public, pg_temp`. EXECUTE on
 | `cascade_task_terminal_to_session()` | Trigger only | When task status → pending/approved/done, flips matching `started` work_sessions to `submitted`. |
 | `ensure_crew_truck()` | Trigger only | Auto-creates a personal truck for new crew/contractor users. crew_type IN-list includes the merged `fiber_construction`/`field_service` (July 2026, backlog #28). Trigger fires on INSERT or UPDATE OF role/is_active only — not on crew_type-only updates. |
 | `ensure_project_job_site()` | Trigger only | Auto-creates a job_site bucket for new active projects. |
+| `guard_owner_role_change()` | Trigger only (`trg_users_owner_role_guard` BEFORE UPDATE OF role on `users`) | A role change to or from `owner` requires `is_owner()` (Sep 8 2026). Server-side twin of `admin-create-user`'s owner-only rule and `AdminUsersView`'s `cannotPickOwner` — before this any manager could set any row (their own included) to owner through the API. No-JWT maintenance (`auth.uid() IS NULL`) is exempt so a lost-owner state can be repaired by SQL. |
 | `update_inventory_stock_on_movement()` | Trigger only | Maintains `inventory_stock` from `inventory_movements` inserts. |
 | `validate_inventory_location_parent()` | Trigger only | Enforces bin parent rules (only warehouses can be parents, single-level only). |
 | `validate_count_session_bin()` | Trigger only | Guards count-session bin validity. |
