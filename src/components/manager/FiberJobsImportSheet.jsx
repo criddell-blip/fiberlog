@@ -17,6 +17,8 @@ import {
 import { denverNaiveToIso } from '../../lib/sonarDates'
 import { resolveServiceRedirect, isServiceJobType } from '../../lib/serviceRouting'
 import { getGrantAssetsForReclass, buildReclassPayload } from '../../lib/inventory'
+import { jobIndexFromRows, nearestSonarJob, denverDateOfIso, normalizeJobType } from '../../lib/sonarJobIndex'
+import { WIRELESS_ONLY_PROJECTS } from '../../lib/crewTypes'
 import {
   Section, MappingRow, StatusBadge, StatusTag, selectStyle,
   SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
@@ -340,9 +342,10 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         projectId: phase?.project_id || null, jobTypeRaw, manual: phaseOverridden, phases,
       })
       const serviceRedirect = svc.redirected
-      // Fix job on a project with NO sibling (non-grant projects are fine;
-      // a BEAD project without one is a setup gap) — surfaced, not blocked.
+      // Fix job on a project with NO sibling (a BEAD project without one is a
+      // setup gap) — surfaced, not blocked. Wireless projects never need one.
       const fixWithoutService = !serviceRedirect && !phaseOverridden && !!phase && isServiceJobType(jobTypeRaw)
+        && !WIRELESS_ONLY_PROJECTS.includes(phase.project_name)
       const destBucketId = serviceRedirect ? svc.bucketId : grantBucketId
       const customer = customerColumn ? (row[customerColumn] || '').trim() : ''
       const account = (row['Account | ID'] || '').trim()
@@ -506,6 +509,13 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   // Look up grant-booked assets for every redirected fix job. One query per
   // job; a delivery has a handful of fix jobs at most. Warn-only on failure
   // (the import still applies; the owner can reclass from Activity later).
+  //
+  // The query returns every asset in the window; an asset is offered under a
+  // job ONLY when that job is its nearest one (same rule the asset importer
+  // uses going forward) — so an install ONT booked two days before a Drop
+  // Fix on the same account stays where it is, and one asset can never be
+  // listed under two jobs. The job index is this CSV's own rows.
+  const csvJobIndex = useMemo(() => jobIndexFromRows(csvRows || []), [csvRows])
   useEffect(() => {
     const jobs = resolved.filter(r => r.serviceRedirect && r.account && r.grantBucketId && r.date)
     if (jobs.length === 0) { setBackAssets({}); return }
@@ -515,7 +525,11 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       for (const r of jobs) {
         try {
           const found = await getGrantAssetsForReclass({ accountId: r.account, bucketId: r.grantBucketId, jobDate: r.date })
-          if (found.length) next[r.dedupKey] = found
+          const mine = found.filter(a => {
+            const nearest = nearestSonarJob(csvJobIndex, r.account, denverDateOfIso(a.occurred_at || a.created_at))
+            return nearest && nearest.date === r.date && normalizeJobType(nearest.jobTypeRaw) === r.jobType
+          })
+          if (mine.length) next[r.dedupKey] = mine
         } catch (e) {
           console.warn('Grant-asset lookup failed for', r.dedupKey, e)
         }
@@ -526,12 +540,13 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     return () => { cancelled = true }
     // Keyed on the redirected jobs' identities, not `resolved` itself — a
     // per-row material edit must not refetch every fix job.
-  }, [resolved.filter(r => r.serviceRedirect).map(r => `${r.dedupKey}|${r.grantBucketId}|${r.rowStatus}`).join(',')])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [csvJobIndex, resolved.filter(r => r.serviceRedirect).map(r => `${r.dedupKey}|${r.grantBucketId}|${r.rowStatus}`).join(',')])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const stats = useMemo(() => {
     if (resolved.length === 0) return null
     let ready = 0, blocked = 0, alreadyImported = 0, excludedCount = 0
     let totalReadyMovements = 0, toService = 0, assetReclasses = 0
+    const reclassSeen = new Set()   // an asset counts once even if two jobs list it
     for (const r of resolved) {
       if (excluded.has(r.idx)) { excludedCount++; continue }
       if (r.rowStatus === 'already-imported') { alreadyImported++; continue }
@@ -543,7 +558,9 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         blocked++
       }
       if (r.rowStatus === 'ready' && r.serviceRedirect && !backOptOut.has(r.dedupKey)) {
-        assetReclasses += (backAssets[r.dedupKey] || []).length
+        for (const a of backAssets[r.dedupKey] || []) {
+          if (!reclassSeen.has(a.id)) { reclassSeen.add(a.id); assetReclasses++ }
+        }
       }
     }
     return { total: resolved.length, ready, blocked, excludedCount, alreadyImported, totalReadyMovements, toService, assetReclasses }
@@ -554,6 +571,10 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     setSubmitting(true)
     try {
       const movements = []
+      // One reclass per asset, whatever job(s) list it — a second payload
+      // for the same unit would move it twice (the in-DB cap only sees rows
+      // that already exist, not this batch).
+      const reclassed = new Set()
       for (const r of resolved) {
         if (excluded.has(r.idx)) continue
         if (r.rowStatus !== 'ready') continue
@@ -562,6 +583,8 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         // the same atomic batch (all-or-nothing with the job's own lines).
         if (r.serviceRedirect && r.destBucketId && !backOptOut.has(r.dedupKey)) {
           for (const a of backAssets[r.dedupKey] || []) {
+            if (reclassed.has(a.id)) continue
+            reclassed.add(a.id)
             movements.push(buildReclassPayload(a, {
               toBucketId: r.destBucketId, phaseId: r.phaseId || null,
               quantity: (Number(a.quantity) || 0) - (a.alreadyReclassed || 0),

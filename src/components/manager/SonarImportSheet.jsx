@@ -289,13 +289,18 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   // reclass (two-way check). Failure = no index = every row treated as
   // "job not reported yet"; warn-only, never blocks the import.
   const [jobIndex, setJobIndex] = useState(null)
+  // 'idle' | 'loading' | 'ready' | 'failed' — Apply waits for 'ready' /
+  // 'failed' so a fast click can't book fix-job ONTs to the grant ledger
+  // before the lookup ran; 'failed' gets its own row hint (not "no job").
+  const [jobIndexState, setJobIndexState] = useState('idle')
   useEffect(() => {
-    if (!dedupedRows || dedupedRows.length === 0) { setJobIndex(null); return }
+    if (!dedupedRows || dedupedRows.length === 0) { setJobIndex(null); setJobIndexState('idle'); return }
     let cancelled = false
+    setJobIndexState('loading')
     ;(async () => {
       try {
         const dates = dedupedRows.map(d => String(d.row['Date Time'] || '').slice(0, 10)).filter(s => /^\d{4}-\d{2}-\d{2}$/.test(s)).sort()
-        if (dates.length === 0) { setJobIndex(new Map()); return }
+        if (dates.length === 0) { setJobIndex(new Map()); setJobIndexState('ready'); return }
         // A job completed on day D is delivered on/after D, so "received since
         // the earliest asset date − 2" covers the whole lookup window.
         const since = new Date(`${dates[0]}T00:00:00Z`)
@@ -303,9 +308,10 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         const deliveries = await getSonarRawCsvs({ reportType: 'fiber_jobs', sinceReceived: since.toISOString() })
         if (cancelled) return
         setJobIndex(buildSonarJobIndex(deliveries.map(d => d.raw_csv)))
+        setJobIndexState('ready')
       } catch (e) {
         console.warn('Fiber-jobs index load failed (fix-job routing off for this import):', e)
-        if (!cancelled) setJobIndex(new Map())
+        if (!cancelled) { setJobIndex(null); setJobIndexState('failed') }
       }
     })()
     return () => { cancelled = true }
@@ -664,6 +670,8 @@ export default function SonarImportSheet({ onClose, onApplied }) {
         } else {
           jobHint = 'no Sonar job reported yet — booking as install'
         }
+      } else if (status === 'ready' && destId && !rowDest[idx] && jobIndexState === 'failed') {
+        jobHint = '⚠ fiber-jobs lookup failed — fix-job routing off for this import'
       }
       return {
         serviceRedirect, matchedJob, jobHint,
@@ -695,7 +703,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     // destination their same-account siblings resolved to — see
     // lib/accountInheritance.js for the rules.
     return applyAccountInheritance(rows)
-  }, [dedupedRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, phases, effectiveCityMap, effectiveProjectMap, effectiveSourceMap, rowDest, rowSource, pendingPartRouting, alreadyImportedItemIds, jobIndex])
+  }, [dedupedRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, phases, effectiveCityMap, effectiveProjectMap, effectiveSourceMap, rowDest, rowSource, pendingPartRouting, alreadyImportedItemIds, jobIndex, jobIndexState])
 
   // Preview-table order only — apply/stats keep working off `resolved`.
   const displayRows = useMemo(() => groupRowsByAccount(resolved), [resolved])
@@ -704,10 +712,13 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     if (resolved.length === 0) return null
     let ready = 0, blocked = 0, excludedCount = 0, alreadyImported = 0, toService = 0
     const blockReasons = {}
+    // Count by DESTINATION, so adapters that inherited a Service bucket from
+    // their ONT (applyAccountInheritance) are included.
+    const serviceBuckets = new Set(phases.filter(ph => ph.project?.service_for_project_id && ph.bucket_id).map(ph => ph.bucket_id))
     for (const r of resolved) {
       if (excluded.has(r.idx)) { excludedCount++; continue }
       if (r.status === 'already-imported') { alreadyImported++; continue }
-      if (r.status === 'ready') { ready++; if (r.serviceRedirect) toService++ }
+      if (r.status === 'ready') { ready++; if (r.destId && serviceBuckets.has(r.destId)) toService++ }
       else {
         blocked++
         blockReasons[r.status] = (blockReasons[r.status] || 0) + 1
@@ -716,7 +727,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     const csvRowCount = csvRows?.length || 0
     const dedupCollapsed = csvRowCount - resolved.length
     return { total: resolved.length, ready, blocked, blockReasons, excludedCount, alreadyImported, csvRowCount, dedupCollapsed, toService }
-  }, [resolved, excluded, csvRows])
+  }, [resolved, excluded, csvRows, phases])
 
   // Which cities surface in the City mapping section: any city that:
   //   - is referenced by a row whose part routes 'region', AND
@@ -1320,7 +1331,8 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             className="btn btn-primary"
             style={{ flex: 2 }}
             onClick={handleApply}
-            disabled={submitting || !stats || stats.ready === 0}
+            disabled={submitting || !stats || stats.ready === 0 || jobIndexState === 'loading'}
+            title={jobIndexState === 'loading' ? 'Checking the fiber-jobs report for fix jobs…' : undefined}
           >
             {submitting
               ? 'Applying…'

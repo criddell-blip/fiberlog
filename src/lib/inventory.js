@@ -731,8 +731,9 @@ export async function getProcessedSonarImports({ limit = 30, reportType = null }
 // processed. The asset-consumption importer builds its per-account job index
 // from the fiber-jobs deliveries this returns (lib/sonarJobIndex), so an ONT
 // can be matched to the Drop Fix / Fiber Fix job it was assigned on. Daily
-// deliveries are a few KB each; raw_csv is blanked by the retention migration
-// after 60 days, which is far wider than the import window this serves.
+// deliveries are a few KB each. Only WEBHOOK deliveries live here — a
+// fiber-jobs CSV uploaded by hand never enters this table and is invisible
+// to the index (its jobs are still matched once the webhook copy arrives).
 export async function getSonarRawCsvs({ reportType, sinceReceived }) {
   let q = db.from('sonar_pending_imports')
     .select('id, received_at, filename, raw_csv')
@@ -2591,6 +2592,23 @@ export function buildReclassPayload(original, { toBucketId, toBucketType = 'job_
   }
 }
 
+// Walk a reclass chain to the movement that was originally consumed (the
+// first row with no reclass_of). Reclassing BACK to a project should carry
+// that root's phase tag, not the destination project's first phase.
+export async function getReclassChainRoot(movement) {
+  let cur = movement
+  for (let i = 0; i < 20 && cur?.reclass_of; i++) {
+    const { data, error } = await db.from('inventory_movements')
+      .select('id, reclass_of, phase_id, phase:phases!inventory_movements_phase_id_fkey(id, name, project_id)')
+      .eq('id', cur.reclass_of)
+      .maybeSingle()
+    if (error) throw error
+    if (!data) break
+    cur = data
+  }
+  return cur === movement ? null : cur
+}
+
 // Already-reclassed quantity per original movement id: Map<id, qty>.
 export async function getReclassChildren(movementIds) {
   const ids = [...new Set((movementIds || []).filter(Boolean))]
@@ -2609,8 +2627,10 @@ export async function getReclassChildren(movementIds) {
 // around a job date — the fiber-jobs importer offers to reclass these when
 // the job turns out to be a *Fix (the ONT went out days before the job
 // closed, so the asset import couldn't know). Excludes rows already fully
-// reclassed.
-export async function getGrantAssetsForReclass({ accountId, bucketId, jobDate, daysBefore = 4, daysAfter = 1 }) {
+// reclassed. The window is ASSET_JOB_WINDOW inverted (assets from
+// job−after … job+before); the caller still has to confirm the Fix is the
+// asset's NEAREST job — this is the candidate set, not the decision.
+export async function getGrantAssetsForReclass({ accountId, bucketId, jobDate, daysBefore = 7, daysAfter = 2 }) {
   if (!accountId || !bucketId || !jobDate) return []
   const base = new Date(`${String(jobDate).slice(0, 10)}T12:00:00Z`)
   const from = new Date(base); from.setUTCDate(from.getUTCDate() - daysBefore - 1)
@@ -2637,8 +2657,11 @@ export async function getGrantAssetsForReclass({ accountId, bucketId, jobDate, d
 // work date) that an effective-date export would otherwise never pick up.
 export async function countUnexportedBefore({ since }) {
   if (!since) return 0
+  // Types the export can carry (receives / adjusts never export, and every
+  // work-dated receipt would otherwise inflate the count).
   const { count, error } = await db.from('inventory_movements')
     .select('id', { count: 'exact', head: true })
+    .in('movement_type', ['transfer', 'issue', 'scrap'])
     .is('exported_at', null)
     .gte('created_at', since)
     .lt('occurred_at', since)

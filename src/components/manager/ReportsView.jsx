@@ -1420,12 +1420,15 @@ function AccountGroup({ acct }) {
           {/* Aggregate by (part, family) — the same SKU booked by both
               reports stays two lines, each with its own badge. */}
           {Object.entries(rows.reduce((acc, r) => {
-            const key = `${r.partId}|${r.source}`
+            // A reclass is two rows (+ on the new project, − on the old one)
+            // and must stay two lines, or it collapses to a "0 ea" line with
+            // the tag printed twice.
+            const key = r.source === 'reclass' ? `${r.partId}|${r.source}|${r.ledgerSide}` : `${r.partId}|${r.source}`
             if (!acc[key]) acc[key] = { name: r.partName, unit: r.unit, qty: 0, source: r.source, bypassed: false, sourceOverride: null, tags: [] }
             acc[key].qty += r.qty
             if (r.bypassed) { acc[key].bypassed = true; acc[key].sourceOverride = acc[key].sourceOverride || r.sourceOverride }
             // One unit per Sonar asset row → one tag line per unit under the SKU.
-            if (r.lineNote) acc[key].tags.push(r.lineNote)
+            if (r.lineNote && r.ledgerSide !== 'out') acc[key].tags.push(r.lineNote)
             return acc
           }, {})).sort(([,a],[,b]) => b.qty - a.qty).map(([key, p], i, arr) => (
             <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',

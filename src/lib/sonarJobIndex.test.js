@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildSonarJobIndex, jobIndexFromRows, nearestSonarJob, normalizeJobType } from './sonarJobIndex.js'
+import { buildSonarJobIndex, jobIndexFromRows, nearestSonarJob, normalizeJobType, denverDateOfIso } from './sonarJobIndex.js'
 
 const HDR = 'Job | Address on Completion,Job Type | Name,Job | Completion Notes,Account | ID,User | Username,Job | Completion Date time,Project,Account | Name'
 const line = (addr, type, acct, date, proj = 'West Mountain Fiber', name = 'X') =>
@@ -70,5 +70,24 @@ describe('nearestSonarJob', () => {
   })
   it('honours a custom window', () => {
     expect(nearestSonarJob(idx, '140420', '2026-08-13', { before: 2, after: 14 })?.jobTypeRaw).toBe('Fiber Install')
+  })
+  it('the backward check keeps an asset only under its NEAREST job (install ONT before a Drop Fix stays put)', () => {
+    // acct 139587: install 8/18, Drop Fix 8/21. ONT assigned 8/18 → install;
+    // second ONT 8/21 → Drop Fix. Same rule the fiber-jobs sheet applies to
+    // getGrantAssetsForReclass' candidate set.
+    const isMine = (assetDate, job) => { const n = nearestSonarJob(idx, '139587', assetDate); return !!n && n.date === job.date && n.jobType === job.jobType }
+    const fix = { date: '2026-08-21', jobType: 'drop_fix' }
+    expect(isMine('2026-08-21', fix)).toBe(true)
+    expect(isMine('2026-08-18', fix)).toBe(false)
+  })
+})
+
+describe('denverDateOfIso', () => {
+  it('maps a stored occurred_at to the Denver wall date (late-evening UTC is still the same Utah day)', () => {
+    expect(denverDateOfIso('2026-08-21T21:27:00Z')).toBe('2026-08-21')
+    expect(denverDateOfIso('2026-08-22T05:30:00Z')).toBe('2026-08-21')   // 23:30 MDT
+    expect(denverDateOfIso('2026-08-22T06:30:00Z')).toBe('2026-08-22')   // 00:30 MDT
+    expect(denverDateOfIso(null)).toBe('')
+    expect(denverDateOfIso('nope')).toBe('')
   })
 })

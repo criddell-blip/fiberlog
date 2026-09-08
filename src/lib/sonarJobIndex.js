@@ -56,12 +56,16 @@ export function buildSonarJobIndex(csvTexts) {
   return jobIndexFromRows(rows)
 }
 
-// Nearest job for an account to an asset-assignment date. Window is
-// asymmetric because assets precede completion: default 2 days before the
-// assignment through 7 days after. Ties (same distance either side) go to the
-// LATER job — the one the asset was staged for.
+// The one window both directions use: a job may close up to `before` days
+// BEFORE the asset went out and up to `after` days AFTER it (assets precede
+// completion). The fiber-jobs importer's backward check inverts it (assets
+// from job−after to job+before) so the two can never disagree.
+export const ASSET_JOB_WINDOW = { before: 2, after: 7 }
+
+// Nearest job for an account to an asset-assignment date. Ties (same distance
+// either side) go to the LATER job — the one the asset was staged for.
 //   assetDate: 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS' (naive Denver wall time)
-export function nearestSonarJob(index, account, assetDate, { before = 2, after = 7 } = {}) {
+export function nearestSonarJob(index, account, assetDate, { before = ASSET_JOB_WINDOW.before, after = ASSET_JOB_WINDOW.after } = {}) {
   if (!index || !account) return null
   const jobs = index.get(String(account).trim())
   if (!jobs || jobs.length === 0) return null
@@ -79,6 +83,15 @@ export function nearestSonarJob(index, account, assetDate, { before = 2, after =
     }
   }
   return best
+}
+
+// ISO timestamp → the Denver wall date it fell on ('YYYY-MM-DD'), so a stored
+// occurred_at compares with the reports' naive dates on equal terms.
+export function denverDateOfIso(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit' })
 }
 
 // Days since epoch for a naive 'YYYY-MM-DD' — no timezone involved, so two

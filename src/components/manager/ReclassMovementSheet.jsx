@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import {
-  getLocations, getPhasesWithBuckets, getReclassChildren, recordMovementsBatch,
+  getLocations, getPhasesWithBuckets, getReclassChildren, getReclassChainRoot, recordMovementsBatch,
   buildReclassPayload, sageProjectId,
 } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
@@ -19,6 +19,9 @@ export default function ReclassMovementSheet({ movement, onClose, onDone }) {
   const [regions, setRegions] = useState([])
   const [phases, setPhases] = useState([])
   const [alreadyReclassed, setAlreadyReclassed] = useState(0)
+  // For a reclass-of-a-reclass: the originally consumed row, whose phase
+  // tag is the right one to restore when moving BACK to its project.
+  const [chainRoot, setChainRoot] = useState(null)
   const [loading, setLoading] = useState(true)
   const [toBucketId, setToBucketId] = useState('')
   const [qty, setQty] = useState(String(movement?.quantity ?? 1))
@@ -34,12 +37,14 @@ export default function ReclassMovementSheet({ movement, onClose, onDone }) {
     let cancelled = false
     ;(async () => {
       try {
-        const [locs, phs, done] = await Promise.all([
+        const [locs, phs, done, root] = await Promise.all([
           getLocations(), getPhasesWithBuckets(), getReclassChildren([movement.id]),
+          movement.reclass_of ? getReclassChainRoot(movement).catch(() => null) : Promise.resolve(null),
         ])
         if (cancelled) return
         setRegions(locs.filter(l => l.type === 'job_site' && l.id !== fromId))
         setPhases(phs)
+        setChainRoot(root)
         const used = done.get(movement.id) || 0
         setAlreadyReclassed(used)
         setQty(String(Math.max(0, (Number(movement.quantity) || 0) - used)))
@@ -54,14 +59,18 @@ export default function ReclassMovementSheet({ movement, onClose, onDone }) {
 
   const remaining = Math.max(0, (Number(movement?.quantity) || 0) - alreadyReclassed)
   const target = regions.find(r => r.id === toBucketId) || null
-  // The destination project's routing phase (lowest sequence) so Sage's
-  // PROJECTID / CLASSID follow the new ledger; NULL when it has no phases —
-  // sageProjectId then falls back to the bucket name, which is the project.
+  // Phase tag for the new ledger so Sage's PROJECTID / CLASSID follow it.
+  // Moving BACK to the project the chain started in restores the original
+  // phase; otherwise the destination's routing phase (lowest sequence). NULL
+  // when it has none — sageProjectId then falls back to the bucket name.
   const targetPhase = useMemo(() => {
     if (!target?.project_id) return null
+    if (chainRoot?.phase && chainRoot.phase.project_id === target.project_id) {
+      return phases.find(ph => ph.id === chainRoot.phase.id) || chainRoot.phase
+    }
     return phases.filter(ph => ph.project_id === target.project_id)
       .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))[0] || null
-  }, [target, phases])
+  }, [target, phases, chainRoot])
 
   // Same derivation the export uses, so the preview can't lie.
   const previewProject = target
