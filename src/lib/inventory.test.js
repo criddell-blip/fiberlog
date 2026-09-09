@@ -22,6 +22,7 @@ import {
   locationTypeLabel,
   foldStockSummary,
   foldStockTotalsByPart,
+  foldNegativeStockByPart,
   consumptionSource,
   movementAccountId,
   movementSourceOverride,
@@ -90,6 +91,39 @@ describe('foldStockTotalsByPart', () => {
     ])
     expect(m.get('A')).toBe(7)
     expect(m.has('B')).toBe(false)
+  })
+
+  // The Sep 2026 strand case: 40,200 in the Yard bin, −17,036 on the crew
+  // group truck, On Hand showed 23,164 and nobody could see why. The totals
+  // fold deliberately keeps netting (that IS the honest usable number); the
+  // negative fold is what makes the hole visible beside it.
+  it('nets negative usable locations into the total', () => {
+    const m = foldStockTotalsByPart([
+      { part_id: 'STRAND', quantity: 40200, location: { type: 'bin' } },
+      { part_id: 'STRAND', quantity: -17036, location: { type: 'group' } },
+    ])
+    expect(m.get('STRAND')).toBe(23164)
+  })
+})
+
+describe('foldNegativeStockByPart', () => {
+  it('reports the absolute shortfall + count per part, usable locations only', () => {
+    const m = foldNegativeStockByPart([
+      { part_id: 'STRAND', quantity: 40200, location: { type: 'bin' } },
+      { part_id: 'STRAND', quantity: -17036, location: { type: 'group' } },
+      { part_id: 'STRAND', quantity: -1, location: { type: 'truck' } },
+      { part_id: 'DROP', quantity: -5, location: { type: 'job_site' } },  // region: not stock
+      { part_id: 'OK', quantity: 0, location: { type: 'truck' } },        // zero is not negative
+      { part_id: 'OK', quantity: 3, location: { type: 'bin' } },
+    ])
+    expect(m.get('STRAND')).toEqual({ count: 2, qty: 17037 })
+    expect(m.has('DROP')).toBe(false)
+    expect(m.has('OK')).toBe(false)
+  })
+
+  it('is empty when nothing is below zero', () => {
+    expect(foldNegativeStockByPart([{ part_id: 'A', quantity: 1, location: { type: 'bin' } }]).size).toBe(0)
+    expect(foldNegativeStockByPart(null).size).toBe(0)
   })
 })
 

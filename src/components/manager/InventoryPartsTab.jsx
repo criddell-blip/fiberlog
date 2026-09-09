@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../AppContext'
-import { getAllParts, updatePart, updatePartsBatch, getStockTotalsByPart, getPartLocations, deleteDraftPart, SONAR_ROUTING_OPTIONS, locationTypeLabel } from '../../lib/inventory'
+import { getAllParts, updatePart, updatePartsBatch, getStockTotalsAndNegativesByPart, getPartLocations, deleteDraftPart, SONAR_ROUTING_OPTIONS, locationTypeLabel } from '../../lib/inventory'
 import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
 import { isoLocalDate } from '../../lib/format'
 import SkuLabelSheet from './SkuLabelSheet'
@@ -29,6 +29,10 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   const [search, setSearch] = useState('')
   const [parts, setParts] = useState([])
   const [stockTotals, setStockTotals] = useState(new Map())
+  // part_id → { count, qty } for parts with a usable location BELOW zero.
+  // On Hand nets these against real shelf stock, so without this flag a
+  // truck auto-deducted past empty is invisible in the list.
+  const [negativeStock, setNegativeStock] = useState(new Map())
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(null)
   const [bulkEditing, setBulkEditing] = useState(false)
@@ -63,12 +67,13 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   async function load() {
     setLoading(true)
     try {
-      const [allParts, totals] = await Promise.all([
+      const [allParts, { totals, negatives }] = await Promise.all([
         getAllParts(),
-        getStockTotalsByPart(),
+        getStockTotalsAndNegativesByPart(),
       ])
       setParts(allParts)
       setStockTotals(totals)
+      setNegativeStock(negatives)
     } catch (e) {
       console.error('Load parts failed:', e)
       showToast('Could not load parts: ' + e.message)
@@ -148,7 +153,8 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
     active: parts.filter(p => p.is_active).length,
     draft:  parts.filter(p => !p.is_active).length,
     nosage: parts.filter(p => p.is_active && !p.sage_id).length,
-  }), [parts])
+    negative: parts.filter(p => negativeStock.has(p.id)).length,
+  }), [parts, negativeStock])
 
   const filtered = useMemo(() => {
     let list = parts
@@ -157,6 +163,9 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
     // Active parts the Sage export still ships as a raw SKU — the work-down
     // list for whoever curates the Sage cross-reference.
     if (filter === 'nosage') list = list.filter(p => p.is_active && !p.sage_id)
+    // Any part with a truck/bin below zero — the "what needs a load booked"
+    // work-down list. Drafts included: a negative is a negative.
+    if (filter === 'negative') list = list.filter(p => negativeStock.has(p.id))
 
     if (search && search.trim().length >= 2) {
       const q = search.toLowerCase()
@@ -175,11 +184,19 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
         if (bQty !== aQty) return bQty - aQty
         return (a.name || '').localeCompare(b.name || '')
       })
+    } else if (filter === 'negative') {
+      // Worst hole first — the −17k truck outranks the −1 rounding slip.
+      list = [...list].sort((a, b) => {
+        const aQ = negativeStock.get(a.id)?.qty || 0
+        const bQ = negativeStock.get(b.id)?.qty || 0
+        if (bQ !== aQ) return bQ - aQ
+        return (a.name || '').localeCompare(b.name || '')
+      })
     } else {
       list = [...list].sort((a, b) => (a.name || '').localeCompare(b.name || ''))
     }
     return list
-  }, [parts, filter, search, stockTotals])
+  }, [parts, filter, search, stockTotals, negativeStock])
 
   // Selection logic. handleCheckboxClick receives the click event so we
   // can read e.shiftKey for range select.
@@ -393,6 +410,17 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
         <button onClick={() => setFilter('nosage')} style={chipStyle(filter === 'nosage')} title="Active parts with no Sage Intacct item ID yet">
           No Sage ID ({counts.nosage})
         </button>
+        {/* Only rendered when something is actually below zero — a red chip
+            that's always there stops meaning anything. */}
+        {counts.negative > 0 && (
+          <button
+            onClick={() => setFilter('negative')}
+            style={chipStyle(filter === 'negative', { color: 'red' })}
+            title="Parts with a truck or bin below zero — more deducted than was ever loaded. Book the missing load to fix."
+          >
+            <Icon name="alert" size={13} style={{ display: 'inline-block', verticalAlign: '-2px', marginRight: 6 }} /> Negative stock ({counts.negative})
+          </button>
+        )}
       </div>
 
       <div style={{ position: 'relative', marginBottom: 8 }}>
@@ -454,6 +482,9 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
         <div style={{ ...cardSurface, overflow: 'hidden' }}>
           {filtered.map((p, i) => {
             const stockQty = stockTotals.get(p.id) || 0
+            // { count, qty } when a truck/bin is below zero — On Hand has
+            // already netted that hole out, so it's shown beside the number.
+            const neg = negativeStock.get(p.id) || null
             const isSelected = selectedIds.has(p.id)
             const isHighlighted = highlightedPartId === p.id
             // Shared pieces so desktop row + phone card stay in sync.
@@ -515,10 +546,19 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                 )
               ) : (
                 <>
-                  <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: stockQty > 0 ? 'var(--text)' : 'var(--hint)' }}>
+                  <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: neg ? 'var(--red)' : stockQty > 0 ? 'var(--text)' : 'var(--hint)' }}>
                     {stockQty.toLocaleString()}
                   </div>
                   <div className="eyebrow" style={{ fontSize: 9 }}>in stock</div>
+                  {neg && (
+                    <div
+                      className="mono"
+                      style={{ fontSize: 10, fontWeight: 700, color: 'var(--red)', whiteSpace: 'nowrap' }}
+                      title={`${neg.count} location${neg.count === 1 ? '' : 's'} below zero — this total already subtracts that shortfall`}
+                    >
+                      −{neg.qty.toLocaleString()} at {neg.count} loc{neg.count === 1 ? '' : 's'}
+                    </div>
+                  )}
                 </>
               )
             )
@@ -548,10 +588,20 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                 </button>
                 <button
                   onClick={() => setViewingLocationsFor(p)}
-                  style={{ ...quickBtnStyle('default'), display: 'inline-flex', alignItems: 'center', gap: 5 }}
-                  title="See which locations have logged stock of this part"
+                  style={{ ...quickBtnStyle(neg ? 'red' : 'default'), display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                  title={neg
+                    ? `${neg.count} location${neg.count === 1 ? '' : 's'} below zero — open to see which`
+                    : 'See which locations have logged stock of this part'}
                 >
-                  <Icon name="pin" size={13} /> Locations
+                  <Icon name={neg ? 'alert' : 'pin'} size={13} /> Locations
+                  {neg && (
+                    <span style={{
+                      fontSize: 9, fontWeight: 800, padding: '1px 5px', borderRadius: 4,
+                      background: 'var(--red)', color: '#fff', lineHeight: 1.4,
+                    }}>
+                      {neg.count} NEG
+                    </span>
+                  )}
                 </button>
                 {!readOnly && <button onClick={() => setEditing(p)} style={quickBtnStyle('default')}>Edit</button>}
               </>
@@ -695,7 +745,7 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
   const { isQtyPaused } = useApp()
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
-  const [data, setData] = useState({ totalQty: 0, locations: [] })
+  const [data, setData] = useState({ totalQty: 0, consumedQty: 0, negativeQty: 0, negativeCount: 0, locations: [] })
   // When the user clicks "Move from here" on a location row, hold the
   // pre-built sourceLocation + selectedRows so BulkMoveSheet can open
   // with the part + source already populated. NULL = closed.
@@ -705,7 +755,9 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
     let cancelled = false
     setLoading(true)
     setErr(null)
-    getPartLocations(part.id)
+    // includeNegative: a truck below zero is the first thing this panel
+    // should show — it's the reason On Hand disagrees with the shelf.
+    getPartLocations(part.id, { includeNegative: true })
       .then(r => { if (!cancelled) setData(r) })
       .catch(e => { if (!cancelled) setErr(e.message || String(e)) })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -729,8 +781,11 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
   }
 
   // getPartLocations sorts usable rows before consumed regions; the header
-  // counts only the former (regions aren't places the part is "at").
-  const usableCount = data.locations.filter(l => !l.isConsumed).length
+  // counts only the former (regions aren't places the part is "at"), and
+  // a hole isn't a place it's at either.
+  const usableCount = data.locations.filter(l => !l.isConsumed && !l.isNegative).length
+  const negativeCount = data.negativeCount || 0
+  const negativeQty = data.negativeQty || 0
 
   return (
     <div className="overlay open" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -766,6 +821,25 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
                 <> · {data.consumedQty.toLocaleString()} consumed into regions</>
               )}
             </div>
+            {/* The On Hand column nets the hole against shelf stock — spell
+                out the arithmetic so "40,200 in the yard but 23,164 in stock"
+                explains itself. */}
+            {negativeCount > 0 && (
+              <div style={{
+                padding: '8px 12px', marginBottom: 8,
+                background: 'var(--danger-bg)', color: 'var(--danger-fg)',
+                border: '1px solid var(--danger-border)',
+                borderRadius: 'var(--r-sm)', fontSize: 'var(--fs-sm)', lineHeight: 1.4,
+              }}>
+                <strong>{negativeCount} location{negativeCount === 1 ? '' : 's'} below zero</strong>
+                {!isQtyPaused && (
+                  <> — short <strong>{negativeQty.toLocaleString()}</strong> {part.unit || 'ea'}.
+                  The Parts list nets this out: {data.totalQty.toLocaleString()} − {negativeQty.toLocaleString()} = <strong>{(data.totalQty - negativeQty).toLocaleString()}</strong> in stock.</>
+                )}
+                {' '}More was deducted here than was ever loaded in. Book the missing load
+                (Record movement, or Reconcile with this location as the counter-location).
+              </div>
+            )}
 
             {data.locations.length === 0 && (
               <div style={{
@@ -799,6 +873,28 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
                       Consumed into regions — not usable stock
                     </div>
                   )}
+                  {/* Negatives sort first; one red header over the group, and
+                      a plain divider where the real shelf stock resumes. */}
+                  {l.isNegative && i === 0 && (
+                    <div style={{
+                      padding: '5px 12px', fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-bold)',
+                      textTransform: 'uppercase', letterSpacing: '.04em',
+                      color: 'var(--danger-fg)', background: 'var(--danger-bg)',
+                      borderBottom: '1px solid var(--border)',
+                    }}>
+                      Below zero — deducted more than was loaded
+                    </div>
+                  )}
+                  {!l.isNegative && !l.isConsumed && data.locations[i - 1]?.isNegative && (
+                    <div style={{
+                      padding: '5px 12px', fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-bold)',
+                      textTransform: 'uppercase', letterSpacing: '.04em',
+                      color: 'var(--muted)', background: 'var(--surface2)',
+                      borderBottom: '1px solid var(--border)',
+                    }}>
+                      On hand
+                    </div>
+                  )}
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 8,
                     padding: '8px 12px',
@@ -826,7 +922,7 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
                       <div style={{
                         minWidth: 50, textAlign: 'right',
                         fontWeight: 'var(--fw-bold)', fontSize: 'var(--fs-md)',
-                        color: l.isConsumed ? 'var(--muted)' : 'var(--orange)',
+                        color: l.isNegative ? 'var(--red)' : l.isConsumed ? 'var(--muted)' : 'var(--orange)',
                       }}>
                         {l.qty.toLocaleString()}
                       </div>

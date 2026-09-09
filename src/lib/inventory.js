@@ -349,8 +349,16 @@ export async function getAllStockGrouped({ excludeLocationId = null, excludeType
 // `includeZero` keeps the qty ≤ 0 rows too (still excluded from both totals).
 // The part-history Balance picker needs them: a bin that's empty TODAY but
 // moved this part last month is exactly the place a manager wants to replay.
-export async function getPartLocations(partId, { includeZero = false } = {}) {
-  if (!partId) return { totalQty: 0, consumedQty: 0, locations: [] }
+//
+// `includeNegative` keeps the qty < 0 rows (flagged `isNegative`, sorted
+// FIRST). A negative truck is the most important line on this list — it means
+// more was deducted than was ever loaded, and the Parts tab's On Hand column
+// silently nets it against real shelf stock (a −17k crew truck once hid inside
+// a 40k yard as "23k in stock"). `negativeQty` is the absolute shortfall across
+// usable locations; `totalQty` stays positive-only so the two can be shown
+// side by side instead of netted.
+export async function getPartLocations(partId, { includeZero = false, includeNegative = false } = {}) {
+  if (!partId) return { totalQty: 0, consumedQty: 0, negativeQty: 0, negativeCount: 0, locations: [] }
   const [stockRes, locsRes] = await Promise.all([
     db.from('inventory_stock')
       .select('location_id, quantity, last_movement_at')
@@ -368,19 +376,26 @@ export async function getPartLocations(partId, { includeZero = false } = {}) {
 
   let totalQty = 0
   let consumedQty = 0
+  let negativeQty = 0
+  let negativeCount = 0
   const locations = []
   for (const r of stockRes.data || []) {
     const qty = Number(r.quantity || 0)
-    if (qty <= 0 && !includeZero) continue  // Surface only places it's actually located
+    const isNegative = qty < 0
+    // Surface only places it's actually located — unless the caller asked
+    // to see the holes too.
+    if (qty <= 0 && !includeZero && !(isNegative && includeNegative)) continue
     const loc = locById.get(r.location_id)
     if (!loc) continue
     const parentName = loc.parent_location_id ? parentNameById.get(loc.parent_location_id) : null
     const isConsumed = isConsumedLocationType(loc.type)
+    if (isNegative && !isConsumed) { negativeQty += -qty; negativeCount += 1 }
     locations.push({
       locationId: loc.id,
       name: loc.name,
       type: loc.type,
       isConsumed,
+      isNegative,
       hasOwner: !!loc.assigned_to,
       isActive: !!loc.is_active,
       parentLocationId: loc.parent_location_id || null,
@@ -394,10 +409,12 @@ export async function getPartLocations(partId, { includeZero = false } = {}) {
     if (isConsumed) consumedQty += qty
     else totalQty += qty
   }
-  // Usable locations first (qty desc), consumed regions after — so a
-  // `.slice(0, 3)` summary reads the shelf, not the ledger.
-  locations.sort((a, b) => (a.isConsumed - b.isConsumed) || (b.qty - a.qty))
-  return { totalQty, consumedQty, locations }
+  // Negative holes first (worst first), then usable locations (qty desc),
+  // consumed regions after — so a `.slice(0, 3)` summary reads the shelf,
+  // not the ledger, and a shortfall is never scrolled past.
+  locations.sort((a, b) =>
+    (a.isConsumed - b.isConsumed) || (b.isNegative - a.isNegative) || (a.isNegative ? a.qty - b.qty : b.qty - a.qty))
+  return { totalQty, consumedQty, negativeQty, negativeCount, locations }
 }
 
 // Pure fold behind getStockSummary — one row per part, USABLE on hand in
@@ -827,16 +844,46 @@ export function foldStockTotalsByPart(rows) {
   return totals
 }
 
+// Pure fold: which parts have a usable location sitting BELOW zero, and by
+// how much. Regions are skipped (not stock either way). Returns
+// Map<part_id, { count, qty }> — `qty` is the absolute shortfall (a positive
+// number) summed across that part's negative locations. The Parts tab flags
+// these rows so a truck that's been auto-deducted past empty is visible at a
+// glance instead of silently netted into On Hand.
+export function foldNegativeStockByPart(rows) {
+  const out = new Map()
+  for (const row of rows || []) {
+    if (isConsumedLocationType(row.location?.type)) continue
+    const qty = Number(row.quantity || 0)
+    if (qty >= 0) continue
+    const cur = out.get(row.part_id) || { count: 0, qty: 0 }
+    cur.count += 1
+    cur.qty += -qty
+    out.set(row.part_id, cur)
+  }
+  return out
+}
+
+async function fetchStockRowsWithLocationType() {
+  // Full-table read — must page past the 1,000-row PostgREST cap.
+  return fetchAllRows(() => db
+    .from('inventory_stock')
+    .select('part_id, quantity, location:inventory_locations(type)')
+    .order('part_id').order('location_id'))
+}
+
 // Get USABLE stock per part across all locations (regions excluded). Used by
 // the Parts admin's On Hand column + CSV and to sort drafts by stock volume
 // (so high-volume drafts surface first). Returns Map<part_id, totalQty>.
 export async function getStockTotalsByPart() {
-  // Full-table read — must page past the 1,000-row PostgREST cap.
-  const data = await fetchAllRows(() => db
-    .from('inventory_stock')
-    .select('part_id, quantity, location:inventory_locations(type)')
-    .order('part_id').order('location_id'))
-  return foldStockTotalsByPart(data)
+  return foldStockTotalsByPart(await fetchStockRowsWithLocationType())
+}
+
+// Same read, both folds — the Parts tab wants the On Hand number AND the
+// per-part negative flag from one table scan. Returns { totals, negatives }.
+export async function getStockTotalsAndNegativesByPart() {
+  const rows = await fetchStockRowsWithLocationType()
+  return { totals: foldStockTotalsByPart(rows), negatives: foldNegativeStockByPart(rows) }
 }
 
 // Get stock at a warehouse including all its bins. Returns flat rows with

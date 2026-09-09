@@ -13,16 +13,20 @@ import Icon from '../shared/Icon'
 // (The 28px `subPillStyle` in InventoryStockTab is a deliberately smaller
 // accent sub-pill, not a drifted copy — it stays local.)
 //
-// opts.color: 'amber' → amber active background (Parts tab's Drafts filter).
+// opts.color: 'amber' → amber active background (Parts tab's Drafts filter);
+// 'red' → red, and the idle chip is tinted red too so a problem filter reads
+// as a warning before it's selected (Parts tab's Negative stock filter).
 export function chipStyle(selected, opts = {}) {
-  const activeBg = opts.color === 'amber' ? 'var(--amber)' : 'var(--dark-bar)'
+  const activeBg = opts.color === 'amber' ? 'var(--amber)' : opts.color === 'red' ? 'var(--red)' : 'var(--dark-bar)'
+  const idleFg = opts.color === 'red' ? 'var(--red)' : 'var(--muted)'
+  const idleBorder = opts.color === 'red' ? 'var(--red-mid)' : 'var(--border2)'
   return {
     display: 'inline-flex', alignItems: 'center', gap: 6,
     height: 30, padding: '0 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
     whiteSpace: 'nowrap', cursor: 'pointer',
     background: selected ? activeBg : 'var(--surface)',
-    color: selected ? '#fff' : 'var(--muted)',
-    border: `1px solid ${selected ? activeBg : 'var(--border2)'}`,
+    color: selected ? '#fff' : idleFg,
+    border: `1px solid ${selected ? activeBg : idleBorder}`,
   }
 }
 
