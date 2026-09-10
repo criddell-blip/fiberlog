@@ -3831,7 +3831,11 @@ export async function getRefurbTwin(partId) {
   if (!partId) return null
   const { data, error } = await db
     .from('parts_catalog')
-    .select('id, name, unit, sage_id, refurb_of, is_active')
+    // department / material_group / attributes are here because Receive PO's
+    // "edit attrs" panel seeds from whatever this returns and then writes the
+    // whole column back — a twin fetched without its attributes bag would have
+    // it (created_via stamp included) blanked on the next save.
+    .select('id, name, unit, sage_id, refurb_of, is_active, department, material_group, attributes')
     .eq('refurb_of', partId)
     .eq('is_active', true)
     .maybeSingle()

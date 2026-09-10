@@ -207,6 +207,38 @@ describe('mergeAttributes', () => {
     const out = mergeAttributes({}, defs, { fiber_count: '144' })
     expect(out.fiber_count).toBe(144)
   })
+
+  // Regression: Receive PO's edit panel seeds its field values when the panel
+  // opens, but the attribute definitions are fetched separately. A def that
+  // landed after the seed used to be handed over as `undefined`, which reads
+  // as "cleared" and deleted the part's stored value. Callers now omit keys
+  // they never showed; this pins the behaviour that makes that safe.
+  it('distinguishes a cleared field from one that was never shown', () => {
+    const existing = { manufacturer: 'Corning', fiber_count: 144 }
+    const cleared = mergeAttributes(existing, defs, { manufacturer: '' })
+    expect('manufacturer' in cleared).toBe(false)
+    expect(cleared.fiber_count).toBe(144)
+
+    const neverShown = mergeAttributes(existing, defs, {})
+    expect(neverShown.manufacturer).toBe('Corning')
+    expect(neverShown.fiber_count).toBe(144)
+  })
+
+  it('treats an explicitly undefined value as a clear, so callers must omit instead', () => {
+    // The dangerous shape, documented: a caller that passes `{key: undefined}`
+    // IS asking for a delete. Anything seeding from an async source has to
+    // check `key in values` before including it.
+    const out = mergeAttributes({ manufacturer: 'Corning' }, defs, { manufacturer: undefined })
+    expect('manufacturer' in out).toBe(false)
+  })
+
+  it('leaves the whole bag alone when no legacy section is supplied', () => {
+    // Guards the failed-defs-read path: with no definitions loaded we must not
+    // conclude that every key is an unexplained leftover and drop it.
+    const existing = { manufacturer: 'Corning', stray: 'x', created_via: { source: 'CSV' } }
+    const out = mergeAttributes(existing, [], {})
+    expect(out).toEqual(existing)
+  })
 })
 
 describe('legacyAttrEntries', () => {

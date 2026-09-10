@@ -35,8 +35,12 @@ export default function PartAttributesView({ onBack }) {
   const [deleting, setDeleting] = useState(null) // { def, count }
   const [busy, setBusy] = useState(false)
 
-  useBackClose(editing ? 1 : 0, () => setEditing(null))
-  useBackClose(deleting ? 1 : 0, () => setDeleting(null))
+  // NOTE: no useBackClose here for the two overlays. Both register their own
+  // layer internally (they're mounted only while open), and the form sheet's
+  // is the one carrying the discard confirm. Registering here as well would
+  // sum to depth 2 per overlay and — because the parent layer activates after
+  // the child mounts — put the parent on top, so Back would fire the plain
+  // close and skip the "Discard changes?" prompt entirely.
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -124,21 +128,29 @@ export default function PartAttributesView({ onBack }) {
     }
   }
 
-  // Reorder by swapping sort_order with the neighbour. Two writes, and the
-  // list re-sorts on reload.
+  // Reorder by rewriting the whole list's sort_order from its new positions,
+  // rather than swapping two values. Swapping is a no-op whenever the two rows
+  // already share a sort_order (they all start at 0 if seeded by SQL), and a
+  // failure between the two writes leaves duplicates behind. Renumbering is
+  // idempotent and self-healing: whatever the list looks like on screen is
+  // what gets written.
   async function move(def, dir) {
     const ordered = [...defs]
     const i = ordered.findIndex(d => d.id === def.id)
     const j = i + dir
     if (i < 0 || j < 0 || j >= ordered.length) return
-    const a = ordered[i], b = ordered[j]
+    const [moved] = ordered.splice(i, 1)
+    ordered.splice(j, 0, moved)
     setBusy(true)
     try {
-      await updatePartAttributeDef(a.id, { sort_order: b.sort_order ?? j }, currentUser?.id)
-      await updatePartAttributeDef(b.id, { sort_order: a.sort_order ?? i }, currentUser?.id)
+      for (let k = 0; k < ordered.length; k++) {
+        if ((ordered[k].sort_order ?? -1) === k) continue   // already correct
+        await updatePartAttributeDef(ordered[k].id, { sort_order: k }, currentUser?.id)
+      }
       await load()
     } catch (e) {
       showToast('Reorder failed: ' + e.message)
+      await load()   // show what actually landed
     } finally {
       setBusy(false)
     }
@@ -272,6 +284,9 @@ export default function PartAttributesView({ onBack }) {
 
       {editing && (
         <AttributeFormSheet
+          // Every field seeds from `def` in a useState initializer, so the
+          // sheet has to remount if the target ever swaps without closing.
+          key={editing.id ?? 'new'}
           def={editing}
           departments={departments}
           existingKeys={existingKeys}

@@ -38,6 +38,10 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   // fields in the edit sheet, the "Missing info" work-down chip, and the extra
   // CSV columns. An empty registry leaves every one of those inert.
   const [attrDefs, setAttrDefs] = useState([])
+  // False only while the registry read is failing. Gates the edit sheet's
+  // "Other attributes" section, which would otherwise treat every defined
+  // attribute as unexplained legacy text.
+  const [attrDefsLoaded, setAttrDefsLoaded] = useState(true)
   const [stockTotals, setStockTotals] = useState(new Map())
   // part_id → { count, qty } for parts with a usable location BELOW zero.
   // On Hand nets these against real shelf stock, so without this flag a
@@ -81,13 +85,20 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
         getAllParts(),
         getStockTotalsAndNegativesByPart(),
         // A registry read failure must not take the whole tab down with it —
-        // the parts list is the job, attributes are the garnish.
-        getPartAttributeDefs().catch(e => { console.warn('Attribute defs load failed:', e); return [] }),
+        // the parts list is the job, attributes are the garnish. But "the read
+        // failed" and "no attributes are defined" must stay distinguishable:
+        // treating a failure as an empty registry would make the edit sheet
+        // classify every defined attribute as legacy free-text and rewrite
+        // typed values as strings (144 → "144") on the next save.
+        getPartAttributeDefs()
+          .then(rows => ({ rows, ok: true }))
+          .catch(e => { console.warn('Attribute defs load failed:', e); return { rows: [], ok: false } }),
       ])
       setParts(allParts)
       setStockTotals(totals)
       setNegativeStock(negatives)
-      setAttrDefs(defs)
+      setAttrDefs(defs.rows)
+      setAttrDefsLoaded(defs.ok)
     } catch (e) {
       console.error('Load parts failed:', e)
       showToast('Could not load parts: ' + e.message)
@@ -419,16 +430,21 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   async function handleBulkEdit(updates, attrChange) {
     const ids = [...selectedIds]
     if (ids.length === 0) return
+    // The attribute write is committed before the column batch and can't be
+    // rolled back with it, so the toasts say what actually landed rather than
+    // reporting one number for two writes.
+    let attrNote = ''
     try {
       if (attrChange) {
         const n = await setPartAttributeBulk(ids, attrChange.key, attrChange.value, { clear: attrChange.clear })
+        attrNote = `${attrChange.clear ? 'Cleared' : 'Set'} ${attrChange.label} on ${n} part${n === 1 ? '' : 's'}`
         if (Object.keys(updates).length === 0) {
           setBulkEditing(false)
           setSelectedIds(new Set())
           lastClickedIndexRef.current = null
           await load()
           onChanged?.()
-          showToast(`${attrChange.clear ? 'Cleared' : 'Set'} ${attrChange.label} on ${n} part${n === 1 ? '' : 's'}`)
+          showToast(attrNote)
           return
         }
       }
@@ -439,10 +455,14 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
       await load()
       onChanged?.()
       const errCount = result.errors?.length || 0
-      showToast(`Updated ${result.updated.length}${errCount ? ` · ${errCount} failed` : ''}`)
+      showToast(`${attrNote ? attrNote + ' · ' : ''}Updated ${result.updated.length}${errCount ? ` · ${errCount} failed` : ''}`)
       if (errCount > 0) console.warn('Bulk edit row failures:', result.errors)
     } catch (e) {
-      showToast('Bulk edit failed: ' + e.message)
+      // Name the half that succeeded — a silent "failed" after the attribute
+      // already applied would send the manager back to re-apply it.
+      showToast(attrNote
+        ? `${attrNote}, but the rest of the bulk edit failed: ${e.message}`
+        : 'Bulk edit failed: ' + e.message)
     }
   }
 
@@ -766,6 +786,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           part={editing}
           distinctValues={distinctValues}
           attrDefs={attrDefs}
+          attrDefsLoaded={attrDefsLoaded}
           onCancel={() => setEditing(null)}
           onSave={handleSave}
         />
@@ -1127,7 +1148,7 @@ function bulkActionBtn(variant) {
 
 // ─── Single-part edit sheet ─────────────────────────────────────────────────
 
-function PartFormSheet({ part, distinctValues, attrDefs, onCancel, onSave }) {
+function PartFormSheet({ part, distinctValues, attrDefs, attrDefsLoaded = true, onCancel, onSave }) {
   const [name, setName] = useState(part.name || '')
   const [nickname, setNickname] = useState(part.nickname || '')
   // Sage Intacct Item ID — a cross-reference that rides next to the SKU; the
@@ -1155,8 +1176,11 @@ function PartFormSheet({ part, distinctValues, attrDefs, onCancel, onSave }) {
   // Keys stored on this part that no active definition explains — a retired
   // attribute, or something typed before the registry existed. Kept editable
   // so nothing becomes invisible, but no longer the way values are added.
+  // Empty when the registry couldn't be read: without the definitions we
+  // can't tell a defined attribute from a stray key, and editing this section
+  // rewrites the whole legacy half of the bag.
   const [legacyRows, setLegacyRows] = useState(
-    () => legacyAttrEntries(part.attributes, attrDefs)
+    () => attrDefsLoaded ? legacyAttrEntries(part.attributes, attrDefs) : []
   )
   function setLegacyRow(idx, patch) {
     setLegacyRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r))
@@ -1222,6 +1246,13 @@ function PartFormSheet({ part, distinctValues, attrDefs, onCancel, onSave }) {
     try {
       // Merge, never replace: the bag also holds the system created_via stamp,
       // and out-of-scope attributes keep their stored answers.
+      //
+      // This is still a client-side merge written back as a whole column, so a
+      // created_via stamp landing between this sheet opening and saving would
+      // be lost. Left as-is deliberately: one manager editing one part is not
+      // the concurrent case, and it matches how every other field on this
+      // sheet is written. The bulk path, which touches hundreds of rows at
+      // once, goes through the set_part_attribute RPC instead.
       const legacy = {}
       for (const r of legacyRows) {
         const k = (r.key || '').trim()
@@ -1232,7 +1263,14 @@ function PartFormSheet({ part, distinctValues, attrDefs, onCancel, onSave }) {
       // an attribute scoped to another department keeps its stored answer.
       const shownValues = {}
       for (const d of scopedDefs) shownValues[d.key] = attrValues[d.key]
-      const attributes = mergeAttributes(part.attributes, attrDefs, shownValues, legacy)
+      // `undefined` legacy = "don't touch the un-defined keys at all". Passing
+      // an empty object would mean "the legacy section is now empty", which
+      // deletes every key with no definition — the wrong answer when the
+      // definitions are exactly what we failed to load.
+      const attributes = mergeAttributes(
+        part.attributes, attrDefs, shownValues,
+        attrDefsLoaded ? legacy : undefined
+      )
       await onSave({
         name: name.trim(),
         nickname: nickname.trim() || null,
@@ -1516,10 +1554,15 @@ function BulkEditSheet({ count, distinctValues, attrDefs, onCancel, onSave }) {
     [attrDefs]
   )
   const [editAttr, setEditAttr] = useState(false)
-  const [attrKey, setAttrKey] = useState(() => activeDefs[0]?.key || '')
+  // Derived, not seeded: the defs load can resolve after this sheet mounts
+  // (the Parts tab swallows a defs-read failure and retries on refresh). A
+  // useState seed would leave the select showing the first option while the
+  // state stayed '', so Apply would sit disabled with nothing explaining why.
+  const [attrKey, setAttrKey] = useState('')
+  const effAttrKey = attrKey || activeDefs[0]?.key || ''
   const [attrRaw, setAttrRaw] = useState('')
   const [attrClear, setAttrClear] = useState(false)
-  const attrDef = activeDefs.find(d => d.key === attrKey) || null
+  const attrDef = activeDefs.find(d => d.key === effAttrKey) || null
 
   const [saving, setSaving] = useState(false)
 
@@ -1593,7 +1636,7 @@ function BulkEditSheet({ count, distinctValues, attrDefs, onCancel, onSave }) {
           {activeDefs.length > 0 && (
             <BulkField label="Attribute" checked={editAttr} onToggle={setEditAttr}>
               <select
-                value={attrKey}
+                value={effAttrKey}
                 onChange={e => { setAttrKey(e.target.value); setAttrRaw('') }}
                 style={{ width: '100%', padding: '8px 10px', fontSize: 14, border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--bg)', color: 'var(--text)', marginBottom: 6 }}
               >

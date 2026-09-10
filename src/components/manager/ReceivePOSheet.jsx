@@ -605,11 +605,39 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
   }
   // Only the fields this form showed are handed to the merge — see
   // mergeAttributes: an out-of-scope attribute keeps its stored answer.
+  //
+  // A key is included only when it's actually IN fAttrs. A field the operator
+  // cleared holds '' and is present; a def that arrived after this panel was
+  // seeded is absent, and must stay absent — passing it as `undefined` would
+  // read as "cleared" and delete the part's stored value.
   function shownAttrValues() {
     const out = {}
-    for (const d of defsForPart(attrDefs, attrPart)) out[d.key] = fAttrs[d.key]
+    for (const d of defsForPart(attrDefs, attrPart)) {
+      if (d.key in fAttrs) out[d.key] = fAttrs[d.key]
+    }
     return out
   }
+
+  // The defs fetch is independent of this panel opening, so a def that lands
+  // while the edit form is already up gets seeded here instead of rendering
+  // blank over a value that's actually stored.
+  useEffect(() => {
+    if (mode !== 'editing' || !line.part) return
+    const stored = line.pendingAttrs?.attributes || line.part.attributes || {}
+    setFAttrs(prev => {
+      let changed = false
+      const next = { ...prev }
+      for (const d of attrDefs || []) {
+        if (d.key in next) continue
+        next[d.key] = attrValueToInput(d, stored[d.key])
+        changed = true
+      }
+      return changed ? next : prev
+    })
+    // line.part / line.pendingAttrs are read for seed values only; re-running
+    // on every keystroke in the panel would fight the operator's typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attrDefs, mode])
 
   // Search active only when no part picked AND we're not in a form mode
   useEffect(() => {
@@ -639,8 +667,11 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
     sage_id: p.sage_id || null, refurb_of: p.refurb_of || null,
     is_depreciated: !!p.is_depreciated,  // no-value flag drives the unit-cost hint (backlog #37)
     // Carried so the edit panel can merge onto the real bag instead of
-    // replacing it — the created_via stamp lives in there too.
-    attributes: p.attributes || {},
+    // replacing it — the created_via stamp lives in there too. Deliberately
+    // `undefined` (not `{}`) when the source query didn't select the column:
+    // saveEdit reads that as "bag not loaded" and won't write the column at
+    // all, rather than merging onto an empty object and wiping it.
+    attributes: p.attributes ?? undefined,
   })
 
   async function pickPart(p) {
@@ -738,16 +769,20 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
 
   function saveEdit() {
     if (attrErrors.length > 0) { setAttrsTouched(true); return }
-    onChange({
-      pendingAttrs: {
-        unit: fUnit.trim() || 'ea',
-        department: fDept.trim() || null,
-        material_group: fMatGrp.trim() || null,
-        // Merge onto the part's stored bag so the created_via stamp and any
-        // out-of-scope attribute survive the edit.
-        attributes: mergeAttributes(line.part?.attributes, attrDefs, shownAttrValues()),
-      },
-    })
+    const payload = {
+      unit: fUnit.trim() || 'ea',
+      department: fDept.trim() || null,
+      material_group: fMatGrp.trim() || null,
+    }
+    // updatePart writes `attributes` as a whole column, so only touch it when
+    // the part's real bag was actually loaded. `undefined` means the query
+    // that produced this line never selected the column — merging onto a
+    // stand-in empty object would delete every stored attribute and the
+    // created_via stamp with them.
+    if (line.part?.attributes !== undefined) {
+      payload.attributes = mergeAttributes(line.part.attributes, attrDefs, shownAttrValues())
+    }
+    onChange({ pendingAttrs: payload })
     setMode('idle')
   }
 
