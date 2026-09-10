@@ -14,6 +14,7 @@ import {
   missingRequiredDefs,
   partIsMissingRequired,
   attributeCsvColumns,
+  searchableAttrValues,
   RESERVED_ATTRIBUTE_KEYS,
 } from './partAttributes'
 
@@ -280,6 +281,31 @@ describe('completeness', () => {
 
   it('handles a part with no attributes at all', () => {
     expect(partIsMissingRequired(defs, { department: 'Fiber' })).toBe(true)
+  })
+})
+
+describe('searchableAttrValues', () => {
+  it('returns every primitive value as a string', () => {
+    expect(searchableAttrValues({ manufacturer: 'Corning', fiber_count: 144, serialized: true }).sort())
+      .toEqual(['144', 'Corning', 'true'])
+  })
+
+  it('never leaks the created_via stamp into search', () => {
+    // The stamp holds the name of whoever created the part. Matching on it
+    // would make a search for "Chris" return every part he ever received.
+    const attrs = { created_via: { by: 'Chris Riddell', source: 'Receive PO' }, manufacturer: 'Corning' }
+    expect(searchableAttrValues(attrs)).toEqual(['Corning'])
+  })
+
+  it('still returns values whose definition was retired or deleted', () => {
+    // Reads the bag, not the registry — the value is on the part either way.
+    expect(searchableAttrValues({ old_supplier_code: 'X1' })).toEqual(['X1'])
+  })
+
+  it('handles a part with no attributes', () => {
+    expect(searchableAttrValues(null)).toEqual([])
+    expect(searchableAttrValues({})).toEqual([])
+    expect(searchableAttrValues({ a: null })).toEqual([])
   })
 })
 

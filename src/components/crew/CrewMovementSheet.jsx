@@ -4,6 +4,7 @@ import { getLocations, getStockByLocation, getAllStockGrouped, recordCrewMovemen
 import { getCrewTypePartRestrictions } from '../../lib/admin'
 import { useBackClose } from '../../lib/backStack'
 import { matchesAllTokens } from '../../lib/shared'
+import { searchableAttrValues } from '../../lib/partAttributes'
 import { t } from '../../lib/i18n'
 import Icon from '../shared/Icon'
 
@@ -310,17 +311,10 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
     if (!partSearch.trim()) return partGroups
     return partGroups.filter(p => {
       const fields = [p.name, p.nickname, p.partId, p.material_group, p.department]
-      // Search across attribute values. Primitives only — the bag also holds
-      // the created_via stamp (an object), which is provenance, not a part
-      // property, and matching on it would surface unrelated parts.
-      if (p.attributes && typeof p.attributes === 'object') {
-        for (const v of Object.values(p.attributes)) {
-          if (v === null) continue
-          if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-            fields.push(String(v))
-          }
-        }
-      }
+      // Search across attribute values. searchableAttrValues owns the rule
+      // (primitives only, never the created_via stamp) and the manager Parts
+      // tab search uses the same helper, so the two can't drift.
+      fields.push(...searchableAttrValues(p.attributes))
       return matchesAllTokens(partSearch, fields)
     })
   }, [partGroups, partSearch])

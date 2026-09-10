@@ -5,6 +5,7 @@ import {
   defsForPart, attrValueToInput, formatAttrValue, coerceAttrValue,
   validateAttrValues, mergeAttributes, legacyAttrEntries,
   missingRequiredDefs, partIsMissingRequired, attributeCsvColumns, compareDefs,
+  searchableAttrValues,
 } from '../../lib/partAttributes'
 import PartAttributeFields from './PartAttributeFields'
 import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
@@ -140,11 +141,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
     // Clear any search that would hide the row.
     if (search && search.trim().length >= 2) {
       const q = search.toLowerCase()
-      const matchesSearch = (target.name || '').toLowerCase().includes(q)
-        || (target.id || '').toLowerCase().includes(q)
-        || (target.sage_id || '').toLowerCase().includes(q)
-        || (target.category || '').toLowerCase().includes(q)
-      if (!matchesSearch) setSearch('')
+      if (!partMatchesSearch(target, q)) setSearch('')
     }
     // Defer scroll/highlight a tick so the filter change has rendered.
     const t = setTimeout(() => {
@@ -211,12 +208,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
 
     if (search && search.trim().length >= 2) {
       const q = search.toLowerCase()
-      list = list.filter(p =>
-        (p.name || '').toLowerCase().includes(q) ||
-        (p.id   || '').toLowerCase().includes(q) ||
-        (p.sage_id || '').toLowerCase().includes(q) ||
-        (p.category || '').toLowerCase().includes(q)
-      )
+      list = list.filter(p => partMatchesSearch(p, q))
     }
 
     if (filter === 'draft') {
@@ -521,7 +513,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           type="text"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search parts by name, SKU, or category…"
+          placeholder="Search by name, SKU, category, or attribute…"
           style={{
             width: '100%', height: 38, padding: '0 12px 0 36px',
             border: '1px solid var(--border2)', borderRadius: 'var(--r-sm)',
@@ -1144,6 +1136,34 @@ function bulkActionBtn(variant) {
   if (variant === 'orange') return { ...base, border: 'none', background: 'var(--accent)', color: '#fff' }
   if (variant === 'ghost')  return { ...base, border: 'none', background: 'transparent', color: 'rgba(255,255,255,0.7)', fontWeight: 600 }
   return { ...base, border: '1px solid rgba(255,255,255,0.3)', background: 'transparent', color: '#fff' }
+}
+
+// ─── Search predicate ───────────────────────────────────────────────────────
+
+// Does this part match the search box? `q` must already be lowercased.
+//
+// One definition used by both the list filter and the cross-link focus jump —
+// they were separate copies, which is how the jump's "would this row still be
+// visible?" check could disagree with the filter that actually hides it.
+//
+// Attribute values are searched alongside the named fields, so a manufacturer
+// or a manufacturer's part number finds the part. Substring, not tokenized,
+// matching the rest of this box: the catalog is already in memory here, so
+// this costs nothing but a pass over values that are a handful of short
+// strings per part.
+function partMatchesSearch(p, q) {
+  if (!p) return false
+  if ((p.name || '').toLowerCase().includes(q)) return true
+  if ((p.id || '').toLowerCase().includes(q)) return true
+  if ((p.sage_id || '').toLowerCase().includes(q)) return true
+  if ((p.category || '').toLowerCase().includes(q)) return true
+  // Nickname is on the row and is what warehouse staff actually say out loud;
+  // it was missing from the old predicate.
+  if ((p.nickname || '').toLowerCase().includes(q)) return true
+  for (const v of searchableAttrValues(p.attributes)) {
+    if (v.toLowerCase().includes(q)) return true
+  }
+  return false
 }
 
 // ─── Single-part edit sheet ─────────────────────────────────────────────────

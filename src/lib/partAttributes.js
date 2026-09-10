@@ -229,6 +229,32 @@ export function partIsMissingRequired(defs, part) {
   return missingRequiredDefs(defs, part).length > 0
 }
 
+// ─── Search ─────────────────────────────────────────────────────────────────
+
+// The attribute values a part should be findable by, as strings.
+//
+// Deliberately independent of the registry: a value stored under a retired or
+// deleted definition is still on the part, and someone searching for it wants
+// the part back. So this reads the bag, not the defs.
+//
+// Two exclusions. Objects never contribute — that's the `created_via` stamp,
+// which holds the name of whoever created the part; matching on it would make
+// a search for "Chris" return every part he ever received, which is
+// provenance leaking into a product search. Numbers and booleans DO
+// contribute, stringified: a fiber count is stored as a number, and typing
+// 144 should find it.
+export function searchableAttrValues(attributes) {
+  const src = attributes && typeof attributes === 'object' ? attributes : {}
+  const out = []
+  for (const [k, v] of Object.entries(src)) {
+    if (isReservedAttrKey(k)) continue
+    if (v === null || v === undefined) continue
+    const t = typeof v
+    if (t === 'string' || t === 'number' || t === 'boolean') out.push(String(v))
+  }
+  return out
+}
+
 // CSV columns for the catalog export: one per active def, stable order,
 // header = label so accounting reads words rather than snake_case.
 export function attributeCsvColumns(defs) {
