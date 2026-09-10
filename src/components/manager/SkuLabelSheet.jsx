@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react'
 import QrLabelSheet from '../shared/QrLabelSheet'
+import { getPartAttributeDefs, getPartAttributesByIds } from '../../lib/inventory'
+import { defsForPart, formatAttrValue, compareDefs } from '../../lib/partAttributes'
 
 // Printable labels for parts. Each label = name + SKU + QR encoding the SKU
 // directly. Stick on product packaging when received; scan during cycle
@@ -104,6 +107,59 @@ const FORMAT_PRESETS = {
 
 export default function SkuLabelSheet({ parts, title = 'Print SKU labels', onClose }) {
   // parts is an array of { id, name, unit?, ... } objects
+
+  // Attributes the owner flagged "print on SKU label" (Admin → Part
+  // attributes). Loaded here rather than passed in, because four different
+  // callers open this sheet and none of them should have to know. Fail-soft
+  // and format-aware: the label formats with no room for a name have no room
+  // for these either.
+  const [labelDefs, setLabelDefs] = useState([])
+  // SKU → { attributes, department }, fetched only when at least one attribute
+  // is flagged for the label. Most callers hand this sheet a narrow
+  // {id, name, unit} shape, so the values have to be looked up by SKU.
+  const [attrByPart, setAttrByPart] = useState(() => new Map())
+
+  useEffect(() => {
+    let cancelled = false
+    getPartAttributeDefs()
+      .then(rows => {
+        if (cancelled) return
+        setLabelDefs((rows || []).filter(d => d.show_on_label && d.is_active !== false).sort(compareDefs))
+      })
+      .catch(e => { console.warn('Label attribute defs load failed:', e) })
+    return () => { cancelled = true }
+  }, [])
+
+  // Keyed on the SKU list itself, not the `parts` array — callers rebuild that
+  // array every render, and depending on it would refetch in a loop.
+  const partIdsKey = (parts || []).map(p => p.id).join('|')
+  useEffect(() => {
+    if (labelDefs.length === 0) return
+    const ids = partIdsKey ? partIdsKey.split('|') : []
+    if (ids.length === 0) return
+    let cancelled = false
+    getPartAttributesByIds(ids)
+      .then(m => { if (!cancelled) setAttrByPart(m) })
+      .catch(e => { console.warn('Label attribute values load failed:', e) })
+    return () => { cancelled = true }
+  }, [labelDefs, partIdsKey])
+
+  // The lines to print for one part: only in-scope attributes that have a value.
+  function attrLines(p) {
+    if (labelDefs.length === 0) return []
+    const fetched = attrByPart.get(p?.id)
+    // Prefer what the caller passed (the Parts tab has the whole row already),
+    // fall back to the lookup.
+    const attrs = (p?.attributes && typeof p.attributes === 'object' && Object.keys(p.attributes).length > 0)
+      ? p.attributes
+      : (fetched?.attributes || {})
+    const scopePart = { department: p?.department ?? fetched?.department ?? null }
+    return labelDefs
+      .filter(d => defsForPart([d], scopePart).length > 0)
+      .map(d => ({ label: d.label, text: formatAttrValue(d, attrs[d.key]) }))
+      .filter(l => l.text)
+  }
+
   return (
     <QrLabelSheet
       title={title}
@@ -176,6 +232,17 @@ export default function SkuLabelSheet({ parts, title = 'Print SKU labels', onClo
           }}>
             {p.id}
           </div>
+          {/* Owner-flagged attributes. Skipped on the dense scan-sheet
+              formats (the ones that already drop the part name). */}
+          {preset.showName && attrLines(p).map(l => (
+            <div key={l.label} style={{
+              fontSize: Math.max(6, Math.round((preset.skuFontPx || 9) * 0.9)),
+              color: '#444', marginTop: 1, lineHeight: 1.15,
+              wordBreak: 'break-word', maxWidth: '100%',
+            }}>
+              <span style={{ color: '#888' }}>{l.label}: </span>{l.text}
+            </div>
+          ))}
         </>
       )}
       onClose={onClose}

@@ -4,8 +4,11 @@ import {
   createPart, updatePart, getPurchaseRequests,
   getRefurbTwin, createRefurbTwin,
   getDefaultReceivingLocation, RECEIVING_BIN_NAME, RETURNS_BIN_NAME,
+  getPartAttributeDefs,
 } from '../../lib/inventory'
 import { searchPartsCatalog } from '../../lib/supabase'
+import { defsForPart, mergeAttributes, validateAttrValues, attrValueToInput } from '../../lib/partAttributes'
+import PartAttributeFields from './PartAttributeFields'
 import SkuLabelSheet from './SkuLabelSheet'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
@@ -58,6 +61,18 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
   // are already typed in, so nothing gets re-keyed at the dock. Fail-soft:
   // load errors just hide the section and leave the manual flow.
   const [openPos, setOpenPos] = useState([])
+  // Owner-defined part attributes, so a SKU minted at the dock is asked the
+  // same questions as one created in the Parts tab. Fail-soft: a load error
+  // just means the inline create form looks the way it always did.
+  const [attrDefs, setAttrDefs] = useState([])
+
+  useEffect(() => {
+    let cancelled = false
+    getPartAttributeDefs()
+      .then(rows => { if (!cancelled) setAttrDefs(rows || []) })
+      .catch(e => { console.warn('Attribute defs load failed:', e); if (!cancelled) setAttrDefs([]) })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (!onOpenPr) return
@@ -172,6 +187,7 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
             sage_id: l.part.sage_id,
             is_depreciated: l.part.is_depreciated || false,
             is_active: true,
+            attributes: l.part.attributes || null,
             created_via: {
               source: 'Receive PO',
               detail: vendorName.trim() ? `vendor ${vendorName.trim()}` : null,
@@ -496,6 +512,7 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
               line={line}
               isReturn={isReturn}
               currentUser={currentUser}
+              attrDefs={attrDefs}
               onChange={patch => updateLine(line.tempId, patch)}
               onRemove={lines.length > 1 ? () => removeLine(line.tempId) : null}
             />
@@ -558,7 +575,7 @@ export default function ReceivePOSheet({ locations, currentUser, onClose, onReco
 // The parent's handleSubmit reads both and does the catalog work before
 // inserting the receive movements.
 
-function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUser = null }) {
+function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUser = null, attrDefs = [] }) {
   const [query, setQuery] = useState('')
   const [twinBusy, setTwinBusy] = useState(false)
   const pickSeq = useRef(0)   // guards the async twin lookup against a faster second pick
@@ -575,6 +592,24 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
   const [fMatGrp, setFMatGrp] = useState('')
   const [fSageId, setFSageId] = useState('')   // create-only: Sage Intacct item, if accounting already minted one
   const [fDepreciated, setFDepreciated] = useState(false)  // create-only: no-value flag (backlog #37)
+  // Owner-defined attributes, so a part minted at the dock is asked the same
+  // questions as one created in the Parts tab. Raw input values by def key.
+  const [fAttrs, setFAttrs] = useState({})
+  const [attrsTouched, setAttrsTouched] = useState(false)
+  // Scoping follows the department typed in THIS form, not a stored one.
+  const attrPart = { department: fDept.trim() || null }
+  const attrErrors = validateAttrValues(attrDefs, attrPart, fAttrs)
+  function setAttrValue(key, value) {
+    setAttrsTouched(true)
+    setFAttrs(prev => ({ ...prev, [key]: value }))
+  }
+  // Only the fields this form showed are handed to the merge — see
+  // mergeAttributes: an out-of-scope attribute keeps its stored answer.
+  function shownAttrValues() {
+    const out = {}
+    for (const d of defsForPart(attrDefs, attrPart)) out[d.key] = fAttrs[d.key]
+    return out
+  }
 
   // Search active only when no part picked AND we're not in a form mode
   useEffect(() => {
@@ -586,7 +621,7 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
       try {
         // Full attrs so a field return can mint the refurb twin from the
         // picked parent without a second round-trip.
-        const data = await searchPartsCatalog(query, { limit: 8, cols: 'id, name, nickname, unit, department, material_group, sage_id, refurb_of, is_depreciated, is_active' })
+        const data = await searchPartsCatalog(query, { limit: 8, cols: 'id, name, nickname, unit, department, material_group, sage_id, refurb_of, is_depreciated, is_active, attributes' })
         setResults(data)
       } catch (e) {
         console.warn('Part search failed:', e)
@@ -603,6 +638,9 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
     department: p.department, material_group: p.material_group,
     sage_id: p.sage_id || null, refurb_of: p.refurb_of || null,
     is_depreciated: !!p.is_depreciated,  // no-value flag drives the unit-cost hint (backlog #37)
+    // Carried so the edit panel can merge onto the real bag instead of
+    // replacing it — the created_via stamp lives in there too.
+    attributes: p.attributes || {},
   })
 
   async function pickPart(p) {
@@ -656,6 +694,8 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
     setFMatGrp('')
     setFSageId('')
     setFDepreciated(false)
+    setFAttrs({})
+    setAttrsTouched(false)
     setMode('creating')
   }
 
@@ -665,11 +705,18 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
     setFUnit(cur.unit ?? line.part.unit ?? 'ea')
     setFDept(cur.department ?? line.part.department ?? '')
     setFMatGrp(cur.material_group ?? line.part.material_group ?? '')
+    // Seed from a pending edit first, then from what's stored on the part.
+    const stored = cur.attributes || line.part.attributes || {}
+    const seed = {}
+    for (const d of attrDefs || []) seed[d.key] = attrValueToInput(d, stored[d.key])
+    setFAttrs(seed)
+    setAttrsTouched(false)
     setMode('editing')
   }
 
   function saveCreate() {
     if (!fSku.trim() || !fName.trim()) return
+    if (attrErrors.length > 0) { setAttrsTouched(true); return }
     onChange({
       part: {
         id: fSku.trim(),
@@ -679,6 +726,8 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
         material_group: fMatGrp.trim() || null,
         sage_id: fSageId.trim().toUpperCase() || null,
         is_depreciated: fDepreciated,
+        // Merged onto an empty bag; createPart adds the created_via stamp.
+        attributes: mergeAttributes({}, attrDefs, shownAttrValues()),
         isNew: true,
       },
       pendingAttrs: null,
@@ -688,11 +737,15 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
   }
 
   function saveEdit() {
+    if (attrErrors.length > 0) { setAttrsTouched(true); return }
     onChange({
       pendingAttrs: {
         unit: fUnit.trim() || 'ea',
         department: fDept.trim() || null,
         material_group: fMatGrp.trim() || null,
+        // Merge onto the part's stored bag so the created_via stamp and any
+        // out-of-scope attribute survive the edit.
+        attributes: mergeAttributes(line.part?.attributes, attrDefs, shownAttrValues()),
       },
     })
     setMode('idle')
@@ -800,6 +853,23 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
             />
             Depreciated (no value) — used/recovered gear; Sage export marks its lines [no-value]
           </label>
+        )}
+
+        {/* Owner-defined attributes (Admin → Part attributes). Renders nothing
+            when none apply, so this panel is unchanged for a catalog with an
+            empty registry. */}
+        {defsForPart(attrDefs, attrPart).length > 0 && (
+          <div style={{ marginBottom: 8 }}>
+            <PartAttributeFields
+              defs={attrDefs}
+              part={attrPart}
+              values={fAttrs}
+              onChange={setAttrValue}
+              showErrors={attrsTouched}
+              compact
+              emptyHint={false}
+            />
+          </div>
         )}
 
         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>

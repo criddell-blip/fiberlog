@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import { db, must } from '../../lib/supabase'
 import AdminUsersView from './AdminUsersView'
 import CrewTypePermissionsView from './CrewTypePermissionsView'
+import PartAttributesView from './PartAttributesView'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 
@@ -18,7 +19,7 @@ export default function AdminPanel() {
   const [selProject, setSelProject] = useState(null)
   const [loading, setLoading] = useState(false)
   const [confirm, setConfirm] = useState(null)
-  const [view, setView] = useState('projects') // 'projects' | 'users' | 'crewperms'
+  const [view, setView] = useState('projects') // 'projects' | 'users' | 'crewperms' | 'partattrs'
 
   // Back dismisses the confirm dialog (same as its Cancel).
   useBackClose(confirm ? 1 : 0, () => setConfirm(null))
@@ -191,6 +192,9 @@ export default function AdminPanel() {
 
   if (view === 'crewperms') {
     return <CrewTypePermissionsView onBack={() => setView('projects')} />
+  }
+  if (view === 'partattrs') {
+    return <PartAttributesView onBack={() => setView('projects')} />
   }
 
   // ── Phase detail ────────────────────────────────────────────────────────────
@@ -416,6 +420,18 @@ export default function AdminPanel() {
             <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 7 }}><Icon name="lock" size={15} /> Crew × Department permissions</div>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
               Restrict which part departments each crew type can move (leave empty for unrestricted)
+            </div>
+          </div>
+          <span style={{ display: 'inline-flex', color: 'var(--muted)' }}><Icon name="chevron-right" size={16} /></span>
+        </div>
+
+        <div
+          onClick={() => setView('partattrs')}
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 16, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 7 }}><Icon name="tag" size={15} /> Part attributes</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+              Define standard fields every part is asked for, so the catalog stays consistent
             </div>
           </div>
           <span style={{ display: 'inline-flex', color: 'var(--muted)' }}><Icon name="chevron-right" size={16} /></span>
