@@ -1909,7 +1909,7 @@ export async function updatePartsBatch(ids, updates) {
 // attributes.created_via so a draft sitting in the Parts tab months later
 // still says which flow minted it and who was driving. created_at (DB
 // default) covers the when.
-export async function createPart({ id, name, unit, department, material_group, barcode, sage_id, refurb_of = null, is_depreciated = false, is_active = true, created_via = null }) {
+export async function createPart({ id, name, unit, department, material_group, barcode, sage_id, refurb_of = null, is_depreciated = false, is_active = true, created_via = null, attributes = null }) {
   if (!id || !String(id).trim()) throw new Error('Part SKU is required')
   if (!name || !String(name).trim()) throw new Error('Part name is required')
   const cleanId = String(id).trim()
@@ -1933,7 +1933,13 @@ export async function createPart({ id, name, unit, department, material_group, b
     is_depreciated: !!is_depreciated,
     is_active,
   }
-  if (created_via) payload.attributes = { created_via }
+  // Owner-defined attribute values answered on the create form, plus the
+  // system creation stamp. Both live in the same bag, so build it once here
+  // rather than letting a caller overwrite one with the other.
+  if (created_via || (attributes && Object.keys(attributes).length > 0)) {
+    payload.attributes = { ...(attributes || {}) }
+    if (created_via) payload.attributes.created_via = created_via
+  }
 
   const { data, error } = await db
     .from('parts_catalog')
@@ -2064,6 +2070,136 @@ export async function searchInventoryParts(query) {
     cols: 'id, name, nickname, unit, category, material_group, is_active',
     limit: 20,
   })
+}
+
+// ─── PART ATTRIBUTE DEFINITIONS ──────────────────────────────────────────────
+// The owner-defined registry behind parts_catalog.attributes. The pure rules
+// (scoping, coercion, validation, merging) live in lib/partAttributes.js —
+// this is only the data access. See migration 20260910120000.
+
+// Ordered for display. Callers that render forms filter to is_active
+// themselves via defsForPart(); the admin view wants the retired ones too.
+export async function getPartAttributeDefs() {
+  const { data, error } = await db
+    .from('part_attribute_defs')
+    .select('*')
+    .order('sort_order', { ascending: true })
+    .order('label', { ascending: true })
+  if (error) throw error
+  return data || []
+}
+
+export async function createPartAttributeDef(def, userId = null) {
+  const payload = {
+    key: def.key,
+    label: def.label,
+    input_type: def.input_type || 'text',
+    options: def.input_type === 'select' ? (def.options || []) : [],
+    required: !!def.required,
+    applies_to_departments: def.applies_to_departments || [],
+    help_text: def.help_text || null,
+    show_on_label: !!def.show_on_label,
+    sort_order: Number.isFinite(def.sort_order) ? def.sort_order : 0,
+    is_active: def.is_active !== false,
+    updated_by: userId,
+  }
+  const { data, error } = await db
+    .from('part_attribute_defs')
+    .insert(payload)
+    .select('*')
+    .single()
+  if (error) throw error
+  return data
+}
+
+// `key` is rejected by trg_pad_key_immutable, so it is never sent — stored
+// values on every part are keyed by it.
+export async function updatePartAttributeDef(id, updates, userId = null) {
+  const payload = { ...updates, updated_by: userId }
+  delete payload.key
+  delete payload.id
+  if (payload.input_type && payload.input_type !== 'select') payload.options = []
+  const { data, error } = await db
+    .from('part_attribute_defs')
+    .update(payload)
+    .eq('id', id)
+    .select('*')
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function deletePartAttributeDef(id) {
+  const { error } = await db.from('part_attribute_defs').delete().eq('id', id)
+  if (error) throw error
+}
+
+// How many parts already carry a value for this key — shown before a delete
+// so the owner knows what they're about to orphan.
+//
+// Counted client-side rather than with a PostgREST `attributes->>key` filter:
+// this runs once, on an admin confirm dialog, and a two-column read of the
+// catalog is cheap enough that it isn't worth depending on JSON-path filter
+// syntax nothing else in the app exercises. An explicit `false` counts — it's
+// an answer, so deleting the definition would still lose it.
+export async function countPartsWithAttribute(key) {
+  const rows = await fetchAllRows(() => db
+    .from('parts_catalog')
+    .select('id, attributes')
+    .order('id'))
+  let n = 0
+  for (const r of rows || []) {
+    const v = r.attributes && typeof r.attributes === 'object' ? r.attributes[key] : undefined
+    if (v === undefined || v === null) continue
+    if (typeof v === 'string' && v.trim() === '') continue
+    n++
+  }
+  return n
+}
+
+// part_id → attributes bag, for callers holding only SKUs. The label sheet is
+// opened from four places and most of them pass a narrow {id, name, unit}
+// shape, so "print on SKU label" would otherwise work only from the Parts tab.
+export async function getPartAttributesByIds(ids) {
+  const out = new Map()
+  const unique = [...new Set((ids || []).filter(Boolean))]
+  if (unique.length === 0) return out
+  // Chunked: a big location's label run can exceed a comfortable URL length.
+  const CHUNK = 100
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const { data, error } = await db
+      .from('parts_catalog')
+      .select('id, attributes, department')
+      .in('id', unique.slice(i, i + CHUNK))
+    if (error) throw error
+    for (const r of data || []) {
+      out.set(r.id, { attributes: r.attributes || {}, department: r.department || null })
+    }
+  }
+  return out
+}
+
+// Set (or clear) one attribute across many parts in a single atomic JSONB
+// merge per row — a read-modify-write in JS would lose a concurrent
+// created_via stamp. `value` is already coerced by coerceAttrValue().
+export async function setPartAttributeBulk(partIds, key, value, { clear = false } = {}) {
+  if (!Array.isArray(partIds) || partIds.length === 0) return 0
+  const { data, error } = await db.rpc('set_part_attribute', {
+    p_part_ids: partIds,
+    p_key: key,
+    p_value: clear ? null : value,
+    p_clear: clear,
+  })
+  if (error) throw error
+  return data || 0
+}
+
+// Drop one attribute's stored values from every part. Used when an attribute
+// definition is deleted and the owner opts to take the values with it.
+export async function purgePartAttribute(key) {
+  const { data, error } = await db.rpc('purge_part_attribute', { p_key: key })
+  if (error) throw error
+  return data || 0
 }
 
 // ─── AUDIT ─────────────────────────────────────────────────────────────────────

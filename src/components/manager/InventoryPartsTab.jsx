@@ -1,6 +1,12 @@
 import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../../AppContext'
-import { getAllParts, updatePart, updatePartsBatch, getStockTotalsAndNegativesByPart, getPartLocations, deleteDraftPart, SONAR_ROUTING_OPTIONS, locationTypeLabel } from '../../lib/inventory'
+import { getAllParts, updatePart, updatePartsBatch, getStockTotalsAndNegativesByPart, getPartLocations, deleteDraftPart, getPartAttributeDefs, setPartAttributeBulk, SONAR_ROUTING_OPTIONS, locationTypeLabel } from '../../lib/inventory'
+import {
+  defsForPart, attrValueToInput, formatAttrValue, coerceAttrValue,
+  validateAttrValues, mergeAttributes, legacyAttrEntries,
+  missingRequiredDefs, partIsMissingRequired, attributeCsvColumns, compareDefs,
+} from '../../lib/partAttributes'
+import PartAttributeFields from './PartAttributeFields'
 import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
 import { isoLocalDate } from '../../lib/format'
 import SkuLabelSheet from './SkuLabelSheet'
@@ -28,6 +34,10 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   const [filter, setFilter] = useState('active')
   const [search, setSearch] = useState('')
   const [parts, setParts] = useState([])
+  // Owner-defined part attributes (Admin → Part attributes). Drives the typed
+  // fields in the edit sheet, the "Missing info" work-down chip, and the extra
+  // CSV columns. An empty registry leaves every one of those inert.
+  const [attrDefs, setAttrDefs] = useState([])
   const [stockTotals, setStockTotals] = useState(new Map())
   // part_id → { count, qty } for parts with a usable location BELOW zero.
   // On Hand nets these against real shelf stock, so without this flag a
@@ -67,13 +77,17 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   async function load() {
     setLoading(true)
     try {
-      const [allParts, { totals, negatives }] = await Promise.all([
+      const [allParts, { totals, negatives }, defs] = await Promise.all([
         getAllParts(),
         getStockTotalsAndNegativesByPart(),
+        // A registry read failure must not take the whole tab down with it —
+        // the parts list is the job, attributes are the garnish.
+        getPartAttributeDefs().catch(e => { console.warn('Attribute defs load failed:', e); return [] }),
       ])
       setParts(allParts)
       setStockTotals(totals)
       setNegativeStock(negatives)
+      setAttrDefs(defs)
     } catch (e) {
       console.error('Load parts failed:', e)
       showToast('Could not load parts: ' + e.message)
@@ -148,13 +162,27 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
     }
   }, [parts])
 
+  // Active parts missing a REQUIRED attribute. Only meaningful once the owner
+  // has marked something required — otherwise it's an empty set and the chip
+  // stays hidden. Drafts are excluded: a draft is already a work-down list.
+  const missingAttrIds = useMemo(() => {
+    const required = attrDefs.filter(d => d.required && d.is_active !== false)
+    if (required.length === 0) return new Set()
+    const s = new Set()
+    for (const p of parts) {
+      if (p.is_active && partIsMissingRequired(required, p)) s.add(p.id)
+    }
+    return s
+  }, [parts, attrDefs])
+
   const counts = useMemo(() => ({
     all:    parts.length,
     active: parts.filter(p => p.is_active).length,
     draft:  parts.filter(p => !p.is_active).length,
     nosage: parts.filter(p => p.is_active && !p.sage_id).length,
     negative: parts.filter(p => negativeStock.has(p.id)).length,
-  }), [parts, negativeStock])
+    missingattr: missingAttrIds.size,
+  }), [parts, negativeStock, missingAttrIds])
 
   const filtered = useMemo(() => {
     let list = parts
@@ -166,6 +194,9 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
     // Any part with a truck/bin below zero — the "what needs a load booked"
     // work-down list. Drafts included: a negative is a negative.
     if (filter === 'negative') list = list.filter(p => negativeStock.has(p.id))
+    // Active parts missing an attribute the owner marked required — the
+    // work-down list for filling a newly defined field across the catalog.
+    if (filter === 'missingattr') list = list.filter(p => missingAttrIds.has(p.id))
 
     if (search && search.trim().length >= 2) {
       const q = search.toLowerCase()
@@ -196,7 +227,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
       list = [...list].sort((a, b) => (a.name || '').localeCompare(b.name || ''))
     }
     return list
-  }, [parts, filter, search, stockTotals, negativeStock])
+  }, [parts, filter, search, stockTotals, negativeStock, missingAttrIds])
 
   // Selection logic. handleCheckboxClick receives the click event so we
   // can read e.shiftKey for range select.
@@ -243,12 +274,20 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   // loads, summed across every location (a parts list without on-hand is
   // half useless on a warehouse floor).
   function handleExportCsv() {
+    // One extra column per defined attribute, labeled as the owner named it,
+    // so the filled-in state of the catalog is auditable in a spreadsheet.
+    // Read-only for now: InventoryImportSheet maps a fixed column set and does
+    // NOT read these back — filling values is the bulk-edit field (one value
+    // across a selection) or the per-part edit sheet.
+    const attrCols = attributeCsvColumns(attrDefs)
     const headers = [
       'SKU', 'Sage ID', 'Name', 'Nickname', 'Unit', 'Department', 'Item Type',
       'Material Group', 'Category', 'Status', 'Depreciated', 'Barcode', 'BoxHero ID', 'On Hand',
+      ...attrCols.map(c => c.header),
     ]
     const lines = [headers.map(escapeCsvField).join(',')]
     for (const p of filtered) {
+      const attrs = p.attributes && typeof p.attributes === 'object' ? p.attributes : {}
       lines.push([
         p.id, p.sage_id || '', p.name || '', p.nickname || '', p.unit || 'ea',
         p.department || '', p.item_type || '', p.material_group || '',
@@ -256,6 +295,11 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
         p.is_depreciated ? 'yes' : '',
         p.barcode || '', p.boxhero_id || '',
         Number(stockTotals.get(p.id) || 0),
+        // Blank rather than "No" when the attribute doesn't apply to this
+        // part — an out-of-scope column shouldn't read as an answer.
+        ...attrCols.map(c => (
+          defsForPart([c.def], p).length === 0 ? '' : formatAttrValue(c.def, attrs[c.key])
+        )),
       ].map(escapeCsvField).join(','))
     }
     const stamp = isoLocalDate()
@@ -369,10 +413,25 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
     }
   }
 
-  async function handleBulkEdit(updates) {
+  // `attrChange` is { key, value, clear } from the sheet's attribute row, or
+  // null. It can't ride along in `updates` — a column update would replace the
+  // whole JSONB bag, so it goes through the merge RPC as its own write.
+  async function handleBulkEdit(updates, attrChange) {
     const ids = [...selectedIds]
     if (ids.length === 0) return
     try {
+      if (attrChange) {
+        const n = await setPartAttributeBulk(ids, attrChange.key, attrChange.value, { clear: attrChange.clear })
+        if (Object.keys(updates).length === 0) {
+          setBulkEditing(false)
+          setSelectedIds(new Set())
+          lastClickedIndexRef.current = null
+          await load()
+          onChanged?.()
+          showToast(`${attrChange.clear ? 'Cleared' : 'Set'} ${attrChange.label} on ${n} part${n === 1 ? '' : 's'}`)
+          return
+        }
+      }
       const result = await updatePartsBatch(ids, updates)
       setBulkEditing(false)
       setSelectedIds(new Set())
@@ -410,6 +469,17 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
         <button onClick={() => setFilter('nosage')} style={chipStyle(filter === 'nosage')} title="Active parts with no Sage Intacct item ID yet">
           No Sage ID ({counts.nosage})
         </button>
+        {/* Same rule as the negative chip: only when there's work to do. An
+            empty registry, or a catalog that's fully filled in, shows nothing. */}
+        {counts.missingattr > 0 && (
+          <button
+            onClick={() => setFilter('missingattr')}
+            style={chipStyle(filter === 'missingattr', { color: 'amber' })}
+            title="Active parts missing an attribute marked required in Admin → Part attributes"
+          >
+            Missing info ({counts.missingattr})
+          </button>
+        )}
         {/* Only rendered when something is actually below zero — a red chip
             that's always there stops meaning anything. */}
         {counts.negative > 0 && (
@@ -518,6 +588,14 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                   )}
                   {p.is_depreciated && (
                     <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 4, background: 'var(--gray-lt)', color: 'var(--muted)', verticalAlign: '1px' }} title="Depreciated: used/recovered gear — Sage export marks its lines [no-value] so accounting doesn't book new inventory value">NO-VALUE</span>
+                  )}
+                  {/* A required attribute has no value yet. Named in the
+                      tooltip so the row says what's actually missing. */}
+                  {missingAttrIds.has(p.id) && (
+                    <span
+                      style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 4, background: 'var(--amber-lt)', color: 'var(--amber)', verticalAlign: '1px' }}
+                      title={`Missing: ${missingRequiredDefs(attrDefs, p).map(d => d.label).join(', ')}`}
+                    >NEEDS INFO</span>
                   )}
                 </div>
                 <div className="mono" style={{ fontSize: 12, color: 'var(--hint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -682,8 +760,12 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
 
       {editing && (
         <PartFormSheet
+          // The sheet seeds its fields (attribute values included) from props
+          // in useState initializers, so it must remount when the part changes.
+          key={editing.id}
           part={editing}
           distinctValues={distinctValues}
+          attrDefs={attrDefs}
           onCancel={() => setEditing(null)}
           onSave={handleSave}
         />
@@ -693,6 +775,7 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
         <BulkEditSheet
           count={selectedCount}
           distinctValues={distinctValues}
+          attrDefs={attrDefs}
           onCancel={() => setBulkEditing(false)}
           onSave={handleBulkEdit}
         />
@@ -1044,7 +1127,7 @@ function bulkActionBtn(variant) {
 
 // ─── Single-part edit sheet ─────────────────────────────────────────────────
 
-function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
+function PartFormSheet({ part, distinctValues, attrDefs, onCancel, onSave }) {
   const [name, setName] = useState(part.name || '')
   const [nickname, setNickname] = useState(part.nickname || '')
   // Sage Intacct Item ID — a cross-reference that rides next to the SKU; the
@@ -1055,24 +1138,31 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
   // → Returned from field, so this is the fix-up path, not the main one.
   const [refurbOf, setRefurbOf] = useState(part.refurb_of || '')
 
-  // Open-ended attribute bag. Stored as an array of {key, value} for
-  // stable rendering during editing; serialized to a plain object on
-  // submit. New keys added at the bottom; deleting clears the row.
-  const [attrRows, setAttrRows] = useState(() => {
+  // Owner-defined attributes (Admin → Part attributes). Held as raw input
+  // values keyed by def key; coerced and merged once, at save.
+  const [attrValues, setAttrValues] = useState(() => {
     const obj = part.attributes && typeof part.attributes === 'object' ? part.attributes : {}
-    return Object.entries(obj).map(([key, value]) => ({
-      key,
-      value: value == null ? '' : String(value),
-    }))
+    const seed = {}
+    for (const d of attrDefs || []) seed[d.key] = attrValueToInput(d, obj[d.key])
+    return seed
   })
-  function addAttrRow() {
-    setAttrRows(prev => [...prev, { key: '', value: '' }])
+  const [attrTouched, setAttrTouched] = useState(false)
+  function setAttrValue(key, value) {
+    setAttrTouched(true)
+    setAttrValues(prev => ({ ...prev, [key]: value }))
   }
-  function setAttrRow(idx, patch) {
-    setAttrRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r))
+
+  // Keys stored on this part that no active definition explains — a retired
+  // attribute, or something typed before the registry existed. Kept editable
+  // so nothing becomes invisible, but no longer the way values are added.
+  const [legacyRows, setLegacyRows] = useState(
+    () => legacyAttrEntries(part.attributes, attrDefs)
+  )
+  function setLegacyRow(idx, patch) {
+    setLegacyRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r))
   }
-  function removeAttrRow(idx) {
-    setAttrRows(prev => prev.filter((_, i) => i !== idx))
+  function removeLegacyRow(idx) {
+    setLegacyRows(prev => prev.filter((_, i) => i !== idx))
   }
 
   const [unit, setUnit] = useState(part.unit || 'ea')
@@ -1109,18 +1199,40 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
     return 'Uncategorized'
   }, [department, materialGroup])
 
+  // Attribute scoping follows the department being EDITED, not the stored one,
+  // so switching a part into Fiber surfaces the Fiber-only fields immediately.
+  const draftPart = useMemo(
+    () => ({ ...part, department: department.trim() || null }),
+    [part, department]
+  )
+  const scopedDefs = useMemo(() => defsForPart(attrDefs, draftPart), [attrDefs, draftPart])
+  const attrErrors = useMemo(
+    () => validateAttrValues(attrDefs, draftPart, attrValues),
+    [attrDefs, draftPart, attrValues]
+  )
+  const [showAttrErrors, setShowAttrErrors] = useState(false)
+
   async function handleSubmit() {
     if (!name.trim()) return
+    if (attrErrors.length > 0) {
+      setShowAttrErrors(true)
+      return
+    }
     setSaving(true)
     try {
-      // Collapse attribute rows back to a plain object. Skip empty keys;
-      // dedupe by key (last write wins for a given key).
-      const attributes = {}
-      for (const r of attrRows) {
+      // Merge, never replace: the bag also holds the system created_via stamp,
+      // and out-of-scope attributes keep their stored answers.
+      const legacy = {}
+      for (const r of legacyRows) {
         const k = (r.key || '').trim()
         if (!k) continue
-        attributes[k] = (r.value || '').trim()
+        legacy[k] = (r.value || '').trim()
       }
+      // Only the fields the form actually rendered are handed to the merge —
+      // an attribute scoped to another department keeps its stored answer.
+      const shownValues = {}
+      for (const d of scopedDefs) shownValues[d.key] = attrValues[d.key]
+      const attributes = mergeAttributes(part.attributes, attrDefs, shownValues, legacy)
       await onSave({
         name: name.trim(),
         nickname: nickname.trim() || null,
@@ -1252,55 +1364,71 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
             </div>
           </div>
 
-          {/* Open-ended attributes — extensible without migrations. Anything
-              you add here gets searched alongside the named fields in the
-              crew Find-a-part view. */}
+          {/* Standard attributes, defined once in Admin → Part attributes so
+              every part answers the same questions. Values live in the same
+              parts_catalog.attributes bag as before and stay searchable from
+              the crew Find-a-part view. */}
           <div className="field">
-            <label>Custom attributes <span style={{ fontWeight: 400, color: 'var(--hint)' }}>— optional</span></label>
-            {attrRows.length === 0 && (
-              <div style={{ fontSize: 11, color: 'var(--hint)', marginBottom: 6 }}>
-                No custom attributes yet. Add things like supplier code, alternate SKU, color — any key/value.
-              </div>
-            )}
-            {attrRows.map((row, idx) => (
-              <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                <input
-                  type="text"
-                  value={row.key}
-                  onChange={e => setAttrRow(idx, { key: e.target.value })}
-                  placeholder="key (e.g. supplier_code)"
-                  autoComplete="off"
-                  name={`attr-key-${idx}`}
-                  style={{ flex: 1, padding: '6px 10px', fontSize: 12, border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', background: 'var(--surface2)' }}
-                />
-                <input
-                  type="text"
-                  value={row.value}
-                  onChange={e => setAttrRow(idx, { value: e.target.value })}
-                  placeholder="value"
-                  autoComplete="off"
-                  name={`attr-val-${idx}`}
-                  style={{ flex: 2, padding: '6px 10px', fontSize: 12, border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', background: 'var(--surface2)' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => removeAttrRow(idx)}
-                  style={{ padding: '4px 10px', fontSize: 12, background: 'transparent', border: '1px solid var(--border)', borderRadius: 'var(--r-xs)', cursor: 'pointer', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center' }}
-                  title="Remove this attribute"
-                >
-                  <Icon name="x" size={13} />
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={addAttrRow}
-              className="add-dashed"
-              style={{ padding: '8px', fontSize: 12 }}
-            >
-              + Add attribute
-            </button>
+            <label>
+              Attributes
+              {scopedDefs.length > 0 && (
+                <span style={{ fontWeight: 400, color: 'var(--hint)' }}> — standard fields</span>
+              )}
+            </label>
+            <PartAttributeFields
+              defs={attrDefs}
+              part={draftPart}
+              values={attrValues}
+              onChange={setAttrValue}
+              showErrors={showAttrErrors || attrTouched}
+            />
           </div>
+
+          {/* Anything stored under a key no active definition explains — a
+              retired attribute, or a value typed before the registry existed.
+              Editable so nothing goes invisible, but new values belong on a
+              defined field, so there's no "add row" button here. */}
+          {legacyRows.length > 0 && (
+            <div className="field">
+              <label>
+                Other attributes{' '}
+                <span style={{ fontWeight: 400, color: 'var(--hint)' }}>— not a defined field</span>
+              </label>
+              {legacyRows.map((row, idx) => (
+                <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                  <input
+                    type="text"
+                    value={row.key}
+                    onChange={e => setLegacyRow(idx, { key: e.target.value })}
+                    autoComplete="off"
+                    name={`legacy-attr-key-${idx}`}
+                    className="mono"
+                    style={{ flex: 1, padding: '6px 10px', fontSize: 12, border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', background: 'var(--surface2)' }}
+                  />
+                  <input
+                    type="text"
+                    value={row.value}
+                    onChange={e => setLegacyRow(idx, { value: e.target.value })}
+                    placeholder="value"
+                    autoComplete="off"
+                    name={`legacy-attr-val-${idx}`}
+                    style={{ flex: 2, padding: '6px 10px', fontSize: 12, border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', background: 'var(--surface2)' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeLegacyRow(idx)}
+                    style={{ padding: '4px 10px', fontSize: 12, background: 'transparent', border: '1px solid var(--border)', borderRadius: 'var(--r-xs)', cursor: 'pointer', color: 'var(--muted)', display: 'inline-flex', alignItems: 'center' }}
+                    title="Remove this attribute"
+                  >
+                    <Icon name="x" size={13} />
+                  </button>
+                </div>
+              ))}
+              <div style={{ fontSize: 11, color: 'var(--hint)' }}>
+                To make one of these standard across the catalog, define it in Admin → Part attributes.
+              </div>
+            </div>
+          )}
 
           <label style={{
             display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, marginBottom: 6,
@@ -1359,7 +1487,7 @@ function PartFormSheet({ part, distinctValues, onCancel, onSave }) {
 
 // ─── Bulk-edit sheet ────────────────────────────────────────────────────────
 
-function BulkEditSheet({ count, distinctValues, onCancel, onSave }) {
+function BulkEditSheet({ count, distinctValues, attrDefs, onCancel, onSave }) {
   const [editUnit, setEditUnit] = useState(false)
   const [unit, setUnit] = useState('ea')
   const [unitCustom, setUnitCustom] = useState(false)
@@ -1381,12 +1509,34 @@ function BulkEditSheet({ count, distinctValues, onCancel, onSave }) {
 
   const [activeMode, setActiveMode] = useState('unchanged')
 
+  // Fill one defined attribute across the whole selection — the reason to
+  // define an attribute is usually 600 parts that now need a value.
+  const activeDefs = useMemo(
+    () => (attrDefs || []).filter(d => d.is_active !== false).sort(compareDefs),
+    [attrDefs]
+  )
+  const [editAttr, setEditAttr] = useState(false)
+  const [attrKey, setAttrKey] = useState(() => activeDefs[0]?.key || '')
+  const [attrRaw, setAttrRaw] = useState('')
+  const [attrClear, setAttrClear] = useState(false)
+  const attrDef = activeDefs.find(d => d.key === attrKey) || null
+
   const [saving, setSaving] = useState(false)
 
-  const anyFieldChecked = editUnit || editDept || editMatGrp || editItemType || editSonarRouting || activeMode !== 'unchanged'
+  const anyFieldChecked = editUnit || editDept || editMatGrp || editItemType || editSonarRouting
+    || activeMode !== 'unchanged'
+    || (editAttr && !!attrDef && (attrClear || coerceAttrValue(attrDef, attrRaw) !== undefined))
 
   async function handleSubmit() {
     if (!anyFieldChecked) return
+    const attrChange = (editAttr && attrDef)
+      ? {
+          key: attrDef.key,
+          label: attrDef.label,
+          clear: attrClear,
+          value: attrClear ? null : coerceAttrValue(attrDef, attrRaw),
+        }
+      : null
     const updates = {}
     if (editUnit) updates.unit = unit.trim() || 'ea'
     if (editDept) updates.department = department.trim() || null
@@ -1398,7 +1548,7 @@ function BulkEditSheet({ count, distinctValues, onCancel, onSave }) {
 
     setSaving(true)
     try {
-      await onSave(updates)
+      await onSave(updates, attrChange)
     } finally {
       setSaving(false)
     }
@@ -1439,6 +1589,55 @@ function BulkEditSheet({ count, distinctValues, onCancel, onSave }) {
               custom={itemTypeCustom} setCustom={setItemTypeCustom}
               options={distinctValues.itemTypes} placeholder="custom item type" allowEmpty />
           </BulkField>
+
+          {activeDefs.length > 0 && (
+            <BulkField label="Attribute" checked={editAttr} onToggle={setEditAttr}>
+              <select
+                value={attrKey}
+                onChange={e => { setAttrKey(e.target.value); setAttrRaw('') }}
+                style={{ width: '100%', padding: '8px 10px', fontSize: 14, border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--bg)', color: 'var(--text)', marginBottom: 6 }}
+              >
+                {activeDefs.map(d => <option key={d.key} value={d.key}>{d.label}</option>)}
+              </select>
+
+              {!attrClear && attrDef && (
+                attrDef.input_type === 'boolean' ? (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {[{ v: 'true', l: 'Yes' }, { v: 'false', l: 'No' }].map(o => (
+                      <button key={o.v} type="button" onClick={() => setAttrRaw(o.v)}
+                        style={chipStyle(attrRaw === o.v)}>{o.l}</button>
+                    ))}
+                  </div>
+                ) : attrDef.input_type === 'select' ? (
+                  <select
+                    value={attrRaw} onChange={e => setAttrRaw(e.target.value)}
+                    style={{ width: '100%', padding: '8px 10px', fontSize: 14, border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--bg)', color: 'var(--text)' }}
+                  >
+                    <option value="">— pick a value —</option>
+                    {(attrDef.options || []).map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                ) : (
+                  <input
+                    type={attrDef.input_type === 'number' ? 'number' : 'text'}
+                    value={attrRaw} onChange={e => setAttrRaw(e.target.value)}
+                    placeholder={attrDef.help_text || 'Value applied to every selected part'}
+                    autoComplete="off" name="bulk-attr-value"
+                    style={{ width: '100%', padding: '8px 10px', fontSize: 14, border: '1.5px solid var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--bg)', color: 'var(--text)' }}
+                  />
+                )
+              )}
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, fontSize: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={attrClear}
+                  onChange={e => setAttrClear(e.target.checked)} style={{ cursor: 'pointer' }} />
+                Clear this attribute instead
+              </label>
+              <div style={{ fontSize: 11, color: 'var(--hint)', marginTop: 4 }}>
+                Applies to every selected part, including ones outside this
+                attribute&apos;s departments.
+              </div>
+            </BulkField>
+          )}
 
           <BulkField label="Sonar import routing" checked={editSonarRouting} onToggle={setEditSonarRouting}>
             <select

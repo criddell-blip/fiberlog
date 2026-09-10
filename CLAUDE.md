@@ -96,6 +96,7 @@ src/
     admin.js              ← user management ops (create/update/deactivate/reset password/set email)
     access.js             ← staff_scope / named-access-type single source of truth (staffScope, visibleManagerTabs, canActAsCrew, inventoryIsLimited)
     crewTypes.js          ← crewTypeLabel() display map + VALID_FIELD_CREW_TYPES
+    partAttributes.js (+ .test.js) ← owner-defined part attributes: scoping, coercion, validation, merge (created_via is reserved)
     cycleCount.js         ← cycle-count RPC wrappers + BIN:<uuid> barcode helpers
     backStack.js          ← Back-button coordinator + useBackClose hook
     i18n.js               ← en/es strings for the crew shells (~290 keys; crew lang toggle reads/writes localStorage.fiberlog_lang)
@@ -134,6 +135,8 @@ src/
       AdminPanel.jsx      ← admin home — wires Users, Reset-password, BoxHero sync, Crew×Dept permissions
       AdminUsersView.jsx  ← user CRUD + per-user movement permission toggles
       CrewTypePermissionsView.jsx ← crew_type × department matrix (whitelist UI)
+      PartAttributesView.jsx ← Admin → Part attributes: the owner-defined attribute registry (add/edit/reorder/retire/delete)
+      PartAttributeFields.jsx ← the ONE renderer for those fields (Parts tab edit sheet + Receive PO inline create/edit)
       InventoryView.jsx   ← inventory section (8 sub-tabs — Purchase Reqs only while the **Admin → Purchasing** switch is on, `app_settings.purchasing_ui_enabled`, OFF since Aug 20 2026; the switch also withholds the Receive PO sheet's PO hand-offs + the Create-PR bulk buttons: Stock / Locations / Parts / Activity / Purchase Reqs / Found / Audit / Cycle Count; toolbar "Record movement" button + a 7-item Actions strip: Receive PO / Reconcile / Sonar / Fiber jobs / Import CSV / Sage export / Footage map — collapses to a bottom sheet on phone). Parts tab has a filter-respecting catalog CSV export (filter in the filename); Activity tab has a date-ranged raw-history CSV export (July 2026) — unlike Sage it keeps adjusts / truck→truck / bin moves, and it's the only way full movement history leaves the app. Both use the shared escapeCsvField + downloadTextAsFile from lib/csvImport.js (the BOM-writing download helper) — do NOT add another private CSV escaper, five legacy copies already exist.
       InventoryStockTab.jsx, InventoryLocationsTab.jsx, InventoryPartsTab.jsx,
       InventoryMovementsTab.jsx, InventoryAuditTab.jsx
@@ -256,6 +259,13 @@ The common reason to flag a passdown is "the materials aren't right." Rather tha
 - `parts_catalog.is_active = false` means it's a **draft** (auto-created during CSV imports for SKUs not yet in catalog)
 - `parts_catalog.sage_id` (migration `20260820120000_parts_catalog_sage_id.sql`; nullable, partial-unique, stored uppercase) is the **Sage Intacct Item ID** (`UB000011` / `UB_900001`) — a cross-reference ADDED beside the SKU, never a replacement for it (the SKU stays the PK + movement anchor). The Sage export writes `ITEMID = sage_id ?? SKU` (`sageItemId()` in `lib/inventory.js`; preview flags SKU fallbacks amber). Editable in the Parts tab (+ a "No Sage ID" filter chip); backfilled by `scripts/sage-id-backfill.mjs` from accounting's "Sage Inventory Item IDs" workbook, which has NO SKU column — matching is by part name (exact/normalised/token auto, fuzzy → `imports/sage-ids/review.csv`). Sage carries parallel IDs for one item (`UB000024` vs `UB_L024`, different GL groups; `_R` variants) — the canonical `UB000nnn` form wins, alternates are listed in `variants.csv`.
 - `parts_catalog.category` is computed as `Department / Material Group` automatically — **don't update it manually**, instead update `department` and/or `material_group` and let the helpers in `lib/inventory.js` rebuild it
+- **`parts_catalog.attributes` (jsonb) is governed by a registry, not typed free-hand** (Sep 2026, migration `20260910120000_part_attribute_defs.sql`). `part_attribute_defs(key, label, input_type text|number|boolean|select, options[], required, applies_to_departments[], help_text, show_on_label, sort_order, is_active)` is the owner-defined list, curated in **Admin → Part attributes**; every part-editing surface renders it as labeled typed fields (`PartAttributeFields.jsx` — Parts tab edit sheet + Receive PO's inline create/edit). Values still live in the same `attributes` bag keyed by `key`, so a new attribute is one row, never a migration. Non-obvious rules, all encoded in **`src/lib/partAttributes.js`** (the single source, tested):
+  - **`created_via` is reserved.** It's the system creation stamp and it lives in the same bag. Never render it as a value, never let a form write it, and **always merge rather than replace** — the old free-form editor replaced the whole bag through `String(value)` and flattened the stamp to `"[object Object]"` on three live parts (repaired in the same migration).
+  - **`key` is immutable** (`trg_pad_key_immutable`) — every stored value is keyed by it. Rename the `label` instead.
+  - **Empty `applies_to_departments` = every part**; otherwise the part's department must be listed, and a part with **no** department is out of scope. Scoping in the edit form follows the department **being edited**, not the stored one.
+  - **Only the fields a form rendered go into `mergeAttributes`.** A key absent from the values map keeps its stored answer, so saving a part never deletes an attribute scoped to some other department.
+  - **Bulk fill goes through the `set_part_attribute` RPC**, not a column update — a `parts_catalog.attributes` UPDATE would replace the whole bag and drop a concurrent `created_via` stamp.
+  - Required-but-empty drives the Parts tab's amber **Missing info** chip + per-row `NEEDS INFO` badge; the catalog CSV export gains one labeled column per active attribute (blank when out of scope); `show_on_label` adds a line to the printed SKU label (skipped on the dense scan-sheet formats).
 
 ### Realtime publication
 The following tables broadcast changes via Supabase Realtime: `app_settings`, `emergency_logs`, `inventory_intake_requests`, `log_entries`, `submissions`, `tasks`, `work_sessions`. Subscriptions are scattered:

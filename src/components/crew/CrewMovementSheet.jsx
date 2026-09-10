@@ -310,10 +310,15 @@ export default function CrewMovementSheet({ mode, myTruck, myStock, onClose, onC
     if (!partSearch.trim()) return partGroups
     return partGroups.filter(p => {
       const fields = [p.name, p.nickname, p.partId, p.material_group, p.department]
-      // Search across attribute values (string-typed only — numbers/booleans skipped)
+      // Search across attribute values. Primitives only — the bag also holds
+      // the created_via stamp (an object), which is provenance, not a part
+      // property, and matching on it would surface unrelated parts.
       if (p.attributes && typeof p.attributes === 'object') {
         for (const v of Object.values(p.attributes)) {
-          if (typeof v === 'string') fields.push(v)
+          if (v === null) continue
+          if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+            fields.push(String(v))
+          }
         }
       }
       return matchesAllTokens(partSearch, fields)
