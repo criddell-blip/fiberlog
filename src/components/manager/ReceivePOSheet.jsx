@@ -671,6 +671,11 @@ function ReceiveLineRow({ line, onChange, onRemove, isReturn = false, currentUse
     // `undefined` (not `{}`) when the source query didn't select the column:
     // saveEdit reads that as "bag not loaded" and won't write the column at
     // all, rather than merging onto an empty object and wiping it.
+    //
+    // This leans on `parts_catalog.attributes` being NOT NULL DEFAULT '{}' —
+    // a selected value is never null, so `?? undefined` can only mean "not
+    // selected". Make that column nullable and this silently stops writing
+    // attributes from the dock.
     attributes: p.attributes ?? undefined,
   })
 

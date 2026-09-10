@@ -1173,6 +1173,25 @@ function PartFormSheet({ part, distinctValues, attrDefs, attrDefsLoaded = true, 
     setAttrValues(prev => ({ ...prev, [key]: value }))
   }
 
+  // The seed above runs once, but the parent can refresh attrDefs while this
+  // sheet is open (a refreshKey bump after a defs read had failed). Fill in
+  // only the keys that weren't seeded, so a definition arriving late shows the
+  // part's stored answer instead of a blank field — and never overwrite what
+  // the operator has already typed.
+  useEffect(() => {
+    const obj = part.attributes && typeof part.attributes === 'object' ? part.attributes : {}
+    setAttrValues(prev => {
+      let changed = false
+      const next = { ...prev }
+      for (const d of attrDefs || []) {
+        if (d.key in next) continue
+        next[d.key] = attrValueToInput(d, obj[d.key])
+        changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [attrDefs, part])
+
   // Keys stored on this part that no active definition explains — a retired
   // attribute, or something typed before the registry existed. Kept editable
   // so nothing becomes invisible, but no longer the way values are added.
@@ -1182,6 +1201,11 @@ function PartFormSheet({ part, distinctValues, attrDefs, attrDefsLoaded = true, 
   const [legacyRows, setLegacyRows] = useState(
     () => attrDefsLoaded ? legacyAttrEntries(part.attributes, attrDefs) : []
   )
+  // Frozen at mount, deliberately. The rows above were built from what the
+  // registry looked like THEN; if the prop flips to true while the sheet is
+  // open, reading it live at save time would submit those stale (empty) rows
+  // as "the legacy section is now empty" and delete every un-defined key.
+  const [legacySeeded] = useState(attrDefsLoaded)
   function setLegacyRow(idx, patch) {
     setLegacyRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r))
   }
@@ -1261,15 +1285,21 @@ function PartFormSheet({ part, distinctValues, attrDefs, attrDefsLoaded = true, 
       }
       // Only the fields the form actually rendered are handed to the merge —
       // an attribute scoped to another department keeps its stored answer.
+      // `d.key in attrValues` matters as much as the scoping: a def that
+      // arrived after this sheet mounted and hasn't been seeded yet would
+      // otherwise go over as `undefined`, which reads as "cleared" and
+      // deletes the part's stored value.
       const shownValues = {}
-      for (const d of scopedDefs) shownValues[d.key] = attrValues[d.key]
+      for (const d of scopedDefs) {
+        if (d.key in attrValues) shownValues[d.key] = attrValues[d.key]
+      }
       // `undefined` legacy = "don't touch the un-defined keys at all". Passing
       // an empty object would mean "the legacy section is now empty", which
       // deletes every key with no definition — the wrong answer when the
       // definitions are exactly what we failed to load.
       const attributes = mergeAttributes(
         part.attributes, attrDefs, shownValues,
-        attrDefsLoaded ? legacy : undefined
+        legacySeeded ? legacy : undefined
       )
       await onSave({
         name: name.trim(),
