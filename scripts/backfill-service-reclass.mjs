@@ -76,7 +76,7 @@ for (const it of items) {
   (movement_type, part_id, quantity, unit, from_location_id, to_location_id, notes, created_by,
    occurred_at, phase_id, consumed_by_user_id, sonar_account_id, line_note, reclass_of)
 select 'transfer', m.part_id, m.quantity, m.unit, m.to_location_id, svc.bucket_id,
-       ${q('Reclass: ' + it.reason + ' — BEAD backfill [reclass:' + it.id + ']')}, ${q(createdBy)},
+       ${q('Reclass: ' + it.reason + ' — backfill [reclass:' + it.id + ']')}, ${q(createdBy)},
        coalesce(m.occurred_at, m.created_at), svc.phase_id, m.consumed_by_user_id, m.sonar_account_id, m.line_note, m.id
   from public.inventory_movements m, svc
  where m.id = ${q(it.id)}

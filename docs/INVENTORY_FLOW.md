@@ -16,7 +16,7 @@ FiberLog is the consumption ledger for every part the company buys. The chain is
 Vendor → Warehouse → Truck (or shared trailer) → Project bucket → Sage export
 ```
 
-Every step is an `inventory_movement` row. Together those rows tell you, per part per project per period, exactly what got used and by whom. That's the data Sage Intacct ingests for accounting and the data BEAD reports pull from for reimbursement.
+Every step is an `inventory_movement` row. Together those rows tell you, per part per project per period, exactly what got used and by whom. That's the data Sage Intacct ingests for accounting and the data grant reports pull from for reimbursement.
 
 There are **6 movement types**, **5 crew types that consume**, and **8 entry points that create movements**. The whole rest of this doc is just expanding those numbers.
 
@@ -216,7 +216,7 @@ On the Manager Submissions queue (and in TaskWorkspace pre-submit), you can set 
 
 ### Service projects — keeping fix-job material out of the grant ledger (Sep 2026)
 
-The BEAD grant reimburses material on installs, not on repairs. A grant project can therefore have a **Service sibling** (`West Mountain - Service`, `projects.service_for_project_id` → the parent) with its own Region and one `Service` phase. A project with a sibling is grant-restricted; nothing else marks it.
+The grant reimburses material on installs, not on repairs. A grant project can therefore have a **Service sibling** (`West Mountain - Service`, `projects.service_for_project_id` → the parent) with its own Region and one `Service` phase. A project with a sibling is grant-restricted; nothing else marks it.
 
 - **Rule:** any Sonar job type containing the word *Fix* (Drop Fix, Fiber Fix, …) — `SERVICE_JOB_TYPE_WORDS` in `src/lib/serviceRouting.js`. Adding a word is a one-line change plus its test; per-row pickers in both importers still outrank the rule.
 - **Fiber-jobs import:** a Fix job on a restricted project books to the sibling (bucket + phase), shown amber in the preview ("fix job → Service"). A Fix on a project with no sibling books to the project with an amber hint.

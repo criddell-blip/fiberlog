@@ -17,7 +17,7 @@ You'll use it in three modes:
 
 - **Looking things up** — "what does Edgar have on his truck?", "do we have any more bullet connectors?", "where did that drum of cable end up?"
 - **Recording activity** — receiving a vendor delivery, applying a daily Sonar install report, fixing a count, scrapping damaged stock
-- **Exporting** — Sage every period, audit CSVs for cycle counts, BEAD reporting later
+- **Exporting** — Sage every period, audit CSVs for cycle counts, grant reporting later
 
 You don't have to think about cycle counts or imports on day one. Most of what you do will be looking things up and confirming activity is being recorded correctly by crews and auto-processes.
 
@@ -335,12 +335,12 @@ Decommissioned locations stop appearing in pickers but stay in Activity history 
 Short list of "this will trip you up if you didn't know it." Not gotchas — just system facts that aren't obvious from the UI.
 
 - **Stock follows movements automatically.** You never edit stock numbers directly. To change stock, record a movement.
-- **Movements can't be edited or deleted.** If you make a mistake, create a counter-movement. This is on purpose — the audit trail must be inviolate for Sage and BEAD reporting.
+- **Movements can't be edited or deleted.** If you make a mistake, create a counter-movement. This is on purpose — the audit trail must be inviolate for Sage and grant reporting.
 - **Bins can't be nested.** A bin lives inside one warehouse — bins can't contain other bins. Encode shelf depth in the bin name ("Aisle 5, Rack 2, Shelf C").
 - **A SKU can't be renamed.** Once a part is in the catalog, its SKU is permanent (because every past movement references it). If a SKU is wrong, retire it and create a new one with the right SKU.
 - **`category` is auto-computed** from department + material group. Don't try to edit category directly — edit department or material group and category updates itself.
 - **Sonar imports dedupe by item ID.** Both Sonar sheets (assets and fiber jobs) collapse duplicates within a delivery and refuse to re-import the same item ID across deliveries (90-day window). The Sonar daily report often emits the same install multiple times at different aggregation levels — that's why dedup is necessary. If you ever see "already imported" rows, that's working as intended.
-- **Project buckets are the permanent record.** When materials transfer to a project bucket (Heber, Wasatch Front, etc.), they don't get "drained" out by anything. The bucket is the consumption ledger — that's what Sage and BEAD pull from.
+- **Project buckets are the permanent record.** When materials transfer to a project bucket (Heber, Wasatch Front, etc.), they don't get "drained" out by anything. The bucket is the consumption ledger — that's what Sage and grant reporting pull from.
 - **Crews don't see your changes in real time.** If you apply a Sonar import or a Reconcile, the affected crew member's "My stock" view won't update until they pull-to-refresh. This is rare friction; if it matters, send a text.
 
 ---

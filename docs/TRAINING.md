@@ -21,11 +21,11 @@ Practice blocks are marked **ZERO IMPACT** (safe, nothing to undo) or **CREATES 
 ### 1.1 What FiberLog is, and why we use it
 
 FiberLog is a field logging and inventory app used daily by our fiber crews, infrastructure crews,
-and managers across the BEAD-funded buildout sites (Heber, Park City, Wasatch Front, Ogden Valley,
+and managers across the grant-funded buildout sites (Heber, Park City, Wasatch Front, Ogden Valley,
 West Mountain, and the wireless projects).
 
 It exists to answer one question with certainty: **what materials were used, by whom, on which
-project?** That record feeds accounting (Sage) and BEAD reimbursement reporting. If work isn't
+project?** That record feeds accounting (Sage) and grant reimbursement reporting. If work isn't
 logged in FiberLog, the company can't bill for the material — "log it in FiberLog" is not optional
 paperwork; it's how the work gets paid for.
 
@@ -39,7 +39,7 @@ paperwork; it's how the work gets paid for.
 
 > **The most important thing to internalize:** you never edit a stock number directly. You record
 > *what happened*, and stock updates itself. Movements can't be edited or deleted afterward — a
-> mistake is fixed with a counter-movement, so the audit trail stays intact for Sage and BEAD.
+> mistake is fixed with a counter-movement, so the audit trail stays intact for Sage and grant reporting.
 
 ### 1.3 One day in the life of a part
 
