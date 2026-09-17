@@ -10,6 +10,8 @@ import { describe, it, expect } from 'vitest'
 import {
   validateMovement,
   isExportableMovement,
+  findCancelledReversalPairs,
+  sageExportableMovements,
   buildSageCsv,
   sageItemId,
   movementEffectiveDate,
@@ -486,6 +488,75 @@ describe('isExportableMovement', () => {
     const ret = mv({ movement_type: 'return', from_location: TRUCK1, to_location: WAREHOUSE })
     expect(isExportableMovement(loadout, { includeStaging: true })).toBe(true)
     expect(isExportableMovement(ret, { includeStaging: true })).toBe(true)
+  })
+})
+
+// ─── Cancelled reversal pairs ────────────────────────────────────────────────
+// A reversal and the booking it undoes, both headed for the same Sage file,
+// are left out together (owner, Sep 2026). Everything short of an exact mirror
+// must stay in the file — this is a money path.
+
+describe('findCancelledReversalPairs / sageExportableMovements', () => {
+  // Real-uuid ids: the marker regex only accepts a full uuid.
+  const pair = (origOver = {}, revOver = {}) => {
+    const orig = mv({ quantity: 1, from_location: TRUCK1, to_location: BUCKET, ...origOver })
+    const rev = mv({
+      quantity: 1, from_location: BUCKET, to_location: TRUCK1,
+      notes: `Reversal: duplicate ONT [reversal:${orig.id}]`, ...revOver,
+    })
+    return { orig, rev }
+  }
+
+  it('drops a reversal and its original when both are in the same file', () => {
+    const { orig, rev } = pair()
+    const other = mv()
+    const { rows, cancelledIds } = sageExportableMovements([orig, other, rev])
+    expect(rows.map(r => r.id)).toEqual([other.id])
+    expect(cancelledIds.sort()).toEqual([orig.id, rev.id].sort())
+    const csv = csvRows(buildSageCsv([orig, other, rev]))
+    expect(csv).toHaveLength(1)
+    expect(csv[0][HEADERS.indexOf('FIBERLOG_MOVEMENT_ID')]).toBe(other.id)
+  })
+
+  it('keeps a lone reversal whose original is not in the file (already sent to Sage)', () => {
+    const { rev } = pair()
+    expect(findCancelledReversalPairs([rev]).size).toBe(0)
+    expect(sageExportableMovements([rev]).rows).toHaveLength(1)
+  })
+
+  it('keeps both when the original was exported in an earlier batch', () => {
+    const { orig, rev } = pair({ exported_at: '2026-08-31T00:00:00Z', export_batch_id: 'batch-1' })
+    expect(findCancelledReversalPairs([orig, rev]).size).toBe(0)
+  })
+
+  it('still cancels on a re-issue when both rows sit in the same batch', () => {
+    const { orig, rev } = pair({ export_batch_id: 'batch-2' }, { export_batch_id: 'batch-2' })
+    expect(findCancelledReversalPairs([orig, rev]).size).toBe(2)
+  })
+
+  it('keeps both on a partial reversal, a different part, or un-mirrored endpoints', () => {
+    const partial = pair({ quantity: 3 }, { quantity: 1 })
+    expect(findCancelledReversalPairs([partial.orig, partial.rev]).size).toBe(0)
+    const otherPart = pair({}, { part: { ...PART, id: 'SKU-2' } })
+    expect(findCancelledReversalPairs([otherPart.orig, otherPart.rev]).size).toBe(0)
+    const otherTruck = pair({}, { to_location: TRUCK2 })
+    expect(findCancelledReversalPairs([otherTruck.orig, otherTruck.rev]).size).toBe(0)
+  })
+
+  it('lets one reversal cancel an original; a second reversal exports', () => {
+    const { orig, rev } = pair()
+    const rev2 = mv({ quantity: 1, from_location: BUCKET, to_location: TRUCK1, notes: `[reversal:${orig.id}]` })
+    const { rows, cancelledIds } = sageExportableMovements([orig, rev, rev2])
+    expect(cancelledIds).toHaveLength(2)
+    expect(rows.map(r => r.id)).toEqual([rev2.id])
+  })
+
+  it('ignores reclass markers and plain notes', () => {
+    const orig = mv()
+    const reclass = mv({ from_location: BUCKET, to_location: { ...BUCKET, id: 'js2', name: 'Heber - Service' }, notes: `Reclass: fix job [reclass:${orig.id}]` })
+    expect(findCancelledReversalPairs([orig, reclass]).size).toBe(0)
+    expect(findCancelledReversalPairs([]).size).toBe(0)
+    expect(findCancelledReversalPairs(null).size).toBe(0)
   })
 })
 
