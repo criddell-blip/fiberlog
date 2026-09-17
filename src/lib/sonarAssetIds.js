@@ -93,3 +93,26 @@ export function formatSonarLineNote(parsed) {
 export function sonarLineNoteFromValueList(valueList) {
   return formatSonarLineNote(parseSonarValueList(valueList))
 }
+
+// ─── Bare asset ID for a movement ───────────────────────────────────────────
+// Just the number, for its own CSV column — sortable and VLOOKUP-able against
+// a Sonar inventory export, which the combined "Tag … · SN … · MAC …" text is
+// not. Two sources, in order:
+//   1. the importer's dedup marker `[sonar:<tag>]` in notes — present on every
+//      asset-report row, including the ~50 pre-Sep-2026 rows with no line_note;
+//   2. the `Tag <n>` prefix formatSonarLineNote writes — the only source on a
+//      reclass row, which copies line_note but carries its own notes.
+// Verified on prod Sep 17 2026: 1,090 rows, the two never disagree.
+// The marker match is digits-then-bracket on purpose: the composite fallback
+// key `[sonar:<acct>-<Date Time>]` is an account, not an asset, and must not
+// leak into this column. Infra passdown tags are free text and never start
+// with the importer's `Tag ` prefix, so they stay out too. '' when absent.
+const SONAR_MARKER_ID_RE = /\[sonar:(\d+)\]/
+const LINE_NOTE_TAG_RE = /^Tag (\d{3,})(?!\d)/
+
+export function sonarAssetIdFromMovement(m) {
+  const marker = SONAR_MARKER_ID_RE.exec(m?.notes || '')
+  if (marker) return marker[1]
+  const tag = LINE_NOTE_TAG_RE.exec(m?.line_note || '')
+  return tag ? tag[1] : ''
+}

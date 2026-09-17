@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useApp } from '../../AppContext'
 import { getRecentMovements, getMovementsForActivityExport, movementEffectiveDate } from '../../lib/inventory'
 import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
+import { sonarAssetIdFromMovement } from '../../lib/sonarAssetIds'
 import { fmtWhen } from '../../lib/format'
 import { TYPE_COLORS, TYPE_LABELS, RECEIPT_KIND_LABEL, movementDisplay, signedQty, resolveReceiveMeta } from '../../lib/movementDisplay'
 import { chipStyle, cardSurface, LoadingBlock, EmptyState } from './chrome'
@@ -61,7 +62,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
       if (rows.length === 0) { showToast('No movements in that range'); return }
       const headers = [
         'Date', 'Recorded', 'Type', 'Receipt kind', 'SKU', 'Part', 'Qty', 'Unit',
-        'From', 'To', 'By', 'Vendor/Invoice', 'Notes', 'Asset tags', 'Movement ID',
+        'From', 'To', 'By', 'Vendor/Invoice', 'Notes', 'Sonar asset ID', 'Asset tags', 'Movement ID',
       ]
       const lines = [headers.map(escapeCsvField).join(',')]
       for (const m of rows) {
@@ -96,6 +97,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
           m.created_by_user?.name || '',
           m.vendor_invoice || '',
           m.notes || '',
+          sonarAssetIdFromMovement(m),
           m.line_note || '',
           m.id,
         ].map(escapeCsvField).join(','))
