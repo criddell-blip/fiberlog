@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import {
   getMovementsForSageExport,
-  isExportableMovement,
+  sageExportableMovements,
   buildSageCsv,
   markMovementsExported,
   movementEffectiveDate,
@@ -99,11 +99,15 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
   // so the same filter decision drives both the on-screen preview and
   // the CSV builder (buildSageCsv runs the same filter at write time).
   const filterOpts = useMemo(() => ({ includeStaging, includeFieldReturns }), [includeStaging, includeFieldReturns])
-  const exportable = useMemo(
-    () => movements.filter(m => isExportableMovement(m, filterOpts)),
+  // sageExportableMovements is the same call buildSageCsv makes, so the
+  // preview, the counts and the file cannot drift apart. cancelledIds = a
+  // reversal + the booking it undoes, both headed for this file — left out as
+  // a pair (they net to zero and would only confuse accounting).
+  const { rows: exportable, cancelledIds } = useMemo(
+    () => sageExportableMovements(movements, filterOpts),
     [movements, filterOpts]
   )
-  const skippedInternal = movements.length - exportable.length
+  const skippedInternal = movements.length - exportable.length - cancelledIds.length
   const typeCounts = useMemo(() => {
     const c = {}
     for (const m of exportable) c[m.movement_type] = (c[m.movement_type] || 0) + 1
@@ -140,7 +144,11 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
       const includedIds = exportable.map(m => m.id)
       // Stamp the batch first — markMovementsExported creates the parent
       // batch row + sets exported_at/export_batch_id on every movement.
-      const batch = await markMovementsExported(includedIds, {
+      // Cancelled reversal pairs are stamped too even though they are not in
+      // the file: this batch settles them. Unstamped, they would sit
+      // unexported forever and trip the "dated before this window" warning on
+      // every later export.
+      const batch = await markMovementsExported([...includedIds, ...cancelledIds], {
         userId: currentUser?.id,
         notes: `Sage export · ${since} → ${until}`,
       })
@@ -262,6 +270,11 @@ export default function SageExportSheet({ onClose, initialSince = null, initialU
             {skippedInternal > 0 && (
               <span style={{ color: 'var(--hint)' }}>
                 {skippedInternal} skipped ({includeFieldReturns ? 'purchase receipts' : 'receipts'} + adjusts + internal moves{includeStaging ? '' : ' + crew loads/returns'})
+              </span>
+            )}
+            {cancelledIds.length > 0 && (
+              <span style={{ color: 'var(--amber)', fontWeight: 600 }} title="A reversal and the booking it undoes are both in this range. They net to zero, so neither is written to the file. Both are still marked exported with this batch.">
+                {cancelledIds.length / 2} reversed booking{cancelledIds.length === 2 ? '' : 's'} left out ({cancelledIds.length} rows cancel)
               </span>
             )}
             {unexportedBefore > 0 && (

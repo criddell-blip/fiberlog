@@ -3037,6 +3037,62 @@ export function sageItemId(part) {
   return part?.sage_id || part?.id || ''
 }
 
+// ─── Cancelled reversal pairs ───────────────────────────────────────────────
+// A reversal (`[reversal:<movement id>]` in notes — written by
+// scripts/backfill-service-reclass.mjs --reverse) undoes a booking that should
+// never have existed, e.g. a duplicate ONT hand-added on a fiber-jobs row the
+// asset report had already delivered. When the mistake and its fix would go to
+// Sage in the SAME file they are noise: accounting sees a consumption line and
+// a nameless transfer back (the reversal's destination is a truck, so it has
+// no PROJECTID), and the two only cancel if someone notices. Owner's call
+// (Sep 2026): leave both out.
+//
+// Strict on purpose — anything short of an exact mirror stays in the file:
+//   • both rows are in this candidate set and individually exportable;
+//   • same part, same quantity, endpoints swapped;
+//   • same export state (both unexported, or both in the same batch). If the
+//     original already went to Sage in an earlier batch, the reversal MUST
+//     export alone — that is the only way Sage learns the unit came back.
+// An original can be cancelled by one reversal only; a second one exports.
+const REVERSAL_MARKER_RE = /\[reversal:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]/i
+
+export function findCancelledReversalPairs(movements, opts = {}) {
+  const cancelled = new Set()
+  const byId = new Map()
+  for (const m of movements || []) if (m?.id) byId.set(String(m.id).toLowerCase(), m)
+  const partOf = m => m?.part?.id ?? m?.part_id ?? null
+  const fromOf = m => m?.from_location?.id ?? m?.from_location_id ?? null
+  const toOf = m => m?.to_location?.id ?? m?.to_location_id ?? null
+  for (const r of movements || []) {
+    const hit = REVERSAL_MARKER_RE.exec(r?.notes || '')
+    if (!hit) continue
+    const o = byId.get(hit[1].toLowerCase())
+    if (!o || o.id === r.id || cancelled.has(o.id) || cancelled.has(r.id)) continue
+    if (!isExportableMovement(r, opts) || !isExportableMovement(o, opts)) continue
+    if (!partOf(r) || partOf(r) !== partOf(o)) continue
+    if (Number(r.quantity) !== Number(o.quantity)) continue
+    if (!fromOf(r) || !toOf(r) || fromOf(r) !== toOf(o) || toOf(r) !== fromOf(o)) continue
+    if ((r.export_batch_id || null) !== (o.export_batch_id || null)) continue
+    cancelled.add(r.id)
+    cancelled.add(o.id)
+  }
+  return cancelled
+}
+
+// The ONE decision about what a Sage file contains — the per-row rules plus
+// the pair rule above. SageExportSheet's preview and buildSageCsv both go
+// through here so the screen can never disagree with the file. `cancelledIds`
+// are still stamped exported with the batch (they are settled by it); left
+// unexported they would trip the "unexported rows before this window" warning
+// on every later export.
+export function sageExportableMovements(movements, opts = {}) {
+  const cancelled = findCancelledReversalPairs(movements, opts)
+  return {
+    rows: (movements || []).filter(m => !cancelled.has(m.id) && isExportableMovement(m, opts)),
+    cancelledIds: [...cancelled],
+  }
+}
+
 // Build CSV text in Sage Intacct Inventory Transactions format.
 // One row per movement. Quote anything with commas/newlines.
 export function buildSageCsv(movements, opts = {}) {
@@ -3062,8 +3118,7 @@ export function buildSageCsv(movements, opts = {}) {
   ]
   const lines = [headers.join(',')]
   let lineIdx = 0
-  for (const m of movements) {
-    if (!isExportableMovement(m, opts)) continue
+  for (const m of sageExportableMovements(movements, opts).rows) {
     lineIdx++
 
     // Date by real work date (occurred_at ?? created_at) so a job imported in

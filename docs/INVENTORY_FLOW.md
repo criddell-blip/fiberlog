@@ -233,7 +233,7 @@ The grant reimburses material on installs, not on repairs. A grant project can t
 
 1. Pick date range (default: last 7 days)
 2. Toggle "Include exported" if re-issuing a corrected batch
-3. Preview shows movements that will export — skips all `receive` and `adjust` rows plus `truck → truck` and warehouse-internal staging (no Sage relevance)
+3. Preview shows movements that will export — skips all `receive` and `adjust` rows plus `truck → truck` and warehouse-internal staging (no Sage relevance). A reversal and the booking it undoes are left out **as a pair** when both would land in the same file (they net to zero); an amber note counts them, and they are still marked exported with the batch. A reversal whose original already went to Sage exports alone.
 4. Stats summarize counts by movement type
 5. Click "Download CSV + mark X exported":
    - Inserts a parent row in `inventory_export_batches` (captures `exported_by` + `movement_count`)
