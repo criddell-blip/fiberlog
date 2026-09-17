@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractItemIdFromValueList, parseSonarValueList, formatSonarLineNote, sonarLineNoteFromValueList, isMacLike } from './sonarAssetIds'
+import { extractItemIdFromValueList, parseSonarValueList, formatSonarLineNote, sonarLineNoteFromValueList, isMacLike, sonarAssetIdFromMovement } from './sonarAssetIds'
 
 describe('extractItemIdFromValueList', () => {
   it('returns the first 3+-digit token (the dedup key must never shift)', () => {
@@ -72,5 +72,31 @@ describe('formatSonarLineNote', () => {
   it('returns null when nothing usable was present', () => {
     expect(formatSonarLineNote(parseSonarValueList(''))).toBeNull()
     expect(sonarLineNoteFromValueList(null)).toBeNull()
+  })
+})
+
+describe('sonarAssetIdFromMovement', () => {
+  it('reads the importer marker, even with no line_note', () => {
+    expect(sonarAssetIdFromMovement({ notes: 'Sonar install · 2026-08-03 10:37 · PAYSON · [sonar:93380]', line_note: null })).toBe('93380')
+  })
+  it('falls back to the Tag prefix on a reclass row (own notes, copied line_note)', () => {
+    expect(sonarAssetIdFromMovement({
+      notes: 'Reclass: fix job (Drop Fix 2026-08-03, acct 140697) [reclass:07655b83]',
+      line_note: 'Tag 93380 · SN CXNK011DCE09 · MAC B8:94:70:DB:11:9D · Alt tag 60519',
+    })).toBe('93380')
+  })
+  it('prefers the marker when both are present', () => {
+    expect(sonarAssetIdFromMovement({ notes: '[sonar:111222]', line_note: 'Tag 333444 · SN X' })).toBe('111222')
+  })
+  it('never returns the account from the composite fallback key', () => {
+    expect(sonarAssetIdFromMovement({ notes: 'Sonar install · [sonar:140647-2026-08-03 11:46]', line_note: null })).toBe('')
+  })
+  it('ignores fiber-jobs markers and free-text infra tags', () => {
+    expect(sonarAssetIdFromMovement({ notes: '[sonar_jobs:141195_2026-06-10_drop_fix]', line_note: null })).toBe('')
+    expect(sonarAssetIdFromMovement({ notes: 'Auto-deduct', line_note: '55123, 55124' })).toBe('')
+  })
+  it('is blank-safe', () => {
+    expect(sonarAssetIdFromMovement(null)).toBe('')
+    expect(sonarAssetIdFromMovement({})).toBe('')
   })
 })

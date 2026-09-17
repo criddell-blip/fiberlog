@@ -6,6 +6,7 @@ import {
   movementAccountId, movementBypassedTruck, movementSourceOverride, consumptionCustomer,
   expandConsumptionRow,
 } from '../../lib/inventory'
+import { sonarAssetIdFromMovement } from '../../lib/sonarAssetIds'
 import ReclassMovementSheet from './ReclassMovementSheet'
 import { escapeCsvField, downloadTextAsFile } from '../../lib/csvImport'
 import { useIsWide } from '../../lib/useIsWide'
@@ -390,6 +391,8 @@ export default function ReportsView() {
           // Asset tag / serial / MAC of the unit (Sonar asset rows + infra
           // passdown tags). Null for everything else.
           lineNote: m.line_note || null,
+          // The bare Sonar asset number, for its own CSV column.
+          assetId: sonarAssetIdFromMovement(m),
           // Never rode the tech's truck (mapped/overridden source).
           bypassed,
           sourceOverride: bypassed ? movementSourceOverride(m) : null,
@@ -825,13 +828,13 @@ export default function ReportsView() {
 
   function exportCSV() {
     const headers = ['Date', 'Crew Member', 'Crew Type', 'Project', 'Phase / Site', 'Task', 'Part SKU', 'BoxHero ID', 'Barcode', 'Department', 'Type', 'Material Group', 'Part Name', 'Qty', 'Unit',
-      'Account', 'Customer / Address', 'Source', 'Bypassed Truck', 'Asset Tag / Serial']
+      'Account', 'Customer / Address', 'Source', 'Bypassed Truck', 'Sonar Asset ID', 'Asset Tag / Serial']
     const csvRows = [headers, ...rows.map(r => [
       r.date, r.userName, r.crewType, r.projectName, r.phaseName, r.taskName,
       r.partId, r.barcode, barcodeMap[r.partId] || '', r.department, r.itemType, r.materialGroup, r.partName, r.qty, r.unit,
       // Consumption-only enrichment; blank on passdown rows.
       r.accountId || '', r.customer || '', r.source || '', r.bypassed ? 'yes' : '',
-      r.lineNote || '',
+      r.assetId || '', r.lineNote || '',
     ])]
     const csv = csvRows.map(row => row.map(escapeCsvField).join(',')).join('\n')
     downloadTextAsFile(`fiberlog-${mode === 'consumption' ? 'consumption' : 'parts'}-${dateFrom}-to-${dateTo}.csv`, csv)
