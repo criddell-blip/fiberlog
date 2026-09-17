@@ -159,8 +159,10 @@ export default function InventoryView() {
   ]
 
   // Accounting (limited) scope: read-only stock + parts catalog + purchase
-  // requests, and the only write action is Receive PO. Hide cycle-count/adjust/
-  // move/reconcile/sonar/sage/import/footage and the Record-movement button.
+  // requests, and the only actions are Receive PO + Sage export (accounting owns
+  // the Sage book; the export only stamps exported_at, never moves stock). Hide
+  // cycle-count/adjust/move/reconcile/sonar/import/footage and the
+  // Record-movement button.
   // Parts is included so accounting can confirm a SKU exists even when it has
   // no logged stock (the Stock tab lists only stocked parts).
   const limited = inventoryIsLimited(currentUser)
@@ -170,7 +172,7 @@ export default function InventoryView() {
   // manual delivery + field-return flows are untouched.
   const baseSubtabs = purchasingEnabled ? SUBTABS : SUBTABS.filter(s => s.id !== 'prs')
   const subtabs = limited ? baseSubtabs.filter(s => s.id === 'stock' || s.id === 'parts' || s.id === 'prs') : baseSubtabs
-  const actions = limited ? ACTIONS.filter(a => a.id === 'receive') : ACTIONS
+  const actions = limited ? ACTIONS.filter(a => a.id === 'receive' || a.id === 'sage') : ACTIONS
   // Flag flipped off while someone was sitting on the PRs tab (realtime).
   useEffect(() => {
     if (!purchasingEnabled && tab === 'prs') setTab('stock')
