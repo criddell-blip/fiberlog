@@ -581,7 +581,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       // Sonar project tag: a CBRS radio or Wave unit is wireless consumption
       // no matter which project dispatch put on the ticket. Without this,
       // "West Mountain Fiber"-tagged wireless installs were landing in the
-      // fiber BEAD consumption ledger (reclassed Aug 2026).
+      // fiber grant consumption ledger (reclassed Aug 2026).
       else if (routing === 'gigwave' || routing === 'none') {
         const bucketName = routing === 'gigwave' ? 'Gigwave' : 'Fixed Wireless'
         const b = buckets.find(b => b.name === bucketName)

@@ -564,7 +564,7 @@ export default function ProjectManager() {
   }
 
   // Create "<name> - Service": the non-grant sibling that absorbs fix-job
-  // material for a BEAD project. The DB trigger creates its Region bucket on
+  // material for a grant project. The DB trigger creates its Region bucket on
   // insert; the single "Service" phase is what the importers route to and what
   // crews log repair days against. Two inserts, each error-checked
   // (supabase-js returns {error}, it doesn't throw) — a project without its
@@ -1804,7 +1804,7 @@ export default function ProjectManager() {
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginTop: 4, cursor: 'pointer' }}>
               <input type="checkbox" checked={projGrant} onChange={e => setProjGrant(e.target.checked)} style={{ marginTop: 3 }} />
               <span>
-                <b>Grant-funded (BEAD)</b>
+                <b>Grant-funded</b>
                 <div style={{ fontSize: 12, color: 'var(--muted)' }}>
                   Also create “{(projName.trim() || 'Project')} - Service” so fix-job material stays out of the grant ledger.
                 </div>

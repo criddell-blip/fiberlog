@@ -1,7 +1,7 @@
--- Service projects: a non-grant sibling per BEAD project.
+-- Service projects: a non-grant sibling per grant project.
 --
 -- Each project's Region bucket (inventory_locations.type='job_site') is the
--- consumption ledger behind the Sage export and BEAD reimbursement. The grant
+-- consumption ledger behind the Sage export and grant reimbursement. The grant
 -- reimburses material on installs, not repairs — but nothing in the ledger
 -- separated the two (West Mountain Aug 2026: 4 fix-job ONTs + 8 fix-job drop
 -- units sat in the grant bucket looking exactly like install material).
@@ -32,7 +32,7 @@ create unique index if not exists projects_service_for_project_uniq
   where service_for_project_id is not null;
 
 comment on column public.projects.service_for_project_id is
-  'Set on a non-grant "Service" sibling: the BEAD project whose fix-job material this project absorbs. NULL on every ordinary project. A project with a sibling is grant-restricted.';
+  'Set on a non-grant "Service" sibling: the grant project whose fix-job material this project absorbs. NULL on every ordinary project. A project with a sibling is grant-restricted.';
 
 -- ─── Reclass provenance on movements ────────────────────────────────────────
 -- Moving consumption between two Regions after the fact is a Region→Region
@@ -55,7 +55,7 @@ comment on column public.inventory_movements.reclass_of is
   'For a Region→Region reclass transfer: the consumption movement being moved. NULL otherwise. Set on insert only; outside prevent_movement_modification.';
 
 -- ─── Seed: West Mountain - Service ──────────────────────────────────────────
--- Only West Mountain is grant-restricted today (owner, Sep 8 2026). Other BEAD
+-- Only West Mountain is grant-restricted today (owner, Sep 8 2026). Other grant
 -- projects get a sibling from the Projects admin ("Create Service sibling")
 -- when the owner decides. Idempotent on name; ASCII hyphen on purpose — the
 -- bucket name and the Sage PROJECTID are this string verbatim.

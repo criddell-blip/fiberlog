@@ -1,6 +1,6 @@
 // ─── Service projects: keep fix-job material out of the grant ledger ────────
 //
-// A BEAD project's Region bucket is the reimbursement ledger. The grant pays
+// A grant project's Region bucket is the reimbursement ledger. The grant pays
 // for installs, not repairs, so any Sonar job whose type names a *Fix* must
 // land in the project's non-grant sibling ("<name> - Service",
 // projects.service_for_project_id → the grant parent) instead.

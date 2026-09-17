@@ -342,7 +342,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         projectId: phase?.project_id || null, jobTypeRaw, manual: phaseOverridden, phases,
       })
       const serviceRedirect = svc.redirected
-      // Fix job on a project with NO sibling (a BEAD project without one is a
+      // Fix job on a project with NO sibling (a grant project without one is a
       // setup gap) — surfaced, not blocked. Wireless projects never need one.
       const fixWithoutService = !serviceRedirect && !phaseOverridden && !!phase && isServiceJobType(jobTypeRaw)
         && !WIRELESS_ONLY_PROJECTS.includes(phase.project_name)

@@ -47,7 +47,7 @@ export function groupLocationsByAisle(locations) {
 // project's consumption bucket is still `job_site` (CHECK-constrained,
 // trigger-created by trg_ensure_project_job_site, referenced by RPCs) — the
 // owner renamed it "Region" in the UI Aug 2026 because that's what each
-// bucket is: one per BEAD region project. Render through here; four
+// bucket is: one per region project. Render through here; four
 // components used to carry their own disagreeing copies ("Job site",
 // "Project bucket", "📍 Job site", "Project buckets").
 export const LOCATION_TYPE_LABELS = {
