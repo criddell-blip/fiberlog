@@ -29,11 +29,13 @@ export function staffScope(user) {
 }
 
 // Tabs a staff user should see, ordered by ALL_MANAGER_TABS.
+// Accounting has Warehouse's access minus Admin (owner call, Sep 30 2026) —
+// full Inventory ops + Reports, but no user management.
 export function visibleManagerTabs(user) {
   const scope = staffScope(user)
   let allowed
-  if (scope === 'warehouse')      allowed = ['inventory', 'reports', 'admin']
-  else if (scope === 'accounting') allowed = ['reports', 'inventory']
+  if (scope === 'warehouse')       allowed = ['inventory', 'reports', 'admin']
+  else if (scope === 'accounting') allowed = ['inventory', 'reports']
   else                             allowed = ALL_MANAGER_TABS  // full (incl. owner)
   return ALL_MANAGER_TABS.filter(t => allowed.includes(t))
 }
@@ -45,11 +47,12 @@ export function canActAsCrew(user) {
   return VALID_FIELD_CREW_TYPES.includes(user?.crew_type)
 }
 
-// Accounting gets a reduced Inventory tab: Receive PO + Sage export + read-only stock/parts
-// (+ Purchase Requests while the Admin → Purchasing switch is on). Everyone
-// else with Inventory access gets full ops.
-export function inventoryIsLimited(user) {
-  return staffScope(user) === 'accounting'
+// No staff scope currently gets a reduced Inventory tab. Accounting used to
+// (Receive PO + Sage export + read-only stock) until Sep 30 2026, when it was
+// given warehouse-manager access. Kept as the one switch InventoryView reads,
+// so a limited scope can be reintroduced here without touching the view.
+export function inventoryIsLimited(_user) {
+  return false
 }
 
 // ─── Access types (the named picker at user create/edit) ──────────────────
@@ -74,7 +77,7 @@ export const ACCESS_TYPES = [
   { id: 'warehouse',       label: 'Warehouse manager', role: 'manager',    scope: 'warehouse',  needsCrew: false,
     desc: 'Inventory (move/count/adjust/receive/locate) + Reports + Admin.' },
   { id: 'accounting',      label: 'Accounting',        role: 'manager',    scope: 'accounting', needsCrew: false,
-    desc: 'Reports + receive deliveries + Sage export (+ purchase requests when Purchasing is on) + view stock. No cycle count or adjust.' },
+    desc: 'Inventory (move/count/adjust/receive/locate) + Reports + Sage export. Like Warehouse manager, but no Admin.' },
   { id: 'crew',            label: 'Crew',              role: 'crew',       scope: null,         needsCrew: true,
     desc: 'Field worker. Logs work in the crew app.' },
   { id: 'contractor',      label: 'Contractor',        role: 'contractor', scope: null,         needsCrew: false,

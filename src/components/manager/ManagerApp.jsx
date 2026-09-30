@@ -182,7 +182,7 @@ export default function ManagerApp() {
   // Visible tabs come from the staff access scope (see lib/access.js):
   //   full       → all tabs + Admin
   //   warehouse  → Inventory + Reports + Admin
-  //   accounting → Reports + Inventory (limited inside InventoryView)
+  //   accounting → Inventory + Reports (warehouse minus Admin, Sep 30 2026)
   // The owner/manager boundary (owner-only account minting) is enforced
   // elsewhere (cannotPickOwner + admin-create-user), not by hiding Admin.
   const visibleTabIds = visibleManagerTabs(currentUser)
