@@ -3882,6 +3882,30 @@ export function refurbTwinOf(partId, parts) {
   if (!partId || !Array.isArray(parts)) return null
   return parts.find(p => p.refurb_of === partId && p.is_active !== false) || null
 }
+// Parent SKUs that already have an active refurbished twin — gates the
+// "→ Refurb" row buttons so they only show where a conversion can land
+// without minting (a few dozen rows at most).
+export async function getPartIdsWithRefurbTwin() {
+  const { data, error } = await db
+    .from('parts_catalog')
+    .select('refurb_of')
+    .not('refurb_of', 'is', null)
+    .eq('is_active', true)
+  if (error) throw error
+  return new Set((data || []).map(r => r.refurb_of))
+}
+// The fields createRefurbTwin copies onto the twin. Callers like the
+// location stock list only carry a slim parts_catalog join (no sage_id), and
+// minting from that would drop the _R Sage ID.
+export async function getPartForRefurb(partId) {
+  const { data, error } = await db
+    .from('parts_catalog')
+    .select('id, name, unit, department, material_group, sage_id, refurb_of, is_active')
+    .eq('id', partId)
+    .maybeSingle()
+  if (error) throw error
+  return data || null
+}
 export async function getRefurbTwin(partId) {
   if (!partId) return null
   const { data, error } = await db

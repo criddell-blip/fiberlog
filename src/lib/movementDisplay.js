@@ -7,6 +7,8 @@
 // that drift becomes permanent, so the derivation moved here where it can be
 // tested. Purely presentational: no db import, no state.
 
+import { isRefurbConversion } from './refurbConvert'
+
 // ─── Movement-type accents ───────────────────────────────────────────────────
 
 // Receive/issue are the in/out pair; the rest keep distinct hues so the
@@ -77,10 +79,15 @@ export function movementDisplay(m) {
   // any transfer; the label says why it exists.
   const isReclass = type === 'transfer' && !!m?.reclass_of
 
+  // An adjust pair carrying [refurb_convert:…] moved units from a new SKU
+  // onto its refurbished twin at one location (lib/refurbConvert.js). Still
+  // a one-sided adjust arithmetically; the label says it wasn't a count fix.
+  const isRefurbConvert = isAdjust && isRefurbConversion(m)
+
   const colors = isAdjustUp
-    ? { bg: 'var(--teal-lt)', text: 'var(--accent-dk)', icon: 'plus' }
+    ? { bg: 'var(--teal-lt)', text: 'var(--accent-dk)', icon: isRefurbConvert ? 'rotate' : 'plus' }
     : isAdjustDown
-    ? { bg: 'var(--red-lt)',  text: 'var(--red)',       icon: isReceiptReversal ? 'rotate' : 'x' }
+    ? { bg: 'var(--red-lt)',  text: 'var(--red)',       icon: isReceiptReversal || isRefurbConvert ? 'rotate' : 'x' }
     : isReclass
     ? { ...base, icon: 'rotate' }
     : base
@@ -91,7 +98,9 @@ export function movementDisplay(m) {
     isAdjustDown,
     isReceiptReversal,
     isReclass,
-    label: isAdjustUp ? 'Adjust up'
+    isRefurbConvert,
+    label: isRefurbConvert ? (isAdjustDown ? 'To refurb' : 'From new')
+      : isAdjustUp ? 'Adjust up'
       : isReceiptReversal ? 'Receipt reversal'
       : isAdjustDown ? 'Adjust down'
       : isReclass ? 'Reclass'
