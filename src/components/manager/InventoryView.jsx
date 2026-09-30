@@ -88,6 +88,9 @@ export default function InventoryView() {
     setTab('parts')
   }
   function jumpToLocation(locationId) {
+    // Limited (accounting) scope has no Locations sub-tab — don't let the
+    // Parts tab's "→ Location" cross-link land them on its write actions.
+    if (limited) return
     setLocationsJump(prev => ({ locationId, n: prev.n + 1 }))
     setTab('locations')
   }

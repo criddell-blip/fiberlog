@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useApp } from '../../AppContext'
 import {
   getStockByLocation, exportLocationStockCSV,
-  LOCATION_TYPE_LABELS, isConsumedLocationType,
+  LOCATION_TYPE_LABELS, isConsumedLocationType, getPartIdsWithRefurbTwin,
 } from '../../lib/inventory'
+import { inventoryIsLimited } from '../../lib/access'
+import ConvertToRefurbSheet from './ConvertToRefurbSheet'
 import {
   getMyActiveRun, startCountRun, startOrResumeCountSession,
 } from '../../lib/cycleCount'
@@ -49,6 +51,11 @@ export default function LocationDetailPanel({
   const [showBinLabels, setShowBinLabels] = useState(false)
   const [showAisleSigns, setShowAisleSigns] = useState(false)
   const [showSkuLabels, setShowSkuLabels] = useState(false)
+  // New-part SKUs with a refurbished twin → those rows get "→ Refurb", which
+  // opens ConvertToRefurbSheet with this location pre-picked.
+  const [refurbParents, setRefurbParents] = useState(() => new Set())
+  const [convertPartId, setConvertPartId] = useState(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   // Back closes the panel (mounted only when open). Display/actions hub, no
   // confirm. Nested label sheets register their own layers and close first.
@@ -64,15 +71,18 @@ export default function LocationDetailPanel({
     setError(null)
     ;(async () => {
       try {
-        const [s, run] = await Promise.all([
+        const [s, run, parents] = await Promise.all([
           getStockByLocation(location.id),
           isBin && currentUser?.id
             ? getMyActiveRun(currentUser.id)
             : Promise.resolve(null),
+          // Non-fatal: without it the rows just don't offer "→ Refurb".
+          getPartIdsWithRefurbTwin().catch(() => new Set()),
         ])
         if (cancelled) return
         setStock(s || [])
         setActiveRun(run)
+        setRefurbParents(parents)
       } catch (e) {
         console.error('LocationDetailPanel load:', e)
         if (!cancelled) setError(e.message || 'Could not load')
@@ -81,7 +91,7 @@ export default function LocationDetailPanel({
       }
     })()
     return () => { cancelled = true }
-  }, [location?.id, currentUser?.id, isBin])
+  }, [location?.id, currentUser?.id, isBin, reloadKey])
 
   async function handleCount() {
     if (!isBin) return
@@ -340,6 +350,23 @@ export default function LocationDetailPanel({
                       </>
                     )}
                   </div>
+                  {qty > 0 && pc?.id && refurbParents.has(pc.id) && pc.is_active !== false
+                    && !inventoryIsLimited(currentUser)
+                    && !isConsumedLocationType(location.type) && !['vendor', 'scrap'].includes(location.type) && (
+                    <button
+                      type="button"
+                      onClick={() => setConvertPartId(pc.id)}
+                      title="Used units here are really refurbished — move them onto the refurbished twin"
+                      style={{
+                        fontSize: 10, padding: '3px 8px',
+                        background: 'var(--amber-lt)', color: 'var(--amber)',
+                        border: '1px solid var(--amber)', borderRadius: 'var(--r-xs)',
+                        cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0, fontWeight: 700,
+                      }}
+                    >
+                      → Refurb
+                    </button>
+                  )}
                   {/* Cross-link: open this part in the Parts tab. Closes
                       the detail panel so the user lands directly on the
                       Parts list with the row highlighted. */}
@@ -364,6 +391,15 @@ export default function LocationDetailPanel({
           </div>
         </div>
       </div>
+
+      {convertPartId && (
+        <ConvertToRefurbSheet
+          partId={convertPartId}
+          initialLocationId={location.id}
+          onClose={() => setConvertPartId(null)}
+          onDone={() => setReloadKey(k => k + 1)}
+        />
+      )}
 
       {/* Bin labels overlay */}
       {showBinLabels && (

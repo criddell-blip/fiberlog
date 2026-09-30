@@ -14,6 +14,7 @@ import SkuLabelSheet from './SkuLabelSheet'
 import BulkMoveSheet from './BulkMoveSheet'
 import PurchaseRequestSheet from './PurchaseRequestSheet'
 import PartHistoryPanel from './PartHistoryPanel'
+import ConvertToRefurbSheet from './ConvertToRefurbSheet'
 import { recencyPillStyle, recencyOf } from '../../lib/recencyPill'
 import { useBackClose } from '../../lib/backStack'
 import { useIsWide } from '../../lib/useIsWide'
@@ -58,6 +59,9 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
   const [viewingLocationsFor, setViewingLocationsFor] = useState(null)
   // The part whose movement-history overlay is open. NULL = closed.
   const [viewingHistoryFor, setViewingHistoryFor] = useState(null)
+  // New part whose "convert stock to refurbished" sheet is open (the sheet
+  // self-registers its Back layer). NULL = closed.
+  const [convertingFor, setConvertingFor] = useState(null)
 
   // Back closes the edit-part form or the location-breakdown overlay. The label
   // / bulk-move / PR sheets self-register, so they're not listed here — and
@@ -153,6 +157,13 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
     return () => { clearTimeout(t); clearTimeout(clear) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusJump?.n, parts.length])
+
+  // Parents that already have an active refurbished twin — only those rows get
+  // the "→ Refurb" button (the Locations panel offers it for any part and can
+  // mint the twin). `parts` is the whole catalog, so no extra query.
+  const refurbParentIds = useMemo(
+    () => new Set(parts.filter(p => p.refurb_of && p.is_active !== false).map(p => p.refurb_of)),
+    [parts])
 
   const distinctValues = useMemo(() => {
     const depts = new Set()
@@ -693,6 +704,13 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
                     </span>
                   )}
                 </button>
+                {!readOnly && p.is_active && refurbParentIds.has(p.id) && stockQty > 0 && (
+                  <button
+                    onClick={() => setConvertingFor(p)}
+                    style={quickBtnStyle('amber')}
+                    title="Move used units booked under this new part onto its refurbished twin"
+                  >→ Refurb</button>
+                )}
                 {!readOnly && <button onClick={() => setEditing(p)} style={quickBtnStyle('default')}>Edit</button>}
               </>
             )
@@ -801,7 +819,8 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
           currentUser={currentUser}
           readOnly={readOnly}
           onClose={() => setViewingLocationsFor(null)}
-          onJumpToLocation={(id) => { setViewingLocationsFor(null); onJumpToLocation?.(id) }}
+          // Limited scope has no Locations sub-tab, so no cross-link to it.
+          onJumpToLocation={readOnly ? undefined : (id) => { setViewingLocationsFor(null); onJumpToLocation?.(id) }}
           onMoved={() => { setViewingLocationsFor(null); onChanged?.() }}
         />
       )}
@@ -812,6 +831,14 @@ export default function InventoryPartsTab({ refreshKey, onChanged, focusJump, on
         <PartHistoryPanel
           part={viewingHistoryFor}
           onClose={() => setViewingHistoryFor(null)}
+        />
+      )}
+
+      {convertingFor && (
+        <ConvertToRefurbSheet
+          partId={convertingFor.id}
+          onClose={() => setConvertingFor(null)}
+          onDone={() => onChanged?.()}
         />
       )}
 
@@ -846,6 +873,10 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
   // pre-built sourceLocation + selectedRows so BulkMoveSheet can open
   // with the part + source already populated. NULL = closed.
   const [moveContext, setMoveContext] = useState(null)
+  // Location id whose "→ Refurb" was tapped; opens ConvertToRefurbSheet with
+  // it pre-picked. Offered for any new part (the sheet mints a missing twin).
+  const [convertAt, setConvertAt] = useState(null)
+  const canConvert = !readOnly && part.is_active !== false && !part.refurb_of
 
   useEffect(() => {
     let cancelled = false
@@ -1059,6 +1090,22 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
                         Move from here
                       </button>
                     )}
+                    {canConvert && l.qty > 0 && !l.isConsumed && !['vendor', 'scrap'].includes(l.type) && (
+                      <button
+                        type="button"
+                        onClick={() => setConvertAt(l.locationId)}
+                        title={`Used units here are really refurbished — move them onto the refurbished twin`}
+                        style={{
+                          fontSize: 10, padding: '3px 8px',
+                          background: 'var(--amber-lt)', color: 'var(--amber)',
+                          border: '1px solid var(--amber)', borderRadius: 'var(--r-xs)',
+                          cursor: 'pointer', whiteSpace: 'nowrap',
+                          fontWeight: 700,
+                        }}
+                      >
+                        → Refurb
+                      </button>
+                    )}
                   </div>
                   </Fragment>
                 ))}
@@ -1090,6 +1137,15 @@ function PartLocationsPanel({ part, locations, currentUser, readOnly = false, on
           currentUser={currentUser}
           onClose={() => setMoveContext(null)}
           onComplete={() => { setMoveContext(null); onMoved?.() }}
+        />
+      )}
+
+      {convertAt && (
+        <ConvertToRefurbSheet
+          partId={part.id}
+          initialLocationId={convertAt}
+          onClose={() => setConvertAt(null)}
+          onDone={() => { setConvertAt(null); onMoved?.() }}
         />
       )}
     </div>
