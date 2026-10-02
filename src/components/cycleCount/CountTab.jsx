@@ -4,6 +4,7 @@ import CountStartSheet from './CountStartSheet'
 import CountRunScreen from './CountRunScreen'
 import CountRunReviewSheet from './CountRunReviewSheet'
 import CountRunHistorySheet from './CountRunHistorySheet'
+import AdjustmentsSummarySheet from '../manager/AdjustmentsSummarySheet'
 import { getMyActiveRun, getPendingCountRuns } from '../../lib/cycleCount'
 import Icon from '../shared/Icon'
 
@@ -24,6 +25,7 @@ export default function CountTab({ onExitTab, jumpTo }) {
   const [showStart, setShowStart] = useState(false)
   const [reviewRunId, setReviewRunId] = useState(null)
   const [showHistory, setShowHistory] = useState(false)
+  const [showAdjSummary, setShowAdjSummary] = useState(false)
   const [loading, setLoading] = useState(true)
 
   // External jump from Locations tab: "Count this bin" creates/resumes
@@ -176,6 +178,17 @@ export default function CountTab({ onExitTab, jumpTo }) {
                 >
                   View past runs
                 </button>
+                <span style={{ color: 'var(--hint)', margin: '0 4px' }}>·</span>
+                <button
+                  onClick={() => setShowAdjSummary(true)}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--muted)', fontSize: 'var(--fs-sm)',
+                    textDecoration: 'underline', padding: 4,
+                  }}
+                >
+                  Adjustments summary
+                </button>
               </div>
             </div>
           </>
@@ -199,6 +212,10 @@ export default function CountTab({ onExitTab, jumpTo }) {
 
       {showHistory && (
         <CountRunHistorySheet onClose={() => setShowHistory(false)} />
+      )}
+
+      {showAdjSummary && (
+        <AdjustmentsSummarySheet onClose={() => setShowAdjSummary(false)} />
       )}
     </div>
   )

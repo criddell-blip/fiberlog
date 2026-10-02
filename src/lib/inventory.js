@@ -2661,6 +2661,31 @@ export async function getMovementsForActivityExport({ since, until, type = null,
   })
 }
 
+// Every `adjust` booked in a window, for the Adjustments summary sheet (pure
+// aggregation in lib/adjustmentsSummary.js). Dated by created_at — when the
+// adjustment was BOOKED is what "what have we adjusted this week" means;
+// adjusts don't carry an occurred_at. Locations come back as bare ids and are
+// resolved by the caller against a full (bins + inactive) location map, so a
+// bin's parent warehouse is available for the roll-up.
+export async function getAdjustmentsForSummary({ since, until, maxRows = 20000 } = {}) {
+  const makeQuery = () => {
+    let q = db.from('inventory_movements')
+      .select(`
+        id, movement_type, part_id, quantity, unit, notes, created_at, count_run_id,
+        purchase_request_line_id, from_location_id, to_location_id,
+        part:parts_catalog(id, name, unit),
+        created_by_user:users!inventory_movements_created_by_fkey(id, name, initials)
+      `)
+      .eq('movement_type', 'adjust')
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+    if (since) q = q.gte('created_at', since)
+    if (until) q = q.lte('created_at', until)
+    return q
+  }
+  return fetchAllRows(makeQuery, { maxRows })
+}
+
 // ─── CONSUMPTION LEDGER (shared by Reports → Consumption + Sage export) ───────
 //
 // The SINGLE definition of "material consumed into a project": a `transfer`

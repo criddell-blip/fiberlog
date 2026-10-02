@@ -125,6 +125,101 @@ export async function discardCountResolution({ resolutionId, reason }) {
   return data
 }
 
+// Settle a PENDING gain/loss some other way than "approve as counted":
+//   countedNow         — reviewer's fresh recount of that bin. The adjustment
+//                        becomes countedNow minus the books AT THAT BIN NOW;
+//                        a match closes the variance with no movement.
+//   counterLocationId  — book the difference as a transfer from (gain) / to
+//                        (loss) the place the stock really came from / went.
+// Either, both, or neither (neither = plain approve).
+// expectedSystem = the book qty the reviewer was SHOWN; the RPC refuses
+// ("Books changed…", isStaleBooksError) if stock at the bin moved since.
+export async function resolveCountResolution({ resolutionId, countedNow = null, counterLocationId = null, note = null, expectedSystem = null }) {
+  const { data, error } = await db.rpc('resolve_count_resolution', {
+    p_resolution_id: resolutionId,
+    p_counted_now: countedNow,
+    p_counter_location_id: counterLocationId,
+    p_note: note,
+    p_expected_system: countedNow == null ? null : expectedSystem,
+  })
+  if (error) throw error
+  return data
+}
+
+// What resolve_count_resolution WILL post, computed client-side for the
+// confirm button. Must mirror the RPC exactly:
+//   diff = countedNow − systemNow when recounted, else ±resolution qty
+//   diff 0 → nothing posted (variance closed as discarded)
+//   counter location → transfer (gain: counter → bin, loss: bin → counter)
+//   else → one-sided adjust at the bin
+export function previewResolution({ resolutionType, quantity, countedNow = null, systemNow = null, counterLocationId = null }) {
+  const recounted = countedNow != null && countedNow !== ''
+  if (recounted && systemNow == null) return null  // still loading the books
+  const diff = recounted
+    ? Number(countedNow) - Number(systemNow)
+    : (resolutionType === 'net_gain' ? Number(quantity) : -Number(quantity))
+  if (diff === 0) return { diff: 0, action: 'none' }
+  if (counterLocationId) return { diff, action: 'transfer', direction: diff > 0 ? 'from_counter' : 'to_counter', qty: Math.abs(diff) }
+  return { diff, action: 'adjust', qty: Math.abs(diff) }
+}
+
+// Recount a (part, bin) the run counted that has NO pending variance — an
+// auto-reconciled transfer or an already-approved line that turned out wrong.
+// Posts one correcting adjust tagged with the run. Returns
+// { movement_id, system_qty, counted_qty, diff } (movement_id null on a match).
+export async function recountCountLocation({ runId, partId, locationId, countedNow, note = null, expectedSystem = null }) {
+  const { data, error } = await db.rpc('recount_count_location', {
+    p_run_id: runId,
+    p_part_id: partId,
+    p_location_id: locationId,
+    p_counted_now: countedNow,
+    p_note: note,
+    p_expected_system: expectedSystem,
+  })
+  if (error) throw error
+  return data
+}
+
+export function isStaleBooksError(e) {
+  return e?.hint === 'stale_books' || /Books changed since/.test(e?.message || '')
+}
+
+// Book qty of one part at one location right now (0 when there's no row).
+// The recount panels show it so the reviewer sees exactly what the
+// adjustment will be before posting.
+export async function getStockQtyAt(partId, locationId) {
+  const { data, error } = await db
+    .from('inventory_stock')
+    .select('quantity')
+    .eq('part_id', partId)
+    .eq('location_id', locationId)
+    .maybeSingle()
+  if (error) throw error
+  return Number(data?.quantity || 0)
+}
+
+// Recent adjustments + count-run moves of ONE part anywhere, newest first.
+// The review sheet shows these beside a variance: a −40 here next to last
+// Tuesday's +40 on the next shelf is almost always the same stock.
+export async function getRecentPartAdjustments(partId, { days = 21, limit = 25 } = {}) {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+  const { data, error } = await db
+    .from('inventory_movements')
+    .select(`
+      id, movement_type, quantity, notes, created_at, count_run_id,
+      from_location_id, to_location_id,
+      from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type),
+      to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type)
+    `)
+    .eq('part_id', partId)
+    .gte('created_at', since)
+    .or('movement_type.eq.adjust,count_run_id.not.is.null')
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return data || []
+}
+
 export async function discardCountRun({ runId, reason }) {
   const { data, error } = await db.rpc('discard_count_run', {
     p_run_id: runId,
@@ -269,9 +364,26 @@ export async function getCountRunDetail(runId) {
   if (runRes.error) throw runRes.error
   if (sessionsRes.error) throw sessionsRes.error
   if (resolutionsRes.error) throw resolutionsRes.error
+  // Corrections posted from the review sheet by recount_count_location are
+  // tagged with the run but belong to no resolution — list them so the run
+  // shows its whole story.
+  const resMovementIds = new Set((resolutionsRes.data || []).map(r => r.movement_id).filter(Boolean))
+  const { data: recountMoves, error: mvErr } = await db.from('inventory_movements')
+    .select(`
+      id, quantity, notes, created_at, from_location_id, to_location_id,
+      part:parts_catalog(id, name, unit),
+      from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name),
+      to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name)
+    `)
+    .eq('count_run_id', runId)
+    .eq('movement_type', 'adjust')
+    .like('notes', 'Count review recount%')
+    .order('created_at')
+  if (mvErr) throw mvErr
   return {
     run: runRes.data,
     sessions: sessionsRes.data || [],
     resolutions: resolutionsRes.data || [],
+    recounts: (recountMoves || []).filter(m => !resMovementIds.has(m.id)),
   }
 }

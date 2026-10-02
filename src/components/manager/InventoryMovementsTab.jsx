@@ -8,6 +8,7 @@ import { TYPE_COLORS, TYPE_LABELS, RECEIPT_KIND_LABEL, movementDisplay, signedQt
 import { chipStyle, cardSurface, LoadingBlock, EmptyState } from './chrome'
 import Icon from '../shared/Icon'
 import ReclassMovementSheet from './ReclassMovementSheet'
+import AdjustmentsSummarySheet from './AdjustmentsSummarySheet'
 
 // Local calendar date as YYYY-MM-DD (toISOString would shift the day in
 // negative-offset timezones — same trap SageExportSheet documents).
@@ -39,6 +40,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
     isoLocalDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)))
   const [exportTo, setExportTo] = useState(() => isoLocalDate(new Date()))
   const [exporting, setExporting] = useState(false)
+  const [showAdjSummary, setShowAdjSummary] = useState(false)
 
   // Full movement history as a file. Honors the tab's type + location filters
   // plus the date range. Deliberately NOT the Sage exclusion rules — adjusts,
@@ -177,6 +179,10 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
         padding: '8px 10px', marginBottom: 12,
         background: 'var(--surface2)', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)',
       }}>
+        <button onClick={() => setShowAdjSummary(true)} style={chipStyle(false)}
+          title="Totals of every adjustment, up vs down, by location and by part">
+          <Icon name="sliders" size={13} /> Adjustments summary
+        </button>
         <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)' }}>Export history</span>
         <input type="date" value={exportFrom} onChange={e => setExportFrom(e.target.value)}
           style={{ height: 30, padding: '0 8px', border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', fontSize: 12, background: 'var(--surface)' }} />
@@ -297,6 +303,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
           onDone={() => load()}
         />
       )}
+      {showAdjSummary && <AdjustmentsSummarySheet onClose={() => setShowAdjSummary(false)} />}
     </div>
   )
 }
