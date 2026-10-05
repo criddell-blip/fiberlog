@@ -21,6 +21,7 @@ import ReconcileSheet from './ReconcileSheet'
 import SonarImportSheet from './SonarImportSheet'
 import FiberJobsImportSheet from './FiberJobsImportSheet'
 import InventoryImportSheet from './InventoryImportSheet'
+import CsvMoveSheet from './CsvMoveSheet'
 import SageExportSheet from './SageExportSheet'
 import FootageMapSheet from './FootageMapSheet'
 
@@ -64,6 +65,7 @@ export default function InventoryView() {
   const [showSonarSheet, setShowSonarSheet] = useState(false)
   const [showFiberJobsSheet, setShowFiberJobsSheet] = useState(false)
   const [showImportSheet, setShowImportSheet] = useState(false)
+  const [showCsvMoveSheet, setShowCsvMoveSheet] = useState(false)
   const [showSageSheet, setShowSageSheet] = useState(false)
   const [showFootageMap, setShowFootageMap] = useState(false)
   // Bumped after a movement is recorded or part is updated, so child tabs re-fetch.
@@ -135,6 +137,13 @@ export default function InventoryView() {
     setRefreshKey(k => k + 1)
     showToast(`Imported ${count} fiber-job movement${count === 1 ? '' : 's'}`)
   }
+  // keepOpen: a partial failure — the sheet stays up to show what didn't
+  // land, but the rows that did are real, so the tabs still refresh.
+  function handleCsvMoveApplied(count, { keepOpen = false } = {}) {
+    if (!keepOpen) setShowCsvMoveSheet(false)
+    setRefreshKey(k => k + 1)
+    showToast(`Moved ${count} row${count === 1 ? '' : 's'}`)
+  }
   function handleLocationsChanged() {
     loadLocations()
     setRefreshKey(k => k + 1)
@@ -156,6 +165,7 @@ export default function InventoryView() {
     { id: 'reconcile', label: 'Reconcile',   sub: 'Apply an audit CSV',  icon: 'refresh',  onClick: () => setShowReconcileSheet(true), disabled: noLocations },
     { id: 'sonar',     label: 'Sonar',       sub: 'Serialized installs', icon: 'zap',      onClick: () => setShowSonarSheet(true),     disabled: noLocations },
     { id: 'fiber',     label: 'Fiber jobs',  sub: 'Cable & drops report',icon: 'layers',   onClick: () => setShowFiberJobsSheet(true), disabled: noLocations },
+    { id: 'csvmove',   label: 'Move CSV',    sub: 'Bulk move from a sheet', icon: 'move', onClick: () => setShowCsvMoveSheet(true), disabled: noLocations },
     { id: 'import',    label: 'Import CSV',  sub: 'BoxHero catalog',     icon: 'upload',   onClick: () => setShowImportSheet(true),    disabled: false },
     { id: 'sage',      label: 'Sage export', sub: 'Build the period CSV',icon: 'receipt',  onClick: () => setShowSageSheet(true),      disabled: false },
     { id: 'footage',   label: 'Footage map', sub: 'Cable/conduit → SKU', icon: 'nut',     onClick: () => setShowFootageMap(true),     disabled: false },
@@ -417,6 +427,14 @@ export default function InventoryView() {
         <FiberJobsImportSheet
           onClose={() => setShowFiberJobsSheet(false)}
           onApplied={handleFiberJobsApplied}
+        />
+      )}
+      {showCsvMoveSheet && (
+        <CsvMoveSheet
+          locations={locations}
+          currentUser={currentUser}
+          onClose={() => setShowCsvMoveSheet(false)}
+          onApplied={handleCsvMoveApplied}
         />
       )}
       {showSageSheet && (
