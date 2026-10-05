@@ -6,7 +6,7 @@ import {
 import { downloadTextAsFile } from '../../lib/csvImport'
 import { useCsvFile } from '../../lib/useCsvImport'
 import {
-  findMoveColumns, buildLocationIndex, locationLabel,
+  findMoveColumns, buildLocationIndex, buildPartFinder, locationLabel,
   parseMoveRows, applyStock, buildCsvMovePayloads, buildMoveTemplateCsv,
 } from '../../lib/csvMove'
 import { useBackClose } from '../../lib/backStack'
@@ -92,13 +92,8 @@ export default function CsvMoveSheet({ locations, currentUser, onClose, onApplie
     ? [!cols.sku && 'SKU', !cols.to && 'To'].filter(Boolean)
     : []
 
-  // Case-insensitive SKU, then exact part name — people paste either.
-  const findPart = useMemo(() => {
-    if (!catalog) return () => null
-    const upper = new Map(catalog.all.map(p => [String(p.id).toUpperCase(), p]))
-    return text => catalog.byId.get(text) || upper.get(text.toUpperCase())
-      || catalog.byName.get(text.toLowerCase()) || null
-  }, [catalog])
+  // SKU (guarding against spreadsheet-stripped leading zeros), then part name.
+  const findPart = useMemo(() => catalog ? buildPartFinder(catalog.all) : () => null, [catalog])
 
   const index = useMemo(() => allLocs ? buildLocationIndex(allLocs) : null, [allLocs])
   const parsed = useMemo(() => {

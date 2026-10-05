@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  findMoveColumns, locationKey, buildLocationIndex,
+  findMoveColumns, locationKey, buildLocationIndex, buildPartFinder,
   parseMoveRows, applyStock, buildCsvMovePayloads, buildMoveTemplateCsv,
 } from './csvMove'
 import { parseCsv } from './csvImport'
@@ -109,6 +109,35 @@ describe('row resolution', () => {
   })
   it('needs a From when there is no default', () => {
     expect(run('SKU,Qty,To\nONT-1,1,4-a2', { defaultFromId: null })[0].status).toBe('error')
+  })
+})
+
+describe('buildPartFinder (spreadsheet-stripped leading zeros)', () => {
+  const find = buildPartFinder([
+    { id: '0065910', name: 'PVC adapter' }, { id: '65910', name: 'PVC adapter' },   // twins, live Oct 2026
+    { id: '0069198', name: 'Conduit' },                                              // padded only
+    { id: '76150', name: 'Attenuator' },                                             // plain numeric
+    { id: 'ONT-1', name: 'ONT' },
+  ])
+  it('refuses a stripped SKU that has a zero-padded twin', () => {
+    expect(find('65910').error).toMatch(/0065910/)
+  })
+  it('the full padded SKU still matches exactly', () => {
+    expect(find('0065910').id).toBe('0065910')
+  })
+  it('recovers the padded SKU when it is the only candidate', () => {
+    expect(find('69198').id).toBe('0069198')
+  })
+  it('leaves ordinary numeric + text SKUs alone', () => {
+    expect(find('76150').id).toBe('76150')
+    expect(find('ont-1').id).toBe('ONT-1')
+    expect(find('nope')).toBeNull()
+  })
+  it('surfaces the error on the row', () => {
+    const { headers, rows } = parseCsv('SKU,Qty,To\n65910,1,4-a2')
+    const r = parseMoveRows({ rows, cols: findMoveColumns(headers), findPart: find, resolveLoc: idx.resolve, defaultFromId: 'wh', locationsById: byId })
+    expect(r[0]).toMatchObject({ status: 'error' })
+    expect(r[0].message).toMatch(/leading zeros/)
   })
 })
 

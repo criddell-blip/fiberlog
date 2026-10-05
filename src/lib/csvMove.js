@@ -103,6 +103,47 @@ export function locationLabel(loc, locationsById) {
   return loc.assigned_user?.name || loc.name
 }
 
+// ─── PART MATCHING ───────────────────────────────────────────────────────────
+
+// Excel and Google Sheets turn "0065910" into the number 65910 on the round
+// trip — and the catalog has zero-less twins of some of those SKUs (same
+// name, separate part, Oct 2026), so a stripped SKU can silently match the
+// WRONG part. Rules for an all-digit SKU:
+//   - zero-padded twin exists alongside an exact match → error (ambiguous)
+//   - only a zero-padded version exists → use it (unambiguous recovery)
+// Then case-insensitive SKU, then exact part name.
+//   → (text) → part | { error } | null
+export function buildPartFinder(parts) {
+  const byId = new Map(), byUpper = new Map(), byName = new Map(), byStripped = new Map()
+  for (const p of parts) {
+    const id = String(p.id)
+    byId.set(id, p)
+    byUpper.set(id.toUpperCase(), p)
+    if (p.name) byName.set(p.name.trim().toLowerCase(), p)
+    if (/^\d+$/.test(id)) {
+      const k = id.replace(/^0+/, '')
+      byStripped.set(k, [...(byStripped.get(k) || []), p])
+    }
+  }
+  return text => {
+    const t = String(text || '').trim()
+    if (/^\d+$/.test(t)) {
+      const family = byStripped.get(t.replace(/^0+/, '')) || []
+      const exact = byId.get(t)
+      // Only a LONGER twin is a risk — zeros get dropped, never added, so a
+      // fully padded SKU that matches exactly is trusted.
+      const others = family.filter(p => String(p.id).length > t.length)
+      if (exact && others.length) {
+        return { error: `SKU ${t} also exists as ${others.map(p => p.id).join(', ')} — the spreadsheet may have dropped leading zeros. Format the SKU column as text and re-check.` }
+      }
+      if (exact) return exact
+      if (family.length === 1) return family[0]
+      if (family.length > 1) return { error: `SKU ${t} could be ${family.map(p => p.id).join(' or ')} — write it in full` }
+    }
+    return byId.get(t) || byUpper.get(t.toUpperCase()) || byName.get(t.toLowerCase()) || null
+  }
+}
+
 // ─── ROW RESOLUTION ──────────────────────────────────────────────────────────
 
 // Endpoints a CSV move may not touch. Vendors aren't stock, scrap has its own
@@ -123,7 +164,7 @@ function parseQty(v) {
 //
 //   rows          — parsed CSV rows (objects keyed by header)
 //   cols          — findMoveColumns() result
-//   findPart      — (skuText) → part | null
+//   findPart      — (skuText) → part | { error } | null   (buildPartFinder)
 //   resolveLoc    — (text) → { location } | { error }   (overrides applied)
 //   defaultFromId — used when the From cell is blank (or no From column)
 //   locationsById — Map for the default-from lookup
@@ -143,6 +184,7 @@ export function parseMoveRows({ rows, cols, findPart, resolveLoc, defaultFromId,
 
     const part = findPart(skuText)
     if (!part) return { ...base, status: 'error', message: `Unknown SKU "${skuText}"` }
+    if (part.error) return { ...base, status: 'error', message: part.error }
 
     const to = resolveLoc(toText)
     let from
