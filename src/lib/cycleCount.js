@@ -131,16 +131,21 @@ export async function discardCountResolution({ resolutionId, reason }) {
 //                        a match closes the variance with no movement.
 //   counterLocationId  — book the difference as a transfer from (gain) / to
 //                        (loss) the place the stock really came from / went.
-// Either, both, or neither (neither = plain approve).
+//   splits             — [{ locationId, qty }]: the same, spread over several
+//                        locations (3 to one truck, 1 to another…). Whatever
+//                        the splits don't cover books as an adjust at the bin.
+//                        Use instead of counterLocationId, never both.
+// Any combination, or none (none = plain approve).
 // expectedSystem = the book qty the reviewer was SHOWN; the RPC refuses
 // ("Books changed…", isStaleBooksError) if stock at the bin moved since.
-export async function resolveCountResolution({ resolutionId, countedNow = null, counterLocationId = null, note = null, expectedSystem = null }) {
+export async function resolveCountResolution({ resolutionId, countedNow = null, counterLocationId = null, splits = null, note = null, expectedSystem = null }) {
   const { data, error } = await db.rpc('resolve_count_resolution', {
     p_resolution_id: resolutionId,
     p_counted_now: countedNow,
     p_counter_location_id: counterLocationId,
     p_note: note,
     p_expected_system: countedNow == null ? null : expectedSystem,
+    p_splits: splits?.length ? splits.map(s => ({ location_id: s.locationId, qty: Number(s.qty) })) : null,
   })
   if (error) throw error
   return data
@@ -151,13 +156,25 @@ export async function resolveCountResolution({ resolutionId, countedNow = null, 
 //   diff = countedNow − systemNow when recounted, else ±resolution qty
 //   diff 0 → nothing posted (variance closed as discarded)
 //   counter location → transfer (gain: counter → bin, loss: bin → counter)
+//   splits → one transfer per split + an adjust for the remainder; a split
+//     that adds up to more than the difference is refused (over: true)
 //   else → one-sided adjust at the bin
-export function previewResolution({ resolutionType, quantity, countedNow = null, systemNow = null, counterLocationId = null }) {
+export function previewResolution({ resolutionType, quantity, countedNow = null, systemNow = null, counterLocationId = null, splits = null }) {
   const recounted = countedNow != null && countedNow !== ''
   if (recounted && systemNow == null) return null  // still loading the books
   const diff = recounted
     ? Number(countedNow) - Number(systemNow)
     : (resolutionType === 'net_gain' ? Number(quantity) : -Number(quantity))
+  if (splits?.length) {
+    const qty = Math.abs(diff)
+    const splitTotal = splits.reduce((sum, s) => sum + Number(s.qty), 0)
+    return {
+      diff, action: 'split', qty, splitTotal,
+      remainder: Math.max(0, qty - splitTotal),
+      over: splitTotal > qty,
+      direction: diff > 0 ? 'from_counter' : 'to_counter',
+    }
+  }
   if (diff === 0) return { diff: 0, action: 'none' }
   if (counterLocationId) return { diff, action: 'transfer', direction: diff > 0 ? 'from_counter' : 'to_counter', qty: Math.abs(diff) }
   return { diff, action: 'adjust', qty: Math.abs(diff) }

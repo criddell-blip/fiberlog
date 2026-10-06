@@ -33,4 +33,25 @@ describe('previewResolution (mirrors resolve_count_resolution)', () => {
   it('waits for the books before previewing a recount', () => {
     expect(previewResolution({ resolutionType: 'net_gain', quantity: 1, countedNow: 3, systemNow: null })).toBeNull()
   })
+
+  it('splits book a transfer each and adjust the remainder', () => {
+    // The owner's case: −16 at the bin, 3 went to one truck, 1 to another.
+    expect(previewResolution({ resolutionType: 'net_loss', quantity: 16, splits: [{ locationId: 'jaco', qty: 3 }, { locationId: 'taryn', qty: '1' }] }))
+      .toEqual({ diff: -16, action: 'split', qty: 16, splitTotal: 4, remainder: 12, over: false, direction: 'to_counter' })
+  })
+
+  it('splits that cover the whole difference leave no adjust', () => {
+    expect(previewResolution({ resolutionType: 'net_gain', quantity: 4, splits: [{ locationId: 'a', qty: 1 }, { locationId: 'b', qty: 3 }] }))
+      .toMatchObject({ action: 'split', remainder: 0, over: false, direction: 'from_counter' })
+  })
+
+  it('flags splits that add up to more than the difference', () => {
+    expect(previewResolution({ resolutionType: 'net_loss', quantity: 2, splits: [{ locationId: 'a', qty: 3 }] }))
+      .toMatchObject({ over: true, remainder: 0 })
+  })
+
+  it('splits follow the recount, not the original variance', () => {
+    expect(previewResolution({ resolutionType: 'net_loss', quantity: 16, countedNow: 6, systemNow: 10, splits: [{ locationId: 'a', qty: 3 }] }))
+      .toMatchObject({ diff: -4, qty: 4, remainder: 1 })
+  })
 })
