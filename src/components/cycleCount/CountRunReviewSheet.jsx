@@ -722,7 +722,9 @@ function FixPanel({ resolution, location, counterLocations, busy, onSubmit }) {
 
   let label = 'Enter a recount or add where it went'
   if (incomplete) label = 'Pick a location and quantity on every line'
-  else if (preview?.over) label = `The split adds up to more than the ${preview.qty} ${unit} difference`
+  else if (preview?.over) label = preview.qty === 0
+    ? 'Matches the books — remove the location lines to close with no adjustment'
+    : `The split adds up to more than the ${preview.qty} ${unit} difference`
   else if (preview && (recounted || splits.length > 0)) {
     if (preview.action === 'none') label = 'Matches the books — close with no adjustment'
     else if (preview.action === 'split') {

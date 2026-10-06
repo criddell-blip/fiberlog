@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useApp } from '../../AppContext'
 import { db } from '../../lib/supabase'
-import { recordMovementsBatch, fetchAllRows, confirmNegativeStock } from '../../lib/inventory'
+import { recordMovementsBatch, fetchAllRows, confirmNegativeStock, buildSplitVariancePayloads } from '../../lib/inventory'
 import { parseCsv, readFileAsText } from '../../lib/csvImport'
 import { isoLocalDate } from '../../lib/format'
 import { useBackClose } from '../../lib/backStack'
@@ -22,6 +22,11 @@ import Icon from '../shared/Icon'
 //     was grabbed off the warehouse shelf: transfer warehouse → truck zeroes
 //     the truck AND decrements the warehouse, instead of minting 48 from
 //     thin air while the warehouse quietly stays overstated).
+//
+//   - `split` (Oct 2026) — the same transfer spread over several locations
+//     (3 went to one truck, 1 to another), with whatever they don't cover
+//     booked as an adjust. Same rule as the count review's Recount / move…
+//     (buildSplitVariancePayloads mirrors resolve_count_resolution p_splits).
 //
 // Sage note (deliberate): transfer-booked variances flow into the Sage
 // export exactly like the contemporaneous movement would have (a normal
@@ -52,10 +57,12 @@ export default function ReconcileSheet({ onClose, onApplied }) {
   const [notes, setNotes] = useState({})           // idx → user-edited note
   // Booking mode: batch default + per-row override.
   //   batchMode 'adjust' | 'transfer'; batchCounterId = the shared counter-location.
-  //   rowBooking[idx] = 'adjust' | <locationId> — explicit pick; absent = follow batch.
+  //   rowBooking[idx] = 'adjust' | 'split' | <locationId> — explicit pick; absent = follow batch.
+  //   rowSplits[idx] = [{ key, locationId, qty }] — the lines of a 'split' row (qty as typed).
   const [batchMode, setBatchMode] = useState('adjust')
   const [batchCounterId, setBatchCounterId] = useState('')
   const [rowBooking, setRowBooking] = useState({})
+  const [rowSplits, setRowSplits] = useState({})
   const [showNoChange, setShowNoChange] = useState(false)
   const [search, setSearch] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -94,6 +101,7 @@ export default function ReconcileSheet({ onClose, onApplied }) {
       setExcluded(new Set())
       setNotes({})
       setRowBooking({})
+      setRowSplits({})
     } catch (e) {
       console.error('Reconcile parse failed:', e)
       setError(e.message || String(e))
@@ -129,6 +137,21 @@ export default function ReconcileSheet({ onClose, onApplied }) {
   // while reconciling the warehouse itself).
   function effectiveBookingFor(row) {
     const ov = rowBooking[row.idx]
+    if (ov === 'split') {
+      const lines = rowSplits[row.idx] || []
+      const good = lines
+        .filter(l => l.locationId && Number(l.qty) > 0)
+        .map(l => ({ locationId: l.locationId, qty: Number(l.qty) }))
+      const total = Math.round(good.reduce((t, l) => t + l.qty, 0) * 1e6) / 1e6
+      const need = Math.abs(row.willAdjust)
+      // A half-filled line or a split bigger than the variance blocks Apply
+      // rather than being silently dropped / clipped.
+      const problem = lines.length === 0 ? 'Add at least one location'
+        : good.length !== lines.length ? 'Pick a location and quantity on every line'
+        : total > need ? `Split adds up to ${total} — the difference is only ${need}`
+        : null
+      return { kind: 'split', lines: good, remainder: Math.max(0, Math.round((need - total) * 1e6) / 1e6), problem }
+    }
     const counter = ov === 'adjust' ? null
       : ov ? ov
       : (batchMode === 'transfer' ? batchCounterId : null)
@@ -141,7 +164,7 @@ export default function ReconcileSheet({ onClose, onApplied }) {
     if (!resolved) return null
     let toAdd = 0, toRemove = 0, addCount = 0, removeCount = 0
     let noChange = 0, noActual = 0, noMatch = 0, badActual = 0
-    let adjustCount = 0, transferCount = 0
+    let adjustCount = 0, transferCount = 0, splitProblems = 0
     // Transfers PULL from their counter-location — tally the demand per
     // (part, counter) so we can warn when it exceeds that location's logged
     // stock (warn-but-allow, same posture as crew over-load).
@@ -160,7 +183,17 @@ export default function ReconcileSheet({ onClose, onApplied }) {
       }
       if (r.status === 'add' || r.status === 'remove') {
         const b = effectiveBookingFor(r)
-        if (b.kind === 'transfer') {
+        if (b.kind === 'split') {
+          if (b.problem) splitProblems++
+          transferCount += b.lines.length
+          if (b.remainder > 0) adjustCount++
+          if (r.willAdjust > 0) {
+            for (const l of b.lines) {
+              const k = `${r.partId}|${l.locationId}`
+              pullDemand.set(k, (pullDemand.get(k) || 0) + l.qty)
+            }
+          }
+        } else if (b.kind === 'transfer') {
           transferCount++
           if (r.willAdjust > 0) {
             const k = `${r.partId}|${b.counterId}`
@@ -182,9 +215,9 @@ export default function ReconcileSheet({ onClose, onApplied }) {
       toAdd, toRemove, addCount, removeCount,
       noChange, noActual, badActual, noMatch,
       adjustments: addCount + removeCount,
-      adjustCount, transferCount, overdrawnPulls,
+      adjustCount, transferCount, overdrawnPulls, splitProblems,
     }
-  }, [resolved, excluded, locMeta, rowBooking, batchMode, batchCounterId])
+  }, [resolved, excluded, locMeta, rowBooking, rowSplits, batchMode, batchCounterId])
 
   const filteredRows = useMemo(() => {
     if (!resolved) return []
@@ -193,6 +226,7 @@ export default function ReconcileSheet({ onClose, onApplied }) {
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter(r =>
+        (rowBooking[r.idx] === 'split' && !excluded.has(r.idx) && effectiveBookingFor(r).problem) ||
         (r.sku || '').toLowerCase().includes(q) ||
         (r.partName || '').toLowerCase().includes(q) ||
         (r.locName || '').toLowerCase().includes(q) ||
@@ -202,7 +236,7 @@ export default function ReconcileSheet({ onClose, onApplied }) {
     // Sort: actionable rows first (add/remove), then warnings, then no-change
     const rank = { 'remove': 0, 'add': 1, 'bad-actual': 2, 'no-match-part': 3, 'no-match-location': 3, 'duplicate': 3, 'no-actual': 4, 'no-change': 5 }
     return [...list].sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9))
-  }, [resolved, excluded, showNoChange, search])
+  }, [resolved, excluded, showNoChange, search, rowBooking, rowSplits])
 
   function toggleExclude(idx) {
     setExcluded(prev => {
@@ -214,6 +248,10 @@ export default function ReconcileSheet({ onClose, onApplied }) {
 
   async function handleApply() {
     if (!stats || stats.adjustments === 0) return
+    if (stats.splitProblems > 0) {
+      setError(`${stats.splitProblems} split row${stats.splitProblems === 1 ? '' : 's'} still need fixing (outlined in amber).`)
+      return
+    }
     setError(''); setSubmitting(true)
     try {
       const movements = []
@@ -230,7 +268,12 @@ export default function ReconcileSheet({ onClose, onApplied }) {
         const noteText = `Reconcile ${stamp} — ${counted}${userNote ? ` — ${userNote}` : ''}`
         const qty = Math.abs(r.willAdjust)
         const booking = effectiveBookingFor(r)
-        if (booking.kind === 'transfer') {
+        if (booking.kind === 'split') {
+          movements.push(...buildSplitVariancePayloads({
+            partId: r.partId, unit: r.unit || null, locationId: r.locationId,
+            diff: r.willAdjust, splits: booking.lines, notes: noteText, createdBy: currentUser?.id,
+          }))
+        } else if (booking.kind === 'transfer') {
           movements.push({
             movement_type: 'transfer',
             part_id: r.partId,
@@ -425,7 +468,17 @@ export default function ReconcileSheet({ onClose, onApplied }) {
                       counterOptions={counterOptions}
                       counterLabelById={counterLabelById}
                       stockByKey={locMeta?.stockByKey}
-                      onBookingChange={v => setRowBooking(prev => ({ ...prev, [r.idx]: v }))}
+                      onBookingChange={v => {
+                        setRowBooking(prev => ({ ...prev, [r.idx]: v }))
+                        // Opening a split starts with one empty line carrying
+                        // the whole difference — the common edit is to pick
+                        // where, then trim the qty and add the next line.
+                        if (v === 'split' && !rowSplits[r.idx]?.length) {
+                          setRowSplits(prev => ({ ...prev, [r.idx]: [{ key: `${r.idx}-0`, locationId: '', qty: String(Math.abs(r.willAdjust)) }] }))
+                        }
+                      }}
+                      splitLines={rowSplits[r.idx] || []}
+                      onSplitLinesChange={lines => setRowSplits(prev => ({ ...prev, [r.idx]: lines }))}
                     />
                   ))}
                   {filteredRows.length === 0 && (
@@ -446,13 +499,15 @@ export default function ReconcileSheet({ onClose, onApplied }) {
             className="btn btn-primary"
             style={{ flex: 2 }}
             onClick={handleApply}
-            disabled={submitting || !stats || stats.adjustments === 0}
+            disabled={submitting || !stats || stats.adjustments === 0 || stats.splitProblems > 0}
           >
             {submitting
               ? 'Applying…'
+              : stats?.splitProblems > 0
+                ? `Fix ${stats.splitProblems} split row${stats.splitProblems === 1 ? '' : 's'} first`
               : stats && stats.adjustments > 0
                 ? (stats.transferCount > 0
-                    ? `Apply ${stats.adjustments} (${stats.transferCount} transfer${stats.transferCount === 1 ? '' : 's'} · ${stats.adjustCount} adjustment${stats.adjustCount === 1 ? '' : 's'})`
+                    ? `Apply ${stats.adjustments} row${stats.adjustments === 1 ? '' : 's'} (${stats.transferCount} transfer${stats.transferCount === 1 ? '' : 's'} · ${stats.adjustCount} adjustment${stats.adjustCount === 1 ? '' : 's'})`
                     : `Apply ${stats.adjustments} adjustment${stats.adjustments === 1 ? '' : 's'}`)
                 : 'No adjustments to apply'}
           </button>
@@ -464,7 +519,7 @@ export default function ReconcileSheet({ onClose, onApplied }) {
 
 // ─── Sub-components ─────────────────────────────────────────────────────
 
-function ReconcileRow({ row, excluded, onToggle, note, onNoteChange, booking, counterOptions, counterLabelById, stockByKey, onBookingChange }) {
+function ReconcileRow({ row, excluded, onToggle, note, onNoteChange, booking, counterOptions, counterLabelById, stockByKey, onBookingChange, splitLines, onSplitLinesChange }) {
   // Kept local on purpose (#36.4): this maps reconcile ROW states, not
   // submission/intake statuses. Shape note for the queues' future shared
   // STATUS_COLORS (backlog #22): `status → { bg, fg }` keyed by status id —
@@ -490,8 +545,10 @@ function ReconcileRow({ row, excluded, onToggle, note, onNoteChange, booking, co
   }
   const c = STATUS_COLORS[row.status] || {}
   const actionable = row.status === 'add' || row.status === 'remove'
+  const isSplit = actionable && booking.kind === 'split'
   return (
-    <tr style={{ background: excluded ? 'var(--gray-lt)' : c.bg, opacity: excluded ? 0.45 : 1 }}>
+    <>
+    <tr style={{ background: excluded ? 'var(--gray-lt)' : c.bg, opacity: excluded ? 0.45 : 1, ...(isSplit && booking.problem && !excluded ? { outline: '2px solid var(--amber)', outlineOffset: -2 } : null) }}>
       <td style={tdStyle({ textAlign: 'center' })}>
         {actionable
           ? <input type="checkbox" checked={!excluded} onChange={onToggle} />
@@ -523,16 +580,18 @@ function ReconcileRow({ row, excluded, onToggle, note, onNoteChange, booking, co
       <td style={tdStyle()}>
         {actionable && (
           <select
-            value={booking.kind === 'transfer' ? booking.counterId : 'adjust'}
+            value={booking.kind === 'transfer' ? booking.counterId : booking.kind === 'split' ? 'split' : 'adjust'}
             onChange={e => onBookingChange(e.target.value)}
             title={booking.kind === 'transfer'
               ? (row.willAdjust > 0
                   ? `Transfer FROM ${counterLabelById.get(booking.counterId) || '?'} to here`
                   : `Transfer from here TO ${counterLabelById.get(booking.counterId) || '?'}`)
+              : booking.kind === 'split' ? 'Spread over several locations — edit the lines below'
               : 'One-sided adjust movement'}
             style={{ width: '100%', maxWidth: 170, padding: '3px 6px', fontSize: 11, border: '1px solid var(--border2)', borderRadius: 4, background: 'var(--bg)' }}
           >
             <option value="adjust">Adjust</option>
+            <option value="split">Split across locations…</option>
             {/* Part-aware split: locations actually holding THIS part come
                 first (with on-hand qty) — for a counted-more row that's where
                 the extra plausibly came from; for counted-less, where the
@@ -572,6 +631,72 @@ function ReconcileRow({ row, excluded, onToggle, note, onNoteChange, booking, co
         />
       </td>
     </tr>
+    {isSplit && !excluded && (
+      <tr style={{ background: c.bg }}>
+        <td style={tdStyle()} />
+        <td colSpan={7} style={tdStyle({ paddingTop: 0 })}>
+          <SplitEditor row={row} booking={booking} lines={splitLines} onChange={onSplitLinesChange}
+            counterOptions={counterOptions} stockByKey={stockByKey} />
+        </td>
+      </tr>
+    )}
+    </>
+  )
+}
+
+// The lines of a "Split across locations" row: one location + qty each. A
+// location already on another line is left out of the picker; the leftover
+// books as an adjust at the counted location.
+function SplitEditor({ row, booking, lines, onChange, counterOptions, stockByKey }) {
+  const gain = row.willAdjust > 0
+  const need = Math.abs(row.willAdjust)
+  const qtyOf = id => Number(stockByKey?.get(`${row.partId}|${id}`) || 0)
+  const assigned = booking.lines.reduce((t, l) => t + l.qty, 0)
+  const update = (key, patch) => onChange(lines.map(l => (l.key === key ? { ...l, ...patch } : l)))
+  const inputStyle = { padding: '3px 6px', fontSize: 11, border: '1px solid var(--border2)', borderRadius: 4, background: 'var(--bg)' }
+  return (
+    <div style={{ padding: '6px 8px', border: '1px dashed var(--border2)', borderRadius: 6, background: 'var(--surface)' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>
+        {gain ? `Where did the extra ${need} come from?` : `Where did the missing ${need} go?`}
+      </div>
+      {lines.map(l => (
+        <div key={l.key} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+          <select value={l.locationId} onChange={e => update(l.key, { locationId: e.target.value })}
+            style={{ ...inputStyle, flex: 1, minWidth: 0, maxWidth: 320, borderColor: l.locationId ? 'var(--border2)' : 'var(--amber)' }}>
+            <option value="">— Pick a location —</option>
+            {counterOptions
+              .filter(o => o.id !== row.locationId && (o.id === l.locationId || !lines.some(x => x.locationId === o.id)))
+              .map(o => {
+                const q = qtyOf(o.id)
+                return <option key={o.id} value={o.id}>{o.label}{q !== 0 ? ` · ${q.toLocaleString()} on hand` : ''}</option>
+              })}
+          </select>
+          <input type="number" inputMode="decimal" min="0" value={l.qty} onChange={e => update(l.key, { qty: e.target.value })}
+            placeholder="Qty" aria-label="Quantity" autoComplete="off" name={`reconcile-split-qty-${row.idx}`}
+            style={{ ...inputStyle, width: 70 }} />
+          <button type="button" onClick={() => onChange(lines.filter(x => x.key !== l.key))} aria-label="Remove line"
+            style={{ ...inputStyle, cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+            <Icon name="x" size={12} />
+          </button>
+          {gain && l.locationId && Number(l.qty) > qtyOf(l.locationId) && (
+            <span style={{ fontSize: 10, color: 'var(--amber)' }}>only {qtyOf(l.locationId).toLocaleString()} on hand — goes negative</span>
+          )}
+        </div>
+      ))}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <button type="button"
+          onClick={() => onChange([...lines, { key: `${row.idx}-${Date.now()}`, locationId: '', qty: String(Math.max(0, need - assigned) || '') }])}
+          style={{ ...inputStyle, cursor: 'pointer', fontWeight: 600 }}>
+          + Add another location
+        </button>
+        <span style={{ fontSize: 11, color: booking.problem ? 'var(--amber)' : 'var(--hint)', fontWeight: booking.problem ? 700 : 400 }}>
+          {booking.problem
+            || (booking.remainder > 0
+              ? `${assigned} of ${need} accounted for — the other ${booking.remainder} books as ${gain ? 'a found' : 'a lost'} adjustment here`
+              : `All ${need} accounted for — no adjustment`)}
+        </span>
+      </div>
+    </div>
   )
 }
 

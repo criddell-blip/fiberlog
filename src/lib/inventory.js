@@ -1055,6 +1055,42 @@ export function buildCountedAdjustPayloads(lines, systemQtyByPartId, locationId,
   return { payloads, skipped }
 }
 
+// Book one count variance (diff = counted − system at `locationId`) as the
+// moves it really was. Each split { locationId, qty } is a transfer — gain:
+// split → here, loss: here → split — and whatever the splits don't cover is a
+// one-sided adjust here. Same rule as resolve_count_resolution's p_splits
+// (count review), used by Reconcile so both places book a split identically.
+// Throws when the splits add up to more than the difference.
+export function buildSplitVariancePayloads({ partId, unit = 'ea', locationId, diff, splits = [], notes = null, createdBy = null }) {
+  const d = Number(diff)
+  if (!locationId) throw new Error('Variance needs its location')
+  if (!d) return []
+  // Rounded: SQL sums numerics exactly, JS floats don't (0.1 + 0.2).
+  const total = Math.round(splits.reduce((t, s) => t + Number(s.qty), 0) * 1e6) / 1e6
+  if (total > Math.abs(d)) throw new Error(`${partId}: the split adds up to ${total} but the difference is only ${Math.abs(d)}`)
+  const base = { part_id: partId, unit, notes, created_by: createdBy }
+  const payloads = []
+  for (const s of splits) {
+    const qty = Number(s.qty)
+    if (!s.locationId || !(qty > 0)) throw new Error(`${partId}: each split needs a location and a quantity above 0`)
+    if (s.locationId === locationId) throw new Error(`${partId}: a split can't point at the counted location itself`)
+    payloads.push({
+      ...base, movement_type: 'transfer', quantity: qty,
+      from_location_id: d > 0 ? s.locationId : locationId,
+      to_location_id:   d > 0 ? locationId : s.locationId,
+    })
+  }
+  const rest = Math.round((Math.abs(d) - total) * 1e6) / 1e6
+  if (rest > 0) {
+    payloads.push({
+      ...base, movement_type: 'adjust', quantity: rest,
+      from_location_id: d < 0 ? locationId : null,
+      to_location_id:   d > 0 ? locationId : null,
+    })
+  }
+  return payloads
+}
+
 export async function getRecentMovements({ limit = 100, locationId = null, type = null, partId = null, receiptKind = null } = {}) {
   let q = db
     .from('inventory_movements')

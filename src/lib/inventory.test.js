@@ -17,6 +17,7 @@ import {
   movementEffectiveDate,
   buildLocationQtyMaps,
   buildCountedAdjustPayloads,
+  buildSplitVariancePayloads,
   aggregateDeductions,
   isFiberCustomerColumn,
   pickFiberCustomerColumn,
@@ -987,5 +988,51 @@ describe('consumptionSource (regression pin)', () => {
     expect(consumptionSource({ notes: 'x [sonar:123]' })).toBe('field-tech-sonar')
     expect(consumptionSource({ notes: 'Auto-deduct' })).toBe('crew/other')
     expect(consumptionSource({})).toBe('crew/other')
+  })
+})
+
+// ─── buildSplitVariancePayloads ─────────────────────────────────────────────
+// Reconcile's "Split…" booking — must match resolve_count_resolution p_splits.
+
+describe('buildSplitVariancePayloads', () => {
+  const base = { partId: 'P1', unit: 'ea', locationId: 'BIN', notes: 'n', createdBy: 'u' }
+
+  it('a loss splits into transfers out + an adjust for the rest', () => {
+    const p = buildSplitVariancePayloads({ ...base, diff: -16, splits: [{ locationId: 'JACO', qty: 3 }, { locationId: 'TARYN', qty: '1' }] })
+    expect(p).toEqual([
+      { part_id: 'P1', unit: 'ea', notes: 'n', created_by: 'u', movement_type: 'transfer', quantity: 3, from_location_id: 'BIN', to_location_id: 'JACO' },
+      { part_id: 'P1', unit: 'ea', notes: 'n', created_by: 'u', movement_type: 'transfer', quantity: 1, from_location_id: 'BIN', to_location_id: 'TARYN' },
+      { part_id: 'P1', unit: 'ea', notes: 'n', created_by: 'u', movement_type: 'adjust', quantity: 12, from_location_id: 'BIN', to_location_id: null },
+    ])
+  })
+
+  it('a gain pulls from the splits; fully covered means no adjust', () => {
+    const p = buildSplitVariancePayloads({ ...base, diff: 4, splits: [{ locationId: 'A', qty: 4 }] })
+    expect(p).toHaveLength(1)
+    expect(p[0]).toMatchObject({ movement_type: 'transfer', quantity: 4, from_location_id: 'A', to_location_id: 'BIN' })
+  })
+
+  it('no splits = the plain one-sided adjust', () => {
+    expect(buildSplitVariancePayloads({ ...base, diff: 5 })).toEqual([
+      { part_id: 'P1', unit: 'ea', notes: 'n', created_by: 'u', movement_type: 'adjust', quantity: 5, from_location_id: null, to_location_id: 'BIN' },
+    ])
+  })
+
+  it('refuses splits over the difference, empty lines, or the counted location itself', () => {
+    expect(() => buildSplitVariancePayloads({ ...base, diff: -2, splits: [{ locationId: 'A', qty: 3 }] })).toThrow(/only 2/)
+    expect(() => buildSplitVariancePayloads({ ...base, diff: -2, splits: [{ locationId: '', qty: 1 }] })).toThrow(/location and a quantity/)
+    expect(() => buildSplitVariancePayloads({ ...base, diff: -2, splits: [{ locationId: 'BIN', qty: 1 }] })).toThrow(/counted location/)
+  })
+
+  it('every payload passes validateMovement', () => {
+    for (const m of buildSplitVariancePayloads({ ...base, diff: -6, splits: [{ locationId: 'A', qty: 2 }] })) {
+      expect(() => validateMovement(m)).not.toThrow()
+    }
+  })
+
+  it('0.1 + 0.2 covers a 0.3 difference exactly (matches SQL numeric)', () => {
+    const p = buildSplitVariancePayloads({ ...base, diff: -0.5, splits: [{ locationId: 'A', qty: 0.1 }, { locationId: 'B', qty: 0.2 }] })
+    expect(p.at(-1)).toMatchObject({ movement_type: 'adjust', quantity: 0.2 })
+    expect(buildSplitVariancePayloads({ ...base, diff: -0.3, splits: [{ locationId: 'A', qty: 0.1 }, { locationId: 'B', qty: 0.2 }] })).toHaveLength(2)
   })
 })

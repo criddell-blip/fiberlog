@@ -167,7 +167,7 @@ export function previewResolution({ resolutionType, quantity, countedNow = null,
     : (resolutionType === 'net_gain' ? Number(quantity) : -Number(quantity))
   if (splits?.length) {
     const qty = Math.abs(diff)
-    const splitTotal = splits.reduce((sum, s) => sum + Number(s.qty), 0)
+    const splitTotal = Math.round(splits.reduce((sum, s) => sum + Number(s.qty), 0) * 1e6) / 1e6
     return {
       diff, action: 'split', qty, splitTotal,
       remainder: Math.max(0, qty - splitTotal),
