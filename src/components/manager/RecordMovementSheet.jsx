@@ -8,6 +8,7 @@ import {
   compareNamesNatural,
   buildLocationQtyMaps,
   buildCountedAdjustPayloads,
+  buildSplitVariancePayloads,
   confirmNegativeStock,
   isConsumedLocationType,
 } from '../../lib/inventory'
@@ -15,6 +16,12 @@ import { isoLocalDate } from '../../lib/format'
 import { useBackClose } from '../../lib/backStack'
 import Icon from '../shared/Icon'
 import LocationWithBinPicker from './LocationWithBinPicker'
+import VarianceSplitPanel from '../shared/VarianceSplitPanel'
+import { splitStatus } from '../../lib/varianceSplit'
+
+// Where a counted-total difference can be booked as a move (mirrors
+// count_counter_location_ok — regions / vendors / scrap aren't shelves).
+const COUNTER_LOCATION_TYPES = ['warehouse', 'bin', 'truck', 'group']
 
 // No `receive` here — vendor deliveries go through the Receive PO sheet
 // (PO ref, unit costs, inline part creation). Keeping receive out of the
@@ -97,6 +104,11 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   // counted mode is that the manager doesn't know the system numbers, so
   // "sys 0" chips from an empty map aren't self-evidently wrong.
   const [sysQtyError, setSysQtyError] = useState(null)
+  // Counted total → "where did it go / come from?" (Oct 2026, the shared
+  // count-review panel). part_id → [{ key, locationId, qty }]; a part with
+  // lines books them as transfers + the leftover as an adjust.
+  const [lineSplits, setLineSplits] = useState({})
+  const [splitOpen, setSplitOpen] = useState({})  // part_id → panel expanded
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -131,6 +143,7 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     setFromTopId(''); setFromBinId('')
     setToTopId(''); setToBinId('')
     setCountedTopId(''); setCountedBinId('')
+    setLineSplits({}); setSplitOpen({})
     setLines(prev => prev.map(l => (l.from_override_id ? { ...l, from_override_id: null } : l)))
     setError(null)
     setShowMissingFrom(false)
@@ -158,6 +171,9 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
   useEffect(() => { setFromBinId('') }, [fromTopId])
   useEffect(() => { setToBinId('') }, [toTopId])
   useEffect(() => { setCountedBinId('') }, [countedTopId])
+  // Lines picked against one counted location don't carry to another.
+  const countedLocKey = countedBinId || countedTopId
+  useEffect(() => { setLineSplits({}); setSplitOpen({}) }, [countedLocKey])
 
   const countedMode = type === 'adjust' && adjustDir === 'counted'
   const countedLocId = countedBinId || countedTopId
@@ -281,11 +297,23 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
 
   function removeLine(partId) {
     setLines(prev => prev.filter(l => l.part_id !== partId))
+    setLineSplits(prev => { const n = { ...prev }; delete n[partId]; return n })
+    setSplitOpen(prev => { const n = { ...prev }; delete n[partId]; return n })
     // Don't drop partLocationsByPart — cheap to keep, useful if the user
     // re-adds the part during the same session.
   }
 
   function setLineQty(partId, qty) {
+    // Counted total: if the corrected count flips the difference's direction,
+    // "went to Truck A" lines would book as "came from Truck A" — drop them
+    // so they're re-picked on purpose. (The panel does the same while open;
+    // this covers it collapsed.)
+    if (countedMode && (lineSplits[partId] || []).length) {
+      const sys = Number(sysQtyByPart[partId] ?? 0)
+      const before = Math.sign(Number(lines.find(l => l.part_id === partId)?.qty) - sys)
+      const after = Math.sign(Number(qty) - sys)
+      if (before && after && before !== after) setLineSplits(prev => ({ ...prev, [partId]: [] }))
+    }
     setLines(prev => prev.map(l => l.part_id === partId ? { ...l, qty } : l))
   }
 
@@ -440,6 +468,20 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     return out
   }, [allFromOptions, allBins])
 
+  // Places a counted difference can move to/from, for the split panel.
+  const splitOptions = useMemo(
+    () => lineFallbackOptions
+      .filter(o => COUNTER_LOCATION_TYPES.includes(o.type))
+      .map(o => ({ id: o.locationId, label: o.type === 'warehouse' ? `${o.displayLabel} (unbinned)` : o.displayLabel })),
+    [lineFallbackOptions]
+  )
+  const countedLocName = useMemo(() => {
+    const top = locations.find(l => l.id === countedLocId)
+    if (top) return top.assigned_user?.name || top.name
+    const bin = allBins.find(b => b.id === countedLocId)
+    return bin ? bin.name : 'counted location'
+  }, [locations, allBins, countedLocId])
+
   // Lines with no resolvable source (own override or the shared From).
   const linesMissingFrom = useMemo(
     () => (showFrom ? lines.filter(l => !lineEffectiveFromId(l)) : []),
@@ -471,6 +513,13 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
       // ALSO refetches authoritatively — this just fails earlier + louder).
       if (sysQtyLoading) return 'System quantities still loading — one moment'
       if (sysQtyError) return sysQtyError
+      for (const l of lines) {
+        const ls = lineSplits[l.part_id] || []
+        if (ls.length === 0) continue
+        const st = splitStatus(Number(l.qty) - Number(sysQtyByPart[l.part_id] ?? 0), ls)
+        if (st.incomplete) return `${l.name}: pick a location and a quantity on every "where did it go" line`
+        if (st.over) return `${l.name}: the locations add up to ${st.total} but the difference is only ${st.qty}`
+      }
       return null
     }
     if (type === 'adjust') {
@@ -516,12 +565,47 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
         for (const r of freshRows) {
           if (r.location_id === countedLocId) freshSys[r.part_id] = Number(r.quantity) || 0
         }
+        // Lines with "where did it go" locations book transfers + the leftover
+        // adjust (buildSplitVariancePayloads — same rule as the count review);
+        // the rest stay plain counted adjusts. Both against the FRESH books: if
+        // stock moved so the split no longer fits, the builder throws and the
+        // manager sees why instead of booking a stale split.
+        const withSplits = lines.filter(l => (lineSplits[l.part_id] || []).length > 0)
+        // The split was entered against the books ON SCREEN. If they moved
+        // since, the difference isn't the one the manager split (it may even
+        // flip direction) — refuse, show the new numbers, keep the lines.
+        const moved = withSplits.filter(l => Number(freshSys[l.part_id] ?? 0) !== Number(sysQtyByPart[l.part_id] ?? 0))
+        if (moved.length) {
+          setSysQtyByPart(prev => {
+            const n = { ...prev }
+            for (const l of moved) n[l.part_id] = Number(freshSys[l.part_id] ?? 0)
+            return n
+          })
+          setError(`Books changed for ${namesOf(moved)} since you split it — check the new difference and the locations, then submit again.`)
+          setSubmitting(false)
+          return
+        }
+        const plain = lines.filter(l => !(lineSplits[l.part_id] || []).length)
         const { payloads } = buildCountedAdjustPayloads(
-          lines.map(l => ({ part_id: l.part_id, unit: l.unit, counted: Number(l.qty) })),
+          plain.map(l => ({ part_id: l.part_id, unit: l.unit, counted: Number(l.qty) })),
           freshSys, countedLocId,
           { noteBase, createdBy: currentUser?.id })
+        for (const l of withSplits) {
+          const counted = Number(l.qty)
+          const sys = Number(freshSys[l.part_id] ?? 0)
+          payloads.push(...buildSplitVariancePayloads({
+            partId: l.part_id, unit: l.unit || 'ea', locationId: countedLocId,
+            diff: counted - sys, splits: splitStatus(counted - sys, lineSplits[l.part_id]).good,
+            notes: `${noteBase} — counted ${counted}, system had ${sys}`, createdBy: currentUser?.id,
+          }))
+        }
         if (payloads.length === 0) {
           setError('Counts match the system — nothing to book')
+          setSubmitting(false)
+          return
+        }
+        // Moves pull from other locations (a gain) — warn before one goes negative.
+        if (withSplits.length && !(await confirmNegativeStock(payloads))) {
           setSubmitting(false)
           return
         }
@@ -752,6 +836,30 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
                         </div>
                       )
                     })()}
+                    {/* Counted total: where did the difference go / come from?
+                        The shared count-review panel, against this line's delta. */}
+                    {countedMode && countedLocId && delta !== null && !sysQtyLoading && !sysQtyError && (delta !== 0 || (lineSplits[l.part_id] || []).length > 0) && (
+                      <div style={{ marginTop: 5 }}>
+                        <button type="button"
+                          onClick={() => setSplitOpen(prev => ({ ...prev, [l.part_id]: !prev[l.part_id] }))}
+                          style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--accent-dk)' }}>
+                          {splitOpen[l.part_id] ? '▾' : '▸'} {delta > 0 ? 'Where did the extra come from?' : 'Where did the missing go?'}
+                          {(lineSplits[l.part_id] || []).length > 0 && !splitOpen[l.part_id] && (
+                            <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {(lineSplits[l.part_id] || []).length} location{(lineSplits[l.part_id] || []).length === 1 ? '' : 's'}</span>
+                          )}
+                        </button>
+                        {splitOpen[l.part_id] && (
+                          <div style={{ marginTop: 6, padding: '8px 10px', border: '1px dashed var(--border2)', borderRadius: 'var(--r-sm)', background: 'var(--bg)' }}>
+                            <VarianceSplitPanel
+                              partId={l.part_id} unit={l.unit} location={{ id: countedLocId, name: countedLocName }}
+                              diff={delta} lines={lineSplits[l.part_id] || []}
+                              onLinesChange={ls => setLineSplits(prev => ({ ...prev, [l.part_id]: ls }))}
+                              options={splitOptions} nameBase={`counted-split-${l.part_id}`}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {/* Per-line source override (see setLineFrom). */}
                     {showFrom && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>

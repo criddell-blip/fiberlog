@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useApp } from '../../AppContext'
 import {
   getCountRunDetail,
@@ -8,10 +8,11 @@ import {
   resolveCountResolution,
   recountCountLocation,
   getStockQtyAt,
-  getRecentPartAdjustments,
   previewResolution,
 } from '../../lib/cycleCount'
-import { getLocations, getPartLocations } from '../../lib/inventory'
+import { getLocations } from '../../lib/inventory'
+import { splitStatus } from '../../lib/varianceSplit'
+import VarianceSplitPanel from '../shared/VarianceSplitPanel'
 import { fmtWhen } from '../../lib/format'
 import { fmtSigned } from '../../lib/adjustmentsSummary'
 import { useBackClose } from '../../lib/backStack'
@@ -668,60 +669,47 @@ function FixPanel({ resolution, location, counterLocations, busy, onSubmit }) {
   const [splits, setSplits] = useState([])  // [{ key, locationId, qty }] — qty kept as the input string
   const [note, setNote] = useState('')
   const [systemNow, setSystemNow] = useState(null)
-  const [elsewhere, setElsewhere] = useState(null)
-  const [recent, setRecent] = useState(null)
   const [booksTick, setBooksTick] = useState(0)  // bump → refetch after a failed submit
 
   useEffect(() => {
     let cancelled = false
     setSystemNow(null)
-    Promise.all([
-      getStockQtyAt(partId, location.id),
-      getPartLocations(partId, { includeNegative: true }),
-      getRecentPartAdjustments(partId),
-    ]).then(([qty, locs, moves]) => {
-      if (cancelled) return
-      setSystemNow(qty)
-      setElsewhere(locs.locations.filter(l => !l.isConsumed && l.locationId !== location.id))
-      setRecent(moves)
-    }).catch(e => {
-      console.warn('Fix panel context load failed:', e)
+    getStockQtyAt(partId, location.id)
+      .then(qty => { if (!cancelled) setSystemNow(qty) })
       // Books unknown → a recount can't be previewed, so its submit stays
-      // disabled; a counter-location move still works.
-      if (!cancelled) { setElsewhere([]); setRecent([]) }
-    })
+      // disabled; a move to other locations still works.
+      .catch(e => console.warn('Fix panel books load failed:', e))
     return () => { cancelled = true }
   }, [partId, location.id, booksTick])
+
+  const options = useMemo(
+    () => counterLocations.map(l => ({
+      id: l.id,
+      label: counterLocationLabel(l, counterLocations, { withType: false }) + (l.type === 'warehouse' ? ' (unbinned)' : ''),
+    })),
+    [counterLocations]
+  )
 
   const recounted = countedNow !== ''
   const countedNum = recounted ? Number(countedNow) : null
   const validCount = !recounted || (Number.isFinite(countedNum) && countedNum >= 0)
 
-  // A row is complete once it has a location and a quantity above 0; a
-  // half-filled row blocks the submit rather than being silently dropped.
-  const rowQty = r => (r.qty === '' ? NaN : Number(r.qty))
-  const rowOk = r => r.locationId && Number.isFinite(rowQty(r)) && rowQty(r) > 0
-  const incomplete = splits.some(r => !rowOk(r))
-  const goodSplits = splits.filter(rowOk).map(r => ({ locationId: r.locationId, qty: rowQty(r) }))
-
   const base = validCount ? previewResolution({
     resolutionType: resolution.resolution_type, quantity: resolution.quantity,
     countedNow: countedNum, systemNow,
   }) : null
+  // Half-filled lines block the submit rather than being silently dropped.
+  const st = splitStatus(base ? base.diff : null, splits)
+  const goodSplits = st.good
   const preview = validCount ? previewResolution({
     resolutionType: resolution.resolution_type, quantity: resolution.quantity,
     countedNow: countedNum, systemNow, splits: goodSplits,
   }) : null
-  const gain = isGainOf(base, resolution)
-  const remainingToSplit = base ? Math.max(0, Math.abs(base.diff) - goodSplits.reduce((t, s) => t + s.qty, 0)) : 0
-  const nameOf = id => {
-    const l = counterLocations.find(x => x.id === id)
-    return l ? counterLocationLabel(l, counterLocations, { withType: false }) : '?'
-  }
-  const canSubmit = !busy && preview && (recounted || splits.length > 0) && !incomplete && !preview.over
+  const nameOf = id => options.find(o => o.id === id)?.label || '?'
+  const canSubmit = !busy && preview && (recounted || splits.length > 0) && !st.incomplete && !preview.over
 
   let label = 'Enter a recount or add where it went'
-  if (incomplete) label = 'Pick a location and quantity on every line'
+  if (st.incomplete) label = 'Pick a location and quantity on every line'
   else if (preview?.over) label = preview.qty === 0
     ? 'Matches the books — remove the location lines to close with no adjustment'
     : `The split adds up to more than the ${preview.qty} ${unit} difference`
@@ -740,22 +728,6 @@ function FixPanel({ resolution, location, counterLocations, busy, onSubmit }) {
     else label = `Post ${fmtSigned(preview.diff)} ${unit} adjustment at ${location.name}`
   }
 
-  // Default qty for a new line: what's still unassigned, capped — for a loss —
-  // at how far negative the location is (a −3 truck most likely took 3), and
-  // for a gain at what the location actually holds.
-  function addSplit(locationId = '') {
-    if (locationId && splits.some(r => r.locationId === locationId)) return
-    const onBooks = elsewhere?.find(l => l.locationId === locationId)?.qty
-    let qty = remainingToSplit
-    if (locationId && onBooks != null) {
-      if (!gain && onBooks < 0) qty = Math.min(qty, -onBooks)
-      if (gain && onBooks > 0) qty = Math.min(qty, onBooks)
-    }
-    setSplits(rows => [...rows, { key: `${Date.now()}-${rows.length}`, locationId, qty: qty > 0 ? String(qty) : '' }])
-  }
-  const updateSplit = (key, patch) => setSplits(rows => rows.map(r => (r.key === key ? { ...r, ...patch } : r)))
-  const removeSplit = key => setSplits(rows => rows.filter(r => r.key !== key))
-
   return (
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border2)' }}>
       {/* 1. Recount */}
@@ -773,122 +745,19 @@ function FixPanel({ resolution, location, counterLocations, busy, onSubmit }) {
         </div>
       </div>
 
-      {/* 2. Where it really came from / went — one line per location. A
-          location already on another line is left out of the picker. */}
-      <div className="field" style={{ marginBottom: 8 }}>
-        <label>
-          {gain ? 'Came from other locations?' : 'Went to other locations?'}
-          <span style={{ fontWeight: 400, color: 'var(--hint)' }}> (optional — books moves instead of an adjustment; split it across as many as you need)</span>
-        </label>
-        {splits.map(r => (
-          <div key={r.key} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-            <select value={r.locationId} onChange={e => updateSplit(r.key, { locationId: e.target.value })}
-              style={{ flex: 1, minWidth: 0 }}>
-              <option value="">Pick a location…</option>
-              {counterLocations
-                .filter(l => l.id !== location.id && (l.id === r.locationId || !splits.some(o => o.locationId === l.id)))
-                .map(l => (
-                  <option key={l.id} value={l.id}>{counterLocationLabel(l, counterLocations)}</option>
-                ))}
-            </select>
-            <input type="number" inputMode="decimal" min="0" value={r.qty}
-              onChange={e => updateSplit(r.key, { qty: e.target.value })}
-              placeholder="Qty" aria-label="Quantity" autoComplete="off" name="count-split-qty"
-              style={{ width: 76, flexShrink: 0 }} />
-            <button type="button" className="btn btn-ghost" onClick={() => removeSplit(r.key)}
-              aria-label="Remove line" style={{ flexShrink: 0, padding: '6px 8px' }}>
-              <Icon name="x" size={13} />
-            </button>
-          </div>
-        ))}
-        <button type="button" className="btn btn-ghost" onClick={() => addSplit()}
-          style={{ padding: '6px 10px', fontSize: 'var(--fs-sm)' }}>
-          + {splits.length === 0 ? (gain ? 'Add where it came from' : 'Add where it went') : 'Add another location'}
-        </button>
-        {splits.length > 0 && preview?.action === 'split' && (
-          <div style={{ fontSize: 11, marginTop: 4, color: preview.over ? 'var(--danger-fg)' : 'var(--hint)' }}>
-            {preview.over
-              ? `These add up to ${preview.splitTotal.toLocaleString()} ${unit} — the difference is only ${preview.qty.toLocaleString()} ${unit}.`
-              : preview.remainder > 0
-                ? `${preview.splitTotal.toLocaleString()} of ${preview.qty.toLocaleString()} ${unit} accounted for — the other ${preview.remainder.toLocaleString()} posts as a ${gain ? 'found' : 'lost'} adjustment at ${location.name}.`
-                : `All ${preview.qty.toLocaleString()} ${unit} accounted for — no adjustment.`}
-          </div>
-        )}
-      </div>
-
-      {/* Context: where else this part is, and what's been adjusted lately */}
-      {elsewhere && elsewhere.length > 0 && (
-        <div style={{ marginBottom: 8 }}>
-          <div style={ctxLabel}>Also on the books at</div>
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {elsewhere.slice(0, 8).map(l => {
-              // Only what the picker (and count_counter_location_ok) accepts.
-              const pickable = l.isActive && COUNTER_LOCATION_TYPES.includes(l.type)
-              return (
-                <button key={l.locationId} type="button" disabled={!pickable}
-                  onClick={() => addSplit(l.locationId)}
-                  title={pickable ? 'Add as a location it went to / came from' : 'Inactive or not a stock location'}
-                  style={{ ...miniBtn(splits.some(r => r.locationId === l.locationId)), color: l.isNegative ? 'var(--danger-fg)' : undefined, cursor: pickable ? 'pointer' : 'default', opacity: pickable ? 1 : 0.6 }}>
-                  {l.name} · {l.qty.toLocaleString()}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      )}
-      {recent && recent.length > 0 && (
-        <div style={{ marginBottom: 8 }}>
-          <div style={ctxLabel}>Recent adjustments & count moves of this part (21 days)</div>
-          <div style={{ maxHeight: 140, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r-xs)' }}>
-            {recent.map(m => {
-              const isAdjust = m.movement_type === 'adjust'
-              const up = !!m.to_location_id
-              const where = isAdjust
-                ? (up ? m.to_location : m.from_location)?.name
-                : `${m.from_location?.name || '?'} → ${m.to_location?.name || '?'}`
-              // An opposite-direction adjust at ANOTHER location is the
-              // "counted in the wrong spot" signature — highlight it.
-              const opposite = isAdjust
-                && (up ? m.to_location_id : m.from_location_id) !== location.id
-                && up !== (resolution.resolution_type === 'net_gain')
-              return (
-                <div key={m.id} style={{
-                  display: 'flex', gap: 6, padding: '4px 8px', fontSize: 11,
-                  borderBottom: '1px solid var(--border)',
-                  background: opposite ? 'var(--warning-bg)' : undefined,
-                }}>
-                  <span style={{ width: 46, flexShrink: 0, color: 'var(--hint)' }}>
-                    {new Date(m.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                  </span>
-                  <span style={{ width: 52, flexShrink: 0, fontWeight: 700, color: !isAdjust ? 'var(--muted)' : up ? 'var(--success-fg)' : 'var(--danger-fg)' }}>
-                    {isAdjust ? (up ? '+' : '−') : '⇄ '}{Number(m.quantity).toLocaleString()}
-                  </span>
-                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.notes || ''}>
-                    {where}{m.notes ? ` · ${m.notes}` : ''}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
+      {/* 2. Where it really came from / went + context (shared panel) */}
+      <VarianceSplitPanel
+        partId={partId} unit={unit} location={location}
+        diff={base ? base.diff : null} gain={isGainOf(base, resolution)}
+        lines={splits} onLinesChange={setSplits}
+        options={options} reloadKey={booksTick} nameBase="count-split"
+      />
 
       <div className="field" style={{ marginBottom: 8 }}>
         <label>Note <span style={{ fontWeight: 400, color: 'var(--hint)' }}>(optional)</span></label>
         <input type="text" value={note} onChange={e => setNote(e.target.value)}
           placeholder="e.g. Recounted — 4 were behind the pallet" autoComplete="off" name="count-fix-note" />
       </div>
-
-      {/* Warn-but-allow, same as Reconcile's transfer booking: pulling more
-          than the other location holds drives it negative. */}
-      {preview?.action === 'split' && preview.direction === 'from_counter' && elsewhere && goodSplits.map(sp => {
-        const have = elsewhere.find(l => l.locationId === sp.locationId)?.qty ?? 0
-        return have < sp.qty ? (
-          <div key={sp.locationId} style={{ fontSize: 11, color: 'var(--warning-fg)', marginBottom: 6 }}>
-            {nameOf(sp.locationId)} only has {have.toLocaleString()} {unit} on the books — this will take it negative.
-          </div>
-        ) : null
-      })}
 
       <button
         className="btn btn-primary"
@@ -984,8 +853,6 @@ function LocationRecount({ partId, unit = 'ea', location, busy, onSubmit, onCanc
     </div>
   )
 }
-
-const ctxLabel = { fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }
 
 function miniBtn(active) {
   return {
