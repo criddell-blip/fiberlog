@@ -371,7 +371,7 @@ export async function getCountRunDetail(runId) {
     db.from('count_resolutions')
       .select(`
         *,
-        part:part_id(id,name,unit),
+        part:part_id(id,name,unit,sage_id),
         from_session:from_session_id(id,location:location_id(id,name)),
         to_session:to_session_id(id,location:location_id(id,name))
       `)

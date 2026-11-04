@@ -506,6 +506,7 @@ function ResultView({ result, locations, onReset, onDownload }) {
 
 const HEADERS = [
   'SKU',
+  'Sage ID',
   'Name',
   'Category',
   'Department',
@@ -530,8 +531,9 @@ function csvField(v) {
 }
 
 function buildAuditCsv(rows, allLocations) {
-  // Variance column index (0-based) → 10, so column letter K. Actual = J, Expected = I.
-  // Excel/Sheets formula: =J<row>-I<row>
+  // Variance column index (0-based) → 11, so column letter L. Actual = K, Expected = J.
+  // Excel/Sheets formula: =K<row>-J<row>. Reconcile reads columns by header
+  // name, so inserting a column only means shifting these letters.
   const lines = [HEADERS.map(csvField).join(',')]
 
   rows.forEach((r, idx) => {
@@ -549,6 +551,7 @@ function buildAuditCsv(rows, allLocations) {
 
     const fields = [
       pc.id || r.part_id,
+      pc.sage_id || '',
       pc.name || '',
       pc.category || '',
       pc.department || '',
@@ -558,7 +561,7 @@ function buildAuditCsv(rows, allLocations) {
       binName,
       Number(r.quantity) || 0,
       '',                          // Actual qty — blank for the counter
-      `=J${rowNum}-I${rowNum}`,    // Variance formula
+      `=K${rowNum}-J${rowNum}`,    // Variance formula
       lastMoved,
       '',                          // Notes
     ]

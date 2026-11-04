@@ -258,7 +258,7 @@ export default function ReportsView() {
       // Get parts
       const { data: parts } = await db
         .from('entry_parts')
-        .select('entry_id, part_id, quantity, parts_catalog ( id, name, unit, boxhero_id, department, item_type, material_group )')
+        .select('entry_id, part_id, quantity, parts_catalog ( id, name, unit, sage_id, boxhero_id, department, item_type, material_group )')
         .in('entry_id', entryIds)
 
       // Build report rows. project/location names coalesce fiber (phase) and
@@ -283,6 +283,7 @@ export default function ReportsView() {
           unit: p.parts_catalog?.unit || 'ea',
           qty: p.quantity || 0,
           barcode: p.parts_catalog?.boxhero_id || '',
+          sageId: p.parts_catalog?.sage_id || '',
           department: p.parts_catalog?.department || '',
           itemType: p.parts_catalog?.item_type || '',
           materialGroup: p.parts_catalog?.material_group || '',
@@ -372,6 +373,7 @@ export default function ReportsView() {
           ledgerSide: m.ledgerSide,
           reclassOf: m.reclass_of || null,
           barcode: m.part?.boxhero_id || '',
+          sageId: m.part?.sage_id || '',
           department: dept,
           itemType: m.part?.item_type || '',
           materialGroup: mg,
@@ -827,11 +829,11 @@ export default function ReportsView() {
   }
 
   function exportCSV() {
-    const headers = ['Date', 'Crew Member', 'Crew Type', 'Project', 'Phase / Site', 'Task', 'Part SKU', 'BoxHero ID', 'Barcode', 'Department', 'Type', 'Material Group', 'Part Name', 'Qty', 'Unit',
+    const headers = ['Date', 'Crew Member', 'Crew Type', 'Project', 'Phase / Site', 'Task', 'Part SKU', 'Sage ID', 'BoxHero ID', 'Barcode', 'Department', 'Type', 'Material Group', 'Part Name', 'Qty', 'Unit',
       'Account', 'Customer / Address', 'Source', 'Bypassed Truck', 'Sonar Asset ID', 'Asset Tag / Serial']
     const csvRows = [headers, ...rows.map(r => [
       r.date, r.userName, r.crewType, r.projectName, r.phaseName, r.taskName,
-      r.partId, r.barcode, barcodeMap[r.partId] || '', r.department, r.itemType, r.materialGroup, r.partName, r.qty, r.unit,
+      r.partId, r.sageId || '', r.barcode, barcodeMap[r.partId] || '', r.department, r.itemType, r.materialGroup, r.partName, r.qty, r.unit,
       // Consumption-only enrichment; blank on passdown rows.
       r.accountId || '', r.customer || '', r.source || '', r.bypassed ? 'yes' : '',
       r.assetId || '', r.lineNote || '',

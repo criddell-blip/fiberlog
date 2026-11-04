@@ -1528,7 +1528,7 @@ export async function removeUserFromGroup(userId) {
 export async function exportLocationStockCSV(location) {
   // Match the headers/format from InventoryAuditTab.buildAuditCsv
   const HEADERS = [
-    'SKU', 'Name', 'Category', 'Department', 'Material Group', 'Unit',
+    'SKU', 'Sage ID', 'Name', 'Category', 'Department', 'Material Group', 'Unit',
     'Location', 'Bin', 'Expected Qty', 'Actual Qty', 'Variance',
     'Last Movement', 'Notes',
   ]
@@ -1569,7 +1569,7 @@ export async function exportLocationStockCSV(location) {
   // scope can exceed the 1,000-row PostgREST cap.
   const stock = await fetchAllRows(() => db
     .from('inventory_stock')
-    .select('location_id, part_id, quantity, last_movement_at, parts_catalog (id, name, category, department, material_group, unit)')
+    .select('location_id, part_id, quantity, last_movement_at, parts_catalog (id, name, sage_id, category, department, material_group, unit)')
     .in('location_id', locationIds)
     .order('part_id').order('location_id'))
 
@@ -1618,6 +1618,7 @@ export async function exportLocationStockCSV(location) {
       : (isBin ? location.name : '')
     const fields = [
       pc.id || r.part_id,
+      pc.sage_id || '',
       pc.name || '',
       pc.category || '',
       pc.department || '',
@@ -1627,7 +1628,7 @@ export async function exportLocationStockCSV(location) {
       rowBinName,
       Number(r.quantity) || 0,
       '',                          // Actual qty — blank for the counter to fill in
-      `=J${rowNum}-I${rowNum}`,    // Variance formula (Excel/Sheets — Actual minus Expected)
+      `=K${rowNum}-J${rowNum}`,    // Variance formula (Excel/Sheets — Actual minus Expected)
       r.last_movement_at ? new Date(r.last_movement_at).toISOString().slice(0, 10) : '',
       '',                          // Notes — blank
     ]
@@ -2270,7 +2271,7 @@ export async function getStockForAudit({
       .from('inventory_stock')
       .select(`
         quantity, last_movement_at, location_id, part_id,
-        parts_catalog!inner(id, name, unit, category, department, material_group, item_type, is_active),
+        parts_catalog!inner(id, name, unit, sage_id, category, department, material_group, item_type, is_active),
         location:inventory_locations!inner(
           id, name, type, parent_location_id,
           assigned_user:users!inventory_locations_assigned_to_fkey(id, name)
@@ -2671,7 +2672,7 @@ export async function getMovementsForActivityExport({ since, until, type = null,
         id, movement_type, receipt_kind, quantity, unit, unit_cost, notes, line_note, created_at, occurred_at,
         submission_id, task_id, vendor_invoice, purchase_request_line_id,
         from_location_id, to_location_id,
-        part:parts_catalog(id, name, unit),
+        part:parts_catalog(id, name, unit, sage_id),
         from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type),
         to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type),
         created_by_user:users!inventory_movements_created_by_fkey(id, name, initials)
@@ -2752,7 +2753,7 @@ export async function getConsumptionLedger({ sinceCreated = null } = {}) {
       .select(`
         id, movement_type, quantity, unit, notes, line_note, created_at, occurred_at,
         part_id, consumed_by_user_id, phase_id, task_id, sonar_account_id, reclass_of, to_location_id, from_location_id,
-        part:parts_catalog(id, name, unit, department, material_group, item_type, boxhero_id),
+        part:parts_catalog(id, name, unit, sage_id, department, material_group, item_type, boxhero_id),
         from_location:inventory_locations!inventory_movements_from_location_id_fkey(id, name, type, project_id, project:projects(id, name)),
         to_location:inventory_locations!inventory_movements_to_location_id_fkey(id, name, type, project_id, project:projects(id, name)),
         phase:phases!inventory_movements_phase_id_fkey(id, name, project:projects(id, name)),
@@ -3439,7 +3440,8 @@ export async function createPurchaseRequest({
   const { data: insertedLines, error: linesErr } = await db
     .from('purchase_request_lines')
     .insert(linesPayload.map(lp => ({ ...lp, request_id: prRow.id })))
-    .select()
+    // Part join so a create-then-export CSV carries the Sage ID too.
+    .select('*, part:parts_catalog(id, name, unit, sage_id)')
   if (linesErr) {
     // Don't leave a numbered, line-less header behind — an ordered one would
     // even surface in the Receive-PO "open POs" list. Best-effort rollback.
@@ -3506,7 +3508,7 @@ export async function getPurchaseRequest(prId) {
   if (!pr) return null
   const { data: lines, error: linesErr } = await db
     .from('purchase_request_lines')
-    .select('*, part:parts_catalog(id, name, unit)')
+    .select('*, part:parts_catalog(id, name, unit, sage_id)')
     .eq('request_id', prId)
     .order('ordered_position', { ascending: true, nullsFirst: false })
   if (linesErr) throw linesErr
@@ -3770,7 +3772,7 @@ export async function markPurchaseRequestReceived(prId, { createdBy, toLocationI
 export function buildPurchaseRequestCsv(pr) {
   const headers = [
     'PR Number', 'Date Requested', 'Deliver To', 'Requested By',
-    'Vendor', 'Qty', 'Item #', 'Description', 'Project/Reason',
+    'Vendor', 'Qty', 'Item #', 'Sage ID', 'Description', 'Project/Reason',
     'Unit Price', 'Line Total',
   ]
   const csvField = v => {
@@ -3796,6 +3798,7 @@ export function buildPurchaseRequestCsv(pr) {
       l.vendor || '',
       qty,
       l.item_number || l.part_id || '',
+      l.part?.sage_id || '',
       l.description || '',
       l.project_reason || '',
       uc == null ? '' : uc.toFixed(2),

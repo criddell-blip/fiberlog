@@ -63,7 +63,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
       })
       if (rows.length === 0) { showToast('No movements in that range'); return }
       const headers = [
-        'Date', 'Recorded', 'Type', 'Receipt kind', 'SKU', 'Part', 'Qty', 'Unit',
+        'Date', 'Recorded', 'Type', 'Receipt kind', 'SKU', 'Sage ID', 'Part', 'Qty', 'Unit',
         'From', 'To', 'By', 'Vendor/Invoice', 'Notes', 'Sonar asset ID', 'Asset tags', 'Movement ID',
       ]
       const lines = [headers.map(escapeCsvField).join(',')]
@@ -91,6 +91,7 @@ export default function InventoryMovementsTab({ locations, refreshKey }) {
           typeLabel,
           d.receiptKind ? (RECEIPT_KIND_LABEL[d.receiptKind] || d.receiptKind).toLowerCase() : '',
           m.part?.id || m.part_id || '',
+          m.part?.sage_id || '',
           m.part?.name || '',
           qtySigned,
           m.unit || m.part?.unit || 'ea',

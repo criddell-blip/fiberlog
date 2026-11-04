@@ -205,11 +205,11 @@ export default function CountRunReviewSheet({ runId, onClose, onChanged }) {
   // and the recount beside it. A gain that a recount turned into a loss is
   // included too — it went missing just the same.
   function downloadMissing(missing, run) {
-    const header = ['SKU', 'Part', 'Bin', 'Counted variance', 'Recounted', 'Books at recount', 'Qty short (posted)', 'Status', 'Reviewed at', 'Notes']
+    const header = ['SKU', 'Sage ID', 'Part', 'Bin', 'Counted variance', 'Recounted', 'Books at recount', 'Qty short (posted)', 'Status', 'Reviewed at', 'Notes']
     const rows = missing.map(r => {
       const net = settledNet(r)
       return [
-        r.part_id, r.part?.name || '', resolutionLocation(r)?.name || '',
+        r.part_id, r.part?.sage_id || '', r.part?.name || '', resolutionLocation(r)?.name || '',
         (r.resolution_type === 'net_gain' ? 1 : -1) * Number(r.quantity),
         r.recount_qty ?? '', r.recount_system_qty ?? '',
         r.status === 'pending' ? Number(r.quantity) : Math.max(0, -net),
