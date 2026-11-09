@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { recordMovementsBatch, getBinsForWarehouse, getStockRowsForParts, buildLocationQtyMaps, confirmNegativeStock } from '../../lib/inventory'
+import { recordMovementsBatch, getBinsForWarehouse, getStockRowsForParts, buildLocationQtyMaps, confirmNegativeStock, isConsumedLocationType } from '../../lib/inventory'
 import { useBackClose } from '../../lib/backStack'
 import LocationWithBinPicker from './LocationWithBinPicker'
 import Icon from '../shared/Icon'
@@ -71,9 +71,12 @@ export default function BulkMoveSheet({
   const destOptions = useMemo(
     () => locations.filter(l =>
       l.type !== 'vendor' &&
-      (l.id !== sourceLocation?.id || l.type === 'warehouse')
+      (l.id !== sourceLocation?.id || l.type === 'warehouse') &&
+      // Regions are owner-only destinations (same gate as Record movement):
+      // consumption reaches a Region via passdown approval / Sonar imports.
+      (currentUser?.role === 'owner' || !isConsumedLocationType(l.type))
     ),
-    [locations, sourceLocation]
+    [locations, sourceLocation, currentUser?.role]
   )
 
   // Load bins for the selected warehouse destination

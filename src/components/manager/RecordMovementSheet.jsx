@@ -427,9 +427,16 @@ export default function RecordMovementSheet({ locations, currentUser, onClose, o
     return pl.locations.some(l => l.locationId === lineEffectiveFromId(line))
   }
 
-  // To options — same flavor as before: hide scrap from destinations
-  // (scrap movements use the 'scrap' type, not destination=scrap).
-  const toOptions = useMemo(() => locations.filter(l => l.type !== 'scrap'), [locations])
+  // To options — hide scrap from destinations (scrap movements use the
+  // 'scrap' type, not destination=scrap). Regions are owner-only here too,
+  // mirroring the From gate: consumption reaches a Region through passdown
+  // approval or the Sonar imports, which tie it to real work. A hand-typed
+  // dock → Region transfer bypasses that (Nov 2026: anchor rods meant for the
+  // Crew Construction group landed straight in West Mountain's grant ledger).
+  const toOptions = useMemo(
+    () => locations.filter(l => l.type !== 'scrap' && (currentUser?.role === 'owner' || !isConsumedLocationType(l.type))),
+    [locations, currentUser?.role]
+  )
   // Show-all From options — hide vendors (you don't transfer FROM a vendor;
   // that's the Receive PO sheet). Project (job_site) buckets are accumulate-only and only
   // pullable by the owner (mis-routed-consumption correction).
