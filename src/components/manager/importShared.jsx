@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import Icon from '../shared/Icon'
 
 // Shared presentational layer for the CSV importer sheets (Sonar asset
@@ -142,7 +143,47 @@ export function SourceLocationSelect({ locations, value, onChange, placeholder, 
 
 export function PendingImportsPanel({ queue, disabled }) {
   const { pendingImports, pendingLoading, activePendingId, loadPending, discardPending } = queue
+  // Once a delivery is loaded, the list collapses to one line. It sits
+  // outside the sheet's scroll body, so a multi-report backlog left expanded
+  // ate ~280px of every review and squeezed the mapping/preview area to a
+  // sliver on a laptop (Nov 2026). Loading another report re-collapses.
+  const [expanded, setExpanded] = useState(false)
+  useEffect(() => { setExpanded(false) }, [activePendingId])
   if (pendingLoading || pendingImports.length === 0) return null
+
+  const active = activePendingId ? pendingImports.find(p => p.id === activePendingId) : null
+  if (active && !expanded) {
+    const others = pendingImports.length - 1
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+        marginBottom: 12, padding: '6px 10px',
+        border: '1px solid var(--accent-border)',
+        background: 'var(--accent-bg)',
+        borderRadius: 'var(--r-sm)',
+        fontSize: 12, color: 'var(--accent-fg)',
+      }}>
+        <Icon name="download" size={14} />
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <strong>Reviewing</strong> {new Date(active.received_at).toLocaleString()}
+          {' · '}{active.parsed_row_count} row{active.parsed_row_count === 1 ? '' : 's'}
+          {others > 0 && <> · <strong>{others} more waiting</strong></>}
+        </span>
+        <button
+          onClick={() => setExpanded(true)}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 2,
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: 'var(--accent-fg)', fontSize: 12, fontWeight: 600,
+            padding: '2px 0', textDecoration: 'underline',
+          }}
+        >
+          <Icon name="chevron-right" size={13} /> {others > 0 ? 'Show all' : 'Show'}
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div style={{
       marginBottom: 12, padding: 10,
@@ -155,7 +196,22 @@ export function PendingImportsPanel({ queue, disabled }) {
         fontSize: 12, fontWeight: 800, color: 'var(--accent-fg)',
         textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6,
       }}>
-        <Icon name="download" size={14} /> Auto-delivered from Sonar ({pendingImports.length})
+        <Icon name="download" size={14} />
+        <span style={{ flex: 1 }}>Auto-delivered from Sonar ({pendingImports.length})</span>
+        {active && (
+          <button
+            onClick={() => setExpanded(false)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 2,
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--accent-fg)', fontSize: 12, fontWeight: 600,
+              textTransform: 'none', letterSpacing: 0,
+              padding: 0, textDecoration: 'underline',
+            }}
+          >
+            <Icon name="chevron-down" size={13} /> Hide list
+          </button>
+        )}
       </div>
       {/* Scroll the list itself, not the whole sheet — a long backlog
           otherwise buries the mapping sections below the fold. */}
