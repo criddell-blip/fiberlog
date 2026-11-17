@@ -134,6 +134,37 @@ export function SourceLocationSelect({ locations, value, onChange, placeholder, 
   )
 }
 
+// ─── Bin picker for warehouse-sourced import lines ──────────────────────
+//
+// `alloc` is one entry of allocateBinSources() (lib/binSource.js). The blank
+// option means "auto" (the rule's pick, named in its label) so a manual pick
+// can be undone. Zero-stock bins stay pickable — the stock record can be
+// wrong; the amber note is the warn-but-allow.
+export function BinSourceSelect({ alloc, onChange, style }) {
+  if (!alloc) return null
+  const chosen = alloc.options.find(o => o.id === alloc.locationId)
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+      <span style={{ fontSize: 10, color: 'var(--hint)' }}>bin:</span>
+      <select
+        value={alloc.auto ? '' : alloc.locationId}
+        onChange={e => onChange(e.target.value || null)}
+        style={style || { ...selectStyle(), fontSize: 11, minWidth: 150, width: 'auto', color: 'var(--muted)' }}
+      >
+        <option value="">auto: {chosen?.label || '—'}</option>
+        {alloc.options.map(o => (
+          <option key={o.id} value={o.id}>{o.label} — {o.qty} on hand</option>
+        ))}
+      </select>
+      {alloc.short && (
+        <span style={{ fontSize: 10, color: 'var(--amber)', fontWeight: 600 }}>
+          only {Math.max(0, alloc.available)} left there
+        </span>
+      )}
+    </div>
+  )
+}
+
 // ─── Webhook delivery panels (pending queue + processed audit) ──────────
 //
 // Both take the object returned by useSonarPendingQueue (lib/useCsvImport.js).

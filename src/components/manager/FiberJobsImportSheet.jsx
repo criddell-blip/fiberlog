@@ -21,8 +21,10 @@ import { jobIndexFromRows, nearestSonarJob, denverDateOfIso, normalizeJobType } 
 import { WIRELESS_ONLY_PROJECTS } from '../../lib/crewTypes'
 import {
   Section, MappingRow, StatusBadge, StatusTag, selectStyle,
-  SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
+  SourceLocationSelect, BinSourceSelect, PendingImportsPanel, ProcessedImportsPanel,
 } from './importShared'
+import { allocateBinSources, buildBinsByWarehouse } from '../../lib/binSource'
+import { useBinStock } from '../../lib/useBinStock'
 import { useBackClose } from '../../lib/backStack'
 import PartSearch from '../crew/workspace/PartSearch'
 import Icon from '../shared/Icon'
@@ -77,6 +79,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   // unmapped/manual. Keyed by `${rowIdx}::${columnName}`.
   const [rowMaterialOverride, setRowMaterialOverride] = useState({})
   const [rowSource, setRowSource] = useState({})        // row idx → source location id (per-row override)
+  const [rowBin, setRowBin] = useState({})              // binLineKey → bin (or the warehouse = unbinned) for warehouse-sourced lines; unset = auto (lib/binSource.js)
   const [rowExtraMaterials, setRowExtraMaterials] = useState({})  // job idx → [{sku, qty}] materials added by hand (Sonar job had none/missing)
   // Backward half of the fix-job check. The asset report books an ONT days
   // before dispatch closes the job, so it lands in the grant ledger as an
@@ -110,6 +113,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
       setExcluded(new Set())
       setRowMaterialOverride({})
       setRowSource({})
+      setRowBin({})
       setRowExtraMaterials({})
       setRowPhase({})
     },
@@ -366,6 +370,11 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             sku: ov.sku !== undefined ? ov.sku : line.sku,
             qty: ov.qty !== undefined ? Number(ov.qty) : line.qty,
             status: ov.exclude ? 'excluded' : (ov.sku && Number(ov.qty) > 0 ? 'ready' : line.status),
+            // Hand-edited: JobRow keeps the SKU/qty editor mounted even once
+            // the line turns 'ready'. Gating the editor on status alone
+            // swapped the input for read-only text on the FIRST digit typed
+            // ("1" of 188 ft -> ready -> input gone), locking the qty at 1.
+            _edited: !ov.exclude,
           }
         }
         return line
@@ -495,6 +504,9 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
   }
   function removeRowMaterial(rowIdx, i) {
     setRowExtraMaterials(prev => ({ ...prev, [rowIdx]: (prev[rowIdx] || []).filter((_, j) => j !== i) }))
+    // Manual-line bin picks are keyed by position — removing one shifts the
+    // rest, so drop this row's manual picks rather than re-attach them.
+    setRowBin(prev => Object.fromEntries(Object.entries(prev).filter(([k]) => !k.startsWith(`${rowIdx}::+`))))
   }
 
   function toggleExclude(idx) {
@@ -541,6 +553,32 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
     // Keyed on the redirected jobs' identities, not `resolved` itself — a
     // per-row material edit must not refetch every fix job.
   }, [csvJobIndex, resolved.filter(r => r.serviceRedirect).map(r => `${r.dedupKey}|${r.grantBucketId}|${r.rowStatus}`).join(',')])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Warehouse → bin resolution ───────────────────────────────────────────
+  // A job sourced from a WAREHOUSE deducts each material from the bin that
+  // holds it, not the warehouse row itself (which drove unbinned negative
+  // while the bins kept the stock). Per LINE, not per job — two materials on
+  // one job can sit in different bins. Rule + tests: lib/binSource.js.
+  const binsByWarehouse = useMemo(() => buildBinsByWarehouse(sourceLocations), [sourceLocations])
+  const warehouseNames = useMemo(
+    () => new Map(sourceLocations.filter(l => l.type === 'warehouse').map(l => [l.id, l.name])),
+    [sourceLocations])
+  const binLines = useMemo(() => {
+    const out = []
+    for (const r of resolved) {
+      if (excluded.has(r.idx) || r.rowStatus === 'already-imported' || !warehouseNames.has(r.sourceLocId)) continue
+      for (const line of r.lines) {
+        if (line.status !== 'ready' || !line.sku || !(line.qty > 0)) continue
+        const key = binLineKey(r.idx, line)
+        out.push({ key, partId: line.sku, warehouseId: r.sourceLocId, qty: line.qty, overrideId: rowBin[key] })
+      }
+    }
+    return out
+  }, [resolved, excluded, warehouseNames, rowBin])
+  const binStock = useBinStock(binLines.map(l => l.partId))
+  const binAlloc = useMemo(
+    () => allocateBinSources(binLines, { stockIndex: binStock.index, binsByWarehouse, warehouseNames }),
+    [binLines, binStock.index, binsByWarehouse, warehouseNames])
 
   const stats = useMemo(() => {
     if (resolved.length === 0) return null
@@ -597,11 +635,12 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
         // came from when it wasn't the completer's own truck. Same token the
         // asset importer writes; parsed by movementSourceOverride /
         // movementBypassedTruck.
-        const srcName = r.sourceIsMapped
-          ? sourceLocations.find(l => l.id === r.sourceLocId)?.name
-          : null
         for (const line of r.lines) {
           if (line.status !== 'ready' || !line.sku || line.qty <= 0) continue
+          const fromId = binAlloc.get(binLineKey(r.idx, line))?.locationId || r.sourceLocId
+          const srcName = r.sourceIsMapped
+            ? sourceLocations.find(l => l.id === fromId)?.name
+            : null
           const notePieces = [
             `Sonar fiber-jobs: ${r.jobTypeRaw}`,
             r.address,
@@ -621,7 +660,7 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             part_id: line.sku,
             quantity: line.qty,
             unit: (parts.find(p => p.id === line.sku)?.unit) || 'ea',
-            from_location_id: r.sourceLocId,
+            from_location_id: fromId,
             to_location_id: r.destBucketId,
             notes: notePieces.join(' · '),
             created_by: currentUser?.id,
@@ -919,12 +958,20 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
                     onAddMaterial={() => addRowMaterial(r.idx)}
                     onSetMaterial={(i, patch) => setRowMaterial(r.idx, i, patch)}
                     onRemoveMaterial={i => removeRowMaterial(r.idx, i)}
+                    binAllocFor={line => binAlloc.get(binLineKey(r.idx, line))}
+                    onSetBin={(line, locId) => setRowBin(prev => ({ ...prev, [binLineKey(r.idx, line)]: locId }))}
                   />
                 ))}
               </div>
             </>
           )}
         </div>
+
+        {binStock.failed && (
+          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--amber)', fontWeight: 600 }}>
+            ⚠ Couldn't load bin stock — warehouse-sourced lines will deduct from the warehouse (unbinned). Close and reopen to retry.
+          </div>
+        )}
 
         {/* Action bar */}
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexShrink: 0 }}>
@@ -935,7 +982,8 @@ export default function FiberJobsImportSheet({ onClose, onApplied }) {
             className="btn btn-primary"
             style={{ flex: 2 }}
             onClick={handleApply}
-            disabled={submitting || !stats || stats.totalReadyMovements === 0}
+            disabled={submitting || !stats || stats.totalReadyMovements === 0 || binStock.loading}
+            title={binStock.loading ? 'Looking up which bins hold these parts…' : undefined}
           >
             {submitting
               ? 'Applying…'
@@ -1046,7 +1094,7 @@ function ValueMapRow({ columnName, valueText, parts, materialColumns, rowCount, 
 }
 
 // ─── Job preview row ────────────────────────────────────────────────────
-function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, sourceLocations = [], rowSourceId = '', onSetSource, phases = [], rowPhaseId = '', onSetPhase, showPhasePicker = false, onAddMaterial, onSetMaterial, onRemoveMaterial, backAssets = [], backOptedOut = false, onToggleBack }) {
+function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, sourceLocations = [], rowSourceId = '', onSetSource, phases = [], rowPhaseId = '', onSetPhase, showPhasePicker = false, onAddMaterial, onSetMaterial, onRemoveMaterial, backAssets = [], backOptedOut = false, onToggleBack, binAllocFor = () => null, onSetBin }) {
   const isReady = job.rowStatus === 'ready'
   const isAlreadyImported = job.rowStatus === 'already-imported'
   // Which line's SKU is being picked via the search overlay:
@@ -1196,7 +1244,8 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
       {!isAlreadyImported && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginLeft: 26 }}>
           {job.lines.filter(l => l.status !== 'ignore').map(line => (
-            <div key={line._manual ? `manual-${line._manualIndex}` : line.columnName} style={{
+            <div key={line._manual ? `manual-${line._manualIndex}` : line.columnName}>
+            <div style={{
               display: 'flex', alignItems: 'center', gap: 8,
               fontSize: 11,
             }}>
@@ -1223,7 +1272,7 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
                     <Icon name="x" size={12} />
                   </button>
                 </>
-              ) : (line.status === 'unmapped' || line.status === 'manual') ? (
+              ) : (line.status === 'unmapped' || line.status === 'manual' || (line._edited && line.status === 'ready')) ? (
                 <>
                   <button
                     type="button"
@@ -1240,6 +1289,9 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
                     onChange={e => onSetOverride(line.columnName, { qty: e.target.value })}
                     style={{ width: 60, padding: '3px 6px', fontSize: 11, border: '1px solid var(--border2)', borderRadius: 'var(--r-xs)', background: 'var(--surface2)' }}
                   />
+                  {line.status === 'ready' && (
+                    <span title="Ready to apply" style={{ color: 'var(--success-fg)', display: 'inline-flex' }}><Icon name="check" size={13} /></span>
+                  )}
                   {/* Skip a compound / non-material cell (e.g. "NID Installed,
                       195 ft conduit") — dismisses the one-cell=one-SKU guess so
                       you can add the real materials below with "Add material".
@@ -1265,6 +1317,11 @@ function JobRow({ job, parts, isExcluded, onToggleExclude, onSetOverride, source
               ) : line.status === 'pair-missing' ? (
                 <span style={{ color: 'var(--amber)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="alert" size={12} /> {line.reason}</span>
               ) : null}
+            </div>
+            {/* Warehouse-sourced line -> which bin it comes off. */}
+            <div style={{ marginLeft: 118 }}>
+              <BinSourceSelect alloc={binAllocFor(line)} onChange={v => onSetBin(line, v)} />
+            </div>
             </div>
           ))}
           <button type="button" onClick={onAddMaterial}
@@ -1305,4 +1362,10 @@ const JOB_STATUS_MAP = {
   'no-project-bucket':{label: 'no bucket',       color: 'var(--red)',      bg: 'var(--red-lt)' },
   'no-materials':    { label: 'no materials',    color: 'var(--hint)',     bg: 'var(--gray-lt)' },
   'already-imported':{ label: 'already imported',color: 'var(--muted)',    bg: 'var(--gray-lt)' },
+}
+
+// Stable per-line key for bin picks: mapped/override lines by column, manual
+// "+ Add material" lines by their position in the row's manual list.
+function binLineKey(rowIdx, line) {
+  return line._manual ? `${rowIdx}::+${line._manualIndex}` : `${rowIdx}::${line.columnName}`
 }
