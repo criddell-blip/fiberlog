@@ -108,6 +108,7 @@ src/
     inventory.test.js     ← validateMovement matrix, buildSageCsv + exclusions, movementEffectiveDate
     footageTypes.js       ← footage "type" option lists (fiber counts, conduit sizes)
     varianceSplit.js (+ .test.js) ← splitStatus / splitPrefillQty: the math behind "split a counted difference across locations"
+    binSource.js (+ .test.js), useBinStock.js ← importers' warehouse→bin source pick (bin with most of the part, running remaining; per-line override)
     recencyPill.js, scanFeedback.js ← small shared UI helpers
     useIsWide.js          ← shared 768px-breakpoint hook (used by both CrewApp and ManagerApp)
   components/

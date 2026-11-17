@@ -22,8 +22,10 @@ import { denverNaiveToIso } from '../../lib/sonarDates'
 import { extractItemIdFromValueList, sonarLineNoteFromValueList } from '../../lib/sonarAssetIds'
 import {
   Section, MappingRow, StatusTag, StatusBadge, selectStyle,
-  SourceLocationSelect, PendingImportsPanel, ProcessedImportsPanel,
+  SourceLocationSelect, BinSourceSelect, PendingImportsPanel, ProcessedImportsPanel,
 } from './importShared'
+import { allocateBinSources, buildBinsByWarehouse } from '../../lib/binSource'
+import { useBinStock } from '../../lib/useBinStock'
 import { applyAccountInheritance, groupRowsByAccount } from '../../lib/accountInheritance'
 import PartSearch from '../crew/workspace/PartSearch'
 import BulkSonarProjectsSheet from './BulkSonarProjectsSheet'
@@ -119,6 +121,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
   const [pendingPartRouting, setPendingPartRouting] = useState({}) // part_id → policy
   const [rowDest, setRowDest] = useState({})          // row idx → bucket id (per-row override / ask-resolution)
   const [rowSource, setRowSource] = useState({})      // row idx → source location id (per-row source override when the completer isn't the carrier)
+  const [rowBin, setRowBin] = useState({})            // row idx → bin (or the warehouse = unbinned) when the source is a warehouse; unset = auto (lib/binSource.js)
   const [excluded, setExcluded] = useState(() => new Set())
 
   const [submitting, setSubmitting] = useState(false)
@@ -139,6 +142,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
       // Index-keyed like rowDest — a source picked for delivery A's row N
       // must not silently re-source whatever sits at index N of delivery B.
       setRowSource({})
+      setRowBin({})
     },
   })
   const { fileName, csvRows, error, setError, parsing, handleFile } = csv
@@ -705,6 +709,24 @@ export default function SonarImportSheet({ onClose, onApplied }) {
     return applyAccountInheritance(rows)
   }, [dedupedRows, crewMap, partMap, trucksByUser, crewUsers, parts, buckets, phases, effectiveCityMap, effectiveProjectMap, effectiveSourceMap, rowDest, rowSource, pendingPartRouting, alreadyImportedItemIds, jobIndex, jobIndexState])
 
+  // ── Warehouse → bin resolution ───────────────────────────────────────────
+  // A row sourced from a WAREHOUSE (e.g. Sonar's "Main Warehouse" mapping)
+  // deducts from the bin that holds the part, not the warehouse row itself —
+  // which drove unbinned negative while the bins kept the stock. Rule +
+  // tests live in lib/binSource.js; apply reads `binAlloc` for from_location_id.
+  const binsByWarehouse = useMemo(() => buildBinsByWarehouse(sourceLocations), [sourceLocations])
+  const warehouseNames = useMemo(
+    () => new Map(sourceLocations.filter(l => l.type === 'warehouse').map(l => [l.id, l.name])),
+    [sourceLocations])
+  const binLines = useMemo(() => resolved
+    .filter(r => !excluded.has(r.idx) && r.status !== 'already-imported' && r.partId && warehouseNames.has(r.fromLocationId))
+    .map(r => ({ key: r.idx, partId: r.partId, warehouseId: r.fromLocationId, qty: 1, overrideId: rowBin[r.idx] })),
+  [resolved, excluded, warehouseNames, rowBin])
+  const binStock = useBinStock(binLines.map(l => l.partId))
+  const binAlloc = useMemo(
+    () => allocateBinSources(binLines, { stockIndex: binStock.index, binsByWarehouse, warehouseNames }),
+    [binLines, binStock.index, binsByWarehouse, warehouseNames])
+
   // Preview-table order only — apply/stats keep working off `resolved`.
   const displayRows = useMemo(() => groupRowsByAccount(resolved), [resolved])
 
@@ -795,8 +817,9 @@ export default function SonarImportSheet({ onClose, onApplied }) {
           // actually came from when it wasn't the tech's own truck (the
           // `source:` prose above it keeps Sonar's raw string for diagnosis).
           // Parsed by movementSourceOverride / movementBypassedTruck.
+          const fromId = binAlloc.get(r.idx)?.locationId || r.fromLocationId
           const srcName = r.sourceIsWarehouse
-            ? sourceLocations.find(l => l.id === r.fromLocationId)?.name
+            ? sourceLocations.find(l => l.id === fromId)?.name
             : null
           const noteParts = [
             'Sonar install',
@@ -813,7 +836,7 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             part_id: r.partId,
             quantity: 1,
             unit: 'ea',
-            from_location_id: r.fromLocationId,
+            from_location_id: fromId,
             to_location_id: r.destId,
             notes: noteParts.join(' · '),
             created_by: currentUser?.id,
@@ -1278,6 +1301,10 @@ export default function SonarImportSheet({ onClose, onApplied }) {
                               placeholder={r.fromLocationId ? 'override source…' : '— pick source —'}
                               style={{ ...selectStyle(), fontSize: 11, marginTop: 4, color: 'var(--muted)', minWidth: 150 }}
                             />
+                            <BinSourceSelect
+                              alloc={binAlloc.get(r.idx)}
+                              onChange={v => setRowBin(prev => ({ ...prev, [r.idx]: v }))}
+                            />
                           </td>
                           <td style={tdStyle()}>
                             {needsPicker ? (
@@ -1322,6 +1349,12 @@ export default function SonarImportSheet({ onClose, onApplied }) {
           )}
         </div>
 
+        {binStock.failed && (
+          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--amber)', fontWeight: 600 }}>
+            ⚠ Couldn't load bin stock — warehouse-sourced lines will deduct from the warehouse (unbinned). Close and reopen to retry.
+          </div>
+        )}
+
         {/* Action bar */}
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexShrink: 0 }}>
           <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose} disabled={submitting}>
@@ -1331,8 +1364,8 @@ export default function SonarImportSheet({ onClose, onApplied }) {
             className="btn btn-primary"
             style={{ flex: 2 }}
             onClick={handleApply}
-            disabled={submitting || !stats || stats.ready === 0 || jobIndexState === 'loading'}
-            title={jobIndexState === 'loading' ? 'Checking the fiber-jobs report for fix jobs…' : undefined}
+            disabled={submitting || !stats || stats.ready === 0 || jobIndexState === 'loading' || binStock.loading}
+            title={jobIndexState === 'loading' ? 'Checking the fiber-jobs report for fix jobs…' : binStock.loading ? 'Looking up which bins hold these parts…' : undefined}
           >
             {submitting
               ? 'Applying…'
